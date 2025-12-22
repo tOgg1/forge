@@ -64,13 +64,14 @@ type UsageStats struct {
 
 // Validate checks if the account configuration is valid.
 func (a *Account) Validate() error {
+	validation := &ValidationErrors{}
 	if a.Provider == "" {
-		return ErrInvalidProvider
+		validation.Add("provider", ErrInvalidProvider)
 	}
 	if a.ProfileName == "" {
-		return ErrInvalidProfileName
+		validation.Add("profile_name", ErrInvalidProfileName)
 	}
-	return nil
+	return validation.Err()
 }
 
 // IsOnCooldown returns true if the account is currently on cooldown.

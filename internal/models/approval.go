@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -43,4 +44,22 @@ type Approval struct {
 
 	// ResolvedBy indicates who or what resolved the approval (user/policy).
 	ResolvedBy string `json:"resolved_by,omitempty"`
+}
+
+// Validate checks if the approval request is valid.
+func (a *Approval) Validate() error {
+	validation := &ValidationErrors{}
+	if strings.TrimSpace(a.AgentID) == "" {
+		validation.AddMessage("agent_id", "agent_id is required")
+	}
+	if strings.TrimSpace(string(a.RequestType)) == "" {
+		validation.AddMessage("request_type", "request_type is required")
+	}
+	if len(a.RequestDetails) == 0 {
+		validation.AddMessage("request_details", "request_details is required")
+	}
+	if strings.TrimSpace(string(a.Status)) == "" {
+		validation.AddMessage("status", "status is required")
+	}
+	return validation.Err()
 }

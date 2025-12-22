@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -85,6 +86,21 @@ type Event struct {
 
 	// Metadata contains additional context.
 	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+// Validate checks if the event is valid.
+func (e *Event) Validate() error {
+	validation := &ValidationErrors{}
+	if strings.TrimSpace(string(e.Type)) == "" {
+		validation.AddMessage("type", "event type is required")
+	}
+	if strings.TrimSpace(string(e.EntityType)) == "" {
+		validation.AddMessage("entity_type", "entity_type is required")
+	}
+	if strings.TrimSpace(e.EntityID) == "" {
+		validation.AddMessage("entity_id", "entity_id is required")
+	}
+	return validation.Err()
 }
 
 // StateChangedPayload is the payload for agent.state_changed events.

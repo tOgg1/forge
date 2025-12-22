@@ -129,16 +129,17 @@ type AgentMetadata struct {
 
 // Validate checks if the agent configuration is valid.
 func (a *Agent) Validate() error {
+	validation := &ValidationErrors{}
 	if a.WorkspaceID == "" {
-		return ErrInvalidAgentWorkspace
+		validation.Add("workspace_id", ErrInvalidAgentWorkspace)
 	}
 	if a.Type == "" {
-		return ErrInvalidAgentType
+		validation.Add("type", ErrInvalidAgentType)
 	}
 	if a.TmuxPane == "" {
-		return ErrInvalidTmuxPane
+		validation.Add("tmux_pane", ErrInvalidTmuxPane)
 	}
-	return nil
+	return validation.Err()
 }
 
 // IsActive returns true if the agent is in an active state.

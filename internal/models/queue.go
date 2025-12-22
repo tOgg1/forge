@@ -2,6 +2,8 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -64,6 +66,15 @@ type MessagePayload struct {
 	Text string `json:"text"`
 }
 
+// Validate checks if the message payload is valid.
+func (p MessagePayload) Validate() error {
+	validation := &ValidationErrors{}
+	if strings.TrimSpace(p.Text) == "" {
+		validation.AddMessage("text", "message text is required")
+	}
+	return validation.Err()
+}
+
 // PausePayload is the payload for pause queue items.
 type PausePayload struct {
 	// Duration is how long to pause in seconds.
@@ -71,6 +82,15 @@ type PausePayload struct {
 
 	// Reason explains why the pause was inserted.
 	Reason string `json:"reason,omitempty"`
+}
+
+// Validate checks if the pause payload is valid.
+func (p PausePayload) Validate() error {
+	validation := &ValidationErrors{}
+	if p.DurationSeconds <= 0 {
+		validation.AddMessage("duration_seconds", "duration_seconds must be greater than 0")
+	}
+	return validation.Err()
 }
 
 // ConditionType specifies the type of condition gate.
@@ -95,12 +115,60 @@ type ConditionalPayload struct {
 	Message string `json:"message"`
 }
 
+// Validate checks if the conditional payload is valid.
+func (p ConditionalPayload) Validate() error {
+	validation := &ValidationErrors{}
+	if p.ConditionType == "" {
+		validation.AddMessage("condition_type", "condition_type is required")
+	}
+	if strings.TrimSpace(p.Message) == "" {
+		validation.AddMessage("message", "message is required")
+	}
+	if p.ConditionType == ConditionTypeCustomExpression && strings.TrimSpace(p.Expression) == "" {
+		validation.AddMessage("expression", "expression is required for custom condition type")
+	}
+	return validation.Err()
+}
+
 // Validate checks if the queue item is valid.
 func (q *QueueItem) Validate() error {
-	if len(q.Payload) == 0 {
-		return ErrInvalidQueueItem
+	validation := &ValidationErrors{}
+	if q.Type == "" {
+		validation.AddMessage("type", "queue item type is required")
 	}
-	return nil
+	if len(q.Payload) == 0 {
+		validation.Add("payload", ErrInvalidQueueItem)
+	}
+
+	if q.Type != "" && len(q.Payload) > 0 {
+		switch q.Type {
+		case QueueItemTypeMessage:
+			var payload MessagePayload
+			if err := json.Unmarshal(q.Payload, &payload); err != nil {
+				validation.AddMessage("payload", fmt.Sprintf("invalid message payload: %v", err))
+				break
+			}
+			validation.Add("payload", payload.Validate())
+		case QueueItemTypePause:
+			var payload PausePayload
+			if err := json.Unmarshal(q.Payload, &payload); err != nil {
+				validation.AddMessage("payload", fmt.Sprintf("invalid pause payload: %v", err))
+				break
+			}
+			validation.Add("payload", payload.Validate())
+		case QueueItemTypeConditional:
+			var payload ConditionalPayload
+			if err := json.Unmarshal(q.Payload, &payload); err != nil {
+				validation.AddMessage("payload", fmt.Sprintf("invalid conditional payload: %v", err))
+				break
+			}
+			validation.Add("payload", payload.Validate())
+		default:
+			validation.AddMessage("type", fmt.Sprintf("unknown queue item type %q", q.Type))
+		}
+	}
+
+	return validation.Err()
 }
 
 // GetMessagePayload extracts the message payload.

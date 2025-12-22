@@ -79,11 +79,12 @@ type NodeMetadata struct {
 
 // Validate checks if the node configuration is valid.
 func (n *Node) Validate() error {
+	validation := &ValidationErrors{}
 	if n.Name == "" {
-		return ErrInvalidNodeName
+		validation.Add("name", ErrInvalidNodeName)
 	}
 	if !n.IsLocal && n.SSHTarget == "" {
-		return ErrInvalidSSHTarget
+		validation.Add("ssh_target", ErrInvalidSSHTarget)
 	}
-	return nil
+	return validation.Err()
 }

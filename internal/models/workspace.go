@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 )
 
@@ -124,14 +125,30 @@ type Alert struct {
 
 // Validate checks if the workspace configuration is valid.
 func (w *Workspace) Validate() error {
+	validation := &ValidationErrors{}
 	if w.NodeID == "" {
-		return ErrInvalidWorkspaceNode
+		validation.Add("node_id", ErrInvalidWorkspaceNode)
 	}
 	if w.RepoPath == "" {
-		return ErrInvalidRepoPath
+		validation.Add("repo_path", ErrInvalidRepoPath)
 	}
 	if w.TmuxSession == "" {
-		return ErrInvalidTmuxSession
+		validation.Add("tmux_session", ErrInvalidTmuxSession)
 	}
-	return nil
+	return validation.Err()
+}
+
+// Validate checks if the alert is well-formed.
+func (a *Alert) Validate() error {
+	validation := &ValidationErrors{}
+	if a.Type == "" {
+		validation.AddMessage("type", "alert type is required")
+	}
+	if a.Severity == "" {
+		validation.AddMessage("severity", "alert severity is required")
+	}
+	if strings.TrimSpace(a.Message) == "" {
+		validation.AddMessage("message", "alert message is required")
+	}
+	return validation.Err()
 }
