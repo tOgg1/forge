@@ -38,12 +38,12 @@ logging:
   enable_caller: false
 
 # Accounts configuration
-# credentials can be env vars, file paths, or vault references
+# credentials can be env vars (env:VAR or $VAR), file paths, or vault references
 accounts:
   # Example account
   - provider: openai
     profile_name: default
-    credential_ref: OPENAI_API_KEY
+    credential_ref: "$OPENAI_API_KEY"
     is_active: true
 
 # Default settings for nodes

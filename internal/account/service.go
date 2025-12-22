@@ -298,6 +298,7 @@ func ProviderEnvVar(provider models.Provider) string {
 // ResolveCredential resolves a credential reference to its actual value.
 // Credential references can be:
 //   - env:VAR_NAME - reads from environment variable VAR_NAME
+//   - $VAR_NAME or ${VAR_NAME} - reads from environment variable VAR_NAME
 //   - file:/path/to/file - reads from file
 //   - literal value - used as-is (not recommended for production)
 func ResolveCredential(credentialRef string) (string, error) {
@@ -308,6 +309,24 @@ func ResolveCredential(credentialRef string) (string, error) {
 	// Check for env: prefix
 	if strings.HasPrefix(credentialRef, "env:") {
 		envVar := strings.TrimPrefix(credentialRef, "env:")
+		value := os.Getenv(envVar)
+		if value == "" {
+			return "", errors.New("environment variable " + envVar + " is not set")
+		}
+		return value, nil
+	}
+
+	// Check for $VAR or ${VAR} env var reference
+	if strings.HasPrefix(credentialRef, "$") {
+		envVar := strings.TrimPrefix(credentialRef, "$")
+		if strings.HasPrefix(envVar, "{") && strings.HasSuffix(envVar, "}") {
+			envVar = strings.TrimPrefix(envVar, "{")
+			envVar = strings.TrimSuffix(envVar, "}")
+		}
+		envVar = strings.TrimSpace(envVar)
+		if envVar == "" {
+			return "", errors.New("environment variable reference is empty")
+		}
 		value := os.Getenv(envVar)
 		if value == "" {
 			return "", errors.New("environment variable " + envVar + " is not set")
