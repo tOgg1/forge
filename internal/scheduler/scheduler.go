@@ -772,4 +772,43 @@ func (s *Scheduler) onStateChange(change state.StateChange) {
 
 		_ = s.ScheduleNow(change.AgentID)
 	}
+
+	if change.CurrentState == models.AgentStateRateLimited {
+		s.handleRateLimit(change)
+	}
+}
+
+func (s *Scheduler) handleRateLimit(change state.StateChange) {
+	if s.accountService == nil || s.agentService == nil {
+		return
+	}
+
+	ctx := s.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	agentInfo, err := s.agentService.GetAgent(ctx, change.AgentID)
+	if err != nil {
+		s.logger.Warn().Err(err).Str("agent_id", change.AgentID).Msg("failed to load agent for rate limit handling")
+		return
+	}
+	if agentInfo.AccountID == "" {
+		s.logger.Debug().Str("agent_id", change.AgentID).Msg("agent has no account; skipping cooldown")
+		return
+	}
+
+	if err := s.accountService.SetCooldownForRateLimit(ctx, agentInfo.AccountID, change.StateInfo.Reason); err != nil {
+		s.logger.Warn().
+			Err(err).
+			Str("agent_id", change.AgentID).
+			Str("account_id", agentInfo.AccountID).
+			Msg("failed to set account cooldown after rate limit")
+		return
+	}
+
+	s.logger.Info().
+		Str("agent_id", change.AgentID).
+		Str("account_id", agentInfo.AccountID).
+		Msg("account placed on cooldown due to rate limit")
 }

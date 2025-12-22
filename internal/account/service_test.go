@@ -2,6 +2,7 @@ package account
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	"github.com/opencode-ai/swarm/internal/config"
+	"github.com/opencode-ai/swarm/internal/db"
+	"github.com/opencode-ai/swarm/internal/events"
 	"github.com/opencode-ai/swarm/internal/models"
 )
 
@@ -217,6 +220,105 @@ func TestService_RotateAccount_LRU(t *testing.T) {
 	}
 	if got.ProfileName != "old" {
 		t.Fatalf("expected profile old, got %s", got.ProfileName)
+	}
+}
+
+type testPublisher struct {
+	events []*models.Event
+}
+
+func (p *testPublisher) Publish(ctx context.Context, event *models.Event) {
+	p.events = append(p.events, event)
+}
+
+func (p *testPublisher) Subscribe(id string, filter events.Filter, handler events.EventHandler) error {
+	return nil
+}
+
+func (p *testPublisher) Unsubscribe(id string) error {
+	return nil
+}
+
+func (p *testPublisher) SubscriberCount() int {
+	return len(p.events)
+}
+
+func TestService_SetCooldownForRateLimit(t *testing.T) {
+	cfg := config.DefaultConfig()
+	ctx := context.Background()
+
+	database, err := db.OpenInMemory()
+	if err != nil {
+		t.Fatalf("failed to open in-memory database: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := database.Migrate(ctx); err != nil {
+		t.Fatalf("failed to migrate database: %v", err)
+	}
+
+	repo := db.NewAccountRepository(database)
+	publisher := &testPublisher{}
+	service := NewService(cfg, WithRepository(repo), WithPublisher(publisher))
+
+	account := &models.Account{
+		ID:            "acct-1",
+		Provider:      models.ProviderOpenAI,
+		ProfileName:   "acct-1",
+		CredentialRef: "env:OPENAI_API_KEY",
+		IsActive:      true,
+	}
+
+	if err := repo.Create(ctx, account); err != nil {
+		t.Fatalf("failed to create account in repo: %v", err)
+	}
+	if err := service.AddAccount(ctx, account); err != nil {
+		t.Fatalf("AddAccount failed: %v", err)
+	}
+
+	reason := "HTTP 429 rate limit"
+	if err := service.SetCooldownForRateLimit(ctx, account.ID, reason); err != nil {
+		t.Fatalf("SetCooldownForRateLimit failed: %v", err)
+	}
+
+	if account.CooldownUntil == nil || !account.IsOnCooldown() {
+		t.Fatal("expected account to be on cooldown")
+	}
+	if account.UsageStats == nil || account.UsageStats.RateLimitCount != 1 {
+		t.Fatalf("expected RateLimitCount to be 1, got %#v", account.UsageStats)
+	}
+
+	stored, err := repo.Get(ctx, account.ID)
+	if err != nil {
+		t.Fatalf("failed to get account from repo: %v", err)
+	}
+	if stored.CooldownUntil == nil || !stored.IsOnCooldown() {
+		t.Fatal("expected stored account to be on cooldown")
+	}
+
+	if len(publisher.events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(publisher.events))
+	}
+	event := publisher.events[0]
+	if event.Type != models.EventTypeRateLimitDetected {
+		t.Fatalf("expected rate limit event, got %s", event.Type)
+	}
+	if event.EntityType != models.EntityTypeAccount || event.EntityID != account.ID {
+		t.Fatalf("unexpected event entity: %s %s", event.EntityType, event.EntityID)
+	}
+
+	var payload models.RateLimitPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("failed to unmarshal payload: %v", err)
+	}
+	if payload.AccountID != account.ID || payload.Provider != account.Provider {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+	if payload.Reason != reason {
+		t.Fatalf("expected reason %q, got %q", reason, payload.Reason)
+	}
+	expectedCooldown := int(cfg.Scheduler.DefaultCooldownDuration.Seconds())
+	if payload.CooldownSeconds != expectedCooldown {
+		t.Fatalf("expected cooldown seconds %d, got %d", expectedCooldown, payload.CooldownSeconds)
 	}
 }
 

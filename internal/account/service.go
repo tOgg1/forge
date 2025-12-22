@@ -3,6 +3,7 @@ package account
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"sort"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/opencode-ai/swarm/internal/config"
+	"github.com/opencode-ai/swarm/internal/db"
+	"github.com/opencode-ai/swarm/internal/events"
 	"github.com/opencode-ai/swarm/internal/logging"
 	"github.com/opencode-ai/swarm/internal/models"
 	"github.com/rs/zerolog"
@@ -29,15 +32,37 @@ type Service struct {
 	mu              sync.RWMutex
 	accounts        map[string]*models.Account
 	defaultCooldown time.Duration
+	repo            *db.AccountRepository
+	publisher       events.Publisher
 	logger          zerolog.Logger
 }
 
+// ServiceOption configures an account Service.
+type ServiceOption func(*Service)
+
+// WithRepository configures a repository for persistence.
+func WithRepository(repo *db.AccountRepository) ServiceOption {
+	return func(s *Service) {
+		s.repo = repo
+	}
+}
+
+// WithPublisher configures a publisher for event emission.
+func WithPublisher(publisher events.Publisher) ServiceOption {
+	return func(s *Service) {
+		s.publisher = publisher
+	}
+}
+
 // NewService creates a new account service from config.
-func NewService(cfg *config.Config) *Service {
+func NewService(cfg *config.Config, opts ...ServiceOption) *Service {
 	s := &Service{
 		accounts:        make(map[string]*models.Account),
 		defaultCooldown: cfg.Scheduler.DefaultCooldownDuration,
 		logger:          logging.Component("account"),
+	}
+	for _, opt := range opts {
+		opt(s)
 	}
 
 	// Load accounts from config
@@ -206,22 +231,53 @@ func (s *Service) IsOnCooldown(ctx context.Context, id string) (bool, time.Durat
 
 // SetCooldown puts an account on cooldown.
 func (s *Service) SetCooldown(ctx context.Context, id string, duration time.Duration) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	_, err := s.applyCooldown(ctx, id, duration, true)
+	return err
+}
 
+// SetCooldownForRateLimit applies the default cooldown after a rate limit.
+func (s *Service) SetCooldownForRateLimit(ctx context.Context, id, reason string) error {
+	account, err := s.applyCooldown(ctx, id, s.defaultCooldown, true)
+	if err != nil {
+		return err
+	}
+
+	s.publishRateLimitEvent(ctx, account, s.defaultCooldown, reason)
+	return nil
+}
+
+func (s *Service) applyCooldown(ctx context.Context, id string, duration time.Duration, incrementRateLimit bool) (*models.Account, error) {
+	if duration <= 0 {
+		return nil, errors.New("cooldown duration must be positive")
+	}
+
+	s.mu.Lock()
 	account, exists := s.accounts[id]
 	if !exists {
-		return ErrAccountNotFound
+		s.mu.Unlock()
+		return nil, ErrAccountNotFound
 	}
 
-	cooldownUntil := time.Now().Add(duration)
+	now := time.Now().UTC()
+	cooldownUntil := now.Add(duration)
 	account.CooldownUntil = &cooldownUntil
-	account.UpdatedAt = time.Now().UTC()
+	account.UpdatedAt = now
 
-	if account.UsageStats == nil {
-		account.UsageStats = &models.UsageStats{}
+	if incrementRateLimit {
+		if account.UsageStats == nil {
+			account.UsageStats = &models.UsageStats{}
+		}
+		account.UsageStats.RateLimitCount++
 	}
-	account.UsageStats.RateLimitCount++
+
+	snapshot := cloneAccount(account)
+	s.mu.Unlock()
+
+	if s.repo != nil {
+		if err := s.repo.SetCooldown(ctx, id, cooldownUntil); err != nil {
+			return snapshot, err
+		}
+	}
 
 	s.logger.Info().
 		Str("account_id", id).
@@ -229,7 +285,7 @@ func (s *Service) SetCooldown(ctx context.Context, id string, duration time.Dura
 		Time("cooldown_until", cooldownUntil).
 		Msg("account placed on cooldown")
 
-	return nil
+	return snapshot, nil
 }
 
 // ClearCooldown removes cooldown from an account.
@@ -433,6 +489,54 @@ func ResolveCredential(credentialRef string) (string, error) {
 
 	// Treat as literal value (for backwards compatibility)
 	return credentialRef, nil
+}
+
+func (s *Service) publishRateLimitEvent(ctx context.Context, account *models.Account, duration time.Duration, reason string) {
+	if s.publisher == nil {
+		return
+	}
+	if account == nil {
+		return
+	}
+
+	payload, err := json.Marshal(models.RateLimitPayload{
+		AccountID:       account.ID,
+		Provider:        account.Provider,
+		CooldownSeconds: int(duration.Seconds()),
+		Reason:          reason,
+	})
+	if err != nil {
+		s.logger.Warn().Err(err).Str("account_id", account.ID).Msg("failed to marshal rate limit payload")
+		return
+	}
+
+	s.publisher.Publish(ctx, &models.Event{
+		Type:       models.EventTypeRateLimitDetected,
+		EntityType: models.EntityTypeAccount,
+		EntityID:   account.ID,
+		Payload:    payload,
+	})
+}
+
+func cloneAccount(account *models.Account) *models.Account {
+	if account == nil {
+		return nil
+	}
+
+	cloned := *account
+	if account.CooldownUntil != nil {
+		cooldown := *account.CooldownUntil
+		cloned.CooldownUntil = &cooldown
+	}
+	if account.UsageStats != nil {
+		usage := *account.UsageStats
+		if account.UsageStats.LastUsed != nil {
+			lastUsed := *account.UsageStats.LastUsed
+			usage.LastUsed = &lastUsed
+		}
+		cloned.UsageStats = &usage
+	}
+	return &cloned
 }
 
 // GetCredentialEnv returns the environment variable map for an account's credentials.
