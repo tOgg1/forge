@@ -104,6 +104,7 @@ type model struct {
 	agentInfo             map[string]models.StateInfo
 	agentLast             map[string]time.Time
 	agentCooldowns        map[string]time.Time
+	agentRecentEvents     map[string][]time.Time // Recent state change timestamps per agent
 	stateChanges          []StateChangeMsg
 	nodes                 []nodeSummary
 	nodesPreview          bool
@@ -113,6 +114,7 @@ type model struct {
 	transcriptViewer      *components.TranscriptViewer
 	transcriptPreview     bool
 	showTranscript        bool
+	transcriptAutoScroll  bool
 }
 
 type nodeSummary struct {
@@ -167,6 +169,7 @@ func initialModel() model {
 	grid.SetWorkspaces(sampleWorkspaces())
 	tv := components.NewTranscriptViewer()
 	tv.SetContent(sampleTranscript())
+	tv.ScrollToBottom()
 	queueEditors := sampleQueueEditors()
 	approvals := sampleApprovals()
 	return model{
@@ -179,6 +182,7 @@ func initialModel() model {
 		agentInfo:            make(map[string]models.StateInfo),
 		agentLast:            make(map[string]time.Time),
 		agentCooldowns:       make(map[string]time.Time),
+		agentRecentEvents:    make(map[string][]time.Time),
 		stateChanges:         make([]StateChangeMsg, 0),
 		nodes:                sampleNodes(),
 		nodesPreview:         true,
@@ -188,6 +192,7 @@ func initialModel() model {
 		approvalsByWorkspace: approvals,
 		transcriptViewer:     tv,
 		transcriptPreview:    true,
+		transcriptAutoScroll: true,
 	}
 }
 
@@ -231,6 +236,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showTranscript = !m.showTranscript
 			if !m.showTranscript {
 				m.closeTranscriptSearch()
+			} else if m.transcriptAutoScroll && m.transcriptViewer != nil {
+				m.transcriptViewer.ScrollToBottom()
 			}
 			return m, nil
 		}
@@ -239,27 +246,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "up", "k":
 				m.transcriptViewer.ScrollUp(1)
+				m.transcriptAutoScroll = false
 				return m, nil
 			case "down", "j":
 				m.transcriptViewer.ScrollDown(1)
+				m.transcriptAutoScroll = false
 				return m, nil
 			case "ctrl+u":
 				m.transcriptViewer.ScrollUp(10)
+				m.transcriptAutoScroll = false
 				return m, nil
 			case "ctrl+d":
 				m.transcriptViewer.ScrollDown(10)
+				m.transcriptAutoScroll = false
 				return m, nil
 			case "g":
 				m.transcriptViewer.ScrollToTop()
+				m.transcriptAutoScroll = false
 				return m, nil
 			case "G":
 				m.transcriptViewer.ScrollToBottom()
+				m.transcriptAutoScroll = false
 				return m, nil
 			case "n":
 				m.transcriptViewer.NextSearchHit()
+				m.transcriptAutoScroll = false
 				return m, nil
 			case "N":
 				m.transcriptViewer.PrevSearchHit()
+				m.transcriptAutoScroll = false
+				return m, nil
+			case "a":
+				m.transcriptAutoScroll = !m.transcriptAutoScroll
+				if m.transcriptAutoScroll {
+					m.transcriptViewer.ScrollToBottom()
+				}
 				return m, nil
 			}
 		}
@@ -408,6 +429,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentLast[msg.AgentID] = activityAt
 		m.lastUpdated = msg.Timestamp
 		m.stale = false
+
+		// Track recent events per agent for activity pulse (max 10 per agent)
+		events := m.agentRecentEvents[msg.AgentID]
+		events = append(events, activityAt)
+		if len(events) > 10 {
+			events = events[1:]
+		}
+		m.agentRecentEvents[msg.AgentID] = events
 
 		// Keep recent state changes for display (max 10)
 		m.stateChanges = append(m.stateChanges, msg)
@@ -578,7 +607,11 @@ func (m *model) viewLines() []string {
 	case viewAgent:
 		transcriptHint := "t: transcript"
 		if m.showTranscript {
-			transcriptHint = "t: hide transcript | /: search | jk/↑↓: scroll | g/G: top/bottom | n/N: next/prev"
+			autoHint := "a: auto-scroll on"
+			if !m.transcriptAutoScroll {
+				autoHint = "a: auto-scroll off"
+			}
+			transcriptHint = fmt.Sprintf("t: hide transcript | %s | /: search | jk/↑↓: scroll | g/G: top/bottom | n/N: next/prev", autoHint)
 		}
 		queueHint := "Q: queue"
 		if m.queueEditorOpen {
@@ -1634,7 +1667,13 @@ func (m model) helpLines() []string {
 	case viewAgent:
 		lines = append(lines, m.styles.Muted.Render("Agents: ↑↓←→/hjkl select | / filter | Ctrl+L clear | t transcript | Q queue"))
 		if m.showTranscript {
-			lines = append(lines, m.styles.Muted.Render("Transcript: jk/↑↓ scroll | g/G top/bottom | n/N next/prev | / search"))
+			autoHint := "a auto-scroll on"
+			if !m.transcriptAutoScroll {
+				autoHint = "a auto-scroll off"
+			}
+			lines = append(lines, m.styles.Muted.Render(
+				fmt.Sprintf("Transcript: jk/↑↓ scroll | g/G top/bottom | n/N next/prev | / search | %s", autoHint),
+			))
 		}
 		lines = append(lines, m.styles.Muted.Render("Actions: I interrupt | R restart | E export"))
 	}
@@ -2167,6 +2206,7 @@ func (m model) allAgentCards() []components.AgentCard {
 			QueueLength:   -1,
 			LastActivity:  lastPtr,
 			CooldownUntil: cooldownPtr,
+			RecentEvents:  m.agentRecentEvents[id],
 		}
 		cards = append(cards, card)
 	}
@@ -2309,6 +2349,11 @@ func sampleAgentCards() []components.AgentCard {
 			Reason:       "Processing queue: update workspace view",
 			QueueLength:  2,
 			LastActivity: timePtr(now.Add(-2 * time.Minute)),
+			RecentEvents: []time.Time{
+				now.Add(-2 * time.Minute),
+				now.Add(-3 * time.Minute),
+				now.Add(-5 * time.Minute),
+			},
 		},
 		{
 			Name:         "Agent B7",
@@ -2320,6 +2365,9 @@ func sampleAgentCards() []components.AgentCard {
 			Reason:       "Awaiting approval for file changes",
 			QueueLength:  0,
 			LastActivity: timePtr(now.Add(-12 * time.Minute)),
+			RecentEvents: []time.Time{
+				now.Add(-12 * time.Minute),
+			},
 		},
 		{
 			Name:         "Agent C3",
@@ -2331,6 +2379,7 @@ func sampleAgentCards() []components.AgentCard {
 			Reason:       "Idle: no queued tasks",
 			QueueLength:  0,
 			LastActivity: timePtr(now.Add(-35 * time.Minute)),
+			RecentEvents: []time.Time{}, // No recent activity
 		},
 		{
 			Name:          "Agent D4",
@@ -2343,6 +2392,13 @@ func sampleAgentCards() []components.AgentCard {
 			QueueLength:   0,
 			LastActivity:  timePtr(now.Add(-1 * time.Minute)),
 			CooldownUntil: timePtr(now.Add(4 * time.Minute)),
+			RecentEvents: []time.Time{
+				now.Add(-1 * time.Minute),
+				now.Add(-2 * time.Minute),
+				now.Add(-3 * time.Minute),
+				now.Add(-4 * time.Minute),
+				now.Add(-5 * time.Minute),
+			},
 		},
 	}
 }
@@ -2823,6 +2879,7 @@ func (m *model) updateTranscriptSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.transcriptViewer.ClearSearch()
 			} else {
 				m.transcriptViewer.SetSearch(query)
+				m.transcriptAutoScroll = false
 			}
 		}
 		m.closeTranscriptSearch()

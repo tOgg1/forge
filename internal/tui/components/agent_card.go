@@ -29,6 +29,7 @@ type AgentCard struct {
 	QueueLength   int
 	LastActivity  *time.Time
 	CooldownUntil *time.Time
+	RecentEvents  []time.Time // Timestamps of recent state changes for activity pulse
 }
 
 // RenderAgentCard renders a compact agent summary card.
@@ -61,11 +62,20 @@ func RenderAgentCard(styleSet styles.Styles, card AgentCard, selected bool) stri
 	cooldownLine := renderCooldownLine(styleSet, card.CooldownUntil)
 	confidenceLine := renderConfidenceLine(styleSet, card.Confidence)
 
+	actionsLine := ""
+	if selected {
+		actionsLine = styleSet.Info.Render("Actions: P pause | R restart | V view")
+	}
+
 	queueValue := "--"
 	if card.QueueLength >= 0 {
 		queueValue = fmt.Sprintf("%d", card.QueueLength)
 	}
 	queueLine := textStyle.Render(fmt.Sprintf("Queue: %s  Last: %s", queueValue, formatLastActivity(card.LastActivity)))
+
+	// Activity pulse indicator
+	pulse := NewActivityPulse(card.RecentEvents, card.State, card.LastActivity)
+	activityLine := RenderActivityLine(styleSet, pulse)
 
 	lines := []string{
 		header,
@@ -77,7 +87,10 @@ func RenderAgentCard(styleSet styles.Styles, card AgentCard, selected bool) stri
 	if cooldownLine != "" {
 		lines = append(lines, cooldownLine)
 	}
-	lines = append(lines, confidenceLine, queueLine)
+	lines = append(lines, confidenceLine, activityLine, queueLine)
+	if actionsLine != "" {
+		lines = append(lines, actionsLine)
+	}
 
 	content := strings.Join(lines, "\n")
 

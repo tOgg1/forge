@@ -89,6 +89,20 @@ func WithPoolSize(size int) NativeExecutorOption {
 	}
 }
 
+// WithPoolMaxPerHost sets the maximum number of pooled connections per host.
+func WithPoolMaxPerHost(size int) NativeExecutorOption {
+	return func(e *NativeExecutor) {
+		e.pool.maxPerHost = size
+	}
+}
+
+// WithPoolIdleTimeout sets how long an idle connection stays in the pool.
+func WithPoolIdleTimeout(timeout time.Duration) NativeExecutorOption {
+	return func(e *NativeExecutor) {
+		e.pool.idleTimeout = timeout
+	}
+}
+
 // NewNativeExecutor creates a new NativeExecutor with the given options.
 func NewNativeExecutor(options ConnectionOptions, opts ...NativeExecutorOption) (*NativeExecutor, error) {
 	if options.Host == "" {
@@ -101,8 +115,10 @@ func NewNativeExecutor(options ConnectionOptions, opts ...NativeExecutorOption) 
 		KeepAliveInterval: 30 * time.Second,
 		KeepAliveTimeout:  15 * time.Second,
 		pool: &connectionPool{
-			maxSize: 5,
-			conns:   make(map[string]*pooledConn),
+			maxSize:     5,
+			maxPerHost:  1,
+			idleTimeout: 5 * time.Minute,
+			conns:       make(map[string][]*pooledConn),
 		},
 	}
 
@@ -347,52 +363,78 @@ func (e *NativeExecutor) dial(ctx context.Context) (*xssh.Client, error) {
 
 // dialViaProxy connects through a ProxyJump host.
 func (e *NativeExecutor) dialViaProxy(ctx context.Context) (*xssh.Client, error) {
-	// Parse proxy jump
-	proxyUser, proxyHost, proxyPort := parseSSHTarget(e.options.ProxyJump)
-	if proxyPort == "" {
-		proxyPort = "22"
+	jumps := parseProxyJumpList(e.options.ProxyJump)
+	if len(jumps) == 0 {
+		return e.dial(ctx)
 	}
 
-	proxyAddr := net.JoinHostPort(proxyHost, proxyPort)
-
-	// Build proxy config (use same auth methods)
-	proxyConfig := &xssh.ClientConfig{
-		User:            proxyUser,
-		Auth:            e.config.Auth,
-		Timeout:         e.config.Timeout,
-		HostKeyCallback: e.config.HostKeyCallback,
-	}
-
-	// Connect to proxy
 	dialer := &net.Dialer{
 		Timeout: e.config.Timeout,
 	}
 
-	proxyConn, err := dialer.DialContext(ctx, "tcp", proxyAddr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to proxy %s: %w", proxyAddr, err)
+	var proxyClients []*xssh.Client
+	var prevClient *xssh.Client
+
+	for i, jump := range jumps {
+		proxyUser, proxyHost, proxyPort := parseSSHTarget(jump)
+		if proxyHost == "" {
+			closeProxyClients(proxyClients)
+			return nil, fmt.Errorf("invalid proxy jump entry: %q", jump)
+		}
+		if proxyUser == "" {
+			proxyUser = e.config.User
+		}
+		if proxyPort == "" {
+			proxyPort = "22"
+		}
+
+		proxyAddr := net.JoinHostPort(proxyHost, proxyPort)
+		proxyConfig := &xssh.ClientConfig{
+			User:            proxyUser,
+			Auth:            e.config.Auth,
+			Timeout:         e.config.Timeout,
+			HostKeyCallback: e.config.HostKeyCallback,
+		}
+
+		var conn net.Conn
+		var err error
+		if i == 0 {
+			conn, err = dialer.DialContext(ctx, "tcp", proxyAddr)
+		} else {
+			conn, err = prevClient.Dial("tcp", proxyAddr)
+		}
+		if err != nil {
+			closeProxyClients(proxyClients)
+			return nil, fmt.Errorf("failed to connect to proxy %s: %w", proxyAddr, err)
+		}
+
+		proxySshConn, proxyChans, proxyReqs, err := xssh.NewClientConn(conn, proxyAddr, proxyConfig)
+		if err != nil {
+			conn.Close()
+			closeProxyClients(proxyClients)
+			return nil, fmt.Errorf("proxy SSH handshake failed: %w", err)
+		}
+
+		proxyClient := xssh.NewClient(proxySshConn, proxyChans, proxyReqs)
+		proxyClients = append(proxyClients, proxyClient)
+		prevClient = proxyClient
 	}
 
-	proxySshConn, proxyChans, proxyReqs, err := xssh.NewClientConn(proxyConn, proxyAddr, proxyConfig)
-	if err != nil {
-		proxyConn.Close()
-		return nil, fmt.Errorf("proxy SSH handshake failed: %w", err)
-	}
-
-	proxyClient := xssh.NewClient(proxySshConn, proxyChans, proxyReqs)
-
-	// Connect to target through proxy
 	targetAddr := e.targetAddr()
-	targetConn, err := proxyClient.Dial("tcp", targetAddr)
+	targetConn, err := prevClient.Dial("tcp", targetAddr)
 	if err != nil {
-		proxyClient.Close()
+		closeProxyClients(proxyClients)
 		return nil, fmt.Errorf("failed to connect to target %s via proxy: %w", targetAddr, err)
 	}
 
-	targetSshConn, targetChans, targetReqs, err := xssh.NewClientConn(targetConn, targetAddr, e.config)
+	closeFn := func() {
+		closeProxyClients(proxyClients)
+	}
+	wrappedConn := &proxyConn{Conn: targetConn, onClose: closeFn}
+
+	targetSshConn, targetChans, targetReqs, err := xssh.NewClientConn(wrappedConn, targetAddr, e.config)
 	if err != nil {
-		targetConn.Close()
-		proxyClient.Close()
+		_ = wrappedConn.Close()
 		return nil, fmt.Errorf("target SSH handshake failed: %w", err)
 	}
 
@@ -420,6 +462,25 @@ func (e *NativeExecutor) keepAlive(client *xssh.Client) {
 			e.logger.Debug().Err(err).Msg("keep-alive failed, connection may be dead")
 			return
 		}
+	}
+}
+
+type proxyConn struct {
+	net.Conn
+	onClose func()
+}
+
+func (c *proxyConn) Close() error {
+	err := c.Conn.Close()
+	if c.onClose != nil {
+		c.onClose()
+	}
+	return err
+}
+
+func closeProxyClients(clients []*xssh.Client) {
+	for i := len(clients) - 1; i >= 0; i-- {
+		_ = clients[i].Close()
 	}
 }
 
@@ -553,9 +614,12 @@ func (s *NativeSession) Close() error {
 
 // connectionPool manages a pool of SSH connections.
 type connectionPool struct {
-	mu      sync.Mutex
-	maxSize int
-	conns   map[string]*pooledConn
+	mu          sync.Mutex
+	maxSize     int
+	maxPerHost  int
+	idleTimeout time.Duration
+	conns       map[string][]*pooledConn
+	total       int
 }
 
 type pooledConn struct {
@@ -568,46 +632,75 @@ func (p *connectionPool) get(addr string) *xssh.Client {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if pc, ok := p.conns[addr]; ok {
-		delete(p.conns, addr)
-		// Check if connection is still alive
+	now := time.Now()
+	p.pruneLocked(now)
+
+	list, ok := p.conns[addr]
+	if !ok || len(list) == 0 {
+		return nil
+	}
+
+	for len(list) > 0 {
+		idx := len(list) - 1
+		pc := list[idx]
+		list = list[:idx]
+		p.total--
+
+		if len(list) == 0 {
+			delete(p.conns, addr)
+		} else {
+			p.conns[addr] = list
+		}
+
+		if pc == nil || pc.client == nil {
+			continue
+		}
+
 		_, _, err := pc.client.SendRequest("keepalive@swarm", true, nil)
 		if err != nil {
 			pc.client.Close()
-			return nil
+			continue
 		}
 		return pc.client
 	}
+
 	return nil
 }
 
 // put returns a connection to the pool.
 func (p *connectionPool) put(addr string, client *xssh.Client) {
+	if client == nil {
+		return
+	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Evict oldest if at capacity
-	if len(p.conns) >= p.maxSize {
-		var oldestAddr string
-		var oldestTime time.Time
-		for a, pc := range p.conns {
-			if oldestAddr == "" || pc.lastUsed.Before(oldestTime) {
-				oldestAddr = a
-				oldestTime = pc.lastUsed
-			}
+	now := time.Now()
+	p.pruneLocked(now)
+
+	if p.maxPerHost > 0 {
+		if list := p.conns[addr]; len(list) >= p.maxPerHost {
+			p.evictOldestInHostLocked(addr)
 		}
-		if oldestAddr != "" {
-			if pc, ok := p.conns[oldestAddr]; ok {
-				pc.client.Close()
-				delete(p.conns, oldestAddr)
+	}
+
+	if p.maxSize > 0 {
+		for p.total >= p.maxSize {
+			p.evictOldestLocked()
+			if p.total == 0 {
+				break
 			}
 		}
 	}
 
-	p.conns[addr] = &pooledConn{
+	list := p.conns[addr]
+	list = append(list, &pooledConn{
 		client:   client,
-		lastUsed: time.Now(),
-	}
+		lastUsed: now,
+	})
+	p.conns[addr] = list
+	p.total++
 }
 
 // closeAll closes all pooled connections.
@@ -616,11 +709,121 @@ func (p *connectionPool) closeAll() error {
 	defer p.mu.Unlock()
 
 	var lastErr error
-	for addr, pc := range p.conns {
-		if err := pc.client.Close(); err != nil {
-			lastErr = err
+	for addr, list := range p.conns {
+		for _, pc := range list {
+			if pc == nil || pc.client == nil {
+				continue
+			}
+			if err := pc.client.Close(); err != nil {
+				lastErr = err
+			}
 		}
 		delete(p.conns, addr)
 	}
+	p.total = 0
 	return lastErr
+}
+
+func (p *connectionPool) pruneLocked(now time.Time) {
+	if p.idleTimeout <= 0 {
+		return
+	}
+
+	for addr, list := range p.conns {
+		if len(list) == 0 {
+			delete(p.conns, addr)
+			continue
+		}
+		kept := list[:0]
+		for _, pc := range list {
+			if pc == nil || pc.client == nil {
+				p.total--
+				continue
+			}
+			if now.Sub(pc.lastUsed) > p.idleTimeout {
+				pc.client.Close()
+				p.total--
+				continue
+			}
+			kept = append(kept, pc)
+		}
+		if len(kept) == 0 {
+			delete(p.conns, addr)
+			continue
+		}
+		p.conns[addr] = kept
+	}
+}
+
+func (p *connectionPool) evictOldestLocked() {
+	var (
+		oldestAddr  string
+		oldestIndex int
+		oldestTime  time.Time
+	)
+	for addr, list := range p.conns {
+		for i, pc := range list {
+			if pc == nil {
+				continue
+			}
+			if oldestAddr == "" || pc.lastUsed.Before(oldestTime) {
+				oldestAddr = addr
+				oldestIndex = i
+				oldestTime = pc.lastUsed
+			}
+		}
+	}
+
+	if oldestAddr == "" {
+		return
+	}
+
+	list := p.conns[oldestAddr]
+	if oldestIndex < 0 || oldestIndex >= len(list) {
+		return
+	}
+	pc := list[oldestIndex]
+	if pc != nil && pc.client != nil {
+		pc.client.Close()
+	}
+	p.total--
+
+	list = append(list[:oldestIndex], list[oldestIndex+1:]...)
+	if len(list) == 0 {
+		delete(p.conns, oldestAddr)
+		return
+	}
+	p.conns[oldestAddr] = list
+}
+
+func (p *connectionPool) evictOldestInHostLocked(addr string) {
+	list := p.conns[addr]
+	if len(list) == 0 {
+		return
+	}
+
+	oldestIndex := 0
+	oldestTime := list[0].lastUsed
+	for i, pc := range list {
+		if pc == nil {
+			continue
+		}
+		if pc.lastUsed.Before(oldestTime) {
+			oldestIndex = i
+			oldestTime = pc.lastUsed
+		}
+	}
+
+	pc := list[oldestIndex]
+	if pc != nil && pc.client != nil {
+		pc.client.Close()
+	}
+	p.total--
+
+	list = append(list[:oldestIndex], list[oldestIndex+1:]...)
+	if len(list) == 0 {
+		delete(p.conns, addr)
+		return
+	}
+	p.conns[addr] = list
 }

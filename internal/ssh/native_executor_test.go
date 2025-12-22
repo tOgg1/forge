@@ -92,7 +92,7 @@ func TestParseSSHTarget(t *testing.T) {
 func TestConnectionPool(t *testing.T) {
 	pool := &connectionPool{
 		maxSize: 2,
-		conns:   make(map[string]*pooledConn),
+		conns:   make(map[string][]*pooledConn),
 	}
 
 	// Test that get returns nil for non-existent connection
@@ -111,7 +111,7 @@ func TestNativeExecutorOptions(t *testing.T) {
 	e := &NativeExecutor{
 		pool: &connectionPool{
 			maxSize: 5,
-			conns:   make(map[string]*pooledConn),
+			conns:   make(map[string][]*pooledConn),
 		},
 	}
 
@@ -130,6 +130,20 @@ func TestNativeExecutorOptions(t *testing.T) {
 	opt2(e)
 	if e.pool.maxSize != 10 {
 		t.Errorf("pool.maxSize = %v, want %v", e.pool.maxSize, 10)
+	}
+
+	// Test WithPoolMaxPerHost
+	opt4 := WithPoolMaxPerHost(3)
+	opt4(e)
+	if e.pool.maxPerHost != 3 {
+		t.Errorf("pool.maxPerHost = %v, want %v", e.pool.maxPerHost, 3)
+	}
+
+	// Test WithPoolIdleTimeout
+	opt5 := WithPoolIdleTimeout(2 * time.Minute)
+	opt5(e)
+	if e.pool.idleTimeout != 2*time.Minute {
+		t.Errorf("pool.idleTimeout = %v, want %v", e.pool.idleTimeout, 2*time.Minute)
 	}
 
 	// Test WithPassphrasePrompt
