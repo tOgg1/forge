@@ -167,6 +167,17 @@ swarm export events --agent <agent-id> --jsonl
 swarm export events --watch --jsonl
 ```
 
+### `swarm audit`
+
+View the audit log with filters for time, entity, and action.
+
+```bash
+swarm audit --since 1h
+swarm audit --type agent.state_changed --entity-type agent
+swarm audit --action message.dispatched --limit 200
+swarm audit --json
+```
+
 ## Planned commands
 
 These are defined in the product spec but not wired up yet.
