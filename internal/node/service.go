@@ -350,6 +350,15 @@ func (s *Service) RefreshNodeStatus(ctx context.Context, id string) (*Connection
 
 // createExecutor creates an SSH executor based on the backend preference.
 func (s *Service) createExecutor(backend models.SSHBackend, opts ssh.ConnectionOptions) (ssh.Executor, error) {
+	if opts.Host != "" {
+		updated, err := ssh.ApplySSHConfig(opts)
+		if err != nil {
+			s.logger.Warn().Err(err).Str("host", opts.Host).Msg("failed to apply ssh config")
+		} else {
+			opts = updated
+		}
+	}
+
 	switch backend {
 	case models.SSHBackendNative:
 		return ssh.NewNativeExecutor(opts)

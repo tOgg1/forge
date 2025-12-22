@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,6 +65,9 @@ type model struct {
 	view          viewID
 	selectedView  viewID
 	showHelp      bool
+	pausedAll     bool
+	statusMsg     string
+	statusWarn    bool
 	paletteOpen   bool
 	paletteQuery  string
 	paletteIndex  int
@@ -71,6 +75,8 @@ type model struct {
 	stale         bool
 	stateEngine   *state.Engine
 	agentStates   map[string]models.AgentState
+	agentInfo     map[string]models.StateInfo
+	agentLast     map[string]time.Time
 	stateChanges  []StateChangeMsg
 	nodes         []nodeSummary
 	nodesPreview  bool
@@ -102,6 +108,8 @@ func initialModel() model {
 		selectedView:  viewDashboard,
 		lastUpdated:   now,
 		agentStates:   make(map[string]models.AgentState),
+		agentInfo:     make(map[string]models.StateInfo),
+		agentLast:     make(map[string]time.Time),
 		stateChanges:  make([]StateChangeMsg, 0),
 		nodes:         sampleNodes(),
 		nodesPreview:  true,
@@ -188,6 +196,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StateChangeMsg:
 		// Update agent state tracking
 		m.agentStates[msg.AgentID] = msg.CurrentState
+		m.agentInfo[msg.AgentID] = msg.StateInfo
+		activityAt := msg.StateInfo.DetectedAt
+		if activityAt.IsZero() {
+			activityAt = msg.Timestamp
+		}
+		m.agentLast[msg.AgentID] = activityAt
 		m.lastUpdated = msg.Timestamp
 		m.stale = false
 
@@ -233,6 +247,9 @@ func (m model) View() string {
 	}
 
 	lines = append(lines, m.viewLines()...)
+	if status := m.statusLine(); status != "" {
+		lines = append(lines, "", status)
+	}
 	lines = append(lines, "", m.lastUpdatedView())
 	lines = append(lines, "", m.styles.Muted.Render("Press q to quit."))
 
@@ -617,14 +634,34 @@ func (m model) paletteLines() []string {
 }
 
 func (m model) paletteActions() []paletteAction {
-	return []paletteAction{
-		{ID: "view.dashboard", Label: "Go to Dashboard"},
-		{ID: "view.workspace", Label: "Go to Workspace"},
-		{ID: "view.agent", Label: "Go to Agent"},
-		{ID: "refresh", Label: "Refresh", Hint: "update timestamp"},
-		{ID: "toggle.help", Label: "Toggle Help"},
-		{ID: "quit", Label: "Quit"},
+	helpID := "help.show"
+	helpLabel := "Show help"
+	if m.showHelp {
+		helpID = "help.hide"
+		helpLabel = "Hide help"
 	}
+
+	actions := []paletteAction{
+		{ID: "view.dashboard", Label: "Navigate to dashboard", Hint: "1"},
+		{ID: "view.workspace", Label: "Navigate to workspace", Hint: "2"},
+		{ID: "view.agent", Label: "Navigate to agents", Hint: "3"},
+		{ID: "agent.spawn", Label: "Spawn agent", Hint: "workspace"},
+	}
+
+	if m.pausedAll {
+		actions = append(actions, paletteAction{ID: "agents.resume_all", Label: "Resume all agents"})
+	} else {
+		actions = append(actions, paletteAction{ID: "agents.pause_all", Label: "Pause all agents"})
+	}
+
+	actions = append(actions,
+		paletteAction{ID: "refresh", Label: "Refresh", Hint: "r"},
+		paletteAction{ID: "settings", Label: "Settings"},
+		paletteAction{ID: helpID, Label: helpLabel, Hint: "?"},
+		paletteAction{ID: "quit", Label: "Quit", Hint: "q"},
+	)
+
+	return actions
 }
 
 func (m model) filteredPaletteActions() []paletteAction {
@@ -717,12 +754,24 @@ func (m *model) applyPaletteAction(action paletteAction) tea.Cmd {
 	case "view.agent":
 		m.view = viewAgent
 		m.selectedView = viewAgent
+	case "agent.spawn":
+		m.setStatus("Spawn agent not wired yet.", true)
+	case "agents.pause_all":
+		m.pausedAll = true
+		m.setStatus("Paused all agents (preview).", false)
+	case "agents.resume_all":
+		m.pausedAll = false
+		m.setStatus("Resumed all agents (preview).", false)
 	case "refresh":
 		m.lastUpdated = time.Now()
 		m.stale = false
 		return staleCheckCmd(m.lastUpdated)
-	case "toggle.help":
-		m.showHelp = !m.showHelp
+	case "settings":
+		m.setStatus("Settings panel not wired yet.", true)
+	case "help.show":
+		m.showHelp = true
+	case "help.hide":
+		m.showHelp = false
 	case "quit":
 		return tea.Quit
 	}
@@ -770,6 +819,21 @@ func (m model) lastUpdatedView() string {
 		return m.styles.Warning.Render(line)
 	}
 	return m.styles.Muted.Render(line)
+}
+
+func (m model) statusLine() string {
+	if strings.TrimSpace(m.statusMsg) == "" {
+		return ""
+	}
+	if m.statusWarn {
+		return m.styles.Warning.Render(m.statusMsg)
+	}
+	return m.styles.Info.Render(m.statusMsg)
+}
+
+func (m *model) setStatus(message string, warning bool) {
+	m.statusMsg = message
+	m.statusWarn = warning
 }
 
 func shortID(value string) string {

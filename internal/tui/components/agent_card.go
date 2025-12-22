@@ -21,6 +21,7 @@ type AgentCard struct {
 	Model        string
 	Profile      string
 	State        models.AgentState
+	Confidence   models.StateConfidence
 	Reason       string
 	QueueLength  int
 	LastActivity *time.Time
@@ -39,6 +40,7 @@ func RenderAgentCard(styleSet styles.Styles, card AgentCard) string {
 	reason = truncate(reason, maxReasonLength)
 	stateBadge := RenderAgentStateBadge(styleSet, card.State)
 	stateLine := fmt.Sprintf("State: %s %s", stateBadge, styleSet.Muted.Render(reason))
+	confidenceLine := renderConfidenceLine(styleSet, card.Confidence)
 
 	queueValue := "--"
 	if card.QueueLength >= 0 {
@@ -51,6 +53,7 @@ func RenderAgentCard(styleSet styles.Styles, card AgentCard) string {
 		typeLine,
 		profileLine,
 		stateLine,
+		confidenceLine,
 		queueLine,
 	}, "\n")
 
@@ -73,4 +76,23 @@ func formatLastActivity(ts *time.Time) string {
 		return "--"
 	}
 	return ts.Format("15:04:05")
+}
+
+func renderConfidenceLine(styleSet styles.Styles, confidence models.StateConfidence) string {
+	label, bars, style := confidenceDescriptor(styleSet, confidence)
+	prefix := styleSet.Muted.Render("Confidence:")
+	return fmt.Sprintf("%s %s", prefix, style.Render(fmt.Sprintf("%s %s", label, bars)))
+}
+
+func confidenceDescriptor(styleSet styles.Styles, confidence models.StateConfidence) (string, string, lipgloss.Style) {
+	switch confidence {
+	case models.StateConfidenceHigh:
+		return "High", "###", styleSet.Success
+	case models.StateConfidenceMedium:
+		return "Medium", "##-", styleSet.Warning
+	case models.StateConfidenceLow:
+		return "Low", "#--", styleSet.Error
+	default:
+		return "Unknown", "---", styleSet.Muted
+	}
 }
