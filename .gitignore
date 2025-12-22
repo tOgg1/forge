@@ -1,2 +1,9 @@
 # bv (beads viewer) local config and caches
 .bv/
+
+# Build outputs
+build/
+
+# Go temporary files
+*.test
+*.out
