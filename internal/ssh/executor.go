@@ -57,3 +57,13 @@ type ConnectionOptions struct {
 	// Timeout controls how long to wait when establishing connections.
 	Timeout time.Duration
 }
+
+// ApplySSHConfig applies settings from ~/.ssh/config to the connection options.
+// It looks up the host alias and updates Host, Port, User, KeyPath, and ProxyJump
+// based on matching Host directives.
+//
+// TODO(OrangeCreek): Full implementation in swarm-y6b.
+func ApplySSHConfig(opts ConnectionOptions) (ConnectionOptions, error) {
+	// Stub: return options unchanged until full implementation
+	return opts, nil
+}

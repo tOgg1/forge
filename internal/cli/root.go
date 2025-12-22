@@ -17,6 +17,7 @@ var (
 	jsonOutput  bool
 	jsonlOutput bool
 	watchMode   bool
+	sinceDur    string
 	verbose     bool
 	noColor     bool
 	noProgress  bool
@@ -71,6 +72,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "output in JSON format")
 	rootCmd.PersistentFlags().BoolVar(&jsonlOutput, "jsonl", false, "output in JSON Lines format (for streaming)")
 	rootCmd.PersistentFlags().BoolVar(&watchMode, "watch", false, "watch for changes and stream updates")
+	rootCmd.PersistentFlags().StringVar(&sinceDur, "since", "", "replay events since duration (e.g., 1h, 30m, 24h) or timestamp")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose output")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output")
 	rootCmd.PersistentFlags().BoolVar(&noProgress, "no-progress", false, "disable progress output")
@@ -172,6 +174,11 @@ func IsWatchMode() bool {
 // IsVerbose returns true if verbose mode is enabled.
 func IsVerbose() bool {
 	return verbose
+}
+
+// GetSinceFlag returns the raw --since flag value.
+func GetSinceFlag() string {
+	return sinceDur
 }
 
 func formatVersion(version, commit, date string) string {

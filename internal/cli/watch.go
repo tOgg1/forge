@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -256,4 +257,126 @@ func MustBeJSONLForWatch() error {
 		return fmt.Errorf("--watch requires --jsonl output format")
 	}
 	return nil
+}
+
+// ParseSince parses a duration string or timestamp and returns the corresponding time.
+// Supports:
+//   - Relative durations: "1h", "30m", "24h", "7d" (days are 24h)
+//   - ISO 8601 timestamps: "2024-01-15T10:30:00Z"
+//   - RFC3339 timestamps: "2024-01-15T10:30:00-05:00"
+//   - Simple date: "2024-01-15"
+//
+// Returns nil if the input is empty.
+func ParseSince(s string) (*time.Time, error) {
+	if s == "" {
+		return nil, nil
+	}
+
+	s = strings.TrimSpace(s)
+
+	// Try parsing as a duration with optional 'd' for days
+	if dur, err := parseDurationWithDays(s); err == nil {
+		t := time.Now().UTC().Add(-dur)
+		return &t, nil
+	}
+
+	// Try RFC3339 (includes ISO 8601 with timezone)
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		utc := t.UTC()
+		return &utc, nil
+	}
+
+	// Try RFC3339Nano for high precision timestamps
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		utc := t.UTC()
+		return &utc, nil
+	}
+
+	// Try simple date format
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		utc := t.UTC()
+		return &utc, nil
+	}
+
+	// Try date with time (no timezone - assume UTC)
+	if t, err := time.Parse("2006-01-02T15:04:05", s); err == nil {
+		return &t, nil
+	}
+
+	return nil, fmt.Errorf("invalid time format: %q (use duration like '1h' or timestamp like '2024-01-15T10:30:00Z')", s)
+}
+
+// parseDurationWithDays parses a duration string, supporting 'd' suffix for days.
+func parseDurationWithDays(s string) (time.Duration, error) {
+	// Handle 'd' suffix for days
+	if strings.HasSuffix(s, "d") {
+		dayStr := strings.TrimSuffix(s, "d")
+		var days float64
+		if _, err := fmt.Sscanf(dayStr, "%f", &days); err != nil {
+			return 0, err
+		}
+		return time.Duration(days * 24 * float64(time.Hour)), nil
+	}
+
+	// Standard Go duration parsing
+	return time.ParseDuration(s)
+}
+
+// GetSinceTime parses the --since flag and returns the corresponding time.
+// Returns nil if --since was not specified.
+func GetSinceTime() (*time.Time, error) {
+	return ParseSince(GetSinceFlag())
+}
+
+// StreamEventsWithReplay streams events starting from a specific timestamp.
+// It first replays historical events since the given time, then continues
+// streaming live events.
+func StreamEventsWithReplay(
+	ctx context.Context,
+	repo *db.EventRepository,
+	out io.Writer,
+	since *time.Time,
+	eventTypes []models.EventType,
+	entityTypes []models.EntityType,
+	entityID string,
+) error {
+	config := DefaultStreamConfig()
+	config.EventTypes = eventTypes
+	config.EntityTypes = entityTypes
+	config.EntityID = entityID
+
+	if since != nil {
+		config.Since = since
+		config.IncludeExisting = true
+	}
+
+	streamer := NewEventStreamer(repo, out, config)
+	return streamer.Stream(ctx)
+}
+
+// WatchHelperWithSince provides a standard way for commands to implement --watch mode
+// with support for replay from a timestamp via the --since flag.
+func WatchHelperWithSince(ctx context.Context, repo *db.EventRepository, entityType models.EntityType, entityID string) error {
+	if !IsWatchMode() {
+		return nil
+	}
+
+	since, err := GetSinceTime()
+	if err != nil {
+		return fmt.Errorf("invalid --since value: %w", err)
+	}
+
+	config := DefaultStreamConfig()
+	config.EntityTypes = []models.EntityType{entityType}
+	if entityID != "" {
+		config.EntityID = entityID
+	}
+
+	if since != nil {
+		config.Since = since
+		config.IncludeExisting = true
+	}
+
+	streamer := NewEventStreamer(repo, os.Stdout, config)
+	return streamer.Stream(ctx)
 }
