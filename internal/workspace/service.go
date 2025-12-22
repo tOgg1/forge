@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/opencode-ai/swarm/internal/beads"
 	"github.com/opencode-ai/swarm/internal/db"
 	"github.com/opencode-ai/swarm/internal/events"
 	"github.com/opencode-ai/swarm/internal/logging"
@@ -378,6 +379,9 @@ type WorkspaceStatusResult struct {
 	// GitInfo is the current git repository state.
 	GitInfo *models.GitInfo
 
+	// BeadsDetected indicates if the workspace contains a .beads directory.
+	BeadsDetected bool
+
 	// ActiveAgents is the number of active agents.
 	ActiveAgents int
 
@@ -434,6 +438,15 @@ func (s *Service) GetWorkspaceStatus(ctx context.Context, id string) (*Workspace
 			if err := s.repo.UpdateGitInfo(ctx, workspace.ID, gitInfo); err != nil {
 				s.logger.Warn().Err(err).Msg("failed to update git info")
 			}
+		}
+	}
+
+	if workspace.RepoPath != "" {
+		detected, err := beads.HasBeadsDir(workspace.RepoPath)
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("failed to detect beads directory")
+		} else {
+			result.BeadsDetected = detected
 		}
 	}
 

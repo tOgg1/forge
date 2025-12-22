@@ -1,6 +1,8 @@
 package beads
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -54,5 +56,45 @@ func TestParseIssuesInvalidJSON(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "line 1") {
 		t.Fatalf("expected line number in error, got %v", err)
+	}
+}
+
+func TestHasBeadsDir(t *testing.T) {
+	repoPath := t.TempDir()
+
+	ok, err := HasBeadsDir(repoPath)
+	if err != nil {
+		t.Fatalf("HasBeadsDir error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected false when .beads is missing")
+	}
+
+	beadsFile := filepath.Join(repoPath, BeadsDirName)
+	if err := os.WriteFile(beadsFile, []byte("nope"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ok, err = HasBeadsDir(repoPath)
+	if err != nil {
+		t.Fatalf("HasBeadsDir error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected false when .beads is a file")
+	}
+
+	if err := os.Remove(beadsFile); err != nil {
+		t.Fatalf("remove file: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(repoPath, BeadsDirName), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	ok, err = HasBeadsDir(repoPath)
+	if err != nil {
+		t.Fatalf("HasBeadsDir error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected true when .beads directory exists")
 	}
 }

@@ -389,6 +389,7 @@ var wsStatusCmd = &cobra.Command{
 		fmt.Printf("Path:      %s\n", status.Workspace.RepoPath)
 		fmt.Printf("Session:   %s\n", status.Workspace.TmuxSession)
 		fmt.Printf("Status:    %s\n", formatWorkspaceStatus(status.Workspace.Status))
+		fmt.Printf("Beads:     %v\n", status.BeadsDetected)
 		fmt.Println()
 
 		fmt.Printf("Node Online:   %v\n", status.NodeOnline)

@@ -70,3 +70,20 @@ func Summaries(issues []Issue) []TaskSummary {
 	}
 	return summaries
 }
+
+// HasBeadsDir reports whether the repo contains a .beads directory.
+func HasBeadsDir(repoPath string) (bool, error) {
+	if strings.TrimSpace(repoPath) == "" {
+		return false, nil
+	}
+
+	info, err := os.Stat(filepath.Join(repoPath, BeadsDirName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return info.IsDir(), nil
+}
