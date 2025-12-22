@@ -46,6 +46,15 @@ type EventPage struct {
 	NextCursor string
 }
 
+// Append adds a new event to the event log.
+// Returns ErrInvalidEvent if required fields are missing.
+func (r *EventRepository) Append(ctx context.Context, event *models.Event) error {
+	if event.Type == "" || event.EntityType == "" || event.EntityID == "" {
+		return ErrInvalidEvent
+	}
+	return r.Create(ctx, event)
+}
+
 // Create appends a new event to the event log.
 func (r *EventRepository) Create(ctx context.Context, event *models.Event) error {
 	if event.Type == "" {
@@ -109,6 +118,77 @@ func (r *EventRepository) Get(ctx context.Context, id string) (*models.Event, er
 	`, id)
 
 	return r.scanEvent(row)
+}
+
+// Query retrieves events matching the given filters with cursor-based pagination.
+func (r *EventRepository) Query(ctx context.Context, q EventQuery) (*EventPage, error) {
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	// Build query dynamically
+	query := `SELECT id, timestamp, type, entity_type, entity_id, payload_json, metadata_json FROM events WHERE 1=1`
+	args := []any{}
+
+	if q.Type != nil {
+		query += ` AND type = ?`
+		args = append(args, string(*q.Type))
+	}
+	if q.EntityType != nil {
+		query += ` AND entity_type = ?`
+		args = append(args, string(*q.EntityType))
+	}
+	if q.EntityID != nil {
+		query += ` AND entity_id = ?`
+		args = append(args, *q.EntityID)
+	}
+	if q.Since != nil {
+		query += ` AND timestamp > ?`
+		args = append(args, q.Since.Format(time.RFC3339))
+	}
+	if q.Until != nil {
+		query += ` AND timestamp < ?`
+		args = append(args, q.Until.Format(time.RFC3339))
+	}
+	if q.Cursor != "" {
+		// Cursor is the last event ID; fetch events with timestamp >= cursor's timestamp
+		// but exclude events with same timestamp and id <= cursor
+		query += ` AND (timestamp, id) > (SELECT timestamp, id FROM events WHERE id = ?)`
+		args = append(args, q.Cursor)
+	}
+
+	query += ` ORDER BY timestamp, id LIMIT ?`
+	args = append(args, limit+1) // Fetch one extra to determine if there's a next page
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []*models.Event
+	for rows.Next() {
+		event, err := r.scanEventFromRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating events: %w", err)
+	}
+
+	page := &EventPage{}
+	if len(events) > limit {
+		// There's a next page
+		page.Events = events[:limit]
+		page.NextCursor = events[limit-1].ID
+	} else {
+		page.Events = events
+	}
+
+	return page, nil
 }
 
 // ListByEntity retrieves events for an entity, ordered by timestamp.
