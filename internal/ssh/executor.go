@@ -3,7 +3,13 @@ package ssh
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
+	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -64,6 +70,169 @@ type ConnectionOptions struct {
 //
 // TODO(OrangeCreek): Full implementation in swarm-y6b.
 func ApplySSHConfig(opts ConnectionOptions) (ConnectionOptions, error) {
-	// Stub: return options unchanged until full implementation
+	if strings.TrimSpace(opts.Host) == "" {
+		return opts, nil
+	}
+
+	configPath, err := defaultSSHConfigPath()
+	if err != nil {
+		return opts, err
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return opts, nil
+		}
+		return opts, err
+	}
+
+	host := strings.TrimSpace(opts.Host)
+	currentMatch := true
+	lines := strings.Split(string(data), "\n")
+
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		key := strings.ToLower(fields[0])
+		value := strings.Join(fields[1:], " ")
+
+		switch key {
+		case "host":
+			currentMatch = matchesHostPatterns(host, fields[1:])
+			continue
+		case "match":
+			// Ignore Match blocks for now.
+			currentMatch = false
+			continue
+		}
+
+		if !currentMatch {
+			continue
+		}
+
+		switch key {
+		case "hostname":
+			if v := strings.TrimSpace(value); v != "" {
+				opts.Host = v
+			}
+		case "user":
+			if opts.User == "" {
+				opts.User = strings.TrimSpace(value)
+			}
+		case "port":
+			if opts.Port == 0 {
+				port, err := strconv.Atoi(strings.TrimSpace(value))
+				if err == nil {
+					opts.Port = port
+				}
+			}
+		case "identityfile":
+			if opts.KeyPath == "" {
+				if expanded := expandSSHPath(value); expanded != "" {
+					opts.KeyPath = expanded
+				}
+			}
+		case "proxyjump":
+			if opts.ProxyJump == "" {
+				proxy := normalizeProxyJump(value)
+				if proxy != "" {
+					opts.ProxyJump = proxy
+				}
+			}
+		}
+	}
+
 	return opts, nil
+}
+
+func defaultSSHConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".ssh", "config"), nil
+}
+
+func matchesHostPatterns(host string, patterns []string) bool {
+	if len(patterns) == 0 {
+		return false
+	}
+
+	lowerHost := strings.ToLower(host)
+	matched := false
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		negated := strings.HasPrefix(pattern, "!")
+		if negated {
+			pattern = strings.TrimPrefix(pattern, "!")
+		}
+		if pattern == "" {
+			continue
+		}
+
+		if matchHostPattern(lowerHost, pattern) {
+			if negated {
+				return false
+			}
+			matched = true
+		}
+	}
+
+	return matched
+}
+
+func matchHostPattern(host, pattern string) bool {
+	lowerPattern := strings.ToLower(pattern)
+	if lowerPattern == host {
+		return true
+	}
+	matched, err := path.Match(lowerPattern, host)
+	if err != nil {
+		return false
+	}
+	return matched
+}
+
+func expandSSHPath(value string) string {
+	trimmed := strings.TrimSpace(value)
+	trimmed = strings.Trim(trimmed, "\"'")
+	if trimmed == "" {
+		return ""
+	}
+
+	expanded := os.ExpandEnv(trimmed)
+	if strings.HasPrefix(expanded, "~") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			expanded = filepath.Join(home, strings.TrimPrefix(expanded, "~"))
+		}
+	}
+	return expanded
+}
+
+func normalizeProxyJump(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.EqualFold(trimmed, "none") {
+		return ""
+	}
+	parts := strings.Split(trimmed, ",")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
 }
