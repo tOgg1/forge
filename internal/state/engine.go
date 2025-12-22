@@ -3,6 +3,7 @@ package state
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"time"
@@ -75,6 +76,7 @@ type DetectionResult struct {
 // Engine manages agent state detection and notifications.
 type Engine struct {
 	repo        *db.AgentRepository
+	eventRepo   *db.EventRepository
 	tmuxClient  *tmux.Client
 	registry    *adapters.Registry
 	subscribers map[string]Subscriber
@@ -83,9 +85,10 @@ type Engine struct {
 }
 
 // NewEngine creates a new StateEngine.
-func NewEngine(repo *db.AgentRepository, tmuxClient *tmux.Client, registry *adapters.Registry) *Engine {
+func NewEngine(repo *db.AgentRepository, eventRepo *db.EventRepository, tmuxClient *tmux.Client, registry *adapters.Registry) *Engine {
 	return &Engine{
 		repo:        repo,
+		eventRepo:   eventRepo,
 		tmuxClient:  tmuxClient,
 		registry:    registry,
 		subscribers: make(map[string]Subscriber),
@@ -137,6 +140,13 @@ func (e *Engine) UpdateState(ctx context.Context, agentID string, state models.A
 			Timestamp:     now,
 		}
 		e.notifySubscribers(change)
+
+		// Log state change event
+		if e.eventRepo != nil {
+			if err := e.logStateChange(ctx, agentID, previousState, state, info); err != nil {
+				e.logger.Warn().Err(err).Str("agent_id", agentID).Msg("failed to log state change event")
+			}
+		}
 	}
 
 	return nil
@@ -364,4 +374,32 @@ func (e *Engine) WatchAgent(ctx context.Context, agentID string, interval time.D
 	}()
 
 	return cancelFn
+}
+
+// logStateChange logs a state change to the event repository.
+func (e *Engine) logStateChange(ctx context.Context, agentID string, oldState, newState models.AgentState, info models.StateInfo) error {
+	if e.eventRepo == nil {
+		return nil
+	}
+
+	event := &models.Event{
+		Type:       models.EventTypeAgentStateChanged,
+		EntityType: models.EntityTypeAgent,
+		EntityID:   agentID,
+	}
+
+	payload := models.StateChangedPayload{
+		OldState:   oldState,
+		NewState:   newState,
+		Confidence: info.Confidence,
+		Reason:     info.Reason,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	event.Payload = payloadBytes
+
+	return e.eventRepo.Create(ctx, event)
 }
