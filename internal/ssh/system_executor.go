@@ -128,6 +128,15 @@ func buildSSHArgs(options ConnectionOptions) ([]string, string) {
 	if options.ProxyJump != "" {
 		args = append(args, "-J", options.ProxyJump)
 	}
+	if options.ControlMaster != "" {
+		args = append(args, "-o", fmt.Sprintf("ControlMaster=%s", options.ControlMaster))
+	}
+	if options.ControlPath != "" {
+		args = append(args, "-o", fmt.Sprintf("ControlPath=%s", options.ControlPath))
+	}
+	if options.ControlPersist != "" {
+		args = append(args, "-o", fmt.Sprintf("ControlPersist=%s", options.ControlPersist))
+	}
 	if options.Timeout > 0 {
 		seconds := int(math.Ceil(options.Timeout.Seconds()))
 		args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", seconds))
