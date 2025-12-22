@@ -3,6 +3,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/opencode-ai/swarm/internal/db"
+	"github.com/opencode-ai/swarm/internal/events"
 	"github.com/opencode-ai/swarm/internal/logging"
 	"github.com/opencode-ai/swarm/internal/models"
 	"github.com/opencode-ai/swarm/internal/ssh"
@@ -26,8 +28,9 @@ var (
 
 // Service manages Swarm nodes.
 type Service struct {
-	repo   *db.NodeRepository
-	logger zerolog.Logger
+	repo      *db.NodeRepository
+	publisher events.Publisher
+	logger    zerolog.Logger
 
 	// DefaultTimeout is the default timeout for SSH operations.
 	DefaultTimeout time.Duration
@@ -40,6 +43,13 @@ type ServiceOption func(*Service)
 func WithDefaultTimeout(timeout time.Duration) ServiceOption {
 	return func(s *Service) {
 		s.DefaultTimeout = timeout
+	}
+}
+
+// WithPublisher sets the event publisher for the service.
+func WithPublisher(publisher events.Publisher) ServiceOption {
+	return func(s *Service) {
+		s.publisher = publisher
 	}
 }
 
@@ -102,7 +112,31 @@ func (s *Service) AddNode(ctx context.Context, node *models.Node, testConnection
 		Bool("is_local", node.IsLocal).
 		Msg("node added")
 
+	// Emit event
+	s.publishEvent(ctx, models.EventTypeNodeAdded, node.ID, nil)
+
 	return nil
+}
+
+// publishEvent publishes an event if a publisher is configured.
+func (s *Service) publishEvent(ctx context.Context, eventType models.EventType, nodeID string, payload any) {
+	if s.publisher == nil {
+		return
+	}
+
+	event := &models.Event{
+		Type:       eventType,
+		EntityType: models.EntityTypeNode,
+		EntityID:   nodeID,
+	}
+
+	if payload != nil {
+		if data, err := json.Marshal(payload); err == nil {
+			event.Payload = data
+		}
+	}
+
+	s.publisher.Publish(ctx, event)
 }
 
 // RemoveNode deletes a node by ID.
@@ -115,6 +149,10 @@ func (s *Service) RemoveNode(ctx context.Context, id string) error {
 	}
 
 	s.logger.Info().Str("node_id", id).Msg("node removed")
+
+	// Emit event
+	s.publishEvent(ctx, models.EventTypeNodeRemoved, id, nil)
+
 	return nil
 }
 
@@ -293,8 +331,18 @@ func (s *Service) RefreshNodeStatus(ctx context.Context, id string) (*Connection
 		newStatus = models.NodeStatusOffline
 	}
 
+	oldStatus := node.Status
 	if err := s.repo.UpdateStatus(ctx, id, newStatus); err != nil {
 		return nil, fmt.Errorf("failed to update node status: %w", err)
+	}
+
+	// Emit status change event
+	if oldStatus != newStatus {
+		if newStatus == models.NodeStatusOnline {
+			s.publishEvent(ctx, models.EventTypeNodeOnline, id, nil)
+		} else if newStatus == models.NodeStatusOffline {
+			s.publishEvent(ctx, models.EventTypeNodeOffline, id, nil)
+		}
 	}
 
 	return result, nil
