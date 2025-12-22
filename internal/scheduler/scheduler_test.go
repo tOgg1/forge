@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/opencode-ai/swarm/internal/agent"
+	"github.com/opencode-ai/swarm/internal/db"
 	"github.com/opencode-ai/swarm/internal/models"
 	"github.com/opencode-ai/swarm/internal/queue"
 )
@@ -46,8 +48,9 @@ func (m *mockAgentService) getMessages(agentID string) []string {
 
 // mockQueueService implements queue.QueueService for testing.
 type mockQueueService struct {
-	mu     sync.Mutex
-	queues map[string][]*models.QueueItem
+	mu           sync.Mutex
+	queues       map[string][]*models.QueueItem
+	dequeueCalls int
 }
 
 func newMockQueueService() *mockQueueService {
@@ -66,6 +69,7 @@ func (m *mockQueueService) Enqueue(ctx context.Context, agentID string, items ..
 func (m *mockQueueService) Dequeue(ctx context.Context, agentID string) (*models.QueueItem, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.dequeueCalls++
 	items := m.queues[agentID]
 	if len(items) == 0 {
 		return nil, queue.ErrQueueEmpty
@@ -124,6 +128,76 @@ func (m *mockQueueService) queueLength(agentID string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.queues[agentID])
+}
+
+func (m *mockQueueService) dequeueCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.dequeueCalls
+}
+
+func setupAgentService(t *testing.T, state models.AgentState) (*agent.Service, string, func()) {
+	t.Helper()
+
+	ctx := context.Background()
+	database, err := db.OpenInMemory()
+	if err != nil {
+		t.Fatalf("failed to open in-memory db: %v", err)
+	}
+
+	if err := database.Migrate(ctx); err != nil {
+		_ = database.Close()
+		t.Fatalf("failed to migrate db: %v", err)
+	}
+
+	nodeRepo := db.NewNodeRepository(database)
+	workspaceRepo := db.NewWorkspaceRepository(database)
+	agentRepo := db.NewAgentRepository(database)
+
+	node := &models.Node{
+		Name:       "local",
+		IsLocal:    true,
+		Status:     models.NodeStatusOnline,
+		SSHBackend: models.SSHBackendAuto,
+	}
+	if err := nodeRepo.Create(ctx, node); err != nil {
+		_ = database.Close()
+		t.Fatalf("failed to create node: %v", err)
+	}
+
+	workspace := &models.Workspace{
+		NodeID:      node.ID,
+		RepoPath:    "/tmp/repo",
+		TmuxSession: "session",
+	}
+	if err := workspaceRepo.Create(ctx, workspace); err != nil {
+		_ = database.Close()
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	now := time.Now().UTC()
+	agentModel := &models.Agent{
+		WorkspaceID: workspace.ID,
+		Type:        models.AgentTypeOpenCode,
+		TmuxPane:    "session:0.0",
+		State:       state,
+		StateInfo: models.StateInfo{
+			State:      state,
+			Confidence: models.StateConfidenceHigh,
+			Reason:     "test setup",
+			DetectedAt: now,
+		},
+	}
+	if err := agentRepo.Create(ctx, agentModel); err != nil {
+		_ = database.Close()
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	cleanup := func() {
+		_ = database.Close()
+	}
+
+	return agent.NewService(agentRepo, nil, nil, nil, nil), agentModel.ID, cleanup
 }
 
 // Helper to create a message queue item
@@ -583,6 +657,30 @@ func TestScheduler_ScheduleNow_Running(t *testing.T) {
 	// Should succeed even with nil agent service (dispatch will just fail gracefully)
 	if err := sched.ScheduleNow("agent-1"); err != nil {
 		t.Errorf("expected ScheduleNow to succeed, got %v", err)
+	}
+}
+
+func TestScheduler_DispatchToAgent_SkipsWhenNotIdle(t *testing.T) {
+	agentSvc, agentID, cleanup := setupAgentService(t, models.AgentStateWorking)
+	defer cleanup()
+
+	queueSvc := newMockQueueService()
+	if err := queueSvc.Enqueue(context.Background(), agentID, createMessageItem("item-1", "hello")); err != nil {
+		t.Fatalf("failed to enqueue item: %v", err)
+	}
+
+	cfg := DefaultConfig()
+	cfg.IdleStateRequired = true
+	sched := New(cfg, agentSvc, queueSvc, nil, nil)
+	sched.ctx = context.Background()
+
+	sched.dispatchToAgent(agentID)
+
+	if got := queueSvc.dequeueCallCount(); got != 0 {
+		t.Errorf("expected no dequeue attempts, got %d", got)
+	}
+	if got := queueSvc.queueLength(agentID); got != 1 {
+		t.Errorf("expected queue length to remain 1, got %d", got)
 	}
 }
 
