@@ -73,6 +73,9 @@ func TestQueueRepository_EnqueuePeekDequeue(t *testing.T) {
 	if peeked.Position != 1 {
 		t.Fatalf("expected position 1, got %d", peeked.Position)
 	}
+	if peeked.Attempts != 0 {
+		t.Fatalf("expected attempts 0, got %d", peeked.Attempts)
+	}
 
 	var payload models.MessagePayload
 	if err := json.Unmarshal(peeked.Payload, &payload); err != nil {
@@ -132,6 +135,49 @@ func TestQueueRepository_Reorder(t *testing.T) {
 	}
 	if items[0].ID != item2.ID || items[1].ID != item3.ID || items[2].ID != item1.ID {
 		t.Fatalf("unexpected order after reorder")
+	}
+}
+
+func TestQueueRepository_Reorder_RequiresAllPending(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	ws := createTestWorkspace(t, db)
+	agent := createTestAgent(t, db, ws)
+	repo := NewQueueRepository(db)
+	ctx := context.Background()
+
+	item1 := newMessageItem(t, "one")
+	item2 := newMessageItem(t, "two")
+	item3 := newMessageItem(t, "three")
+
+	if err := repo.Enqueue(ctx, agent.ID, item1, item2, item3); err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	if err := repo.Reorder(ctx, agent.ID, []string{item1.ID, item3.ID}); err == nil {
+		t.Fatalf("expected error for missing items")
+	}
+}
+
+func TestQueueRepository_Reorder_DuplicateIDs(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	ws := createTestWorkspace(t, db)
+	agent := createTestAgent(t, db, ws)
+	repo := NewQueueRepository(db)
+	ctx := context.Background()
+
+	item1 := newMessageItem(t, "one")
+	item2 := newMessageItem(t, "two")
+
+	if err := repo.Enqueue(ctx, agent.ID, item1, item2); err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	if err := repo.Reorder(ctx, agent.ID, []string{item1.ID, item1.ID}); err == nil {
+		t.Fatalf("expected error for duplicate IDs")
 	}
 }
 
@@ -220,5 +266,32 @@ func TestQueueRepository_ClearUpdateStatusAndRemove(t *testing.T) {
 	_, err = repo.Get(ctx, item.ID)
 	if err == nil {
 		t.Fatalf("expected error after removal")
+	}
+}
+
+func TestQueueRepository_UpdateAttempts(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	ws := createTestWorkspace(t, db)
+	agent := createTestAgent(t, db, ws)
+	repo := NewQueueRepository(db)
+	ctx := context.Background()
+
+	item := newMessageItem(t, "attempts")
+	if err := repo.Enqueue(ctx, agent.ID, item); err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	if err := repo.UpdateAttempts(ctx, item.ID, 2); err != nil {
+		t.Fatalf("UpdateAttempts failed: %v", err)
+	}
+
+	updated, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if updated.Attempts != 2 {
+		t.Fatalf("expected attempts 2, got %d", updated.Attempts)
 	}
 }

@@ -59,18 +59,18 @@ func (r *QueueRepository) Enqueue(ctx context.Context, agentID string, items ...
 		if item.Status == "" {
 			item.Status = models.QueueItemStatusPending
 		}
-
 		_, err := r.db.ExecContext(ctx, `
 			INSERT INTO queue_items (
-				id, agent_id, type, position, status, payload_json,
+				id, agent_id, type, position, status, attempts, payload_json,
 				error_message, created_at, dispatched_at, completed_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			item.ID,
 			item.AgentID,
 			string(item.Type),
 			item.Position,
 			string(item.Status),
+			item.Attempts,
 			string(item.Payload),
 			item.Error,
 			item.CreatedAt.Format(time.RFC3339),
@@ -115,7 +115,7 @@ func (r *QueueRepository) Dequeue(ctx context.Context, agentID string) (*models.
 func (r *QueueRepository) Peek(ctx context.Context, agentID string) (*models.QueueItem, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT 
-			id, agent_id, type, position, status, payload_json,
+			id, agent_id, type, position, status, attempts, payload_json,
 			error_message, created_at, dispatched_at, completed_at
 		FROM queue_items
 		WHERE agent_id = ? AND status = ?
@@ -138,7 +138,7 @@ func (r *QueueRepository) Peek(ctx context.Context, agentID string) (*models.Que
 func (r *QueueRepository) List(ctx context.Context, agentID string) ([]*models.QueueItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT 
-			id, agent_id, type, position, status, payload_json,
+			id, agent_id, type, position, status, attempts, payload_json,
 			error_message, created_at, dispatched_at, completed_at
 		FROM queue_items
 		WHERE agent_id = ?
@@ -157,7 +157,7 @@ func (r *QueueRepository) List(ctx context.Context, agentID string) ([]*models.Q
 func (r *QueueRepository) ListPending(ctx context.Context, agentID string) ([]*models.QueueItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT 
-			id, agent_id, type, position, status, payload_json,
+			id, agent_id, type, position, status, attempts, payload_json,
 			error_message, created_at, dispatched_at, completed_at
 		FROM queue_items
 		WHERE agent_id = ? AND status = ?
@@ -178,6 +178,37 @@ func (r *QueueRepository) Reorder(ctx context.Context, agentID string, itemIDs [
 		return nil
 	}
 
+	pending, err := r.ListPending(ctx, agentID)
+	if err != nil {
+		return err
+	}
+
+	pendingIDs := make(map[string]struct{}, len(pending))
+	for _, item := range pending {
+		if item == nil {
+			continue
+		}
+		pendingIDs[item.ID] = struct{}{}
+	}
+
+	if len(itemIDs) != len(pendingIDs) {
+		return fmt.Errorf("reorder list must include all pending items for agent %s", agentID)
+	}
+
+	seen := make(map[string]struct{}, len(itemIDs))
+	for _, id := range itemIDs {
+		if id == "" {
+			return fmt.Errorf("queue item id is required")
+		}
+		if _, ok := pendingIDs[id]; !ok {
+			return fmt.Errorf("queue item %s not found in pending queue for agent %s", id, agentID)
+		}
+		if _, dup := seen[id]; dup {
+			return fmt.Errorf("duplicate queue item %s in reorder list", id)
+		}
+		seen[id] = struct{}{}
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -187,8 +218,8 @@ func (r *QueueRepository) Reorder(ctx context.Context, agentID string, itemIDs [
 	for i, id := range itemIDs {
 		result, err := tx.ExecContext(ctx, `
 			UPDATE queue_items SET position = ?
-			WHERE id = ? AND agent_id = ?
-		`, i+1, id, agentID)
+			WHERE id = ? AND agent_id = ? AND status = ?
+		`, i+1, id, agentID, string(models.QueueItemStatusPending))
 
 		if err != nil {
 			return fmt.Errorf("failed to update position for item %s: %w", id, err)
@@ -261,15 +292,16 @@ func (r *QueueRepository) InsertAt(ctx context.Context, agentID string, position
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO queue_items (
-			id, agent_id, type, position, status, payload_json,
+			id, agent_id, type, position, status, attempts, payload_json,
 			error_message, created_at, dispatched_at, completed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		item.ID,
 		item.AgentID,
 		string(item.Type),
 		item.Position,
 		string(item.Status),
+		item.Attempts,
 		string(item.Payload),
 		item.Error,
 		item.CreatedAt.Format(time.RFC3339),
@@ -307,7 +339,7 @@ func (r *QueueRepository) Remove(ctx context.Context, id string) error {
 func (r *QueueRepository) Get(ctx context.Context, id string) (*models.QueueItem, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT 
-			id, agent_id, type, position, status, payload_json,
+			id, agent_id, type, position, status, attempts, payload_json,
 			error_message, created_at, dispatched_at, completed_at
 		FROM queue_items WHERE id = ?
 	`, id)
@@ -333,6 +365,33 @@ func (r *QueueRepository) UpdateStatus(ctx context.Context, id string, status mo
 
 	if err != nil {
 		return fmt.Errorf("failed to update queue item status: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rows == 0 {
+		return ErrQueueItemNotFound
+	}
+
+	return nil
+}
+
+// UpdateAttempts updates the dispatch attempt count for a queue item.
+func (r *QueueRepository) UpdateAttempts(ctx context.Context, id string, attempts int) error {
+	if attempts < 0 {
+		attempts = 0
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE queue_items
+		SET attempts = ?
+		WHERE id = ?
+	`, attempts, id)
+	if err != nil {
+		return fmt.Errorf("failed to update queue item attempts: %w", err)
 	}
 
 	rows, err := result.RowsAffected()
@@ -384,6 +443,7 @@ func (r *QueueRepository) getMaxPosition(ctx context.Context, agentID string) (i
 func (r *QueueRepository) scanQueueItem(row *sql.Row) (*models.QueueItem, error) {
 	var item models.QueueItem
 	var itemType, status string
+	var attempts int
 	var payloadJSON string
 	var errorMsg sql.NullString
 	var createdAt string
@@ -395,6 +455,7 @@ func (r *QueueRepository) scanQueueItem(row *sql.Row) (*models.QueueItem, error)
 		&itemType,
 		&item.Position,
 		&status,
+		&attempts,
 		&payloadJSON,
 		&errorMsg,
 		&createdAt,
@@ -411,6 +472,7 @@ func (r *QueueRepository) scanQueueItem(row *sql.Row) (*models.QueueItem, error)
 
 	item.Type = models.QueueItemType(itemType)
 	item.Status = models.QueueItemStatus(status)
+	item.Attempts = attempts
 	item.Payload = json.RawMessage(payloadJSON)
 
 	if errorMsg.Valid {
@@ -441,6 +503,7 @@ func (r *QueueRepository) scanQueueItems(rows *sql.Rows) ([]*models.QueueItem, e
 	for rows.Next() {
 		var item models.QueueItem
 		var itemType, status string
+		var attempts int
 		var payloadJSON string
 		var errorMsg sql.NullString
 		var createdAt string
@@ -452,6 +515,7 @@ func (r *QueueRepository) scanQueueItems(rows *sql.Rows) ([]*models.QueueItem, e
 			&itemType,
 			&item.Position,
 			&status,
+			&attempts,
 			&payloadJSON,
 			&errorMsg,
 			&createdAt,
@@ -465,6 +529,7 @@ func (r *QueueRepository) scanQueueItems(rows *sql.Rows) ([]*models.QueueItem, e
 
 		item.Type = models.QueueItemType(itemType)
 		item.Status = models.QueueItemStatus(status)
+		item.Attempts = attempts
 		item.Payload = json.RawMessage(payloadJSON)
 
 		if errorMsg.Valid {
