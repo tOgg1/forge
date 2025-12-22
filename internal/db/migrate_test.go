@@ -30,8 +30,18 @@ func TestMigrateUp(t *testing.T) {
 		t.Fatalf("SchemaVersion failed: %v", err)
 	}
 
-	if version != 1 {
-		t.Errorf("expected version 1, got %d", version)
+	migrations, err := loadMigrations()
+	if err != nil {
+		t.Fatalf("loadMigrations failed: %v", err)
+	}
+	maxVersion := 0
+	for _, migration := range migrations {
+		if migration.Version > maxVersion {
+			maxVersion = migration.Version
+		}
+	}
+	if version != maxVersion {
+		t.Errorf("expected version %d, got %d", maxVersion, version)
 	}
 
 	// Run again - should be idempotent
@@ -70,14 +80,29 @@ func TestMigrateDown(t *testing.T) {
 		t.Errorf("expected 1 migration rolled back, got %d", rolledBack)
 	}
 
+	migrations, err := loadMigrations()
+	if err != nil {
+		t.Fatalf("loadMigrations failed: %v", err)
+	}
+	maxVersion := 0
+	for _, migration := range migrations {
+		if migration.Version > maxVersion {
+			maxVersion = migration.Version
+		}
+	}
+
 	// Check version
 	version, err := database.SchemaVersion(ctx)
 	if err != nil {
 		t.Fatalf("SchemaVersion failed: %v", err)
 	}
 
-	if version != 0 {
-		t.Errorf("expected version 0 after rollback, got %d", version)
+	expectedVersion := maxVersion - 1
+	if expectedVersion < 0 {
+		expectedVersion = 0
+	}
+	if version != expectedVersion {
+		t.Errorf("expected version %d after rollback, got %d", expectedVersion, version)
 	}
 }
 
