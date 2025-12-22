@@ -1863,6 +1863,7 @@ func (m model) renderAgentDetailProfile(card *components.AgentCard, width int) s
 	profileLabel := defaultIfEmpty(card.Profile, "--")
 	profileLine := m.styles.Muted.Render(fmt.Sprintf("Profile: %s", profileLabel))
 	lines = append(lines, profileLine)
+	options := m.profileOptions(card)
 	if m.profileSelectOpen && m.profileSelectAgent == card.Name {
 		lines = append(lines, m.styles.Muted.Render("Select profile:"))
 		if len(m.profileSelectOptions) == 0 {
@@ -1883,7 +1884,7 @@ func (m model) renderAgentDetailProfile(card *components.AgentCard, width int) s
 			}
 			lines = append(lines, m.styles.Muted.Render("enter: confirm | esc: cancel"))
 		}
-	} else if len(m.profileOptions(card)) > 0 {
+	} else if len(options) > 1 {
 		lines = append(lines, m.styles.Muted.Render("p: switch profile"))
 	}
 
