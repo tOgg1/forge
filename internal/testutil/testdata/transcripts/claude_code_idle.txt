@@ -1,0 +1,20 @@
+╭────────────────────────────────────────────────────────────────────────────╮
+│ > claude help                                                              │
+│                                                                            │
+│ Claude Code is an interactive AI coding assistant.                         │
+│                                                                            │
+│ Usage:                                                                     │
+│   claude [flags]                                                           │
+│   claude [command]                                                         │
+│                                                                            │
+│ Available Commands:                                                        │
+│   config      Manage configuration                                         │
+│   help        Help about any command                                       │
+│   version     Print the version number                                     │
+│                                                                            │
+│ Flags:                                                                     │
+│   -h, --help   help for claude                                             │
+│                                                                            │
+╰────────────────────────────────────────────────────────────────────────────╯
+
+ > 

@@ -1,0 +1,11 @@
+╭─────────────────────────────────────────────────────────────────────────────╮
+│ OpenCode v0.1.0                                                             │
+│                                                                             │
+│ Working on: Fix authentication bug in login handler                         │
+│                                                                             │
+│ ● Reading file: internal/auth/handler.go                                    │
+│ ● Analyzing code...                                                         │
+│ ● Making changes...                                                         │
+│                                                                             │
+│ Status: Working                                                             │
+╰─────────────────────────────────────────────────────────────────────────────╯
