@@ -1,0 +1,9 @@
+OpenCode Agent
+
+I need to run the following command:
+
+  rm -rf node_modules && npm install
+
+This will delete and reinstall all node dependencies.
+
+Do you want to proceed? [y/n]: _

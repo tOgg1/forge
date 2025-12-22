@@ -1,0 +1,9 @@
+OpenCode v0.1.0
+
+$ Working on your request...
+
+HTTP 429 Too Many Requests
+Rate limit exceeded. Please wait 60 seconds before retrying.
+Retry-After: 60
+
+[Rate Limited - waiting for cooldown]

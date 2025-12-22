@@ -1,0 +1,14 @@
+Claude Code v1.0.5
+
+Executing command...
+
+Error: Command failed with exit code 1
+
+FATAL: Unable to connect to database
+Connection refused: localhost:5432
+
+Stack trace:
+  at Database.connect (src/db/connection.go:45)
+  at main (cmd/server/main.go:23)
+
+Agent encountered an error. Please check the logs.

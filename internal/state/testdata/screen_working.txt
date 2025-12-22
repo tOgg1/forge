@@ -1,0 +1,10 @@
+Claude Code v1.0.5
+
+⠋ Thinking...
+
+I'm analyzing your codebase to understand the structure. Let me look at the main entry points and understand how the application flows.
+
+Looking at:
+- cmd/main.go
+- internal/app/app.go
+- internal/handlers/...
