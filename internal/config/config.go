@@ -39,6 +39,9 @@ type Config struct {
 
 	// TUI settings
 	TUI TUIConfig `yaml:"tui" mapstructure:"tui"`
+
+	// EventRetention settings
+	EventRetention EventRetentionConfig `yaml:"event_retention" mapstructure:"event_retention"`
 }
 
 // GlobalConfig contains global Swarm settings.
@@ -173,6 +176,32 @@ type TUIConfig struct {
 	CompactMode bool `yaml:"compact_mode" mapstructure:"compact_mode"`
 }
 
+// EventRetentionConfig contains event retention policy settings.
+type EventRetentionConfig struct {
+	// Enabled controls whether retention cleanup runs.
+	Enabled bool `yaml:"enabled" mapstructure:"enabled"`
+
+	// MaxAge is the maximum age of events to keep (e.g., 720h for 30 days).
+	// Events older than this will be deleted. Zero means no age limit.
+	MaxAge time.Duration `yaml:"max_age" mapstructure:"max_age"`
+
+	// MaxCount is the maximum number of events to keep.
+	// Oldest events beyond this count will be deleted. Zero means no count limit.
+	MaxCount int `yaml:"max_count" mapstructure:"max_count"`
+
+	// CleanupInterval is how often to run the cleanup job.
+	CleanupInterval time.Duration `yaml:"cleanup_interval" mapstructure:"cleanup_interval"`
+
+	// ArchiveBeforeDelete controls whether to archive events before deletion.
+	ArchiveBeforeDelete bool `yaml:"archive_before_delete" mapstructure:"archive_before_delete"`
+
+	// ArchiveDir is the directory to store archived events (defaults to DataDir/archives).
+	ArchiveDir string `yaml:"archive_dir" mapstructure:"archive_dir"`
+
+	// BatchSize is the number of events to process per cleanup batch.
+	BatchSize int `yaml:"batch_size" mapstructure:"batch_size"`
+}
+
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
@@ -223,6 +252,15 @@ func DefaultConfig() *Config {
 			Theme:           "default",
 			ShowTimestamps:  true,
 			CompactMode:     false,
+		},
+		EventRetention: EventRetentionConfig{
+			Enabled:             true,
+			MaxAge:              30 * 24 * time.Hour, // 30 days
+			MaxCount:            0,                   // No count limit by default
+			CleanupInterval:     1 * time.Hour,
+			ArchiveBeforeDelete: false,
+			ArchiveDir:          "", // Will be set to DataDir/archives
+			BatchSize:           1000,
 		},
 	}
 }
@@ -313,6 +351,25 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("tui.theme must be one of default, dark, light")
 	}
 
+	// Event retention validation
+	if c.EventRetention.Enabled {
+		if c.EventRetention.MaxAge < 0 {
+			return fmt.Errorf("event_retention.max_age must be zero or positive")
+		}
+		if c.EventRetention.MaxCount < 0 {
+			return fmt.Errorf("event_retention.max_count must be zero or positive")
+		}
+		if c.EventRetention.MaxAge == 0 && c.EventRetention.MaxCount == 0 {
+			return fmt.Errorf("event_retention: at least one of max_age or max_count must be set when enabled")
+		}
+		if c.EventRetention.CleanupInterval < 1*time.Minute {
+			return fmt.Errorf("event_retention.cleanup_interval must be at least 1 minute")
+		}
+		if c.EventRetention.BatchSize < 1 {
+			return fmt.Errorf("event_retention.batch_size must be at least 1")
+		}
+	}
+
 	for i, account := range c.Accounts {
 		if account.Provider == "" {
 			return fmt.Errorf("accounts[%d].provider is required", i)
@@ -369,4 +426,12 @@ func (c *Config) DatabasePath() string {
 		return c.Database.Path
 	}
 	return filepath.Join(c.Global.DataDir, "swarm.db")
+}
+
+// ArchivePath returns the full archive directory path.
+func (c *Config) ArchivePath() string {
+	if c.EventRetention.ArchiveDir != "" {
+		return c.EventRetention.ArchiveDir
+	}
+	return filepath.Join(c.Global.DataDir, "archives")
 }

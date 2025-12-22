@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -318,4 +319,192 @@ func (r *EventRepository) scanEventFromRows(rows *sql.Rows) (*models.Event, erro
 	}
 
 	return &event, nil
+}
+
+// Count returns the total number of events.
+func (r *EventRepository) Count(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count events: %w", err)
+	}
+	return count, nil
+}
+
+// OldestTimestamp returns the timestamp of the oldest event.
+func (r *EventRepository) OldestTimestamp(ctx context.Context) (*time.Time, error) {
+	var timestamp sql.NullString
+	err := r.db.QueryRowContext(ctx, `SELECT MIN(timestamp) FROM events`).Scan(&timestamp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get oldest timestamp: %w", err)
+	}
+	if !timestamp.Valid {
+		return nil, nil // No events
+	}
+	t, err := time.Parse(time.RFC3339, timestamp.String)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse oldest timestamp: %w", err)
+	}
+	return &t, nil
+}
+
+// DeleteOlderThan deletes events older than the given timestamp.
+// Returns the number of events deleted.
+func (r *EventRepository) DeleteOlderThan(ctx context.Context, before time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		DELETE FROM events WHERE id IN (
+			SELECT id FROM events WHERE timestamp < ? ORDER BY timestamp LIMIT ?
+		)
+	`, before.UTC().Format(time.RFC3339), limit)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete old events: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get deleted count: %w", err)
+	}
+	return count, nil
+}
+
+// DeleteExcess deletes the oldest events beyond a maximum count.
+// Returns the number of events deleted.
+func (r *EventRepository) DeleteExcess(ctx context.Context, maxCount int, limit int) (int64, error) {
+	if maxCount <= 0 {
+		return 0, nil
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	// Count current events
+	total, err := r.Count(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	excess := total - int64(maxCount)
+	if excess <= 0 {
+		return 0, nil
+	}
+
+	// Limit to batch size
+	deleteCount := excess
+	if deleteCount > int64(limit) {
+		deleteCount = int64(limit)
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		DELETE FROM events WHERE id IN (
+			SELECT id FROM events ORDER BY timestamp LIMIT ?
+		)
+	`, deleteCount)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete excess events: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get deleted count: %w", err)
+	}
+	return count, nil
+}
+
+// ListOlderThan retrieves events older than the given timestamp, ordered by timestamp.
+// Used for archiving before deletion.
+func (r *EventRepository) ListOlderThan(ctx context.Context, before time.Time, limit int) ([]*models.Event, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, timestamp, type, entity_type, entity_id, payload_json, metadata_json
+		FROM events
+		WHERE timestamp < ?
+		ORDER BY timestamp
+		LIMIT ?
+	`, before.UTC().Format(time.RFC3339), limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query old events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []*models.Event
+	for rows.Next() {
+		event, err := r.scanEventFromRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating old events: %w", err)
+	}
+
+	return events, nil
+}
+
+// ListOldest retrieves the oldest events up to the given limit.
+// Used for archiving excess events before deletion.
+func (r *EventRepository) ListOldest(ctx context.Context, limit int) ([]*models.Event, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, timestamp, type, entity_type, entity_id, payload_json, metadata_json
+		FROM events
+		ORDER BY timestamp
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query oldest events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []*models.Event
+	for rows.Next() {
+		event, err := r.scanEventFromRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating oldest events: %w", err)
+	}
+
+	return events, nil
+}
+
+// DeleteByIDs deletes events by their IDs.
+// Returns the number of events deleted.
+func (r *EventRepository) DeleteByIDs(ctx context.Context, ids []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	// Build placeholder list
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`DELETE FROM events WHERE id IN (%s)`, strings.Join(placeholders, ","))
+	result, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete events by ids: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get deleted count: %w", err)
+	}
+	return count, nil
 }
