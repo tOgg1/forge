@@ -13,6 +13,7 @@ import (
 	"github.com/opencode-ai/swarm/internal/account"
 	"github.com/opencode-ai/swarm/internal/adapters"
 	"github.com/opencode-ai/swarm/internal/db"
+	"github.com/opencode-ai/swarm/internal/events"
 	"github.com/opencode-ai/swarm/internal/logging"
 	"github.com/opencode-ai/swarm/internal/models"
 	"github.com/opencode-ai/swarm/internal/tmux"
@@ -40,7 +41,18 @@ type Service struct {
 	accountService   *account.Service
 	tmuxClient       *tmux.Client
 	paneMap          *PaneMap
+	publisher        events.Publisher
 	logger           zerolog.Logger
+}
+
+// ServiceOption configures an AgentService.
+type ServiceOption func(*Service)
+
+// WithPublisher sets the event publisher for the service.
+func WithPublisher(publisher events.Publisher) ServiceOption {
+	return func(s *Service) {
+		s.publisher = publisher
+	}
 }
 
 // NewService creates a new AgentService.
@@ -50,8 +62,9 @@ func NewService(
 	workspaceService *workspace.Service,
 	accountService *account.Service,
 	tmuxClient *tmux.Client,
+	opts ...ServiceOption,
 ) *Service {
-	return &Service{
+	s := &Service{
 		repo:             repo,
 		queueRepo:        queueRepo,
 		workspaceService: workspaceService,
@@ -60,6 +73,10 @@ func NewService(
 		paneMap:          NewPaneMap(),
 		logger:           logging.Component("agent"),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // SpawnOptions contains options for spawning a new agent.
@@ -208,6 +225,9 @@ func (s *Service) SpawnAgent(ctx context.Context, opts SpawnOptions) (*models.Ag
 		Str("type", string(opts.Type)).
 		Str("pane", paneTarget).
 		Msg("agent spawned")
+
+	// Emit event
+	s.publishEvent(ctx, models.EventTypeAgentSpawned, agent.ID, nil)
 
 	return agent, nil
 }
@@ -668,6 +688,10 @@ func (s *Service) TerminateAgent(ctx context.Context, id string) error {
 	}
 
 	s.logger.Info().Str("agent_id", id).Msg("agent terminated")
+
+	// Emit event
+	s.publishEvent(ctx, models.EventTypeAgentTerminated, id, nil)
+
 	return nil
 }
 
@@ -710,7 +734,14 @@ func (s *Service) PauseAgent(ctx context.Context, id string, duration time.Durat
 	}
 	agent.PausedUntil = &pausedUntil
 
-	return s.repo.Update(ctx, agent)
+	if err := s.repo.Update(ctx, agent); err != nil {
+		return err
+	}
+
+	// Emit event
+	s.publishEvent(ctx, models.EventTypeAgentPaused, id, nil)
+
+	return nil
 }
 
 // ResumeAgent resumes a paused agent.
@@ -731,7 +762,14 @@ func (s *Service) ResumeAgent(ctx context.Context, id string) error {
 	agent.PausedUntil = nil
 	agent.LastActivity = &now
 
-	return s.repo.Update(ctx, agent)
+	if err := s.repo.Update(ctx, agent); err != nil {
+		return err
+	}
+
+	// Emit event
+	s.publishEvent(ctx, models.EventTypeAgentResumed, id, nil)
+
+	return nil
 }
 
 // buildStartCommand builds the command to start an agent CLI.
@@ -941,4 +979,19 @@ func (s *Service) SendMessage(ctx context.Context, id, message string, opts *Sen
 		Msg("message sent to agent")
 
 	return nil
+}
+
+// publishEvent publishes an event if a publisher is configured.
+func (s *Service) publishEvent(ctx context.Context, eventType models.EventType, agentID string, payload any) {
+	if s.publisher == nil {
+		return
+	}
+
+	event := &models.Event{
+		Type:       eventType,
+		EntityType: models.EntityTypeAgent,
+		EntityID:   agentID,
+	}
+
+	s.publisher.Publish(ctx, event)
 }
