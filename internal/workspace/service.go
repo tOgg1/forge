@@ -185,6 +185,9 @@ type ImportWorkspaceInput struct {
 
 	// Name is an optional human-friendly name.
 	Name string
+
+	// RepoPath overrides repo path detection from tmux panes.
+	RepoPath string
 }
 
 // ImportWorkspace imports an existing tmux session as a workspace.
@@ -203,10 +206,15 @@ func (s *Service) ImportWorkspace(ctx context.Context, input ImportWorkspaceInpu
 		return nil, fmt.Errorf("failed to get node: %w", err)
 	}
 
-	// Get working directory from tmux session
-	repoPath, err := s.getTmuxSessionWorkingDir(ctx, nodeObj, input.TmuxSession)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tmux session working directory: %w", err)
+	repoPath := input.RepoPath
+	if repoPath == "" {
+		// Get working directory from tmux session
+		repoPath, err = s.getTmuxSessionWorkingDir(ctx, nodeObj, input.TmuxSession)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get tmux session working directory: %w", err)
+		}
+	} else if err := ValidateRepoPath(repoPath); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRepoValidationFailed, err)
 	}
 
 	// Detect git info

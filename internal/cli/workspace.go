@@ -2,12 +2,15 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/opencode-ai/swarm/internal/agent"
 	"github.com/opencode-ai/swarm/internal/beads"
@@ -28,9 +31,10 @@ var (
 	wsCreateNoTmux  bool
 
 	// ws import flags
-	wsImportSession string
-	wsImportNode    string
-	wsImportName    string
+	wsImportSession  string
+	wsImportNode     string
+	wsImportName     string
+	wsImportRepoPath string
 
 	// ws list flags
 	wsListNode   string
@@ -68,6 +72,7 @@ func init() {
 	wsImportCmd.Flags().StringVar(&wsImportSession, "session", "", "tmux session name (required)")
 	wsImportCmd.Flags().StringVar(&wsImportNode, "node", "", "node name or ID (required)")
 	wsImportCmd.Flags().StringVar(&wsImportName, "name", "", "workspace name (default: session name)")
+	wsImportCmd.Flags().StringVar(&wsImportRepoPath, "repo-path", "", "repository path override (use when multiple repos are detected)")
 	wsImportCmd.MarkFlagRequired("session")
 	wsImportCmd.MarkFlagRequired("node")
 
@@ -207,14 +212,38 @@ This allows Swarm to manage agents in sessions created outside of Swarm.`,
 			NodeID:      n.ID,
 			TmuxSession: wsImportSession,
 			Name:        wsImportName,
+			RepoPath:    wsImportRepoPath,
 		}
 
 		step := startProgress("Importing workspace")
 		ws, err := wsService.ImportWorkspace(ctx, input)
 		if err != nil {
+			var ambiguous *workspace.AmbiguousRepoRootError
+			if errors.As(err, &ambiguous) {
+				step.Fail(err)
+				if wsImportRepoPath != "" {
+					return fmt.Errorf("failed to import workspace: %w", err)
+				}
+				if !IsInteractive() || IsJSONOutput() || IsJSONLOutput() {
+					return fmt.Errorf("ambiguous repository roots detected: %s (use --repo-path to select)", strings.Join(ambiguous.Roots, ", "))
+				}
+
+				selection, selectErr := promptRepoRootSelection(ambiguous.Roots)
+				if selectErr != nil {
+					return selectErr
+				}
+				input.RepoPath = selection
+				step = startProgress("Importing workspace")
+				ws, err = wsService.ImportWorkspace(ctx, input)
+			}
+		}
+		if err != nil {
 			step.Fail(err)
 			if errors.Is(err, workspace.ErrWorkspaceAlreadyExists) {
 				return fmt.Errorf("workspace already exists for this session")
+			}
+			if errors.Is(err, workspace.ErrRepoValidationFailed) {
+				return fmt.Errorf("invalid repository path: %w", err)
 			}
 			return fmt.Errorf("failed to import workspace: %w", err)
 		}
@@ -764,6 +793,32 @@ func summarizeBeadsCounts(tasks []beads.TaskSummary) (map[string]int, map[int]in
 	}
 
 	return statusCounts, priorityCounts
+}
+
+func promptRepoRootSelection(roots []string) (string, error) {
+	if len(roots) == 0 {
+		return "", errors.New("no repository roots to select")
+	}
+
+	fmt.Fprintln(os.Stderr, "Multiple repository roots detected. Select one:")
+	for i, root := range roots {
+		fmt.Fprintf(os.Stderr, "  %d) %s\n", i+1, root)
+	}
+	fmt.Fprintf(os.Stderr, "Select repo root [1-%d]: ", len(roots))
+
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+
+	choice := strings.TrimSpace(line)
+	index, err := strconv.Atoi(choice)
+	if err != nil || index < 1 || index > len(roots) {
+		return "", fmt.Errorf("invalid selection %q", choice)
+	}
+
+	return roots[index-1], nil
 }
 
 // truncatePath truncates a path for display.
