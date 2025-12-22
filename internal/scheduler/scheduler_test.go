@@ -178,7 +178,7 @@ func TestNew(t *testing.T) {
 	queueSvc := newMockQueueService()
 
 	// Test with nil services (scheduler creation should still work)
-	sched := New(cfg, nil, queueSvc, nil)
+	sched := New(cfg, nil, queueSvc, nil, nil)
 
 	if sched == nil {
 		t.Fatal("expected scheduler to be created")
@@ -196,7 +196,7 @@ func TestNew_DefaultsApplied(t *testing.T) {
 		MaxConcurrentDispatches: 0,
 	}
 
-	sched := New(cfg, nil, nil, nil)
+	sched := New(cfg, nil, nil, nil, nil)
 
 	if sched.config.TickInterval != DefaultConfig().TickInterval {
 		t.Errorf("expected default TickInterval, got %v", sched.config.TickInterval)
@@ -216,7 +216,7 @@ func TestScheduler_StartStop(t *testing.T) {
 		MaxConcurrentDispatches: 5,
 	}
 
-	sched := New(cfg, nil, nil, nil)
+	sched := New(cfg, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	// Start scheduler
@@ -263,7 +263,7 @@ func TestScheduler_PauseResume(t *testing.T) {
 		MaxConcurrentDispatches: 5,
 	}
 
-	sched := New(cfg, nil, nil, nil)
+	sched := New(cfg, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	// Pause before start should fail
@@ -317,7 +317,7 @@ func TestScheduler_PauseResume(t *testing.T) {
 }
 
 func TestScheduler_ScheduleNow_NotRunning(t *testing.T) {
-	sched := New(DefaultConfig(), nil, nil, nil)
+	sched := New(DefaultConfig(), nil, nil, nil, nil)
 
 	err := sched.ScheduleNow("agent-1")
 	if err != ErrSchedulerNotRunning {
@@ -331,7 +331,7 @@ func TestScheduler_ScheduleNow_Paused(t *testing.T) {
 		DispatchTimeout:         100 * time.Millisecond,
 		MaxConcurrentDispatches: 5,
 	}
-	sched := New(cfg, nil, nil, nil)
+	sched := New(cfg, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	if err := sched.Start(ctx); err != nil {
@@ -350,7 +350,7 @@ func TestScheduler_ScheduleNow_Paused(t *testing.T) {
 }
 
 func TestScheduler_AgentPauseResume(t *testing.T) {
-	sched := New(DefaultConfig(), nil, nil, nil)
+	sched := New(DefaultConfig(), nil, nil, nil, nil)
 
 	// Pause agent
 	if err := sched.PauseAgent("agent-1"); err != nil {
@@ -397,7 +397,7 @@ func TestScheduler_AgentPauseResume(t *testing.T) {
 func TestScheduler_IsEligibleForDispatch(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.IdleStateRequired = true
-	sched := New(cfg, nil, nil, nil)
+	sched := New(cfg, nil, nil, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -480,7 +480,7 @@ func TestScheduler_IsEligibleForDispatch(t *testing.T) {
 func TestScheduler_IsEligibleForDispatch_IdleNotRequired(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.IdleStateRequired = false
-	sched := New(cfg, nil, nil, nil)
+	sched := New(cfg, nil, nil, nil, nil)
 
 	// Working agent with queue should be eligible when idle not required
 	agent := &models.Agent{
@@ -495,7 +495,7 @@ func TestScheduler_IsEligibleForDispatch_IdleNotRequired(t *testing.T) {
 }
 
 func TestScheduler_Stats(t *testing.T) {
-	sched := New(DefaultConfig(), nil, nil, nil)
+	sched := New(DefaultConfig(), nil, nil, nil, nil)
 
 	stats := sched.Stats()
 	if stats.Running {
@@ -516,7 +516,7 @@ func TestScheduler_Stats(t *testing.T) {
 }
 
 func TestScheduler_DispatchEvents(t *testing.T) {
-	sched := New(DefaultConfig(), nil, nil, nil)
+	sched := New(DefaultConfig(), nil, nil, nil, nil)
 
 	ch := sched.DispatchEvents()
 	if ch == nil {
@@ -525,7 +525,7 @@ func TestScheduler_DispatchEvents(t *testing.T) {
 }
 
 func TestScheduler_RecordDispatch(t *testing.T) {
-	sched := New(DefaultConfig(), nil, nil, nil)
+	sched := New(DefaultConfig(), nil, nil, nil, nil)
 
 	// Record a successful dispatch
 	event := DispatchEvent{
@@ -572,7 +572,7 @@ func TestScheduler_ScheduleNow_Running(t *testing.T) {
 		DispatchTimeout:         100 * time.Millisecond,
 		MaxConcurrentDispatches: 5,
 	}
-	sched := New(cfg, nil, nil, nil)
+	sched := New(cfg, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	if err := sched.Start(ctx); err != nil {
@@ -687,7 +687,7 @@ func TestScheduler_EvaluateCondition_WhenIdle(t *testing.T) {
 	// This is a unit test for evaluateCondition
 	// Without agent service, this will panic (nil pointer), which is expected
 	// In production, the scheduler guards against this in the dispatch flow
-	sched := New(DefaultConfig(), nil, nil, nil)
+	sched := New(DefaultConfig(), nil, nil, nil, nil)
 
 	payload := models.ConditionalPayload{
 		ConditionType: models.ConditionTypeWhenIdle,
@@ -705,7 +705,7 @@ func TestScheduler_EvaluateCondition_WhenIdle(t *testing.T) {
 }
 
 func TestScheduler_EvaluateCondition_AfterPrevious(t *testing.T) {
-	sched := New(DefaultConfig(), nil, nil, nil)
+	sched := New(DefaultConfig(), nil, nil, nil, nil)
 
 	payload := models.ConditionalPayload{
 		ConditionType: models.ConditionTypeAfterPrevious,
@@ -723,7 +723,7 @@ func TestScheduler_EvaluateCondition_AfterPrevious(t *testing.T) {
 }
 
 func TestScheduler_EvaluateCondition_Custom(t *testing.T) {
-	sched := New(DefaultConfig(), nil, nil, nil)
+	sched := New(DefaultConfig(), nil, nil, nil, nil)
 
 	payload := models.ConditionalPayload{
 		ConditionType: models.ConditionTypeCustomExpression,
@@ -739,7 +739,7 @@ func TestScheduler_EvaluateCondition_Custom(t *testing.T) {
 }
 
 func TestScheduler_EvaluateCondition_UnknownType(t *testing.T) {
-	sched := New(DefaultConfig(), nil, nil, nil)
+	sched := New(DefaultConfig(), nil, nil, nil, nil)
 
 	payload := models.ConditionalPayload{
 		ConditionType: "unknown",
