@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/opencode-ai/swarm/internal/models"
@@ -228,16 +229,88 @@ func DefaultConfig() *Config {
 
 // Validate checks if the configuration is valid.
 func (c *Config) Validate() error {
+	if strings.TrimSpace(c.Global.DataDir) == "" {
+		return fmt.Errorf("global.data_dir is required")
+	}
+	if strings.TrimSpace(c.Global.ConfigDir) == "" {
+		return fmt.Errorf("global.config_dir is required")
+	}
+
 	if c.Database.MaxConnections < 1 {
 		return fmt.Errorf("database.max_connections must be at least 1")
+	}
+	if c.Database.BusyTimeoutMs < 0 {
+		return fmt.Errorf("database.busy_timeout_ms must be zero or greater")
+	}
+
+	switch strings.ToLower(strings.TrimSpace(c.Logging.Level)) {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("logging.level must be one of debug, info, warn, error")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Logging.Format)) {
+	case "console", "json":
+	default:
+		return fmt.Errorf("logging.format must be one of console, json")
+	}
+
+	switch c.NodeDefaults.SSHBackend {
+	case models.SSHBackendNative, models.SSHBackendSystem, models.SSHBackendAuto:
+	default:
+		return fmt.Errorf("node_defaults.ssh_backend must be native, system, or auto")
+	}
+	if c.NodeDefaults.SSHTimeout <= 0 {
+		return fmt.Errorf("node_defaults.ssh_timeout must be greater than 0")
+	}
+	if c.NodeDefaults.HealthCheckInterval <= 0 {
+		return fmt.Errorf("node_defaults.health_check_interval must be greater than 0")
+	}
+
+	if strings.TrimSpace(c.WorkspaceDefaults.TmuxPrefix) == "" {
+		return fmt.Errorf("workspace_defaults.tmux_prefix is required")
+	}
+	if !isValidAgentType(c.WorkspaceDefaults.DefaultAgentType) {
+		return fmt.Errorf("workspace_defaults.default_agent_type must be one of opencode, claude-code, codex, gemini, generic")
 	}
 
 	if c.AgentDefaults.StatePollingInterval < 100*time.Millisecond {
 		return fmt.Errorf("agent_defaults.state_polling_interval must be at least 100ms")
 	}
+	if c.AgentDefaults.IdleTimeout <= 0 {
+		return fmt.Errorf("agent_defaults.idle_timeout must be greater than 0")
+	}
+	if c.AgentDefaults.TranscriptBufferSize < 1 {
+		return fmt.Errorf("agent_defaults.transcript_buffer_size must be at least 1")
+	}
+	if !isValidAgentType(c.AgentDefaults.DefaultType) {
+		return fmt.Errorf("agent_defaults.default_type must be one of opencode, claude-code, codex, gemini, generic")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.AgentDefaults.ApprovalPolicy)) {
+	case "strict", "permissive":
+	default:
+		return fmt.Errorf("agent_defaults.approval_policy must be strict or permissive")
+	}
 
 	if c.Scheduler.DispatchInterval < 100*time.Millisecond {
 		return fmt.Errorf("scheduler.dispatch_interval must be at least 100ms")
+	}
+	if c.Scheduler.MaxRetries < 0 {
+		return fmt.Errorf("scheduler.max_retries must be zero or greater")
+	}
+	if c.Scheduler.RetryBackoff <= 0 {
+		return fmt.Errorf("scheduler.retry_backoff must be greater than 0")
+	}
+	if c.Scheduler.DefaultCooldownDuration <= 0 {
+		return fmt.Errorf("scheduler.default_cooldown_duration must be greater than 0")
+	}
+
+	if c.TUI.RefreshInterval <= 0 {
+		return fmt.Errorf("tui.refresh_interval must be greater than 0")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.TUI.Theme)) {
+	case "default", "dark", "light":
+	default:
+		return fmt.Errorf("tui.theme must be one of default, dark, light")
 	}
 
 	for i, account := range c.Accounts {
@@ -259,6 +332,19 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+func isValidAgentType(agentType models.AgentType) bool {
+	switch agentType {
+	case models.AgentTypeOpenCode,
+		models.AgentTypeClaudeCode,
+		models.AgentTypeCodex,
+		models.AgentTypeGemini,
+		models.AgentTypeGeneric:
+		return true
+	default:
+		return false
+	}
 }
 
 // EnsureDirectories creates required directories.
