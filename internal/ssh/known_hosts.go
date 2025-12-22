@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
-	"golang.org/x/crypto/ssh/knownhosts"
 	xssh "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/term"
 )
 

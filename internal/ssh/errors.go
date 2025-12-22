@@ -6,9 +6,9 @@ import (
 )
 
 var (
-	ErrPassphraseRequired  = errors.New("passphrase required for private key")
-	ErrSSHAgentUnavailable = errors.New("ssh agent not available")
-	ErrHostKeyRejected     = errors.New("host key rejected")
+	ErrPassphraseRequired       = errors.New("passphrase required for private key")
+	ErrSSHAgentUnavailable      = errors.New("ssh agent not available")
+	ErrHostKeyRejected          = errors.New("host key rejected")
 	ErrHostKeyPromptUnavailable = errors.New("host key prompt unavailable")
 )
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/opencode-ai/swarm/internal/models"
 	"github.com/opencode-ai/swarm/internal/state"
@@ -57,22 +58,24 @@ func RunWithConfig(cfg Config) error {
 }
 
 type model struct {
-	width        int
-	height       int
-	styles       styles.Styles
-	view         viewID
-	selectedView viewID
-	showHelp     bool
-	paletteOpen  bool
-	paletteQuery string
-	paletteIndex int
-	lastUpdated  time.Time
-	stale        bool
-	stateEngine  *state.Engine
-	agentStates  map[string]models.AgentState
-	stateChanges []StateChangeMsg
-	nodes        []nodeSummary
-	nodesPreview bool
+	width         int
+	height        int
+	styles        styles.Styles
+	view          viewID
+	selectedView  viewID
+	showHelp      bool
+	paletteOpen   bool
+	paletteQuery  string
+	paletteIndex  int
+	lastUpdated   time.Time
+	stale         bool
+	stateEngine   *state.Engine
+	agentStates   map[string]models.AgentState
+	stateChanges  []StateChangeMsg
+	nodes         []nodeSummary
+	nodesPreview  bool
+	workspaceGrid *components.WorkspaceGrid
+	selectedWsID  string // Selected workspace ID for drill-down
 }
 
 type nodeSummary struct {
@@ -91,15 +94,18 @@ const (
 
 func initialModel() model {
 	now := time.Now()
+	grid := components.NewWorkspaceGrid()
+	grid.SetWorkspaces(sampleWorkspaces())
 	return model{
-		styles:       styles.DefaultStyles(),
-		view:         viewDashboard,
-		selectedView: viewDashboard,
-		lastUpdated:  now,
-		agentStates:  make(map[string]models.AgentState),
-		stateChanges: make([]StateChangeMsg, 0),
-		nodes:        sampleNodes(),
-		nodesPreview: true,
+		styles:        styles.DefaultStyles(),
+		view:          viewDashboard,
+		selectedView:  viewDashboard,
+		lastUpdated:   now,
+		agentStates:   make(map[string]models.AgentState),
+		stateChanges:  make([]StateChangeMsg, 0),
+		nodes:         sampleNodes(),
+		nodesPreview:  true,
+		workspaceGrid: grid,
 	}
 }
 
@@ -352,8 +358,8 @@ func (m model) renderPanel(title string, width int, lines []string) string {
 
 func panelContentWidth(width int) int {
 	contentWidth := width - 4
-	if contentWidth < 10 {
-		return 10
+	if contentWidth < 1 {
+		return 1
 	}
 	return contentWidth
 }
@@ -752,8 +758,67 @@ func sampleNodes() []nodeSummary {
 			Name:        "prod-02",
 			Status:      models.NodeStatusOffline,
 			AgentCount:  0,
-			LoadPercent: 0,
+			LoadPercent: -1,
 			Alerts:      2,
+		},
+	}
+}
+
+func sampleWorkspaces() []*models.Workspace {
+	return []*models.Workspace{
+		{
+			ID:       "ws-1",
+			Name:     "api-service",
+			NodeID:   "local",
+			RepoPath: "/home/user/projects/api-service",
+			Status:   models.WorkspaceStatusActive,
+			GitInfo: &models.GitInfo{
+				Branch:  "main",
+				IsDirty: false,
+			},
+			AgentCount: 3,
+		},
+		{
+			ID:       "ws-2",
+			Name:     "frontend-ui",
+			NodeID:   "gpu-box",
+			RepoPath: "/home/user/projects/frontend-ui",
+			Status:   models.WorkspaceStatusActive,
+			GitInfo: &models.GitInfo{
+				Branch:  "feature/redesign",
+				IsDirty: true,
+			},
+			AgentCount: 3,
+			Alerts: []models.Alert{
+				{Type: models.AlertTypeApprovalNeeded, Message: "Approval needed"},
+			},
+		},
+		{
+			ID:       "ws-3",
+			Name:     "data-pipeline",
+			NodeID:   "prod-02",
+			RepoPath: "/opt/apps/data-pipeline",
+			Status:   models.WorkspaceStatusError,
+			GitInfo: &models.GitInfo{
+				Branch:  "release/1.4",
+				IsDirty: false,
+			},
+			AgentCount: 4,
+			Alerts: []models.Alert{
+				{Type: models.AlertTypeRateLimit, Message: "Rate limited"},
+			},
+		},
+		{
+			ID:       "ws-4",
+			Name:     "ml-models",
+			NodeID:   "gpu-box",
+			RepoPath: "/home/user/projects/ml-models",
+			Status:   models.WorkspaceStatusInactive,
+			GitInfo: &models.GitInfo{
+				Branch:  "main",
+				IsDirty: false,
+			},
+			AgentCount: 0,
 		},
 	}
 }
