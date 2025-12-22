@@ -40,6 +40,24 @@ type Node struct {
 	// SSHKeyPath is the path to the SSH private key (optional).
 	SSHKeyPath string `json:"ssh_key_path,omitempty"`
 
+	// SSHAgentForwarding enables SSH agent forwarding.
+	SSHAgentForwarding bool `json:"ssh_agent_forwarding,omitempty"`
+
+	// SSHProxyJump specifies a bastion host to reach the target.
+	SSHProxyJump string `json:"ssh_proxy_jump,omitempty"`
+
+	// SSHControlMaster configures SSH multiplexing (auto/yes/no).
+	SSHControlMaster string `json:"ssh_control_master,omitempty"`
+
+	// SSHControlPath is the socket path for SSH multiplexing.
+	SSHControlPath string `json:"ssh_control_path,omitempty"`
+
+	// SSHControlPersist controls how long master connections stay alive.
+	SSHControlPersist string `json:"ssh_control_persist,omitempty"`
+
+	// SSHTimeoutSeconds overrides the default connection timeout.
+	SSHTimeoutSeconds int `json:"ssh_timeout_seconds,omitempty"`
+
 	// Status is the current connection status.
 	Status NodeStatus `json:"status"`
 
