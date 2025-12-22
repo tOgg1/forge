@@ -133,11 +133,7 @@ func (s *Service) GetNextAvailable(ctx context.Context, provider models.Provider
 		return nil, ErrNoAvailableAccount
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].ProfileName < candidates[j].ProfileName
-	})
-
-	return candidates[0], nil
+	return selectLeastRecentlyUsed(candidates), nil
 }
 
 // Get retrieves an account by ID.
@@ -279,19 +275,25 @@ func (s *Service) RotateAccount(ctx context.Context, currentID string) (*models.
 	}
 
 	// Find another available account for the same provider
+	var candidates []*models.Account
 	for _, account := range s.accounts {
 		if account.ID != currentID &&
 			account.Provider == current.Provider &&
 			account.IsAvailable() {
-			s.logger.Info().
-				Str("from_account", currentID).
-				Str("to_account", account.ID).
-				Msg("rotating account")
-			return account, nil
+			candidates = append(candidates, account)
 		}
 	}
 
-	return nil, ErrNoAvailableAccount
+	if len(candidates) == 0 {
+		return nil, ErrNoAvailableAccount
+	}
+
+	next := selectLeastRecentlyUsed(candidates)
+	s.logger.Info().
+		Str("from_account", currentID).
+		Str("to_account", next.ID).
+		Msg("rotating account")
+	return next, nil
 }
 
 // RecordUsage records usage for an account.
@@ -480,4 +482,28 @@ func MergeEnv(base map[string]string, credentials map[string]string) map[string]
 	}
 
 	return result
+}
+
+func selectLeastRecentlyUsed(accounts []*models.Account) *models.Account {
+	if len(accounts) == 0 {
+		return nil
+	}
+
+	sort.Slice(accounts, func(i, j int) bool {
+		left := lastUsedTime(accounts[i])
+		right := lastUsedTime(accounts[j])
+		if left.Equal(right) {
+			return accounts[i].ProfileName < accounts[j].ProfileName
+		}
+		return left.Before(right)
+	})
+
+	return accounts[0]
+}
+
+func lastUsedTime(account *models.Account) time.Time {
+	if account == nil || account.UsageStats == nil || account.UsageStats.LastUsed == nil {
+		return time.Time{}
+	}
+	return account.UsageStats.LastUsed.UTC()
 }

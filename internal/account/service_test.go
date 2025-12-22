@@ -124,20 +124,25 @@ func TestService_GetNextAvailable(t *testing.T) {
 	service := NewService(cfg)
 	ctx := context.Background()
 
-	future := time.Now().UTC().Add(5 * time.Minute)
+	now := time.Now().UTC()
 
 	account1 := &models.Account{
 		Provider:      models.ProviderOpenAI,
 		ProfileName:   "a",
 		CredentialRef: "env:OPENAI_API_KEY",
 		IsActive:      true,
-		CooldownUntil: &future,
+		UsageStats: &models.UsageStats{
+			LastUsed: &now,
+		},
 	}
 	account2 := &models.Account{
 		Provider:      models.ProviderOpenAI,
 		ProfileName:   "b",
 		CredentialRef: "env:OPENAI_API_KEY",
 		IsActive:      true,
+		UsageStats: &models.UsageStats{
+			LastUsed: timePtr(now.Add(-1 * time.Hour)),
+		},
 	}
 	account3 := &models.Account{
 		Provider:      models.ProviderAnthropic,
@@ -163,4 +168,58 @@ func TestService_GetNextAvailable(t *testing.T) {
 	if _, err := service.GetNextAvailable(ctx, models.Provider("")); !errors.Is(err, models.ErrInvalidProvider) {
 		t.Fatalf("expected ErrInvalidProvider, got %v", err)
 	}
+}
+
+func TestService_RotateAccount_LRU(t *testing.T) {
+	cfg := config.DefaultConfig()
+	service := NewService(cfg)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+
+	current := &models.Account{
+		Provider:      models.ProviderOpenAI,
+		ProfileName:   "current",
+		CredentialRef: "env:OPENAI_API_KEY",
+		IsActive:      true,
+		UsageStats: &models.UsageStats{
+			LastUsed: timePtr(now.Add(-30 * time.Minute)),
+		},
+	}
+	oldest := &models.Account{
+		Provider:      models.ProviderOpenAI,
+		ProfileName:   "old",
+		CredentialRef: "env:OPENAI_API_KEY",
+		IsActive:      true,
+		UsageStats: &models.UsageStats{
+			LastUsed: timePtr(now.Add(-2 * time.Hour)),
+		},
+	}
+	newer := &models.Account{
+		Provider:      models.ProviderOpenAI,
+		ProfileName:   "new",
+		CredentialRef: "env:OPENAI_API_KEY",
+		IsActive:      true,
+		UsageStats: &models.UsageStats{
+			LastUsed: timePtr(now.Add(-1 * time.Hour)),
+		},
+	}
+
+	for _, acct := range []*models.Account{current, oldest, newer} {
+		if err := service.AddAccount(ctx, acct); err != nil {
+			t.Fatalf("AddAccount failed: %v", err)
+		}
+	}
+
+	got, err := service.RotateAccount(ctx, current.ID)
+	if err != nil {
+		t.Fatalf("RotateAccount failed: %v", err)
+	}
+	if got.ProfileName != "old" {
+		t.Fatalf("expected profile old, got %s", got.ProfileName)
+	}
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
 }
