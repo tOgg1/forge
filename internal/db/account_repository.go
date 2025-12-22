@@ -136,6 +136,179 @@ func (r *AccountRepository) List(ctx context.Context, provider *models.Provider)
 	return accounts, nil
 }
 
+// Get retrieves an account by ID.
+func (r *AccountRepository) Get(ctx context.Context, id string) (*models.Account, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT
+			id, provider, profile_name, credential_ref, is_active,
+			cooldown_until, usage_stats_json, created_at, updated_at
+		FROM accounts
+		WHERE id = ?
+	`, id)
+
+	return r.scanAccount(row)
+}
+
+// Update modifies an existing account.
+func (r *AccountRepository) Update(ctx context.Context, account *models.Account) error {
+	if err := account.Validate(); err != nil {
+		return fmt.Errorf("invalid account: %w", err)
+	}
+
+	account.UpdatedAt = time.Now().UTC()
+
+	var usageStatsJSON *string
+	if account.UsageStats != nil {
+		data, err := json.Marshal(account.UsageStats)
+		if err != nil {
+			return fmt.Errorf("failed to marshal usage stats: %w", err)
+		}
+		s := string(data)
+		usageStatsJSON = &s
+	}
+
+	var cooldownUntil *string
+	if account.CooldownUntil != nil {
+		s := account.CooldownUntil.UTC().Format(time.RFC3339)
+		cooldownUntil = &s
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE accounts SET
+			provider = ?,
+			profile_name = ?,
+			credential_ref = ?,
+			is_active = ?,
+			cooldown_until = ?,
+			usage_stats_json = ?,
+			updated_at = ?
+		WHERE id = ?
+	`,
+		string(account.Provider),
+		account.ProfileName,
+		account.CredentialRef,
+		boolToInt(account.IsActive),
+		cooldownUntil,
+		usageStatsJSON,
+		account.UpdatedAt.Format(time.RFC3339),
+		account.ID,
+	)
+
+	if err != nil {
+		if isUniqueConstraintError(err) {
+			return ErrAccountAlreadyExists
+		}
+		return fmt.Errorf("failed to update account: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrAccountNotFound
+	}
+
+	return nil
+}
+
+// Delete removes an account by ID.
+func (r *AccountRepository) Delete(ctx context.Context, id string) error {
+	result, err := r.db.ExecContext(ctx, "DELETE FROM accounts WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete account: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrAccountNotFound
+	}
+
+	return nil
+}
+
+// SetCooldown updates cooldown_until for an account.
+func (r *AccountRepository) SetCooldown(ctx context.Context, id string, until time.Time) error {
+	if until.IsZero() {
+		return fmt.Errorf("cooldown time is required")
+	}
+
+	now := time.Now().UTC()
+	cooldownUntil := until.UTC().Format(time.RFC3339)
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE accounts SET
+			cooldown_until = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, cooldownUntil, now.Format(time.RFC3339), id)
+
+	if err != nil {
+		return fmt.Errorf("failed to set cooldown: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrAccountNotFound
+	}
+
+	return nil
+}
+
+// ClearCooldown removes cooldown from an account.
+func (r *AccountRepository) ClearCooldown(ctx context.Context, id string) error {
+	now := time.Now().UTC()
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE accounts SET
+			cooldown_until = NULL,
+			updated_at = ?
+		WHERE id = ?
+	`, now.Format(time.RFC3339), id)
+
+	if err != nil {
+		return fmt.Errorf("failed to clear cooldown: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrAccountNotFound
+	}
+
+	return nil
+}
+
+// GetNextAvailable returns the next available account for a provider.
+func (r *AccountRepository) GetNextAvailable(ctx context.Context, provider models.Provider) (*models.Account, error) {
+	if provider == "" {
+		return nil, models.ErrInvalidProvider
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	row := r.db.QueryRowContext(ctx, `
+		SELECT
+			id, provider, profile_name, credential_ref, is_active,
+			cooldown_until, usage_stats_json, created_at, updated_at
+		FROM accounts
+		WHERE provider = ?
+			AND is_active = 1
+			AND (cooldown_until IS NULL OR cooldown_until <= ?)
+		ORDER BY profile_name
+		LIMIT 1
+	`, string(provider), now)
+
+	return r.scanAccount(row)
+}
+
 func (r *AccountRepository) scanAccount(row *sql.Row) (*models.Account, error) {
 	var account models.Account
 	var provider string
@@ -227,11 +400,11 @@ func (r *AccountRepository) populateAccountFields(
 		}
 	}
 
-	createdParsed, err := time.Parse(time.RFC3339, createdAt)
+	createdParsed, err := parseAccountTime(createdAt)
 	if err != nil {
 		return fmt.Errorf("failed to parse created_at: %w", err)
 	}
-	updatedParsed, err := time.Parse(time.RFC3339, updatedAt)
+	updatedParsed, err := parseAccountTime(updatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to parse updated_at: %w", err)
 	}
@@ -239,4 +412,20 @@ func (r *AccountRepository) populateAccountFields(
 	account.UpdatedAt = updatedParsed
 
 	return nil
+}
+
+func parseAccountTime(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, fmt.Errorf("empty time value")
+	}
+
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed, nil
+	}
+
+	if parsed, err := time.Parse("2006-01-02 15:04:05", value); err == nil {
+		return parsed, nil
+	}
+
+	return time.Time{}, fmt.Errorf("unsupported time format: %s", value)
 }
