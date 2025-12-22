@@ -28,6 +28,8 @@ type QueueService interface {
 	Clear(ctx context.Context, agentID string) (int, error)
 	InsertAt(ctx context.Context, agentID string, position int, item *models.QueueItem) error
 	Remove(ctx context.Context, itemID string) error
+	UpdateStatus(ctx context.Context, itemID string, status models.QueueItemStatus, errorMsg string) error
+	UpdateAttempts(ctx context.Context, itemID string, attempts int) error
 }
 
 // Service implements QueueService using a QueueRepository.
@@ -117,6 +119,28 @@ func (s *Service) Remove(ctx context.Context, itemID string) error {
 			return ErrQueueItemNotFound
 		}
 		return fmt.Errorf("failed to remove queue item: %w", err)
+	}
+	return nil
+}
+
+// UpdateStatus updates the status of a queue item.
+func (s *Service) UpdateStatus(ctx context.Context, itemID string, status models.QueueItemStatus, errorMsg string) error {
+	if err := s.repo.UpdateStatus(ctx, itemID, status, errorMsg); err != nil {
+		if errors.Is(err, db.ErrQueueItemNotFound) {
+			return ErrQueueItemNotFound
+		}
+		return fmt.Errorf("failed to update queue status: %w", err)
+	}
+	return nil
+}
+
+// UpdateAttempts updates the attempt count for a queue item.
+func (s *Service) UpdateAttempts(ctx context.Context, itemID string, attempts int) error {
+	if err := s.repo.UpdateAttempts(ctx, itemID, attempts); err != nil {
+		if errors.Is(err, db.ErrQueueItemNotFound) {
+			return ErrQueueItemNotFound
+		}
+		return fmt.Errorf("failed to update queue attempts: %w", err)
 	}
 	return nil
 }
