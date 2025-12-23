@@ -13,6 +13,8 @@
 #   SWARM_INSTALL_CLAUDE      Install Claude Code CLI (default: 0)
 #   SWARM_CLAUDE_VERSION      Claude Code npm version (default: latest)
 #   SWARM_CLAUDE_NPM_PACKAGE  Claude Code npm package (default: @anthropic-ai/claude-code)
+#   SWARM_INTERACTIVE         Prompt for configuration (default: 0)
+#   SWARM_SKIP_USER_SETUP     Skip user creation and SSH key setup (default: 0)
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -27,6 +29,8 @@ SWARM_OPENCODE_VERSION="${SWARM_OPENCODE_VERSION:-latest}"
 SWARM_INSTALL_CLAUDE="${SWARM_INSTALL_CLAUDE:-0}"
 SWARM_CLAUDE_VERSION="${SWARM_CLAUDE_VERSION:-latest}"
 SWARM_CLAUDE_NPM_PACKAGE="${SWARM_CLAUDE_NPM_PACKAGE:-@anthropic-ai/claude-code}"
+SWARM_INTERACTIVE="${SWARM_INTERACTIVE:-0}"
+SWARM_SKIP_USER_SETUP="${SWARM_SKIP_USER_SETUP:-0}"
 
 usage() {
   cat <<'EOF'
@@ -38,6 +42,8 @@ Options:
   --install-claude       Install Claude Code CLI via npm.
   --no-install-claude    Skip Claude Code install (default).
   --claude-version <v>   Pin Claude Code npm version (default: latest).
+  --interactive          Prompt for configuration before running.
+  --non-interactive      Do not prompt (default).
   -h, --help             Show this help text.
 EOF
 }
@@ -67,6 +73,12 @@ parse_args() {
       --claude-version=*)
         SWARM_CLAUDE_VERSION="${1#*=}"
         ;;
+      --interactive)
+        SWARM_INTERACTIVE="1"
+        ;;
+      --non-interactive)
+        SWARM_INTERACTIVE="0"
+        ;;
       -h|--help)
         usage
         exit 0
@@ -77,6 +89,116 @@ parse_args() {
     esac
     shift
   done
+}
+
+can_prompt() {
+  [ -t 0 ] && [ -t 1 ]
+}
+
+prompt_yes_no() {
+  local prompt="$1"
+  local default="${2:-n}"
+  local reply suffix
+
+  case "$default" in
+    y|Y|yes|YES)
+      default="y"
+      suffix="Y/n"
+      ;;
+    *)
+      default="n"
+      suffix="y/N"
+      ;;
+  esac
+
+  while true; do
+    read -r -p "$prompt [$suffix] " reply || return 1
+    reply="$(trim_line "${reply,,}")"
+    if [ -z "$reply" ]; then
+      reply="$default"
+    fi
+    case "$reply" in
+      y|yes)
+        return 0
+        ;;
+      n|no)
+        return 1
+        ;;
+      *)
+        printf '%s\n' "Please answer y or n."
+        ;;
+    esac
+  done
+}
+
+prompt_input() {
+  local prompt="$1"
+  local default="$2"
+  local reply
+
+  if [ -n "$default" ]; then
+    if ! read -r -p "$prompt [$default]: " reply; then
+      printf '%s' "$default"
+      return 0
+    fi
+  else
+    if ! read -r -p "$prompt: " reply; then
+      printf '%s' "$default"
+      return 0
+    fi
+  fi
+  reply="$(trim_line "$reply")"
+  if [ -z "$reply" ]; then
+    printf '%s' "$default"
+  else
+    printf '%s' "$reply"
+  fi
+}
+
+run_interactive() {
+  if [ "$SWARM_INTERACTIVE" != "1" ]; then
+    return
+  fi
+
+  if ! can_prompt; then
+    warn "interactive mode requested but no TTY available; continuing with defaults"
+    return
+  fi
+
+  log "interactive mode enabled"
+
+  SWARM_USER="$(prompt_input "Swarm user name" "$SWARM_USER")"
+  SWARM_SHELL="$(prompt_input "Shell for ${SWARM_USER:-user}" "$SWARM_SHELL")"
+
+  if prompt_yes_no "Manage user '${SWARM_USER}' (create if missing)" "y"; then
+    SWARM_SKIP_USER_SETUP="0"
+  else
+    SWARM_SKIP_USER_SETUP="1"
+  fi
+
+  if prompt_yes_no "Copy root authorized_keys to '${SWARM_USER}'" "$( [ "$SWARM_INHERIT_ROOT_KEYS" = "1" ] && echo y || echo n )"; then
+    SWARM_INHERIT_ROOT_KEYS="1"
+  else
+    SWARM_INHERIT_ROOT_KEYS="0"
+  fi
+
+  if prompt_yes_no "Install OpenCode CLI" "$( [ "$SWARM_INSTALL_OPENCODE" = "1" ] && echo y || echo n )"; then
+    SWARM_INSTALL_OPENCODE="1"
+  else
+    SWARM_INSTALL_OPENCODE="0"
+  fi
+
+  if prompt_yes_no "Install Claude Code CLI" "$( [ "$SWARM_INSTALL_CLAUDE" = "1" ] && echo y || echo n )"; then
+    SWARM_INSTALL_CLAUDE="1"
+  else
+    SWARM_INSTALL_CLAUDE="0"
+  fi
+
+  if prompt_yes_no "Install optional extras (jq, ripgrep, rsync)" "$( [ "$SWARM_INSTALL_EXTRAS" = "1" ] && echo y || echo n )"; then
+    SWARM_INSTALL_EXTRAS="1"
+  else
+    SWARM_INSTALL_EXTRAS="0"
+  fi
 }
 
 log() {
@@ -320,6 +442,9 @@ verify_runtimes() {
   if [ "$SWARM_INSTALL_OPENCODE" = "1" ]; then
     verify_runtime "opencode" "opencode" || failures=1
   fi
+  if [ "$SWARM_INSTALL_CLAUDE" = "1" ]; then
+    verify_runtime "claude" "claude" "--version" || failures=1
+  fi
 
   if [ "$failures" -ne 0 ]; then
     fail "one or more runtimes failed verification"
@@ -327,6 +452,11 @@ verify_runtimes() {
 }
 
 ensure_user() {
+  if [ "$SWARM_SKIP_USER_SETUP" = "1" ]; then
+    log "skipping user setup"
+    return
+  fi
+
   if id "$SWARM_USER" >/dev/null 2>&1; then
     log "user '$SWARM_USER' already exists"
   else
@@ -362,6 +492,11 @@ trim_line() {
 }
 
 ensure_ssh_keys() {
+  if [ "$SWARM_SKIP_USER_SETUP" = "1" ]; then
+    log "skipping SSH key setup"
+    return
+  fi
+
   local home ssh_dir auth_file
   home="$(home_for_user)"
   ssh_dir="$home/.ssh"
@@ -481,6 +616,7 @@ ensure_services() {
 main() {
   require_root
   parse_args "$@"
+  run_interactive
 
   local manager
   manager="$(detect_pkg_manager)"
