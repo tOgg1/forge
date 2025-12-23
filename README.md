@@ -70,7 +70,7 @@ Swarm provides a unified interface for managing AI coding agents (OpenCode, Clau
 ### Build from Source
 
 ```bash
-git clone https://github.com/opencode-ai/swarm.git
+git clone https://github.com/tOgg1/swarm.git
 cd swarm
 make build
 ```
@@ -83,10 +83,10 @@ For fresh servers, use the bootstrap script:
 
 ```bash
 # One-liner (downloads and verifies before running)
-curl -fsSL https://raw.githubusercontent.com/opencode-ai/swarm/main/scripts/install.sh | bash -s -- --install-extras
+curl -fsSL https://raw.githubusercontent.com/tOgg1/swarm/main/scripts/install.sh | bash -s -- --install-extras
 
 # With Claude Code
-curl -fsSL https://raw.githubusercontent.com/opencode-ai/swarm/main/scripts/install.sh | bash -s -- --install-extras --install-claude
+curl -fsSL https://raw.githubusercontent.com/tOgg1/swarm/main/scripts/install.sh | bash -s -- --install-extras --install-claude
 ```
 
 ## Quick Start
