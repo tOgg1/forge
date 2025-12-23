@@ -46,6 +46,20 @@ func (a *claudeCodeAdapter) Tier() models.AdapterTier {
 	return models.AdapterTierTelemetry
 }
 
+// SpawnCommand returns the command and args to launch Claude Code.
+func (a *claudeCodeAdapter) SpawnCommand(opts SpawnOptions) (cmd string, args []string) {
+	cmd, args = a.GenericAdapter.SpawnCommand(opts)
+	if cmd == "" {
+		return cmd, args
+	}
+
+	if strings.EqualFold(strings.TrimSpace(opts.ApprovalPolicy), "permissive") {
+		args = append(args, "--permission-mode", "dontAsk")
+	}
+
+	return cmd, args
+}
+
 // DetectReady reports whether the agent is ready based on screen output.
 func (a *claudeCodeAdapter) DetectReady(screen string) (bool, error) {
 	if hasClaudeStreamInit(screen) {

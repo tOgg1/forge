@@ -22,6 +22,9 @@ type SpawnOptions struct {
 
 	// Environment overrides for the agent process.
 	Environment map[string]string
+
+	// ApprovalPolicy is the effective approval policy for the agent.
+	ApprovalPolicy string
 }
 
 // StateReason describes why an adapter reported a state.

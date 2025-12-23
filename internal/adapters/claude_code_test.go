@@ -67,3 +67,25 @@ func TestClaudeCodeAdapter_DetectState_FallbackPrompt(t *testing.T) {
 		t.Fatalf("expected idle state, got %v (reason: %s)", state, reason.Reason)
 	}
 }
+
+func TestClaudeCodeAdapter_SpawnCommandPermissive(t *testing.T) {
+	adapter := NewClaudeCodeAdapter()
+
+	cmd, args := adapter.SpawnCommand(SpawnOptions{ApprovalPolicy: "permissive"})
+	if cmd != "claude" {
+		t.Fatalf("expected command claude, got %q", cmd)
+	}
+
+	if !containsArgsPair(args, "--permission-mode", "dontAsk") {
+		t.Fatalf("expected --permission-mode dontAsk in args, got %v", args)
+	}
+}
+
+func containsArgsPair(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
