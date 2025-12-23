@@ -27,7 +27,7 @@ CMD_DAEMON := ./cmd/swarmd
 # Platforms for cross-compilation
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: all build build-cli build-daemon clean test lint fmt vet tidy install dev help
+.PHONY: all build build-cli build-daemon clean test lint fmt vet tidy install dev help proto proto-lint
 
 # Default target
 all: build
@@ -120,6 +120,26 @@ tidy:
 
 # Run all checks (for CI)
 check: fmt-check vet lint test
+
+## Protocol Buffers
+
+# Generate protobuf code
+proto:
+	@echo "Generating protobuf code..."
+	@which buf > /dev/null || (echo "buf not installed. Run: go install github.com/bufbuild/buf/cmd/buf@latest" && exit 1)
+	buf generate
+	@echo "Generated code in gen/"
+
+# Lint protobuf files
+proto-lint:
+	@echo "Linting protobuf files..."
+	@which buf > /dev/null || (echo "buf not installed. Run: go install github.com/bufbuild/buf/cmd/buf@latest" && exit 1)
+	buf lint
+
+# Update buf dependencies
+proto-deps:
+	@echo "Updating buf dependencies..."
+	buf dep update
 
 ## Cleanup
 

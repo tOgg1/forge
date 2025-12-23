@@ -1,0 +1,16 @@
+# buf.gen.yaml - Code generation configuration
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/opencode-ai/swarm
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: gen
+    opt:
+      - paths=source_relative
+  - remote: buf.build/grpc/go
+    out: gen
+    opt:
+      - paths=source_relative

@@ -1,0 +1,567 @@
+// Copyright 2025 OpenCode. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package swarmd.v1;
+
+option go_package = "github.com/opencode-ai/swarm/internal/swarmd/proto/swarmdv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// =============================================================================
+// SwarmdService
+// =============================================================================
+// The SwarmdService runs on each node and provides:
+// - Agent lifecycle control (spawn, kill, send input)
+// - State streaming (screen snapshots, events)
+// - Transcript collection
+// - Health monitoring
+// =============================================================================
+
+service SwarmdService {
+  // -----------------------------------------------------------------------------
+  // Agent Control
+  // -----------------------------------------------------------------------------
+  
+  // SpawnAgent creates a new agent in a tmux pane.
+  rpc SpawnAgent(SpawnAgentRequest) returns (SpawnAgentResponse);
+  
+  // KillAgent terminates an agent's process.
+  rpc KillAgent(KillAgentRequest) returns (KillAgentResponse);
+  
+  // SendInput sends keystrokes or text to an agent's pane.
+  rpc SendInput(SendInputRequest) returns (SendInputResponse);
+  
+  // ListAgents returns all agents managed by this daemon.
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  
+  // GetAgent returns details for a specific agent.
+  rpc GetAgent(GetAgentRequest) returns (GetAgentResponse);
+
+  // -----------------------------------------------------------------------------
+  // Screen Capture
+  // -----------------------------------------------------------------------------
+  
+  // CapturePane returns the current content of an agent's pane.
+  rpc CapturePane(CapturePaneRequest) returns (CapturePaneResponse);
+  
+  // StreamPaneUpdates streams pane content changes in real-time.
+  // Uses content hashing to only send deltas.
+  rpc StreamPaneUpdates(StreamPaneUpdatesRequest) returns (stream StreamPaneUpdatesResponse);
+
+  // -----------------------------------------------------------------------------
+  // Events
+  // -----------------------------------------------------------------------------
+  
+  // StreamEvents provides a real-time stream of daemon events.
+  // Supports cursor-based replay for missed events.
+  rpc StreamEvents(StreamEventsRequest) returns (stream StreamEventsResponse);
+
+  // -----------------------------------------------------------------------------
+  // Transcripts
+  // -----------------------------------------------------------------------------
+  
+  // GetTranscript retrieves the full transcript for an agent.
+  rpc GetTranscript(GetTranscriptRequest) returns (GetTranscriptResponse);
+  
+  // StreamTranscript streams transcript updates in real-time.
+  rpc StreamTranscript(StreamTranscriptRequest) returns (stream StreamTranscriptResponse);
+
+  // -----------------------------------------------------------------------------
+  // Health & Status
+  // -----------------------------------------------------------------------------
+  
+  // GetStatus returns daemon health and resource usage.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  
+  // Ping is a simple health check.
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+// =============================================================================
+// Agent Control Messages
+// =============================================================================
+
+message SpawnAgentRequest {
+  // Unique identifier for the agent within this node.
+  string agent_id = 1;
+  
+  // The workspace ID this agent belongs to.
+  string workspace_id = 2;
+  
+  // Command to execute (e.g., "opencode", "claude").
+  string command = 3;
+  
+  // Arguments to pass to the command.
+  repeated string args = 4;
+  
+  // Environment variables to set.
+  map<string, string> env = 5;
+  
+  // Working directory for the agent.
+  string working_dir = 6;
+  
+  // Tmux session name (defaults to workspace-based naming).
+  string session_name = 7;
+  
+  // Adapter type hint (e.g., "opencode", "claude_code", "codex").
+  string adapter = 8;
+}
+
+message SpawnAgentResponse {
+  // The spawned agent details.
+  Agent agent = 1;
+  
+  // Tmux session:window.pane identifier.
+  string pane_id = 2;
+}
+
+message KillAgentRequest {
+  // Agent to terminate.
+  string agent_id = 1;
+  
+  // If true, send SIGKILL instead of SIGTERM.
+  bool force = 2;
+  
+  // Grace period before force kill (if force is false).
+  google.protobuf.Duration grace_period = 3;
+}
+
+message KillAgentResponse {
+  // Whether the agent was successfully killed.
+  bool success = 1;
+}
+
+message SendInputRequest {
+  // Target agent.
+  string agent_id = 1;
+  
+  // Text to send (will be written to the pane).
+  string text = 2;
+  
+  // If true, press Enter after the text.
+  bool send_enter = 3;
+  
+  // Special keys to send (e.g., "C-c" for Ctrl+C).
+  repeated string keys = 4;
+}
+
+message SendInputResponse {
+  // Whether input was successfully sent.
+  bool success = 1;
+}
+
+message ListAgentsRequest {
+  // Filter by workspace ID (optional).
+  string workspace_id = 1;
+  
+  // Filter by agent state (optional).
+  repeated AgentState states = 2;
+}
+
+message ListAgentsResponse {
+  repeated Agent agents = 1;
+}
+
+message GetAgentRequest {
+  string agent_id = 1;
+}
+
+message GetAgentResponse {
+  Agent agent = 1;
+}
+
+// =============================================================================
+// Agent State
+// =============================================================================
+
+message Agent {
+  // Unique identifier.
+  string id = 1;
+  
+  // Workspace this agent belongs to.
+  string workspace_id = 2;
+  
+  // Current state.
+  AgentState state = 3;
+  
+  // Tmux pane identifier (session:window.pane).
+  string pane_id = 4;
+  
+  // Process ID of the agent.
+  int32 pid = 5;
+  
+  // Command being run.
+  string command = 6;
+  
+  // Adapter type.
+  string adapter = 7;
+  
+  // When the agent was spawned.
+  google.protobuf.Timestamp spawned_at = 8;
+  
+  // Last activity timestamp.
+  google.protobuf.Timestamp last_activity_at = 9;
+  
+  // Current pane content hash (for change detection).
+  string content_hash = 10;
+}
+
+enum AgentState {
+  AGENT_STATE_UNSPECIFIED = 0;
+  AGENT_STATE_STARTING = 1;
+  AGENT_STATE_RUNNING = 2;
+  AGENT_STATE_IDLE = 3;
+  AGENT_STATE_WAITING_APPROVAL = 4;
+  AGENT_STATE_PAUSED = 5;
+  AGENT_STATE_STOPPING = 6;
+  AGENT_STATE_STOPPED = 7;
+  AGENT_STATE_FAILED = 8;
+}
+
+// =============================================================================
+// Screen Capture Messages
+// =============================================================================
+
+message CapturePaneRequest {
+  // Agent whose pane to capture.
+  string agent_id = 1;
+  
+  // If true, include ANSI escape sequences.
+  bool include_escape_sequences = 2;
+  
+  // Number of lines to capture (0 = visible area, -1 = full history).
+  int32 lines = 3;
+}
+
+message CapturePaneResponse {
+  // The pane content.
+  string content = 1;
+  
+  // Hash of the content (for change detection).
+  string content_hash = 2;
+  
+  // Pane dimensions.
+  int32 width = 3;
+  int32 height = 4;
+  
+  // Cursor position.
+  int32 cursor_x = 5;
+  int32 cursor_y = 6;
+  
+  // Capture timestamp.
+  google.protobuf.Timestamp captured_at = 7;
+}
+
+message StreamPaneUpdatesRequest {
+  // Agent to monitor.
+  string agent_id = 1;
+  
+  // Minimum interval between updates.
+  google.protobuf.Duration min_interval = 2;
+  
+  // If provided, only send updates when hash differs.
+  string last_known_hash = 3;
+  
+  // If true, include full content; otherwise just hash + diff info.
+  bool include_content = 4;
+}
+
+message StreamPaneUpdatesResponse {
+  // Agent ID.
+  string agent_id = 1;
+  
+  // New content hash.
+  string content_hash = 2;
+  
+  // Full content (if requested).
+  string content = 3;
+  
+  // Whether content changed since last update.
+  bool changed = 4;
+  
+  // Update timestamp.
+  google.protobuf.Timestamp timestamp = 5;
+  
+  // Detected agent state based on content analysis.
+  AgentState detected_state = 6;
+}
+
+// =============================================================================
+// Event Messages
+// =============================================================================
+
+message StreamEventsRequest {
+  // Resume from this cursor (event ID). Empty = start from now.
+  string cursor = 1;
+  
+  // Filter by event types.
+  repeated EventType types = 2;
+  
+  // Filter by agent IDs.
+  repeated string agent_ids = 3;
+  
+  // Filter by workspace IDs.
+  repeated string workspace_ids = 4;
+}
+
+message StreamEventsResponse {
+  // The event.
+  Event event = 1;
+}
+
+message Event {
+  // Unique event ID (also serves as cursor).
+  string id = 1;
+  
+  // Event type.
+  EventType type = 2;
+  
+  // When the event occurred.
+  google.protobuf.Timestamp timestamp = 3;
+  
+  // Associated agent (if applicable).
+  string agent_id = 4;
+  
+  // Associated workspace (if applicable).
+  string workspace_id = 5;
+  
+  // Event-specific payload.
+  oneof payload {
+    AgentStateChangedEvent agent_state_changed = 10;
+    AgentOutputEvent agent_output = 11;
+    ApprovalRequestedEvent approval_requested = 12;
+    ApprovalResolvedEvent approval_resolved = 13;
+    ErrorEvent error = 14;
+    PaneContentChangedEvent pane_content_changed = 15;
+  }
+}
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_AGENT_STATE_CHANGED = 1;
+  EVENT_TYPE_AGENT_OUTPUT = 2;
+  EVENT_TYPE_APPROVAL_REQUESTED = 3;
+  EVENT_TYPE_APPROVAL_RESOLVED = 4;
+  EVENT_TYPE_ERROR = 5;
+  EVENT_TYPE_PANE_CONTENT_CHANGED = 6;
+}
+
+message AgentStateChangedEvent {
+  AgentState previous_state = 1;
+  AgentState new_state = 2;
+  string reason = 3;
+}
+
+message AgentOutputEvent {
+  // Output text (may be partial line).
+  string text = 1;
+  
+  // Whether this is stderr.
+  bool is_stderr = 2;
+}
+
+message ApprovalRequestedEvent {
+  // Approval request ID.
+  string approval_id = 1;
+  
+  // What action needs approval.
+  string action = 2;
+  
+  // Details about the action.
+  string details = 3;
+  
+  // Risk level assessment.
+  string risk_level = 4;
+}
+
+message ApprovalResolvedEvent {
+  // Approval request ID.
+  string approval_id = 1;
+  
+  // Whether it was approved.
+  bool approved = 2;
+  
+  // Who/what resolved it.
+  string resolved_by = 3;
+}
+
+message ErrorEvent {
+  // Error code.
+  string code = 1;
+  
+  // Error message.
+  string message = 2;
+  
+  // Whether this is recoverable.
+  bool recoverable = 3;
+}
+
+message PaneContentChangedEvent {
+  // New content hash.
+  string content_hash = 1;
+  
+  // Number of lines changed.
+  int32 lines_changed = 2;
+}
+
+// =============================================================================
+// Transcript Messages
+// =============================================================================
+
+message GetTranscriptRequest {
+  // Agent ID.
+  string agent_id = 1;
+  
+  // Start time (optional, defaults to session start).
+  google.protobuf.Timestamp start_time = 2;
+  
+  // End time (optional, defaults to now).
+  google.protobuf.Timestamp end_time = 3;
+  
+  // Maximum number of entries to return.
+  int32 limit = 4;
+}
+
+message GetTranscriptResponse {
+  // Agent ID.
+  string agent_id = 1;
+  
+  // Transcript entries.
+  repeated TranscriptEntry entries = 2;
+  
+  // Whether there are more entries.
+  bool has_more = 3;
+  
+  // Cursor for pagination.
+  string next_cursor = 4;
+}
+
+message TranscriptEntry {
+  // Entry timestamp.
+  google.protobuf.Timestamp timestamp = 1;
+  
+  // Entry type.
+  TranscriptEntryType type = 2;
+  
+  // Content.
+  string content = 3;
+  
+  // Associated metadata.
+  map<string, string> metadata = 4;
+}
+
+enum TranscriptEntryType {
+  TRANSCRIPT_ENTRY_TYPE_UNSPECIFIED = 0;
+  TRANSCRIPT_ENTRY_TYPE_COMMAND = 1;
+  TRANSCRIPT_ENTRY_TYPE_OUTPUT = 2;
+  TRANSCRIPT_ENTRY_TYPE_ERROR = 3;
+  TRANSCRIPT_ENTRY_TYPE_STATE_CHANGE = 4;
+  TRANSCRIPT_ENTRY_TYPE_APPROVAL = 5;
+  TRANSCRIPT_ENTRY_TYPE_USER_INPUT = 6;
+}
+
+message StreamTranscriptRequest {
+  // Agent ID.
+  string agent_id = 1;
+  
+  // Resume from cursor (optional).
+  string cursor = 2;
+}
+
+message StreamTranscriptResponse {
+  // Entries in this chunk.
+  repeated TranscriptEntry entries = 1;
+  
+  // Cursor for resumption.
+  string cursor = 2;
+}
+
+// =============================================================================
+// Health & Status Messages
+// =============================================================================
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  // Daemon status details.
+  DaemonStatus status = 1;
+}
+
+message DaemonStatus {
+  // Daemon version.
+  string version = 1;
+  
+  // Node hostname.
+  string hostname = 2;
+  
+  // When the daemon started.
+  google.protobuf.Timestamp started_at = 3;
+  
+  // Current uptime.
+  google.protobuf.Duration uptime = 4;
+  
+  // Number of managed agents.
+  int32 agent_count = 5;
+  
+  // Resource usage.
+  ResourceUsage resources = 6;
+  
+  // Health status.
+  HealthStatus health = 7;
+}
+
+message ResourceUsage {
+  // CPU usage percentage.
+  double cpu_percent = 1;
+  
+  // Memory usage in bytes.
+  int64 memory_bytes = 2;
+  
+  // Memory limit in bytes (0 = no limit).
+  int64 memory_limit_bytes = 3;
+  
+  // Number of open file descriptors.
+  int32 open_fds = 4;
+}
+
+message HealthStatus {
+  // Overall health.
+  Health health = 1;
+  
+  // Component health checks.
+  repeated HealthCheck checks = 2;
+}
+
+enum Health {
+  HEALTH_UNSPECIFIED = 0;
+  HEALTH_HEALTHY = 1;
+  HEALTH_DEGRADED = 2;
+  HEALTH_UNHEALTHY = 3;
+}
+
+message HealthCheck {
+  // Component name.
+  string name = 1;
+  
+  // Component health.
+  Health health = 2;
+  
+  // Status message.
+  string message = 3;
+  
+  // Last check time.
+  google.protobuf.Timestamp last_check = 4;
+}
+
+message PingRequest {}
+
+message PingResponse {
+  // Echo back timestamp.
+  google.protobuf.Timestamp timestamp = 1;
+  
+  // Daemon version.
+  string version = 2;
+}
