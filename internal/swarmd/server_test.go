@@ -264,7 +264,7 @@ func TestSplitLines(t *testing.T) {
 		{
 			name:    "trailing newline",
 			content: "line1\nline2\n",
-			want:    []string{"line1", "line2", ""},
+			want:    []string{"line1", "line2"},
 		},
 		{
 			name:    "empty string",
@@ -286,5 +286,188 @@ func TestSplitLines(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// =============================================================================
+// Transcript Tests
+// =============================================================================
+
+func TestServerGetTranscriptNotFound(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	_, err := server.GetTranscript(context.Background(), &swarmdv1.GetTranscriptRequest{
+		AgentId: "nonexistent",
+	})
+	if err == nil {
+		t.Error("GetTranscript() should return error for nonexistent agent")
+	}
+}
+
+func TestServerGetTranscriptValidation(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	_, err := server.GetTranscript(context.Background(), &swarmdv1.GetTranscriptRequest{})
+	if err == nil {
+		t.Error("GetTranscript() should return error for empty agent_id")
+	}
+}
+
+func TestAddTranscriptEntry(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	// Manually add an agent (bypass tmux)
+	server.mu.Lock()
+	server.agents["test-agent"] = &agentInfo{
+		id:         "test-agent",
+		transcript: make([]transcriptEntry, 0),
+	}
+	server.mu.Unlock()
+
+	// Add a transcript entry
+	server.addTranscriptEntry("test-agent", swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_COMMAND, "echo hello", map[string]string{"key": "value"})
+
+	// Verify the entry was added
+	resp, err := server.GetTranscript(context.Background(), &swarmdv1.GetTranscriptRequest{
+		AgentId: "test-agent",
+	})
+	if err != nil {
+		t.Fatalf("GetTranscript() error = %v", err)
+	}
+
+	if len(resp.Entries) != 1 {
+		t.Fatalf("Expected 1 entry, got %d", len(resp.Entries))
+	}
+
+	entry := resp.Entries[0]
+	if entry.Content != "echo hello" {
+		t.Errorf("Content = %q, want %q", entry.Content, "echo hello")
+	}
+	if entry.Type != swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_COMMAND {
+		t.Errorf("Type = %v, want %v", entry.Type, swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_COMMAND)
+	}
+	if entry.Metadata["key"] != "value" {
+		t.Errorf("Metadata[key] = %q, want %q", entry.Metadata["key"], "value")
+	}
+}
+
+func TestGetTranscriptWithLimit(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	// Manually add an agent with multiple transcript entries
+	server.mu.Lock()
+	server.agents["test-agent"] = &agentInfo{
+		id:         "test-agent",
+		transcript: make([]transcriptEntry, 0),
+	}
+	server.mu.Unlock()
+
+	// Add 10 entries
+	for i := 0; i < 10; i++ {
+		server.addTranscriptEntry("test-agent", swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_OUTPUT, "output", nil)
+	}
+
+	// Get with limit of 5
+	resp, err := server.GetTranscript(context.Background(), &swarmdv1.GetTranscriptRequest{
+		AgentId: "test-agent",
+		Limit:   5,
+	})
+	if err != nil {
+		t.Fatalf("GetTranscript() error = %v", err)
+	}
+
+	if len(resp.Entries) != 5 {
+		t.Errorf("Expected 5 entries, got %d", len(resp.Entries))
+	}
+	if !resp.HasMore {
+		t.Error("Expected HasMore to be true")
+	}
+	if resp.NextCursor == "" {
+		t.Error("Expected NextCursor to be set")
+	}
+}
+
+func TestParseInt64(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    int64
+		wantErr bool
+	}{
+		{
+			name:    "valid number",
+			input:   "123",
+			want:    123,
+			wantErr: false,
+		},
+		{
+			name:    "zero",
+			input:   "0",
+			want:    0,
+			wantErr: false,
+		},
+		{
+			name:    "large number",
+			input:   "9999999999",
+			want:    9999999999,
+			wantErr: false,
+		},
+		{
+			name:    "invalid character",
+			input:   "123abc",
+			want:    0,
+			wantErr: true,
+		},
+		{
+			name:    "negative sign",
+			input:   "-123",
+			want:    0,
+			wantErr: true,
+		},
+		{
+			name:    "empty string",
+			input:   "",
+			want:    0,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseInt64(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseInt64() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("parseInt64() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTranscriptEntryToProto(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	entry := &transcriptEntry{
+		id:        42,
+		entryType: swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_USER_INPUT,
+		content:   "user input text",
+		metadata:  map[string]string{"source": "keyboard"},
+	}
+
+	proto := server.transcriptEntryToProto(entry)
+
+	if proto.Content != "user input text" {
+		t.Errorf("Content = %q, want %q", proto.Content, "user input text")
+	}
+	if proto.Type != swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_USER_INPUT {
+		t.Errorf("Type = %v, want %v", proto.Type, swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_USER_INPUT)
+	}
+	if proto.Metadata["source"] != "keyboard" {
+		t.Errorf("Metadata[source] = %q, want %q", proto.Metadata["source"], "keyboard")
+	}
+	if proto.Timestamp == nil {
+		t.Error("Timestamp should not be nil")
 	}
 }

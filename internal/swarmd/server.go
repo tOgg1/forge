@@ -28,6 +28,29 @@ type transcriptEntry struct {
 	metadata  map[string]string
 }
 
+// storedEvent represents an event stored for cursor-based replay.
+type storedEvent struct {
+	id    int64 // monotonic ID for cursor-based streaming
+	event *swarmdv1.Event
+}
+
+// eventSubscriber represents a client subscribed to events.
+type eventSubscriber struct {
+	id           string
+	eventTypes   map[swarmdv1.EventType]bool // nil = all types
+	agentIDs     map[string]bool             // nil = all agents
+	workspaceIDs map[string]bool             // nil = all workspaces
+	ch           chan *swarmdv1.Event
+}
+
+const (
+	// maxStoredEvents is the maximum number of events to keep for replay.
+	maxStoredEvents = 1000
+
+	// eventChannelBuffer is the buffer size for event subscriber channels.
+	eventChannelBuffer = 100
+)
+
 // agentInfo tracks a running agent's state.
 type agentInfo struct {
 	id          string
@@ -58,6 +81,13 @@ type Server struct {
 
 	mu     sync.RWMutex
 	agents map[string]*agentInfo // keyed by agent ID
+
+	// Event streaming infrastructure
+	eventsMu      sync.RWMutex
+	events        []storedEvent               // circular buffer of events
+	nextEventID   int64                       // next event ID to assign
+	eventSubs     map[string]*eventSubscriber // active subscribers keyed by ID
+	eventSubIDSeq int64                       // subscriber ID sequence
 }
 
 // ServerOption configures the Server.
@@ -81,6 +111,8 @@ func NewServer(logger zerolog.Logger, opts ...ServerOption) *Server {
 		hostname:  hostname,
 		version:   "dev",
 		agents:    make(map[string]*agentInfo),
+		events:    make([]storedEvent, 0, maxStoredEvents),
+		eventSubs: make(map[string]*eventSubscriber),
 	}
 
 	for _, opt := range opts {
@@ -188,6 +220,15 @@ func (s *Server) SpawnAgent(ctx context.Context, req *swarmdv1.SpawnAgentRequest
 		Str("command", cmdLine).
 		Msg("agent spawned")
 
+	// Publish agent state changed event (outside lock to avoid deadlock)
+	go s.publishAgentStateChanged(
+		req.AgentId,
+		req.WorkspaceId,
+		swarmdv1.AgentState_AGENT_STATE_UNSPECIFIED,
+		swarmdv1.AgentState_AGENT_STATE_STARTING,
+		"agent spawned",
+	)
+
 	return &swarmdv1.SpawnAgentResponse{
 		Agent:  s.agentToProto(info),
 		PaneId: paneID,
@@ -236,13 +277,28 @@ func (s *Server) KillAgent(ctx context.Context, req *swarmdv1.KillAgentRequest) 
 		s.logger.Warn().Err(err).Str("agent_id", req.AgentId).Msg("failed to kill pane")
 	}
 
+	prevState := info.state
 	info.state = swarmdv1.AgentState_AGENT_STATE_STOPPED
+	workspaceID := info.workspaceID
 	delete(s.agents, req.AgentId)
 
 	s.logger.Info().
 		Str("agent_id", req.AgentId).
 		Bool("force", req.Force).
 		Msg("agent killed")
+
+	// Publish agent state changed event (outside lock to avoid deadlock)
+	reason := "agent killed"
+	if req.Force {
+		reason = "agent force killed"
+	}
+	go s.publishAgentStateChanged(
+		req.AgentId,
+		workspaceID,
+		prevState,
+		swarmdv1.AgentState_AGENT_STATE_STOPPED,
+		reason,
+	)
 
 	return &swarmdv1.KillAgentResponse{Success: true}, nil
 }
@@ -429,10 +485,15 @@ func (s *Server) StreamPaneUpdates(req *swarmdv1.StreamPaneUpdatesRequest, strea
 				resp.DetectedState = s.detectAgentState(content, info.adapter)
 
 				// Update agent's content hash, last active time, and record output
+				var prevState swarmdv1.AgentState
+				var stateChanged bool
+				var workspaceID string
+
 				s.mu.Lock()
 				if agent, ok := s.agents[req.AgentId]; ok {
 					agent.contentHash = currentHash
 					agent.lastActive = time.Now()
+					workspaceID = agent.workspaceID
 
 					// Record content change in transcript (truncate if very long)
 					outputContent := content
@@ -446,6 +507,8 @@ func (s *Server) StreamPaneUpdates(req *swarmdv1.StreamPaneUpdatesRequest, strea
 					if resp.DetectedState != swarmdv1.AgentState_AGENT_STATE_UNSPECIFIED {
 						// Record state change if different
 						if agent.state != resp.DetectedState {
+							prevState = agent.state
+							stateChanged = true
 							s.addTranscriptEntryLocked(agent, swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_STATE_CHANGE, resp.DetectedState.String(), map[string]string{
 								"previous": agent.state.String(),
 							})
@@ -454,6 +517,14 @@ func (s *Server) StreamPaneUpdates(req *swarmdv1.StreamPaneUpdatesRequest, strea
 					}
 				}
 				s.mu.Unlock()
+
+				// Publish events outside lock
+				if stateChanged {
+					go s.publishAgentStateChanged(req.AgentId, workspaceID, prevState, resp.DetectedState, "state detected from pane content")
+				}
+				if changed {
+					go s.publishPaneContentChanged(req.AgentId, workspaceID, currentHash, int32(len(splitLines(content))))
+				}
 
 				if err := stream.Send(resp); err != nil {
 					s.logger.Debug().Err(err).Str("agent_id", req.AgentId).Msg("failed to send pane update")
@@ -878,4 +949,226 @@ func parseInt64(s string) (int64, error) {
 		result = result*10 + int64(c-'0')
 	}
 	return result, nil
+}
+
+// =============================================================================
+// Event Streaming
+// =============================================================================
+
+// StreamEvents provides a real-time stream of daemon events with cursor-based replay.
+func (s *Server) StreamEvents(req *swarmdv1.StreamEventsRequest, stream swarmdv1.SwarmdService_StreamEventsServer) error {
+	// Build filter sets from request
+	var eventTypes map[swarmdv1.EventType]bool
+	if len(req.Types) > 0 {
+		eventTypes = make(map[swarmdv1.EventType]bool, len(req.Types))
+		for _, t := range req.Types {
+			eventTypes[t] = true
+		}
+	}
+
+	var agentIDs map[string]bool
+	if len(req.AgentIds) > 0 {
+		agentIDs = make(map[string]bool, len(req.AgentIds))
+		for _, id := range req.AgentIds {
+			agentIDs[id] = true
+		}
+	}
+
+	var workspaceIDs map[string]bool
+	if len(req.WorkspaceIds) > 0 {
+		workspaceIDs = make(map[string]bool, len(req.WorkspaceIds))
+		for _, id := range req.WorkspaceIds {
+			workspaceIDs[id] = true
+		}
+	}
+
+	// Parse cursor if provided
+	var cursor int64
+	if req.Cursor != "" {
+		var err error
+		cursor, err = parseInt64(req.Cursor)
+		if err != nil {
+			return status.Errorf(codes.InvalidArgument, "invalid cursor: %v", err)
+		}
+	}
+
+	// Register subscriber
+	sub := &eventSubscriber{
+		eventTypes:   eventTypes,
+		agentIDs:     agentIDs,
+		workspaceIDs: workspaceIDs,
+		ch:           make(chan *swarmdv1.Event, eventChannelBuffer),
+	}
+
+	s.eventsMu.Lock()
+	s.eventSubIDSeq++
+	sub.id = fmt.Sprintf("sub-%d", s.eventSubIDSeq)
+	s.eventSubs[sub.id] = sub
+
+	// Replay events from cursor if provided
+	var eventsToReplay []*swarmdv1.Event
+	if cursor > 0 {
+		for _, stored := range s.events {
+			if stored.id >= cursor && s.eventMatchesFilter(stored.event, sub) {
+				eventsToReplay = append(eventsToReplay, stored.event)
+			}
+		}
+	}
+	s.eventsMu.Unlock()
+
+	// Cleanup subscriber on exit
+	defer func() {
+		s.eventsMu.Lock()
+		delete(s.eventSubs, sub.id)
+		close(sub.ch)
+		s.eventsMu.Unlock()
+	}()
+
+	s.logger.Debug().
+		Str("subscriber_id", sub.id).
+		Int64("cursor", cursor).
+		Int("replay_count", len(eventsToReplay)).
+		Msg("starting event stream")
+
+	// Send replayed events first
+	for _, event := range eventsToReplay {
+		if err := stream.Send(&swarmdv1.StreamEventsResponse{Event: event}); err != nil {
+			s.logger.Debug().Err(err).Str("subscriber_id", sub.id).Msg("failed to send replayed event")
+			return err
+		}
+	}
+
+	ctx := stream.Context()
+
+	// Stream new events
+	for {
+		select {
+		case <-ctx.Done():
+			s.logger.Debug().
+				Str("subscriber_id", sub.id).
+				Msg("event stream ended (context done)")
+			return ctx.Err()
+		case event, ok := <-sub.ch:
+			if !ok {
+				return nil // Channel closed
+			}
+			if err := stream.Send(&swarmdv1.StreamEventsResponse{Event: event}); err != nil {
+				s.logger.Debug().Err(err).Str("subscriber_id", sub.id).Msg("failed to send event")
+				return err
+			}
+		}
+	}
+}
+
+// eventMatchesFilter checks if an event matches the subscriber's filters.
+func (s *Server) eventMatchesFilter(event *swarmdv1.Event, sub *eventSubscriber) bool {
+	// Check event type filter
+	if sub.eventTypes != nil && !sub.eventTypes[event.Type] {
+		return false
+	}
+
+	// Check agent ID filter
+	if sub.agentIDs != nil && event.AgentId != "" && !sub.agentIDs[event.AgentId] {
+		return false
+	}
+
+	// Check workspace ID filter
+	if sub.workspaceIDs != nil && event.WorkspaceId != "" && !sub.workspaceIDs[event.WorkspaceId] {
+		return false
+	}
+
+	return true
+}
+
+// publishEvent stores an event and broadcasts it to all matching subscribers.
+func (s *Server) publishEvent(event *swarmdv1.Event) {
+	s.eventsMu.Lock()
+	defer s.eventsMu.Unlock()
+
+	// Assign event ID
+	event.Id = fmt.Sprintf("%d", s.nextEventID)
+	s.nextEventID++
+
+	// Store event (circular buffer)
+	stored := storedEvent{
+		id:    s.nextEventID - 1,
+		event: event,
+	}
+	if len(s.events) >= maxStoredEvents {
+		// Remove oldest event
+		s.events = s.events[1:]
+	}
+	s.events = append(s.events, stored)
+
+	// Broadcast to matching subscribers
+	for _, sub := range s.eventSubs {
+		if s.eventMatchesFilter(event, sub) {
+			select {
+			case sub.ch <- event:
+				// Event sent
+			default:
+				// Channel full, skip (avoid blocking)
+				s.logger.Warn().
+					Str("subscriber_id", sub.id).
+					Str("event_id", event.Id).
+					Msg("event channel full, dropping event")
+			}
+		}
+	}
+
+	s.logger.Debug().
+		Str("event_id", event.Id).
+		Str("event_type", event.Type.String()).
+		Str("agent_id", event.AgentId).
+		Msg("event published")
+}
+
+// publishAgentStateChanged publishes an agent state changed event.
+func (s *Server) publishAgentStateChanged(agentID, workspaceID string, prevState, newState swarmdv1.AgentState, reason string) {
+	s.publishEvent(&swarmdv1.Event{
+		Type:        swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED,
+		Timestamp:   timestamppb.Now(),
+		AgentId:     agentID,
+		WorkspaceId: workspaceID,
+		Payload: &swarmdv1.Event_AgentStateChanged{
+			AgentStateChanged: &swarmdv1.AgentStateChangedEvent{
+				PreviousState: prevState,
+				NewState:      newState,
+				Reason:        reason,
+			},
+		},
+	})
+}
+
+// publishError publishes an error event.
+func (s *Server) publishError(agentID, workspaceID, code, message string, recoverable bool) {
+	s.publishEvent(&swarmdv1.Event{
+		Type:        swarmdv1.EventType_EVENT_TYPE_ERROR,
+		Timestamp:   timestamppb.Now(),
+		AgentId:     agentID,
+		WorkspaceId: workspaceID,
+		Payload: &swarmdv1.Event_Error{
+			Error: &swarmdv1.ErrorEvent{
+				Code:        code,
+				Message:     message,
+				Recoverable: recoverable,
+			},
+		},
+	})
+}
+
+// publishPaneContentChanged publishes a pane content changed event.
+func (s *Server) publishPaneContentChanged(agentID, workspaceID, contentHash string, linesChanged int32) {
+	s.publishEvent(&swarmdv1.Event{
+		Type:        swarmdv1.EventType_EVENT_TYPE_PANE_CONTENT_CHANGED,
+		Timestamp:   timestamppb.Now(),
+		AgentId:     agentID,
+		WorkspaceId: workspaceID,
+		Payload: &swarmdv1.Event_PaneContentChanged{
+			PaneContentChanged: &swarmdv1.PaneContentChangedEvent{
+				ContentHash:  contentHash,
+				LinesChanged: linesChanged,
+			},
+		},
+	})
 }
