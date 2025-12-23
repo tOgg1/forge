@@ -19,6 +19,8 @@
 #   SWARM_INSTALL_GEMINI      Install Gemini CLI (default: 0)
 #   SWARM_GEMINI_VERSION      Gemini npm version (default: latest)
 #   SWARM_GEMINI_NPM_PACKAGE  Gemini npm package (default: @google/gemini-cli)
+#   SWARM_INSTALL_SWARMD      Install swarmd daemon binary (default: 0)
+#   SWARM_SWARMD_VERSION      Swarm release version for swarmd (default: latest)
 #   SWARM_INTERACTIVE         Prompt for configuration (default: 0)
 #   SWARM_SKIP_USER_SETUP     Skip user creation and SSH key setup (default: 0)
 set -euo pipefail
@@ -41,6 +43,8 @@ SWARM_CODEX_NPM_PACKAGE="${SWARM_CODEX_NPM_PACKAGE:-@openai/codex}"
 SWARM_INSTALL_GEMINI="${SWARM_INSTALL_GEMINI:-0}"
 SWARM_GEMINI_VERSION="${SWARM_GEMINI_VERSION:-latest}"
 SWARM_GEMINI_NPM_PACKAGE="${SWARM_GEMINI_NPM_PACKAGE:-@google/gemini-cli}"
+SWARM_INSTALL_SWARMD="${SWARM_INSTALL_SWARMD:-0}"
+SWARM_SWARMD_VERSION="${SWARM_SWARMD_VERSION:-latest}"
 SWARM_INTERACTIVE="${SWARM_INTERACTIVE:-0}"
 SWARM_SKIP_USER_SETUP="${SWARM_SKIP_USER_SETUP:-0}"
 
@@ -60,6 +64,9 @@ Options:
   --install-gemini       Install Gemini CLI via npm.
   --no-install-gemini    Skip Gemini install (default).
   --gemini-version <v>   Pin Gemini npm version (default: latest).
+  --install-swarmd       Install swarmd daemon binary from releases.
+  --no-install-swarmd    Skip swarmd install (default).
+  --swarmd-version <v>   Swarm release version for swarmd (default: latest).
   --interactive          Prompt for configuration before running.
   --non-interactive      Do not prompt (default).
   -h, --help             Show this help text.
@@ -122,6 +129,22 @@ parse_args() {
         ;;
       --gemini-version=*)
         SWARM_GEMINI_VERSION="${1#*=}"
+        ;;
+      --install-swarmd)
+        SWARM_INSTALL_SWARMD="1"
+        ;;
+      --no-install-swarmd)
+        SWARM_INSTALL_SWARMD="0"
+        ;;
+      --swarmd-version)
+        shift
+        if [ "$#" -eq 0 ]; then
+          fail "--swarmd-version requires a value"
+        fi
+        SWARM_SWARMD_VERSION="$1"
+        ;;
+      --swarmd-version=*)
+        SWARM_SWARMD_VERSION="${1#*=}"
         ;;
       --interactive)
         SWARM_INTERACTIVE="1"
@@ -256,6 +279,12 @@ run_interactive() {
     SWARM_INSTALL_GEMINI="0"
   fi
 
+  if prompt_yes_no "Install swarmd daemon binary" "$( [ "$SWARM_INSTALL_SWARMD" = "1" ] && echo y || echo n )"; then
+    SWARM_INSTALL_SWARMD="1"
+  else
+    SWARM_INSTALL_SWARMD="0"
+  fi
+
   if prompt_yes_no "Install optional extras (jq, ripgrep, rsync)" "$( [ "$SWARM_INSTALL_EXTRAS" = "1" ] && echo y || echo n )"; then
     SWARM_INSTALL_EXTRAS="1"
   else
@@ -298,6 +327,22 @@ detect_arch() {
       ;;
     *)
       fail "unsupported architecture: $arch"
+      ;;
+  esac
+}
+
+detect_os() {
+  local os
+  os="$(uname -s)"
+  case "$os" in
+    Linux|linux)
+      echo "linux"
+      ;;
+    Darwin|darwin)
+      echo "darwin"
+      ;;
+    *)
+      fail "unsupported OS: $os"
       ;;
   esac
 }
@@ -355,6 +400,80 @@ download_file() {
   local url="$1"
   local dest="$2"
   curl -fsSL "$url" -o "$dest"
+}
+
+resolve_swarm_tag() {
+  local version="$1"
+  if [ "$version" = "latest" ]; then
+    if ! command_exists curl; then
+      fail "curl is required to resolve latest swarmd version"
+    fi
+    local tag
+    tag="$(curl -fsSL https://api.github.com/repos/opencode-ai/swarm/releases/latest | tr -d '\r' | awk -F\" '/tag_name/{print $4; exit}')"
+    if [ -z "$tag" ]; then
+      fail "failed to resolve latest swarmd version"
+    fi
+    printf '%s' "$tag"
+    return
+  fi
+  case "$version" in
+    v*)
+      printf '%s' "$version"
+      ;;
+    *)
+      printf 'v%s' "$version"
+      ;;
+  esac
+}
+
+swarm_archive_version() {
+  local tag="$1"
+  printf '%s' "${tag#v}"
+}
+
+install_swarmd() {
+  local manager="$1"
+
+  if [ "$SWARM_INSTALL_SWARMD" != "1" ]; then
+    log "skipping swarmd install (SWARM_INSTALL_SWARMD=$SWARM_INSTALL_SWARMD)"
+    return
+  fi
+
+  if command_exists swarmd; then
+    log "swarmd already installed"
+    return
+  fi
+
+  if ! command_exists tar; then
+    install_packages "$manager" tar
+  fi
+
+  if ! command_exists tar; then
+    warn "tar not available; cannot install swarmd"
+    return
+  fi
+
+  local os arch tag version asset url tmpdir
+  os="$(detect_os)"
+  arch="$(detect_arch)"
+  tag="$(resolve_swarm_tag "$SWARM_SWARMD_VERSION")"
+  version="$(swarm_archive_version "$tag")"
+  asset="swarm_${version}_${os}_${arch}.tar.gz"
+  url="https://github.com/opencode-ai/swarm/releases/download/${tag}/${asset}"
+
+  tmpdir="$(mktemp -d)"
+  trap 'rm -rf "$tmpdir"' RETURN
+
+  log "downloading swarmd (${tag}) for ${os}/${arch}"
+  download_file "$url" "$tmpdir/$asset"
+
+  tar -xzf "$tmpdir/$asset" -C "$tmpdir"
+  if [ ! -f "$tmpdir/swarmd" ]; then
+    fail "swarmd binary not found in archive"
+  fi
+
+  install -m 0755 "$tmpdir/swarmd" /usr/local/bin/swarmd
+  log "swarmd installed"
 }
 
 opencode_release_base_url() {
@@ -579,6 +698,9 @@ verify_runtimes() {
   if [ "$SWARM_INSTALL_GEMINI" = "1" ]; then
     verify_runtime "gemini" "gemini" "--version" || failures=1
   fi
+  if [ "$SWARM_INSTALL_SWARMD" = "1" ]; then
+    verify_runtime "swarmd" "swarmd" "--version" || failures=1
+  fi
 
   if [ "$failures" -ne 0 ]; then
     fail "one or more runtimes failed verification"
@@ -761,6 +883,7 @@ main() {
   install_claude
   install_codex
   install_gemini
+  install_swarmd "$manager"
   ensure_user
   ensure_ssh_keys
   configure_shell_defaults
