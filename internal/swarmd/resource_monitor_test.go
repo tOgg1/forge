@@ -67,13 +67,16 @@ func TestResourceMonitor_UpdatePID(t *testing.T) {
 	// Update PID
 	rm.UpdateAgentPID("agent-1", 54321)
 
-	// Verify
-	usage, ok := rm.GetAgentUsage("agent-1")
+	// Verify by accessing internal state
+	rm.mu.RLock()
+	state, ok := rm.agents["agent-1"]
+	rm.mu.RUnlock()
+
 	if !ok {
 		t.Fatal("expected agent to be registered")
 	}
-	if usage.PID != 54321 {
-		t.Errorf("expected PID 54321, got %d", usage.PID)
+	if state.pid != 54321 {
+		t.Errorf("expected PID 54321, got %d", state.pid)
 	}
 }
 
@@ -183,11 +186,16 @@ func TestResourceMonitor_GetAllUsage(t *testing.T) {
 		t.Errorf("expected 3 usages, got %d", len(usages))
 	}
 
-	if usages["agent-1"].PID != 1111 {
-		t.Errorf("expected PID 1111 for agent-1, got %d", usages["agent-1"].PID)
+	// GetAllUsage returns ResourceUsage, not the internal state
+	// Just verify all agents are tracked
+	if _, ok := usages["agent-1"]; !ok {
+		t.Error("expected agent-1 in usages")
 	}
-	if usages["agent-2"].PID != 2222 {
-		t.Errorf("expected PID 2222 for agent-2, got %d", usages["agent-2"].PID)
+	if _, ok := usages["agent-2"]; !ok {
+		t.Error("expected agent-2 in usages")
+	}
+	if _, ok := usages["agent-3"]; !ok {
+		t.Error("expected agent-3 in usages")
 	}
 }
 
