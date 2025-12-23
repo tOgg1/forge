@@ -26,6 +26,8 @@ type Config struct {
 	StateEngine *state.Engine
 	// Theme is the color theme name (default, high-contrast).
 	Theme string
+	// AgentMail configures optional mailbox integration.
+	AgentMail AgentMailConfig
 }
 
 // Run launches the Swarm TUI program.
@@ -43,6 +45,13 @@ func RunWithConfig(cfg Config) error {
 		if theme, ok := styles.Themes[cfg.Theme]; ok {
 			m.styles = styles.BuildStyles(theme)
 		}
+	}
+	mailCfg := normalizeAgentMailConfig(cfg.AgentMail)
+	if mailCfg.Enabled() {
+		m.mailClient = newAgentMailClient(mailCfg)
+		m.mailPollInterval = mailCfg.PollInterval
+		m.mailThreads = nil
+		m.mailSelected = -1
 	}
 
 	program := tea.NewProgram(m, tea.WithAltScreen())
@@ -102,6 +111,11 @@ type model struct {
 	mailThreads            []mailThread
 	mailFilter             string
 	mailSelected           int
+	mailClient             *agentMailClient
+	mailPollInterval       time.Duration
+	mailSyncErr            string
+	mailLastSynced         time.Time
+	mailRead               map[string]bool
 	actionConfirmOpen      bool
 	actionConfirmAction    string
 	actionConfirmAgent     string
@@ -269,6 +283,7 @@ func initialModel() model {
 		auditSelected:         0,
 		mailThreads:           mailThreads,
 		mailSelected:          0,
+		mailRead:              make(map[string]bool),
 		transcriptViewer:      tv,
 		transcriptPreview:     true,
 		transcriptAutoScroll:  true,
@@ -276,7 +291,11 @@ func initialModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(staleCheckCmd(m.lastUpdated), toastTickCmd())
+	cmds := []tea.Cmd{staleCheckCmd(m.lastUpdated), toastTickCmd()}
+	if m.mailClient != nil {
+		cmds = append(cmds, m.mailboxRefreshCmd(), mailboxPollCmd(m.mailPollInterval))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -491,6 +510,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "enter":
 				m.showInspector = true
+				if thread, ok := m.selectedMailThread(); ok {
+					m.markMailThreadRead(thread.ID)
+				}
 				return m, nil
 			}
 		}
@@ -575,7 +597,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastUpdated = time.Now()
 			m.stale = false
 			m.refreshingUntil = time.Now().Add(refreshPulseDuration)
-			return m, staleCheckCmd(m.lastUpdated)
+			cmds := []tea.Cmd{staleCheckCmd(m.lastUpdated)}
+			if m.mailClient != nil {
+				cmds = append(cmds, m.mailboxRefreshCmd())
+			}
+			return m, tea.Batch(cmds...)
 		case "esc":
 			// Go back from agent detail view
 			if m.view == viewAgentDetail {
@@ -623,6 +649,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Action == m.actionInFlightAction && msg.Agent == m.actionInFlightAgent {
 			m.actionInFlightAction = ""
 			m.actionInFlightAgent = ""
+		}
+	case mailboxPollMsg:
+		return m, tea.Batch(m.mailboxRefreshCmd(), mailboxPollCmd(m.mailPollInterval))
+	case mailboxRefreshMsg:
+		if msg.Err != nil {
+			m.mailSyncErr = msg.Err.Error()
+			return m, nil
+		}
+		selectedID := ""
+		if thread, ok := m.selectedMailThread(); ok {
+			selectedID = thread.ID
+		}
+		if m.mailRead == nil {
+			m.mailRead = make(map[string]bool)
+		}
+		m.mailThreads = buildMailThreads(msg.Messages, m.mailRead)
+		m.mailSyncErr = ""
+		m.mailLastSynced = msg.ReceivedAt
+		m.ensureMailSelection(m.filteredMailThreads())
+		if selectedID != "" {
+			m.restoreMailSelection(selectedID)
 		}
 	case staleMsg:
 		if msg.Since.Equal(m.lastUpdated) && !m.stale {
@@ -1678,6 +1725,38 @@ func (m model) selectedMailThread() (mailThread, bool) {
 	return threads[idx], true
 }
 
+func (m *model) restoreMailSelection(threadID string) {
+	if strings.TrimSpace(threadID) == "" {
+		return
+	}
+	threads := m.filteredMailThreads()
+	for i, thread := range threads {
+		if thread.ID == threadID {
+			m.mailSelected = i
+			return
+		}
+	}
+}
+
+func (m *model) markMailThreadRead(threadID string) {
+	if strings.TrimSpace(threadID) == "" {
+		return
+	}
+	if m.mailRead == nil {
+		m.mailRead = make(map[string]bool)
+	}
+	for i := range m.mailThreads {
+		if m.mailThreads[i].ID != threadID {
+			continue
+		}
+		for j := range m.mailThreads[i].Messages {
+			msg := &m.mailThreads[i].Messages[j]
+			msg.Read = true
+			m.mailRead[msg.ID] = true
+		}
+	}
+}
+
 func (m model) agentInspectorLines() []string {
 	if m.queueEditorOpen {
 		return m.queueEditorLines()
@@ -2202,6 +2281,7 @@ func (m model) mailboxViewLines() []string {
 		lines = append(lines, line)
 	}
 	lines = append(lines, m.mailSearchStatusLines()...)
+	lines = append(lines, m.mailboxStatusLines(mainWidth)...)
 	lines = append(lines, "")
 
 	threads := m.filteredMailThreads()
@@ -3200,7 +3280,11 @@ func (m *model) applyPaletteAction(action paletteAction) tea.Cmd {
 		m.lastUpdated = time.Now()
 		m.stale = false
 		m.refreshingUntil = time.Now().Add(refreshPulseDuration)
-		return staleCheckCmd(m.lastUpdated)
+		cmds := []tea.Cmd{staleCheckCmd(m.lastUpdated)}
+		if m.mailClient != nil {
+			cmds = append(cmds, m.mailboxRefreshCmd())
+		}
+		return tea.Batch(cmds...)
 	case "settings":
 		m.setStatus("Settings panel not wired yet.", statusWarn)
 	case "help.show":
@@ -3282,6 +3366,14 @@ type actionCompleteMsg struct {
 	Agent  string
 }
 
+type mailboxPollMsg struct{}
+
+type mailboxRefreshMsg struct {
+	Messages   []agentMailMessage
+	Err        error
+	ReceivedAt time.Time
+}
+
 func staleCheckCmd(since time.Time) tea.Cmd {
 	if since.IsZero() {
 		return nil
@@ -3301,6 +3393,30 @@ func actionCompleteCmd(action, agent string) tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 		return actionCompleteMsg{Action: action, Agent: agent}
 	})
+}
+
+func mailboxPollCmd(interval time.Duration) tea.Cmd {
+	if interval <= 0 {
+		return nil
+	}
+	return tea.Tick(interval, func(time.Time) tea.Msg {
+		return mailboxPollMsg{}
+	})
+}
+
+func (m model) mailboxRefreshCmd() tea.Cmd {
+	if m.mailClient == nil {
+		return nil
+	}
+	client := m.mailClient
+	return func() tea.Msg {
+		messages, err := client.fetchInbox(context.Background())
+		return mailboxRefreshMsg{
+			Messages:   messages,
+			Err:        err,
+			ReceivedAt: time.Now(),
+		}
+	}
 }
 
 func (m model) refreshIndicatorLine() string {
@@ -4494,6 +4610,25 @@ func (m model) mailSearchStatusLines() []string {
 		)
 	}
 	return lines
+}
+
+func (m model) mailboxStatusLines(maxWidth int) []string {
+	if m.mailClient == nil {
+		line := "Agent Mail not configured. Set SWARM_AGENT_MAIL_AGENT and SWARM_AGENT_MAIL_PROJECT."
+		return []string{m.styles.Warning.Render(truncateText(line, maxWidth))}
+	}
+
+	status := "syncing..."
+	style := m.styles.Muted
+	if strings.TrimSpace(m.mailSyncErr) != "" {
+		status = fmt.Sprintf("error: %s", m.mailSyncErr)
+		style = m.styles.Warning
+	} else if !m.mailLastSynced.IsZero() {
+		status = fmt.Sprintf("synced %s", m.mailLastSynced.Format("15:04:05"))
+	}
+
+	label := fmt.Sprintf("Agent Mail: %s@%s (%s)", m.mailClient.agent, m.mailClient.project, status)
+	return []string{style.Render(truncateText(label, maxWidth))}
 }
 
 func (m model) transcriptSearchLine() string {
