@@ -227,19 +227,8 @@ func CodexAdapter() AgentAdapter {
 }
 
 // GeminiAdapter creates an adapter for Google Gemini CLI.
-func GeminiAdapter() *GenericAdapter {
-	return NewGenericAdapter(
-		string(models.AgentTypeGemini),
-		"gemini",
-		WithIdleIndicators(
-			">",
-			"gemini>",
-		),
-		WithBusyIndicators(
-			"thinking",
-			"processing",
-		),
-	)
+func GeminiAdapter() AgentAdapter {
+	return NewGeminiAdapter()
 }
 
 // GenericFallbackAdapter creates a fallback adapter for unknown agent types.
