@@ -168,3 +168,52 @@ func TestEnsureDirectories(t *testing.T) {
 		t.Error("ConfigDir was not created")
 	}
 }
+
+func TestTUIThemeValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		theme   string
+		wantErr bool
+	}{
+		{name: "default theme", theme: "default", wantErr: false},
+		{name: "high-contrast theme", theme: "high-contrast", wantErr: false},
+		{name: "empty uses default", theme: "", wantErr: true}, // empty fails validation
+		{name: "invalid theme", theme: "invalid", wantErr: true},
+		{name: "old dark theme", theme: "dark", wantErr: true},
+		{name: "old light theme", theme: "light", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.TUI.Theme = tt.theme
+
+			err := cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestTUIThemeFromFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `
+tui:
+  theme: high-contrast
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config: %v", err)
+	}
+
+	cfg, err := LoadFromFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile() error = %v", err)
+	}
+
+	if cfg.TUI.Theme != "high-contrast" {
+		t.Errorf("Expected tui.theme = 'high-contrast', got %q", cfg.TUI.Theme)
+	}
+}

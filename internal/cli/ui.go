@@ -31,7 +31,13 @@ func runTUI() error {
 		}
 	}
 
-	return tui.Run()
+	// Build TUI config from app config
+	tuiConfig := tui.Config{}
+	if cfg := GetConfig(); cfg != nil {
+		tuiConfig.Theme = cfg.TUI.Theme
+	}
+
+	return tui.RunWithConfig(tuiConfig)
 }
 
 func hasTTY() bool {
