@@ -29,8 +29,9 @@ type AgentCard struct {
 	QueueLength   int
 	LastActivity  *time.Time
 	CooldownUntil *time.Time
-	RecentEvents  []time.Time          // Timestamps of recent state changes for activity pulse
-	UsageMetrics  *models.UsageMetrics // Usage metrics from adapter
+	RecentEvents  []time.Time              // Timestamps of recent state changes for activity pulse
+	UsageMetrics  *models.UsageMetrics     // Usage metrics from adapter
+	ClaimSummary  *models.FileClaimSummary // File claim status from Agent Mail
 }
 
 // RenderAgentCard renders a compact agent summary card.
@@ -94,6 +95,12 @@ func RenderAgentCard(styleSet styles.Styles, card AgentCard, selected bool) stri
 	usageLine := RenderUsageSummaryLine(styleSet, card.UsageMetrics)
 	if usageLine != "" {
 		lines = append(lines, usageLine)
+	}
+
+	// File claims line (if available)
+	claimsLine := RenderFileClaimsLine(styleSet, card.ClaimSummary)
+	if claimsLine != "" {
+		lines = append(lines, claimsLine)
 	}
 
 	if actionsLine != "" {
@@ -178,4 +185,48 @@ func formatDuration(value time.Duration) string {
 		return fmt.Sprintf("%dm%02ds", minutes, seconds)
 	}
 	return value.Round(time.Minute).String()
+}
+
+// RenderFileClaimsLine renders a summary line showing file claim status.
+// Returns empty string if no claims are present.
+func RenderFileClaimsLine(styleSet styles.Styles, summary *models.FileClaimSummary) string {
+	if summary == nil || summary.TotalClaims == 0 {
+		return ""
+	}
+
+	prefix := styleSet.Muted.Render("Claims:")
+
+	// Build the claims part
+	var claimsPart string
+	if summary.ExclusiveClaims > 0 && summary.SharedClaims > 0 {
+		claimsPart = fmt.Sprintf("%d exclusive, %d shared", summary.ExclusiveClaims, summary.SharedClaims)
+	} else if summary.ExclusiveClaims > 0 {
+		claimsPart = fmt.Sprintf("%d exclusive", summary.ExclusiveClaims)
+	} else {
+		claimsPart = fmt.Sprintf("%d shared", summary.SharedClaims)
+	}
+
+	// Style based on conflict status
+	var claimsStyled string
+	if summary.HasConflicts {
+		claimsStyled = styleSet.Error.Render(fmt.Sprintf("%s [%d conflicts]", claimsPart, summary.Conflicts))
+	} else {
+		claimsStyled = styleSet.Success.Render(claimsPart)
+	}
+
+	return fmt.Sprintf("%s %s", prefix, claimsStyled)
+}
+
+// RenderFileClaimsBadge renders a compact badge for file claims.
+// Returns empty string if no claims are present.
+func RenderFileClaimsBadge(styleSet styles.Styles, summary *models.FileClaimSummary) string {
+	if summary == nil || summary.TotalClaims == 0 {
+		return ""
+	}
+
+	if summary.HasConflicts {
+		return styleSet.Error.Render(fmt.Sprintf("!%d", summary.Conflicts))
+	}
+
+	return styleSet.Success.Render(fmt.Sprintf("F%d", summary.TotalClaims))
 }
