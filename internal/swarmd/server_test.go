@@ -2,10 +2,12 @@ package swarmd
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	swarmdv1 "github.com/opencode-ai/swarm/gen/swarmd/v1"
 	"github.com/rs/zerolog"
+	"google.golang.org/grpc/metadata"
 )
 
 func TestServerPing(t *testing.T) {
@@ -470,4 +472,384 @@ func TestTranscriptEntryToProto(t *testing.T) {
 	if proto.Timestamp == nil {
 		t.Error("Timestamp should not be nil")
 	}
+}
+
+// =============================================================================
+// Event Streaming Tests
+// =============================================================================
+
+type eventStreamRecorder struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	responses []*swarmdv1.StreamEventsResponse
+	want      int
+}
+
+func newEventStreamRecorder(want int) *eventStreamRecorder {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &eventStreamRecorder{
+		ctx:    ctx,
+		cancel: cancel,
+		want:   want,
+	}
+}
+
+func (s *eventStreamRecorder) Send(resp *swarmdv1.StreamEventsResponse) error {
+	s.responses = append(s.responses, resp)
+	if s.want > 0 && len(s.responses) >= s.want {
+		s.cancel()
+	}
+	return nil
+}
+
+func (s *eventStreamRecorder) SetHeader(metadata.MD) error  { return nil }
+func (s *eventStreamRecorder) SendHeader(metadata.MD) error { return nil }
+func (s *eventStreamRecorder) SetTrailer(metadata.MD)       {}
+func (s *eventStreamRecorder) Context() context.Context     { return s.ctx }
+func (s *eventStreamRecorder) SendMsg(interface{}) error    { return nil }
+func (s *eventStreamRecorder) RecvMsg(interface{}) error    { return nil }
+
+func TestPublishEvent(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	// Publish an event
+	server.publishAgentStateChanged(
+		"agent-1",
+		"workspace-1",
+		swarmdv1.AgentState_AGENT_STATE_STARTING,
+		swarmdv1.AgentState_AGENT_STATE_RUNNING,
+		"test reason",
+	)
+
+	// Verify event was stored
+	server.eventsMu.RLock()
+	defer server.eventsMu.RUnlock()
+
+	if len(server.events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(server.events))
+	}
+
+	event := server.events[0].event
+	if event.AgentId != "agent-1" {
+		t.Errorf("AgentId = %q, want %q", event.AgentId, "agent-1")
+	}
+	if event.WorkspaceId != "workspace-1" {
+		t.Errorf("WorkspaceId = %q, want %q", event.WorkspaceId, "workspace-1")
+	}
+	if event.Type != swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED {
+		t.Errorf("Type = %v, want %v", event.Type, swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED)
+	}
+
+	stateChanged := event.GetAgentStateChanged()
+	if stateChanged == nil {
+		t.Fatal("Expected AgentStateChanged payload")
+	}
+	if stateChanged.PreviousState != swarmdv1.AgentState_AGENT_STATE_STARTING {
+		t.Errorf("PreviousState = %v, want %v", stateChanged.PreviousState, swarmdv1.AgentState_AGENT_STATE_STARTING)
+	}
+	if stateChanged.NewState != swarmdv1.AgentState_AGENT_STATE_RUNNING {
+		t.Errorf("NewState = %v, want %v", stateChanged.NewState, swarmdv1.AgentState_AGENT_STATE_RUNNING)
+	}
+	if stateChanged.Reason != "test reason" {
+		t.Errorf("Reason = %q, want %q", stateChanged.Reason, "test reason")
+	}
+}
+
+func TestPublishErrorEvent(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	server.publishError("agent-1", "workspace-1", "ERR_TEST", "test error message", true)
+
+	server.eventsMu.RLock()
+	defer server.eventsMu.RUnlock()
+
+	if len(server.events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(server.events))
+	}
+
+	event := server.events[0].event
+	if event.Type != swarmdv1.EventType_EVENT_TYPE_ERROR {
+		t.Errorf("Type = %v, want %v", event.Type, swarmdv1.EventType_EVENT_TYPE_ERROR)
+	}
+
+	errEvent := event.GetError()
+	if errEvent == nil {
+		t.Fatal("Expected Error payload")
+	}
+	if errEvent.Code != "ERR_TEST" {
+		t.Errorf("Code = %q, want %q", errEvent.Code, "ERR_TEST")
+	}
+	if errEvent.Message != "test error message" {
+		t.Errorf("Message = %q, want %q", errEvent.Message, "test error message")
+	}
+	if !errEvent.Recoverable {
+		t.Error("Expected Recoverable to be true")
+	}
+}
+
+func TestPublishPaneContentChangedEvent(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	server.publishPaneContentChanged("agent-1", "workspace-1", "abc123", 42)
+
+	server.eventsMu.RLock()
+	defer server.eventsMu.RUnlock()
+
+	if len(server.events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(server.events))
+	}
+
+	event := server.events[0].event
+	if event.Type != swarmdv1.EventType_EVENT_TYPE_PANE_CONTENT_CHANGED {
+		t.Errorf("Type = %v, want %v", event.Type, swarmdv1.EventType_EVENT_TYPE_PANE_CONTENT_CHANGED)
+	}
+
+	paneEvent := event.GetPaneContentChanged()
+	if paneEvent == nil {
+		t.Fatal("Expected PaneContentChanged payload")
+	}
+	if paneEvent.ContentHash != "abc123" {
+		t.Errorf("ContentHash = %q, want %q", paneEvent.ContentHash, "abc123")
+	}
+	if paneEvent.LinesChanged != 42 {
+		t.Errorf("LinesChanged = %d, want %d", paneEvent.LinesChanged, 42)
+	}
+}
+
+func TestStreamEventsReplayFromCursor(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	server.publishAgentStateChanged("agent-1", "workspace-1", swarmdv1.AgentState_AGENT_STATE_STARTING, swarmdv1.AgentState_AGENT_STATE_RUNNING, "first")
+	server.publishAgentStateChanged("agent-2", "workspace-1", swarmdv1.AgentState_AGENT_STATE_STARTING, swarmdv1.AgentState_AGENT_STATE_RUNNING, "second")
+	server.publishAgentStateChanged("agent-3", "workspace-1", swarmdv1.AgentState_AGENT_STATE_STARTING, swarmdv1.AgentState_AGENT_STATE_RUNNING, "third")
+
+	stream := newEventStreamRecorder(2)
+	err := server.StreamEvents(&swarmdv1.StreamEventsRequest{Cursor: "1"}, stream)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("StreamEvents() error = %v", err)
+	}
+
+	if len(stream.responses) != 2 {
+		t.Fatalf("Expected 2 replayed events, got %d", len(stream.responses))
+	}
+
+	first := stream.responses[0].GetEvent()
+	second := stream.responses[1].GetEvent()
+	if first == nil || second == nil {
+		t.Fatal("Expected replayed events in responses")
+	}
+
+	if first.Id != "1" {
+		t.Errorf("First replayed event ID = %q, want %q", first.Id, "1")
+	}
+	if second.Id != "2" {
+		t.Errorf("Second replayed event ID = %q, want %q", second.Id, "2")
+	}
+}
+
+func TestEventMatchesFilter(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	event := &swarmdv1.Event{
+		Type:        swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED,
+		AgentId:     "agent-1",
+		WorkspaceId: "workspace-1",
+	}
+
+	tests := []struct {
+		name string
+		sub  *eventSubscriber
+		want bool
+	}{
+		{
+			name: "no filters matches all",
+			sub:  &eventSubscriber{},
+			want: true,
+		},
+		{
+			name: "matching event type",
+			sub: &eventSubscriber{
+				eventTypes: map[swarmdv1.EventType]bool{
+					swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED: true,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "non-matching event type",
+			sub: &eventSubscriber{
+				eventTypes: map[swarmdv1.EventType]bool{
+					swarmdv1.EventType_EVENT_TYPE_ERROR: true,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "matching agent ID",
+			sub: &eventSubscriber{
+				agentIDs: map[string]bool{"agent-1": true},
+			},
+			want: true,
+		},
+		{
+			name: "non-matching agent ID",
+			sub: &eventSubscriber{
+				agentIDs: map[string]bool{"agent-2": true},
+			},
+			want: false,
+		},
+		{
+			name: "matching workspace ID",
+			sub: &eventSubscriber{
+				workspaceIDs: map[string]bool{"workspace-1": true},
+			},
+			want: true,
+		},
+		{
+			name: "non-matching workspace ID",
+			sub: &eventSubscriber{
+				workspaceIDs: map[string]bool{"workspace-2": true},
+			},
+			want: false,
+		},
+		{
+			name: "all filters matching",
+			sub: &eventSubscriber{
+				eventTypes:   map[swarmdv1.EventType]bool{swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED: true},
+				agentIDs:     map[string]bool{"agent-1": true},
+				workspaceIDs: map[string]bool{"workspace-1": true},
+			},
+			want: true,
+		},
+		{
+			name: "one filter not matching",
+			sub: &eventSubscriber{
+				eventTypes:   map[swarmdv1.EventType]bool{swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED: true},
+				agentIDs:     map[string]bool{"agent-2": true}, // not matching
+				workspaceIDs: map[string]bool{"workspace-1": true},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := server.eventMatchesFilter(event, tt.sub)
+			if got != tt.want {
+				t.Errorf("eventMatchesFilter() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEventCircularBuffer(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	// Publish more events than maxStoredEvents
+	for i := 0; i < maxStoredEvents+100; i++ {
+		server.publishAgentStateChanged(
+			"agent-1",
+			"workspace-1",
+			swarmdv1.AgentState_AGENT_STATE_RUNNING,
+			swarmdv1.AgentState_AGENT_STATE_IDLE,
+			"test",
+		)
+	}
+
+	server.eventsMu.RLock()
+	defer server.eventsMu.RUnlock()
+
+	// Should only have maxStoredEvents
+	if len(server.events) != maxStoredEvents {
+		t.Errorf("Expected %d events, got %d", maxStoredEvents, len(server.events))
+	}
+
+	// First event should have ID >= 100 (the first 100 were evicted)
+	firstEventID, _ := parseInt64(server.events[0].event.Id)
+	if firstEventID < 100 {
+		t.Errorf("First event ID = %d, expected >= 100", firstEventID)
+	}
+}
+
+func TestEventSubscriberBroadcast(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	// Create a subscriber
+	sub := &eventSubscriber{
+		id: "test-sub",
+		ch: make(chan *swarmdv1.Event, 10),
+	}
+
+	server.eventsMu.Lock()
+	server.eventSubs[sub.id] = sub
+	server.eventsMu.Unlock()
+
+	// Publish an event
+	server.publishAgentStateChanged(
+		"agent-1",
+		"workspace-1",
+		swarmdv1.AgentState_AGENT_STATE_STARTING,
+		swarmdv1.AgentState_AGENT_STATE_RUNNING,
+		"test",
+	)
+
+	// Check that subscriber received the event
+	select {
+	case event := <-sub.ch:
+		if event.AgentId != "agent-1" {
+			t.Errorf("AgentId = %q, want %q", event.AgentId, "agent-1")
+		}
+	default:
+		t.Error("Expected subscriber to receive event")
+	}
+
+	// Cleanup
+	server.eventsMu.Lock()
+	delete(server.eventSubs, sub.id)
+	server.eventsMu.Unlock()
+}
+
+func TestEventSubscriberFiltering(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+
+	// Create a subscriber with agent filter
+	sub := &eventSubscriber{
+		id:       "test-sub",
+		agentIDs: map[string]bool{"agent-1": true},
+		ch:       make(chan *swarmdv1.Event, 10),
+	}
+
+	server.eventsMu.Lock()
+	server.eventSubs[sub.id] = sub
+	server.eventsMu.Unlock()
+
+	// Publish event for agent-1 (should be received)
+	server.publishAgentStateChanged("agent-1", "workspace-1", swarmdv1.AgentState_AGENT_STATE_STARTING, swarmdv1.AgentState_AGENT_STATE_RUNNING, "test")
+
+	// Publish event for agent-2 (should NOT be received)
+	server.publishAgentStateChanged("agent-2", "workspace-1", swarmdv1.AgentState_AGENT_STATE_STARTING, swarmdv1.AgentState_AGENT_STATE_RUNNING, "test")
+
+	// Check that subscriber received only agent-1 event
+	receivedCount := 0
+	for {
+		select {
+		case event := <-sub.ch:
+			receivedCount++
+			if event.AgentId != "agent-1" {
+				t.Errorf("Received event for wrong agent: %q", event.AgentId)
+			}
+		default:
+			goto done
+		}
+	}
+done:
+
+	if receivedCount != 1 {
+		t.Errorf("Expected 1 event, received %d", receivedCount)
+	}
+
+	// Cleanup
+	server.eventsMu.Lock()
+	delete(server.eventSubs, sub.id)
+	server.eventsMu.Unlock()
 }
