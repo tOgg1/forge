@@ -158,3 +158,81 @@ func sampleApprovals() map[string][]approvalItem {
 		},
 	}
 }
+
+func sampleAuditItems() []auditItem {
+	now := time.Now()
+	return []auditItem{
+		{
+			ID:         "evt-128",
+			Timestamp:  now.Add(-2 * time.Minute),
+			Type:       models.EventTypeMessageDispatched,
+			EntityType: models.EntityTypeQueue,
+			EntityID:   "q-02",
+			Summary:    "Dispatched queued message to Agent A1.",
+			Detail:     "Queue item q-02 sent to agent-a1; awaiting response.",
+		},
+		{
+			ID:         "evt-127",
+			Timestamp:  now.Add(-4 * time.Minute),
+			Type:       models.EventTypeApprovalRequested,
+			EntityType: models.EntityTypeAgent,
+			EntityID:   "agent-b7",
+			Summary:    "Approval requested for file changes.",
+			Detail:     "Agent B7 proposed edits to auth middleware in ws-2.",
+		},
+		{
+			ID:         "evt-124",
+			Timestamp:  now.Add(-7 * time.Minute),
+			Type:       models.EventTypeAgentStateChanged,
+			EntityType: models.EntityTypeAgent,
+			EntityID:   "agent-a1",
+			Summary:    "Agent moved to Working.",
+			Detail:     "State changed from Idle to Working (confidence: high).",
+		},
+		{
+			ID:         "evt-119",
+			Timestamp:  now.Add(-12 * time.Minute),
+			Type:       models.EventTypeWorkspaceCreated,
+			EntityType: models.EntityTypeWorkspace,
+			EntityID:   "ws-4",
+			Summary:    "Workspace ml-models created.",
+			Detail:     "Workspace bound to gpu-box at /home/user/projects/ml-models.",
+		},
+		{
+			ID:         "evt-115",
+			Timestamp:  now.Add(-18 * time.Minute),
+			Type:       models.EventTypeRateLimitDetected,
+			EntityType: models.EntityTypeAccount,
+			EntityID:   "acct-primary",
+			Summary:    "Rate limit detected for primary account.",
+			Detail:     "Cooldown started for 5 minutes (provider: openai).",
+		},
+		{
+			ID:         "evt-109",
+			Timestamp:  now.Add(-25 * time.Minute),
+			Type:       models.EventTypeNodeOffline,
+			EntityType: models.EntityTypeNode,
+			EntityID:   "prod-02",
+			Summary:    "Node went offline.",
+			Detail:     "Lost heartbeat from prod-02; last seen 3m ago.",
+		},
+		{
+			ID:         "evt-102",
+			Timestamp:  now.Add(-40 * time.Minute),
+			Type:       models.EventTypeAgentSpawned,
+			EntityType: models.EntityTypeAgent,
+			EntityID:   "agent-c3",
+			Summary:    "Agent spawned for data-pipeline.",
+			Detail:     "Codex agent started on workspace ws-3.",
+		},
+		{
+			ID:         "evt-097",
+			Timestamp:  now.Add(-55 * time.Minute),
+			Type:       models.EventTypeError,
+			EntityType: models.EntityTypeSystem,
+			EntityID:   "scheduler",
+			Summary:    "Scheduler error.",
+			Detail:     "Dispatch loop encountered timeout contacting tmux.",
+		},
+	}
+}

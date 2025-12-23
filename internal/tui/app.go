@@ -87,6 +87,9 @@ type model struct {
 	approvalsBulkAction    models.ApprovalStatus
 	approvalsBulkTargets   []string
 	approvalsBulkWorkspace string
+	auditItems             []auditItem
+	auditFilter            string
+	auditSelected          int
 	actionConfirmOpen      bool
 	actionConfirmAction    string
 	actionConfirmAgent     string
@@ -181,6 +184,16 @@ type approvalItem struct {
 	CreatedAt   time.Time
 }
 
+type auditItem struct {
+	ID         string
+	Timestamp  time.Time
+	Type       models.EventType
+	EntityType models.EntityType
+	EntityID   string
+	Summary    string
+	Detail     string
+}
+
 const (
 	minWidth            = 60
 	minHeight           = 15
@@ -199,6 +212,7 @@ func initialModel() model {
 	tv.ScrollToBottom()
 	queueEditors := sampleQueueEditors()
 	approvals := sampleApprovals()
+	auditItems := sampleAuditItems()
 	return model{
 		styles:                styles.DefaultStyles(),
 		view:                  viewDashboard,
@@ -221,6 +235,8 @@ func initialModel() model {
 		queueEditors:          queueEditors,
 		approvalsByWorkspace:  approvals,
 		approvalsMarked:       make(map[string]map[string]bool),
+		auditItems:            auditItems,
+		auditSelected:         0,
 		transcriptViewer:      tv,
 		transcriptPreview:     true,
 		transcriptAutoScroll:  true,
@@ -414,6 +430,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		if m.view == viewAudit {
+			switch msg.String() {
+			case "up", "k":
+				m.moveAuditSelection(-1)
+				return m, nil
+			case "down", "j":
+				m.moveAuditSelection(1)
+				return m, nil
+			case "/":
+				m.openSearch(viewAudit)
+				return m, nil
+			case "enter":
+				m.showInspector = true
+				return m, nil
+			}
+		}
 		if m.view == viewAgentDetail {
 			switch msg.String() {
 			case "p":
@@ -445,12 +477,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedView = m.view
 			m.closeSearch()
 			m.syncAgentSelection()
+		case "4":
+			m.view = viewAudit
+			m.selectedView = m.view
+			m.closeSearch()
+			m.ensureAuditSelection(m.filteredAuditItems())
 		case "g":
 			m.view = nextView(m.view)
 			m.selectedView = m.view
 			m.closeSearch()
 			if m.view == viewAgent {
 				m.syncAgentSelection()
+			} else if m.view == viewAudit {
+				m.ensureAuditSelection(m.filteredAuditItems())
 			}
 		case "left", "up":
 			if m.view != viewWorkspace {
@@ -470,7 +509,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+k", ":":
 			m.openPalette()
 		case "ctrl+l":
-			if m.view == viewWorkspace || m.view == viewAgent {
+			if m.view == viewWorkspace || m.view == viewAgent || m.view == viewAudit {
 				m.clearSearchFilter(m.view)
 				m.setStatus(fmt.Sprintf("%s filter cleared.", viewLabel(m.view)), statusInfo)
 				return m, nil
@@ -609,6 +648,7 @@ const (
 	viewDashboard viewID = iota
 	viewWorkspace
 	viewAgent
+	viewAudit
 	viewAgentDetail // Full-screen agent detail view
 )
 
@@ -636,6 +676,8 @@ func nextView(current viewID) viewID {
 		return viewWorkspace
 	case viewWorkspace:
 		return viewAgent
+	case viewAgent:
+		return viewAudit
 	default:
 		return viewDashboard
 	}
@@ -644,9 +686,13 @@ func nextView(current viewID) viewID {
 func prevView(current viewID) viewID {
 	switch current {
 	case viewDashboard:
-		return viewAgent
+		return viewAudit
 	case viewWorkspace:
 		return viewDashboard
+	case viewAgent:
+		return viewWorkspace
+	case viewAudit:
+		return viewAgent
 	default:
 		return viewWorkspace
 	}
@@ -755,6 +801,8 @@ func (m *model) viewLines() []string {
 			lines = append(lines, "")
 		}
 		return m.renderWithInspector(lines, "Agent inspector", m.agentInspectorLines())
+	case viewAudit:
+		return m.auditViewLines()
 	case viewAgentDetail:
 		return m.agentDetailView()
 	default:
@@ -1449,6 +1497,63 @@ func (m *model) moveAgentSelection(delta int) {
 	m.selectedAgent = cards[next].Name
 }
 
+func (m model) filteredAuditItems() []auditItem {
+	return filterAuditItems(m.auditItems, m.auditFilter)
+}
+
+func (m *model) ensureAuditSelection(items []auditItem) {
+	if len(items) == 0 {
+		m.auditSelected = -1
+		return
+	}
+	idx := m.auditSelected
+	if idx < 0 {
+		idx = 0
+	} else if idx >= len(items) {
+		idx = len(items) - 1
+	}
+	m.auditSelected = idx
+}
+
+func (m *model) moveAuditSelection(delta int) {
+	items := m.filteredAuditItems()
+	if len(items) == 0 {
+		m.auditSelected = -1
+		return
+	}
+	m.ensureAuditSelection(items)
+	next := m.auditSelected + delta
+	if next < 0 {
+		next = 0
+	} else if next >= len(items) {
+		next = len(items) - 1
+	}
+	m.auditSelected = next
+}
+
+func (m model) auditSelectedIndexFor(items []auditItem) int {
+	if len(items) == 0 {
+		return -1
+	}
+	idx := m.auditSelected
+	if idx < 0 {
+		return 0
+	}
+	if idx >= len(items) {
+		return len(items) - 1
+	}
+	return idx
+}
+
+func (m model) selectedAuditItem() (auditItem, bool) {
+	items := m.filteredAuditItems()
+	if len(items) == 0 {
+		return auditItem{}, false
+	}
+	idx := m.auditSelectedIndexFor(items)
+	return items[idx], true
+}
+
 func (m model) agentInspectorLines() []string {
 	if m.queueEditorOpen {
 		return m.queueEditorLines()
@@ -1498,6 +1603,41 @@ func (m model) agentInspectorLines() []string {
 		lines = append(lines, line)
 	}
 	lines = append(lines, m.styles.Muted.Render("Actions: [I] Interrupt | [R] Restart | [E] Export logs"))
+
+	return lines
+}
+
+func (m model) auditInspectorLines() []string {
+	item, ok := m.selectedAuditItem()
+	if !ok {
+		if strings.TrimSpace(m.auditFilter) != "" {
+			return []string{
+				m.styles.Warning.Render("No audit events match filter."),
+				m.styles.Muted.Render("Press / to edit filter."),
+			}
+		}
+		return []string{m.styles.Muted.Render("No audit events available.")}
+	}
+
+	maxWidth := m.inspectorContentWidth()
+	timestamp := item.Timestamp.Local().Format("2006-01-02 15:04:05")
+	lines := []string{
+		m.styles.Text.Render("Event"),
+		m.styles.Muted.Render(fmt.Sprintf("Time: %s", timestamp)),
+		m.styles.Muted.Render(fmt.Sprintf("Type: %s", defaultLabel(string(item.Type)))),
+		m.styles.Muted.Render(fmt.Sprintf("Entity: %s", defaultLabel(string(item.EntityType)))),
+		m.styles.Muted.Render(fmt.Sprintf("Entity ID: %s", defaultLabel(item.EntityID))),
+		m.styles.Muted.Render(fmt.Sprintf("Event ID: %s", defaultLabel(item.ID))),
+	}
+
+	if summary := strings.TrimSpace(item.Summary); summary != "" {
+		lines = append(lines, "", m.styles.Text.Render("Summary"))
+		lines = append(lines, wrapIndented(summary, maxWidth, m.styles.Muted, "  ")...)
+	}
+	if detail := strings.TrimSpace(item.Detail); detail != "" {
+		lines = append(lines, "", m.styles.Text.Render("Detail"))
+		lines = append(lines, wrapIndented(detail, maxWidth, m.styles.Muted, "  ")...)
+	}
 
 	return lines
 }
@@ -1769,6 +1909,77 @@ func (m model) dashboardView() string {
 	activityPanel := m.renderActivityPanel(rightWidth)
 	spacer := strings.Repeat(" ", gap)
 	return lipgloss.JoinHorizontal(lipgloss.Top, nodesPanel, spacer, activityPanel)
+}
+
+func (m model) auditViewLines() []string {
+	mainWidth := m.width
+	if m.showInspector {
+		if width, _, _, _ := m.inspectorLayout(); width > 0 {
+			mainWidth = width
+		}
+	}
+	if mainWidth <= 0 {
+		mainWidth = 80
+	}
+
+	lines := []string{
+		m.styles.Accent.Render("Audit log"),
+		m.styles.Muted.Render("↑↓/jk: move | Enter: inspect | /: filter | Ctrl+L: clear"),
+	}
+	if line := m.searchLine(viewAudit); line != "" {
+		lines = append(lines, line)
+	}
+	lines = append(lines, m.auditSearchStatusLines()...)
+	lines = append(lines, "")
+
+	items := m.filteredAuditItems()
+	if len(items) == 0 {
+		if strings.TrimSpace(m.auditFilter) != "" {
+			lines = append(lines, m.styles.Warning.Render("No audit events match this filter."))
+			lines = append(lines, m.styles.Muted.Render("Press / to edit or clear the filter."))
+		} else {
+			lines = append(lines, m.styles.Muted.Render("No audit events recorded yet."))
+		}
+		return m.renderWithInspector(lines, "Audit inspector", m.auditInspectorLines())
+	}
+
+	header := fmt.Sprintf("%-19s  %-18s  %-16s  %s", "Time", "Type", "Entity", "Summary")
+	lines = append(lines, m.styles.Muted.Render(truncateText(header, mainWidth)))
+
+	selectedIdx := m.auditSelectedIndexFor(items)
+	for i, item := range items {
+		line := m.auditRowLine(item)
+		prefix := "  "
+		if i == selectedIdx {
+			prefix = "> "
+		}
+		line = prefix + line
+		if mainWidth > 0 {
+			line = truncateText(line, mainWidth)
+		}
+		if i == selectedIdx {
+			lines = append(lines, m.styles.Accent.Render(line))
+		} else {
+			lines = append(lines, m.styles.Text.Render(line))
+		}
+	}
+
+	return m.renderWithInspector(lines, "Audit inspector", m.auditInspectorLines())
+}
+
+func (m model) auditRowLine(item auditItem) string {
+	timestamp := item.Timestamp.Local().Format("2006-01-02 15:04:05")
+	eventType := truncateText(string(item.Type), 18)
+	entity := fmt.Sprintf("%s:%s", defaultLabel(string(item.EntityType)), defaultLabel(item.EntityID))
+	entity = truncateText(entity, 16)
+	summary := strings.TrimSpace(item.Summary)
+	if summary == "" {
+		summary = strings.TrimSpace(item.Detail)
+	}
+	if summary == "" {
+		summary = "Event recorded"
+	}
+	return fmt.Sprintf("%-19s  %-18s  %-16s  %s", timestamp, eventType, entity, summary)
 }
 
 // agentDetailView renders a full-screen agent detail view.
@@ -2237,6 +2448,7 @@ func (m model) breadcrumbLine() string {
 		m.styles.Muted.Render("Dashboard"),
 		m.styles.Muted.Render("Workspace"),
 		m.styles.Muted.Render("Agent"),
+		m.styles.Muted.Render("Audit"),
 	}
 
 	switch m.view {
@@ -2244,18 +2456,21 @@ func (m model) breadcrumbLine() string {
 		parts[0] = m.styles.Accent.Render("Dashboard")
 	case viewWorkspace:
 		parts[1] = m.styles.Accent.Render("Workspace")
-	case viewAgent:
+	case viewAgent, viewAgentDetail:
 		parts[2] = m.styles.Accent.Render("Agent")
+	case viewAudit:
+		parts[3] = m.styles.Accent.Render("Audit")
 	}
 
-	return fmt.Sprintf("%s > %s > %s", parts[0], parts[1], parts[2])
+	return fmt.Sprintf("%s > %s > %s > %s", parts[0], parts[1], parts[2], parts[3])
 }
 
 func (m model) navLine() string {
 	dash := m.navLabel(viewDashboard)
 	ws := m.navLabel(viewWorkspace)
 	agent := m.navLabel(viewAgent)
-	return fmt.Sprintf("Navigate: %s  %s  %s", dash, ws, agent)
+	audit := m.navLabel(viewAudit)
+	return fmt.Sprintf("Navigate: %s  %s  %s  %s", dash, ws, agent, audit)
 }
 
 func (m model) navLabel(view viewID) string {
@@ -2308,6 +2523,8 @@ func viewLabel(view viewID) string {
 		return "Workspace"
 	case viewAgent:
 		return "Agent"
+	case viewAudit:
+		return "Audit"
 	case viewAgentDetail:
 		return "Agent Detail"
 	default:
@@ -2333,7 +2550,7 @@ func (m model) helpLines() []string {
 
 	switch m.view {
 	case viewDashboard:
-		lines = append(lines, m.styles.Muted.Render("Views: 1/2/3 switch | g cycle"))
+		lines = append(lines, m.styles.Muted.Render("Views: 1/2/3/4 switch | g cycle"))
 	case viewWorkspace:
 		lines = append(lines, m.styles.Muted.Render("Workspace: ↑↓←→/hjkl move | Enter open | / filter | Ctrl+L clear | A approvals"))
 	case viewAgent:
@@ -2348,6 +2565,8 @@ func (m model) helpLines() []string {
 			))
 		}
 		lines = append(lines, m.styles.Muted.Render("Actions: I interrupt | R restart | E export"))
+	case viewAudit:
+		lines = append(lines, m.styles.Muted.Render("Audit: ↑↓/jk move | Enter inspect | / filter | Ctrl+L clear"))
 	case viewAgentDetail:
 		lines = append(lines, m.styles.Muted.Render("Agent detail: p profile | I interrupt | R restart | P pause | Esc back"))
 	}
@@ -2429,6 +2648,7 @@ func (m model) paletteActions() []paletteAction {
 		{ID: "view.dashboard", Label: "Navigate to dashboard", Hint: "1"},
 		{ID: "view.workspace", Label: "Navigate to workspace", Hint: "2"},
 		{ID: "view.agent", Label: "Navigate to agents", Hint: "3"},
+		{ID: "view.audit", Label: "Navigate to audit log", Hint: "4"},
 		{
 			ID:             "agent.spawn",
 			Label:          "Spawn agent",
@@ -2665,6 +2885,10 @@ func (m *model) applyPaletteAction(action paletteAction) tea.Cmd {
 	case "view.agent":
 		m.view = viewAgent
 		m.selectedView = viewAgent
+	case "view.audit":
+		m.view = viewAudit
+		m.selectedView = viewAudit
+		m.ensureAuditSelection(m.filteredAuditItems())
 	case "agent.spawn":
 		m.setStatus("Spawn agent not wired yet.", statusWarn)
 	case "agent.pause":
@@ -2737,6 +2961,8 @@ func isRedundantViewAction(actionID string, view viewID) bool {
 		return actionID == "view.workspace"
 	case viewAgent:
 		return actionID == "view.agent"
+	case viewAudit:
+		return actionID == "view.audit"
 	default:
 		return false
 	}
@@ -3118,6 +3344,8 @@ func (m *model) openSearch(target viewID) {
 		}
 	case viewAgent:
 		m.searchQuery = m.agentFilter
+	case viewAudit:
+		m.searchQuery = m.auditFilter
 	}
 	m.searchPrevQuery = m.searchQuery
 	m.applySearchQuery()
@@ -3173,6 +3401,9 @@ func (m *model) applySearchQuery() {
 	case viewAgent:
 		m.agentFilter = m.searchQuery
 		m.syncAgentSelection()
+	case viewAudit:
+		m.auditFilter = m.searchQuery
+		m.ensureAuditSelection(m.filteredAuditItems())
 	}
 }
 
@@ -3185,6 +3416,9 @@ func (m *model) clearSearchFilter(target viewID) {
 	case viewAgent:
 		m.agentFilter = ""
 		m.syncAgentSelection()
+	case viewAudit:
+		m.auditFilter = ""
+		m.ensureAuditSelection(m.filteredAuditItems())
 	}
 }
 
@@ -3847,6 +4081,8 @@ func (m model) searchLine(target viewID) string {
 		}
 	case viewAgent:
 		query = m.agentFilter
+	case viewAudit:
+		query = m.auditFilter
 	}
 	activeSearch := m.searchOpen && m.searchTarget == target
 	label := "Filter"
@@ -3880,6 +4116,27 @@ func (m model) agentSearchStatusLines() []string {
 	if matches == 0 {
 		lines = append(lines,
 			m.styles.Warning.Render("No agents match this filter."),
+			m.styles.Muted.Render("Press / to edit or clear the filter."),
+		)
+	}
+	return lines
+}
+
+func (m model) auditSearchStatusLines() []string {
+	query := strings.TrimSpace(m.auditFilter)
+	if query == "" {
+		return nil
+	}
+	allItems := m.auditItems
+	filtered := m.filteredAuditItems()
+	total := len(allItems)
+	matches := len(filtered)
+	lines := []string{
+		m.styles.Muted.Render(fmt.Sprintf("Matches: %d/%d", matches, total)),
+	}
+	if matches == 0 {
+		lines = append(lines,
+			m.styles.Warning.Render("No audit events match this filter."),
 			m.styles.Muted.Render("Press / to edit or clear the filter."),
 		)
 	}
@@ -3975,6 +4232,19 @@ func filterAgentCards(cards []components.AgentCard, query string) []components.A
 	return filtered
 }
 
+func filterAuditItems(items []auditItem, query string) []auditItem {
+	if strings.TrimSpace(query) == "" {
+		return items
+	}
+	filtered := make([]auditItem, 0, len(items))
+	for _, item := range items {
+		if matchesSearch(query, auditItemHaystack(item)) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
 func agentCardHaystack(card components.AgentCard) string {
 	fields := []string{
 		card.Name,
@@ -3984,6 +4254,19 @@ func agentCardHaystack(card components.AgentCard) string {
 	}
 	if card.CooldownUntil != nil && time.Until(*card.CooldownUntil) > 0 {
 		fields = append(fields, "cooldown")
+	}
+	return strings.ToLower(strings.Join(fields, " "))
+}
+
+func auditItemHaystack(item auditItem) string {
+	fields := []string{
+		item.ID,
+		item.Timestamp.Format("2006-01-02 15:04:05"),
+		string(item.Type),
+		string(item.EntityType),
+		item.EntityID,
+		item.Summary,
+		item.Detail,
 	}
 	return strings.ToLower(strings.Join(fields, " "))
 }
