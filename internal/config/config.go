@@ -31,6 +31,9 @@ type Config struct {
 	// Default settings for workspaces
 	WorkspaceDefaults WorkspaceConfig `yaml:"workspace_defaults" mapstructure:"workspace_defaults"`
 
+	// Workspace-specific overrides
+	WorkspaceOverrides []WorkspaceOverrideConfig `yaml:"workspace_overrides" mapstructure:"workspace_overrides"`
+
 	// Default settings for agents
 	AgentDefaults AgentConfig `yaml:"agent_defaults" mapstructure:"agent_defaults"`
 
@@ -125,6 +128,33 @@ type WorkspaceConfig struct {
 	AutoImportExisting bool `yaml:"auto_import_existing" mapstructure:"auto_import_existing"`
 }
 
+// WorkspaceOverrideConfig provides per-workspace configuration overrides.
+type WorkspaceOverrideConfig struct {
+	// WorkspaceID matches a specific workspace id.
+	WorkspaceID string `yaml:"workspace_id" mapstructure:"workspace_id"`
+
+	// Name matches a workspace name.
+	Name string `yaml:"name" mapstructure:"name"`
+
+	// RepoPath matches the workspace repo path (supports glob patterns).
+	RepoPath string `yaml:"repo_path" mapstructure:"repo_path"`
+
+	// ApprovalPolicy overrides the approval policy for the workspace.
+	ApprovalPolicy string `yaml:"approval_policy" mapstructure:"approval_policy"`
+
+	// ApprovalRules apply when approval_policy is custom.
+	ApprovalRules []ApprovalRule `yaml:"approval_rules" mapstructure:"approval_rules"`
+}
+
+// ApprovalRule defines a rule for approval decisions.
+type ApprovalRule struct {
+	// RequestType matches the approval request type (supports "*" wildcard).
+	RequestType string `yaml:"request_type" mapstructure:"request_type"`
+
+	// Action is approve, deny, or prompt.
+	Action string `yaml:"action" mapstructure:"action"`
+}
+
 // AgentConfig contains default settings for agents.
 type AgentConfig struct {
 	// DefaultType is the default agent type.
@@ -139,8 +169,11 @@ type AgentConfig struct {
 	// TranscriptBufferSize is the max lines to keep in transcript buffer.
 	TranscriptBufferSize int `yaml:"transcript_buffer_size" mapstructure:"transcript_buffer_size"`
 
-	// ApprovalPolicy is the default approval policy (strict, permissive).
+	// ApprovalPolicy is the default approval policy (strict, permissive, custom).
 	ApprovalPolicy string `yaml:"approval_policy" mapstructure:"approval_policy"`
+
+	// ApprovalRules apply when approval_policy is custom.
+	ApprovalRules []ApprovalRule `yaml:"approval_rules" mapstructure:"approval_rules"`
 }
 
 // SchedulerConfig contains scheduler settings.
@@ -323,10 +356,21 @@ func (c *Config) Validate() error {
 	if !isValidAgentType(c.AgentDefaults.DefaultType) {
 		return fmt.Errorf("agent_defaults.default_type must be one of opencode, claude-code, codex, gemini, generic")
 	}
-	switch strings.ToLower(strings.TrimSpace(c.AgentDefaults.ApprovalPolicy)) {
-	case "strict", "permissive":
-	default:
-		return fmt.Errorf("agent_defaults.approval_policy must be strict or permissive")
+	if err := validateApprovalPolicy("agent_defaults", c.AgentDefaults.ApprovalPolicy, c.AgentDefaults.ApprovalRules); err != nil {
+		return err
+	}
+
+	for i, override := range c.WorkspaceOverrides {
+		path := fmt.Sprintf("workspace_overrides[%d]", i)
+		if strings.TrimSpace(override.WorkspaceID) == "" && strings.TrimSpace(override.Name) == "" && strings.TrimSpace(override.RepoPath) == "" {
+			return fmt.Errorf("%s must include workspace_id, name, or repo_path", path)
+		}
+		if strings.TrimSpace(override.ApprovalPolicy) == "" && len(override.ApprovalRules) == 0 {
+			return fmt.Errorf("%s must set approval_policy or approval_rules", path)
+		}
+		if err := validateApprovalPolicy(path, override.ApprovalPolicy, override.ApprovalRules); err != nil {
+			return err
+		}
 	}
 
 	if c.Scheduler.DispatchInterval < 100*time.Millisecond {
