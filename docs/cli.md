@@ -78,12 +78,18 @@ swarm node remove <name-or-id> --force
 swarm node doctor <name-or-id>
 swarm node refresh [name-or-id]
 swarm node exec <name-or-id> -- uname -a
+swarm node forward <name-or-id> --local-port 8080 --remote 127.0.0.1:3000
 ```
 
 Notes:
 - `swarm node bootstrap` exists but only reports missing deps today.
 - Use `--no-test` on `node add` to skip connection test.
 - `node add` supports per-node SSH preferences (backend, timeout, proxy jump, control master) via flags.
+- `node forward` creates a local SSH tunnel for remote services (binds to `127.0.0.1` by default).
+
+Secure access tip:
+Use `swarm node forward` instead of opening remote ports. Keep remote services bound to
+`127.0.0.1` and expose them locally via an SSH tunnel when needed.
 
 ### `swarm ws`
 

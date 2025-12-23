@@ -98,6 +98,21 @@ but not yet wired up. Planned steps are labeled.
 - `swarm node bootstrap` to provision dependencies.
 - `swarm node doctor` for diagnostics.
 
+## Secure remote access (SSH port forwarding)
+
+When you need to reach a service running on a remote node (for example an agent
+runtime or local HTTP UI), use SSH port forwarding instead of opening public
+ports.
+
+```bash
+# Forward local 8080 to a service bound on the remote node
+swarm node forward prod-server --local-port 8080 --remote 127.0.0.1:3000
+```
+
+Tips:
+- Keep remote services bound to `127.0.0.1` on the node.
+- Forward to a local `127.0.0.1` bind unless you explicitly need to share.
+
 ## Incident checklist
 
 - Capture logs (re-run with `--log-level debug`).
