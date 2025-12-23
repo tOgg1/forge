@@ -115,6 +115,7 @@ type model struct {
 	paletteQuery           string
 	paletteIndex           int
 	lastUpdated            time.Time
+	refreshingUntil        time.Time
 	stale                  bool
 	stateEngine            *state.Engine
 	agentStates            map[string]models.AgentState
@@ -195,11 +196,13 @@ type auditItem struct {
 }
 
 const (
-	minWidth            = 60
-	minHeight           = 15
-	staleAfter          = 30 * time.Second
-	statusToastDuration = 5 * time.Second
-	maxWorkspaceEvents  = 20
+	minWidth             = 60
+	minHeight            = 15
+	refreshInterval      = 15 * time.Second
+	refreshPulseDuration = 2 * time.Second
+	staleAfter           = 2 * refreshInterval
+	statusToastDuration  = 5 * time.Second
+	maxWorkspaceEvents   = 20
 )
 
 func initialModel() model {
@@ -519,6 +522,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			m.lastUpdated = time.Now()
 			m.stale = false
+			m.refreshingUntil = time.Now().Add(refreshPulseDuration)
 			return m, staleCheckCmd(m.lastUpdated)
 		case "esc":
 			// Go back from agent detail view
@@ -545,6 +549,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentLast[msg.AgentID] = activityAt
 		m.lastUpdated = msg.Timestamp
 		m.stale = false
+		m.refreshingUntil = time.Now().Add(refreshPulseDuration)
 
 		// Track recent events per agent for activity pulse (max 10 per agent)
 		events := m.agentRecentEvents[msg.AgentID]
@@ -1908,7 +1913,11 @@ func (m model) dashboardView() string {
 	nodesPanel := m.renderNodesPanel(leftWidth)
 	activityPanel := m.renderActivityPanel(rightWidth)
 	spacer := strings.Repeat(" ", gap)
-	return lipgloss.JoinHorizontal(lipgloss.Top, nodesPanel, spacer, activityPanel)
+	panels := lipgloss.JoinHorizontal(lipgloss.Top, nodesPanel, spacer, activityPanel)
+	if line := m.refreshIndicatorLine(); line != "" {
+		return joinLines([]string{line, "", panels})
+	}
+	return panels
 }
 
 func (m model) auditViewLines() []string {
@@ -2910,6 +2919,7 @@ func (m *model) applyPaletteAction(action paletteAction) tea.Cmd {
 	case "refresh":
 		m.lastUpdated = time.Now()
 		m.stale = false
+		m.refreshingUntil = time.Now().Add(refreshPulseDuration)
 		return staleCheckCmd(m.lastUpdated)
 	case "settings":
 		m.setStatus("Settings panel not wired yet.", statusWarn)
@@ -3011,18 +3021,48 @@ func actionCompleteCmd(action, agent string) tea.Cmd {
 	})
 }
 
+func (m model) refreshIndicatorLine() string {
+	label := "--"
+	if !m.lastUpdated.IsZero() {
+		label = m.lastUpdated.Format("15:04:05")
+	}
+	line := fmt.Sprintf("Refresh: %s", label)
+	if spinner := m.refreshSpinner(); spinner != "" {
+		line = fmt.Sprintf("%s %s", line, spinner)
+	}
+	if m.width > 0 {
+		line = truncateText(line, m.width)
+	}
+	if m.stale {
+		return m.styles.Warning.Render(line + " (stale)")
+	}
+	return m.styles.Muted.Render(line)
+}
+
+func (m model) refreshSpinner() string {
+	if m.refreshingUntil.IsZero() || time.Now().After(m.refreshingUntil) {
+		return ""
+	}
+	return components.Spinner(m.pulseFrame)
+}
+
 func (m model) lastUpdatedLine() string {
 	if m.lastUpdated.IsZero() {
 		return "Last updated: --"
 	}
 	label := m.lastUpdated.Format("15:04:05")
 	if m.stale {
-		label += " (stale)"
+		label += " (stale - press r)"
 	}
 	return fmt.Sprintf("Last updated: %s", label)
 }
 
 func (m model) lastUpdatedView() string {
+	// Show spinner when actively refreshing
+	if spinner := m.refreshSpinner(); spinner != "" {
+		return m.styles.Accent.Render(spinner) + " " + m.styles.Muted.Render("Refreshing...")
+	}
+
 	line := m.lastUpdatedLine()
 	if m.stale {
 		return m.styles.Warning.Render(line)
