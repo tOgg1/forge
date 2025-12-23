@@ -13,6 +13,12 @@
 #   SWARM_INSTALL_CLAUDE      Install Claude Code CLI (default: 0)
 #   SWARM_CLAUDE_VERSION      Claude Code npm version (default: latest)
 #   SWARM_CLAUDE_NPM_PACKAGE  Claude Code npm package (default: @anthropic-ai/claude-code)
+#   SWARM_INSTALL_CODEX       Install Codex CLI (default: 0)
+#   SWARM_CODEX_VERSION       Codex npm version (default: latest)
+#   SWARM_CODEX_NPM_PACKAGE   Codex npm package (default: @openai/codex)
+#   SWARM_INSTALL_GEMINI      Install Gemini CLI (default: 0)
+#   SWARM_GEMINI_VERSION      Gemini npm version (default: latest)
+#   SWARM_GEMINI_NPM_PACKAGE  Gemini npm package (default: @google/gemini-cli)
 #   SWARM_INTERACTIVE         Prompt for configuration (default: 0)
 #   SWARM_SKIP_USER_SETUP     Skip user creation and SSH key setup (default: 0)
 set -euo pipefail
@@ -29,6 +35,12 @@ SWARM_OPENCODE_VERSION="${SWARM_OPENCODE_VERSION:-latest}"
 SWARM_INSTALL_CLAUDE="${SWARM_INSTALL_CLAUDE:-0}"
 SWARM_CLAUDE_VERSION="${SWARM_CLAUDE_VERSION:-latest}"
 SWARM_CLAUDE_NPM_PACKAGE="${SWARM_CLAUDE_NPM_PACKAGE:-@anthropic-ai/claude-code}"
+SWARM_INSTALL_CODEX="${SWARM_INSTALL_CODEX:-0}"
+SWARM_CODEX_VERSION="${SWARM_CODEX_VERSION:-latest}"
+SWARM_CODEX_NPM_PACKAGE="${SWARM_CODEX_NPM_PACKAGE:-@openai/codex}"
+SWARM_INSTALL_GEMINI="${SWARM_INSTALL_GEMINI:-0}"
+SWARM_GEMINI_VERSION="${SWARM_GEMINI_VERSION:-latest}"
+SWARM_GEMINI_NPM_PACKAGE="${SWARM_GEMINI_NPM_PACKAGE:-@google/gemini-cli}"
 SWARM_INTERACTIVE="${SWARM_INTERACTIVE:-0}"
 SWARM_SKIP_USER_SETUP="${SWARM_SKIP_USER_SETUP:-0}"
 
@@ -42,6 +54,12 @@ Options:
   --install-claude       Install Claude Code CLI via npm.
   --no-install-claude    Skip Claude Code install (default).
   --claude-version <v>   Pin Claude Code npm version (default: latest).
+  --install-codex        Install Codex CLI via npm.
+  --no-install-codex     Skip Codex install (default).
+  --codex-version <v>    Pin Codex npm version (default: latest).
+  --install-gemini       Install Gemini CLI via npm.
+  --no-install-gemini    Skip Gemini install (default).
+  --gemini-version <v>   Pin Gemini npm version (default: latest).
   --interactive          Prompt for configuration before running.
   --non-interactive      Do not prompt (default).
   -h, --help             Show this help text.
@@ -72,6 +90,38 @@ parse_args() {
         ;;
       --claude-version=*)
         SWARM_CLAUDE_VERSION="${1#*=}"
+        ;;
+      --install-codex)
+        SWARM_INSTALL_CODEX="1"
+        ;;
+      --no-install-codex)
+        SWARM_INSTALL_CODEX="0"
+        ;;
+      --codex-version)
+        shift
+        if [ "$#" -eq 0 ]; then
+          fail "--codex-version requires a value"
+        fi
+        SWARM_CODEX_VERSION="$1"
+        ;;
+      --codex-version=*)
+        SWARM_CODEX_VERSION="${1#*=}"
+        ;;
+      --install-gemini)
+        SWARM_INSTALL_GEMINI="1"
+        ;;
+      --no-install-gemini)
+        SWARM_INSTALL_GEMINI="0"
+        ;;
+      --gemini-version)
+        shift
+        if [ "$#" -eq 0 ]; then
+          fail "--gemini-version requires a value"
+        fi
+        SWARM_GEMINI_VERSION="$1"
+        ;;
+      --gemini-version=*)
+        SWARM_GEMINI_VERSION="${1#*=}"
         ;;
       --interactive)
         SWARM_INTERACTIVE="1"
@@ -192,6 +242,18 @@ run_interactive() {
     SWARM_INSTALL_CLAUDE="1"
   else
     SWARM_INSTALL_CLAUDE="0"
+  fi
+
+  if prompt_yes_no "Install Codex CLI" "$( [ "$SWARM_INSTALL_CODEX" = "1" ] && echo y || echo n )"; then
+    SWARM_INSTALL_CODEX="1"
+  else
+    SWARM_INSTALL_CODEX="0"
+  fi
+
+  if prompt_yes_no "Install Gemini CLI" "$( [ "$SWARM_INSTALL_GEMINI" = "1" ] && echo y || echo n )"; then
+    SWARM_INSTALL_GEMINI="1"
+  else
+    SWARM_INSTALL_GEMINI="0"
   fi
 
   if prompt_yes_no "Install optional extras (jq, ripgrep, rsync)" "$( [ "$SWARM_INSTALL_EXTRAS" = "1" ] && echo y || echo n )"; then
@@ -401,6 +463,72 @@ install_claude() {
   fi
 }
 
+install_codex() {
+  if [ "$SWARM_INSTALL_CODEX" != "1" ]; then
+    log "skipping Codex install (SWARM_INSTALL_CODEX=$SWARM_INSTALL_CODEX)"
+    return
+  fi
+
+  if command_exists codex; then
+    log "codex already installed"
+    return
+  fi
+
+  if ! command_exists npm; then
+    warn "npm not available; cannot install Codex CLI"
+    return
+  fi
+
+  local pkg="$SWARM_CODEX_NPM_PACKAGE"
+  if [ "$SWARM_CODEX_VERSION" != "latest" ] && [ -n "$SWARM_CODEX_VERSION" ]; then
+    pkg="${pkg}@${SWARM_CODEX_VERSION}"
+  fi
+
+  log "installing Codex CLI via npm ($pkg)"
+  if npm install -g "$pkg"; then
+    log "codex installed"
+  else
+    warn "Codex CLI install failed; try manual install steps"
+  fi
+
+  if ! command_exists codex; then
+    warn "codex not found after install"
+  fi
+}
+
+install_gemini() {
+  if [ "$SWARM_INSTALL_GEMINI" != "1" ]; then
+    log "skipping Gemini install (SWARM_INSTALL_GEMINI=$SWARM_INSTALL_GEMINI)"
+    return
+  fi
+
+  if command_exists gemini; then
+    log "gemini already installed"
+    return
+  fi
+
+  if ! command_exists npm; then
+    warn "npm not available; cannot install Gemini CLI"
+    return
+  fi
+
+  local pkg="$SWARM_GEMINI_NPM_PACKAGE"
+  if [ "$SWARM_GEMINI_VERSION" != "latest" ] && [ -n "$SWARM_GEMINI_VERSION" ]; then
+    pkg="${pkg}@${SWARM_GEMINI_VERSION}"
+  fi
+
+  log "installing Gemini CLI via npm ($pkg)"
+  if npm install -g "$pkg"; then
+    log "gemini installed"
+  else
+    warn "Gemini CLI install failed; try manual install steps"
+  fi
+
+  if ! command_exists gemini; then
+    warn "gemini not found after install"
+  fi
+}
+
 verify_runtime() {
   local label="$1"
   local cmd="$2"
@@ -444,6 +572,12 @@ verify_runtimes() {
   fi
   if [ "$SWARM_INSTALL_CLAUDE" = "1" ]; then
     verify_runtime "claude" "claude" "--version" || failures=1
+  fi
+  if [ "$SWARM_INSTALL_CODEX" = "1" ]; then
+    verify_runtime "codex" "codex" "--version" || failures=1
+  fi
+  if [ "$SWARM_INSTALL_GEMINI" = "1" ]; then
+    verify_runtime "gemini" "gemini" "--version" || failures=1
   fi
 
   if [ "$failures" -ne 0 ]; then
@@ -625,6 +759,8 @@ main() {
   install_dependencies "$manager"
   install_opencode "$manager"
   install_claude
+  install_codex
+  install_gemini
   ensure_user
   ensure_ssh_keys
   configure_shell_defaults
