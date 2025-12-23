@@ -529,6 +529,29 @@ func (c *Client) capturePaneRange(ctx context.Context, target, start, end string
 	return string(stdout), nil
 }
 
+// GetPanePID returns the PID of the process running in the pane.
+func (c *Client) GetPanePID(ctx context.Context, target string) (int, error) {
+	if strings.TrimSpace(target) == "" {
+		return 0, fmt.Errorf("target is required")
+	}
+
+	cmd := fmt.Sprintf("tmux display-message -p -t %s '#{pane_pid}'", escapeArg(target))
+	stdout, _, err := c.exec.Exec(ctx, cmd)
+	if err != nil {
+		return 0, fmt.Errorf("tmux display-message failed: %w", err)
+	}
+
+	raw := strings.TrimSpace(string(stdout))
+	if raw == "" {
+		return 0, fmt.Errorf("pane PID unavailable")
+	}
+	pid, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid pane PID %q: %w", raw, err)
+	}
+	return pid, nil
+}
+
 // KillPane kills a specific pane.
 func (c *Client) KillPane(ctx context.Context, target string) error {
 	if strings.TrimSpace(target) == "" {

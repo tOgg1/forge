@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 
 	swarmdv1 "github.com/opencode-ai/swarm/gen/swarmd/v1"
 	"github.com/opencode-ai/swarm/internal/config"
@@ -28,6 +29,12 @@ type Options struct {
 
 	// GlobalRateLimit sets an optional global rate limit across all methods.
 	GlobalRateLimit *RateLimitConfig
+
+	// ResourceMonitorEnabled enables resource monitoring (default: true).
+	ResourceMonitorEnabled *bool
+
+	// DefaultResourceLimits sets the default resource limits for agents.
+	DefaultResourceLimits *ResourceLimits
 }
 
 // Daemon is the long-running process responsible for node orchestration.
@@ -36,9 +43,10 @@ type Daemon struct {
 	logger zerolog.Logger
 	opts   Options
 
-	server      *Server
-	grpcServer  *grpc.Server
-	rateLimiter *RateLimiter
+	server          *Server
+	grpcServer      *grpc.Server
+	rateLimiter     *RateLimiter
+	resourceMonitor *ResourceMonitor
 }
 
 // New constructs a daemon with the provided configuration.
@@ -83,13 +91,47 @@ func New(cfg *config.Config, logger zerolog.Logger, opts Options) (*Daemon, erro
 		Bool("rate_limiting_enabled", rateLimiter.IsEnabled()).
 		Msg("rate limiter configured")
 
+	// Create resource monitor if enabled (default: enabled)
+	var resourceMonitor *ResourceMonitor
+	resourceMonitorEnabled := opts.ResourceMonitorEnabled == nil || *opts.ResourceMonitorEnabled
+	if resourceMonitorEnabled {
+		rmOpts := []ResourceMonitorOption{
+			WithViolationCallback(func(v ResourceViolation) {
+				// Publish resource violation event
+				server.publishResourceViolation(v)
+			}),
+			WithKillCallback(func(agentID, reason string) {
+				// Kill the agent via the server
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				_, err := server.KillAgent(ctx, &swarmdv1.KillAgentRequest{
+					AgentId: agentID,
+					Force:   true,
+				})
+				if err != nil {
+					logger.Warn().Err(err).Str("agent_id", agentID).Msg("failed to kill agent due to resource violation")
+				}
+			}),
+		}
+		if opts.DefaultResourceLimits != nil {
+			rmOpts = append(rmOpts, WithDefaultLimits(*opts.DefaultResourceLimits))
+		}
+		resourceMonitor = NewResourceMonitor(logger, server, rmOpts...)
+		server.SetResourceMonitor(resourceMonitor)
+
+		logger.Info().
+			Bool("resource_monitoring_enabled", true).
+			Msg("resource monitor configured")
+	}
+
 	return &Daemon{
-		cfg:         cfg,
-		logger:      logger,
-		opts:        opts,
-		server:      server,
-		grpcServer:  grpcServer,
-		rateLimiter: rateLimiter,
+		cfg:             cfg,
+		logger:          logger,
+		opts:            opts,
+		server:          server,
+		grpcServer:      grpcServer,
+		rateLimiter:     rateLimiter,
+		resourceMonitor: resourceMonitor,
 	}, nil
 }
 
@@ -109,6 +151,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 		Str("bind", bindAddr).
 		Str("version", d.opts.Version).
 		Msg("swarmd gRPC server starting")
+
+	// Start resource monitor if configured
+	if d.resourceMonitor != nil {
+		d.resourceMonitor.Start(ctx)
+		defer d.resourceMonitor.Stop()
+	}
 
 	// Start gRPC server in a goroutine
 	errCh := make(chan error, 1)
@@ -148,4 +196,10 @@ func (d *Daemon) Server() *Server {
 // Useful for testing and runtime configuration.
 func (d *Daemon) RateLimiter() *RateLimiter {
 	return d.rateLimiter
+}
+
+// ResourceMonitor returns the resource monitor.
+// Useful for testing and runtime configuration.
+func (d *Daemon) ResourceMonitor() *ResourceMonitor {
+	return d.resourceMonitor
 }

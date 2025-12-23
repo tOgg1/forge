@@ -64,6 +64,9 @@ type agentInfo struct {
 	lastActive  time.Time
 	contentHash string
 
+	// Resource limits configured for this agent
+	resourceLimits *swarmdv1.ResourceLimits
+
 	// Transcript storage
 	transcript     []transcriptEntry
 	transcriptNext int64 // next ID for new entries
@@ -91,6 +94,9 @@ type Server struct {
 
 	// Rate limiter reference for status reporting
 	rateLimiter *RateLimiter
+
+	// Resource monitor for enforcing resource caps
+	resourceMonitor *ResourceMonitor
 }
 
 // ServerOption configures the Server.
@@ -133,6 +139,16 @@ func (s *Server) SetRateLimiter(rl *RateLimiter) {
 // RateLimiter returns the rate limiter, if configured.
 func (s *Server) RateLimiter() *RateLimiter {
 	return s.rateLimiter
+}
+
+// SetResourceMonitor sets the resource monitor reference.
+func (s *Server) SetResourceMonitor(rm *ResourceMonitor) {
+	s.resourceMonitor = rm
+}
+
+// ResourceMonitor returns the resource monitor, if configured.
+func (s *Server) ResourceMonitor() *ResourceMonitor {
+	return s.resourceMonitor
 }
 
 // =============================================================================
@@ -205,18 +221,27 @@ func (s *Server) SpawnAgent(ctx context.Context, req *swarmdv1.SpawnAgentRequest
 		return nil, status.Errorf(codes.Internal, "failed to send command: %v", err)
 	}
 
+	// Get the PID of the process in the pane (after a short delay to let it start)
+	time.Sleep(100 * time.Millisecond)
+	pid, err := s.tmux.GetPanePID(ctx, paneID)
+	if err != nil {
+		s.logger.Warn().Err(err).Str("pane_id", paneID).Msg("failed to get pane PID")
+		// Continue without PID - resource monitoring will be limited
+	}
+
 	now := time.Now()
 	info := &agentInfo{
-		id:          req.AgentId,
-		workspaceID: req.WorkspaceId,
-		paneID:      paneID,
-		command:     req.Command,
-		adapter:     req.Adapter,
-		pid:         0, // We don't know the PID yet
-		state:       swarmdv1.AgentState_AGENT_STATE_STARTING,
-		spawnedAt:   now,
-		lastActive:  now,
-		transcript:  make([]transcriptEntry, 0, 100), // Pre-allocate for efficiency
+		id:             req.AgentId,
+		workspaceID:    req.WorkspaceId,
+		paneID:         paneID,
+		command:        req.Command,
+		adapter:        req.Adapter,
+		pid:            pid,
+		state:          swarmdv1.AgentState_AGENT_STATE_STARTING,
+		spawnedAt:      now,
+		lastActive:     now,
+		resourceLimits: req.ResourceLimits,
+		transcript:     make([]transcriptEntry, 0, 100), // Pre-allocate for efficiency
 	}
 	s.agents[req.AgentId] = info
 
@@ -226,6 +251,15 @@ func (s *Server) SpawnAgent(ctx context.Context, req *swarmdv1.SpawnAgentRequest
 		"adapter":   req.Adapter,
 		"workspace": req.WorkspaceId,
 	})
+
+	// Register agent with resource monitor for tracking
+	if s.resourceMonitor != nil && pid > 0 {
+		var limits *ResourceLimits
+		if req.ResourceLimits != nil {
+			limits = FromProtoLimits(req.ResourceLimits)
+		}
+		s.resourceMonitor.RegisterAgent(req.AgentId, req.WorkspaceId, pid, limits)
+	}
 
 	s.logger.Info().
 		Str("agent_id", req.AgentId).
@@ -294,6 +328,11 @@ func (s *Server) KillAgent(ctx context.Context, req *swarmdv1.KillAgentRequest) 
 	info.state = swarmdv1.AgentState_AGENT_STATE_STOPPED
 	workspaceID := info.workspaceID
 	delete(s.agents, req.AgentId)
+
+	// Unregister agent from resource monitor
+	if s.resourceMonitor != nil {
+		s.resourceMonitor.UnregisterAgent(req.AgentId)
+	}
 
 	s.logger.Info().
 		Str("agent_id", req.AgentId).
@@ -1182,6 +1221,19 @@ func (s *Server) publishPaneContentChanged(agentID, workspaceID, contentHash str
 				ContentHash:  contentHash,
 				LinesChanged: linesChanged,
 			},
+		},
+	})
+}
+
+// publishResourceViolation publishes a resource violation event.
+func (s *Server) publishResourceViolation(v ResourceViolation) {
+	s.publishEvent(&swarmdv1.Event{
+		Type:        swarmdv1.EventType_EVENT_TYPE_RESOURCE_VIOLATION,
+		Timestamp:   timestamppb.Now(),
+		AgentId:     v.AgentID,
+		WorkspaceId: v.WorkspaceID,
+		Payload: &swarmdv1.Event_ResourceViolation{
+			ResourceViolation: v.ToProtoViolationEvent(),
 		},
 	})
 }

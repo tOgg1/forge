@@ -26,6 +26,62 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ResourceLimitAction defines what happens when limits are exceeded.
+type ResourceLimitAction int32
+
+const (
+	ResourceLimitAction_RESOURCE_LIMIT_ACTION_UNSPECIFIED ResourceLimitAction = 0
+	// Log the violation but take no action.
+	ResourceLimitAction_RESOURCE_LIMIT_ACTION_WARN ResourceLimitAction = 1
+	// Throttle the process (SIGSTOP/SIGCONT).
+	ResourceLimitAction_RESOURCE_LIMIT_ACTION_THROTTLE ResourceLimitAction = 2
+	// Kill the process.
+	ResourceLimitAction_RESOURCE_LIMIT_ACTION_KILL ResourceLimitAction = 3
+)
+
+// Enum value maps for ResourceLimitAction.
+var (
+	ResourceLimitAction_name = map[int32]string{
+		0: "RESOURCE_LIMIT_ACTION_UNSPECIFIED",
+		1: "RESOURCE_LIMIT_ACTION_WARN",
+		2: "RESOURCE_LIMIT_ACTION_THROTTLE",
+		3: "RESOURCE_LIMIT_ACTION_KILL",
+	}
+	ResourceLimitAction_value = map[string]int32{
+		"RESOURCE_LIMIT_ACTION_UNSPECIFIED": 0,
+		"RESOURCE_LIMIT_ACTION_WARN":        1,
+		"RESOURCE_LIMIT_ACTION_THROTTLE":    2,
+		"RESOURCE_LIMIT_ACTION_KILL":        3,
+	}
+)
+
+func (x ResourceLimitAction) Enum() *ResourceLimitAction {
+	p := new(ResourceLimitAction)
+	*p = x
+	return p
+}
+
+func (x ResourceLimitAction) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ResourceLimitAction) Descriptor() protoreflect.EnumDescriptor {
+	return file_swarmd_v1_swarmd_proto_enumTypes[0].Descriptor()
+}
+
+func (ResourceLimitAction) Type() protoreflect.EnumType {
+	return &file_swarmd_v1_swarmd_proto_enumTypes[0]
+}
+
+func (x ResourceLimitAction) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ResourceLimitAction.Descriptor instead.
+func (ResourceLimitAction) EnumDescriptor() ([]byte, []int) {
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{0}
+}
+
 type AgentState int32
 
 const (
@@ -77,11 +133,11 @@ func (x AgentState) String() string {
 }
 
 func (AgentState) Descriptor() protoreflect.EnumDescriptor {
-	return file_swarmd_v1_swarmd_proto_enumTypes[0].Descriptor()
+	return file_swarmd_v1_swarmd_proto_enumTypes[1].Descriptor()
 }
 
 func (AgentState) Type() protoreflect.EnumType {
-	return &file_swarmd_v1_swarmd_proto_enumTypes[0]
+	return &file_swarmd_v1_swarmd_proto_enumTypes[1]
 }
 
 func (x AgentState) Number() protoreflect.EnumNumber {
@@ -90,7 +146,7 @@ func (x AgentState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AgentState.Descriptor instead.
 func (AgentState) EnumDescriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{0}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{1}
 }
 
 type EventType int32
@@ -103,6 +159,7 @@ const (
 	EventType_EVENT_TYPE_APPROVAL_RESOLVED    EventType = 4
 	EventType_EVENT_TYPE_ERROR                EventType = 5
 	EventType_EVENT_TYPE_PANE_CONTENT_CHANGED EventType = 6
+	EventType_EVENT_TYPE_RESOURCE_VIOLATION   EventType = 7
 )
 
 // Enum value maps for EventType.
@@ -115,6 +172,7 @@ var (
 		4: "EVENT_TYPE_APPROVAL_RESOLVED",
 		5: "EVENT_TYPE_ERROR",
 		6: "EVENT_TYPE_PANE_CONTENT_CHANGED",
+		7: "EVENT_TYPE_RESOURCE_VIOLATION",
 	}
 	EventType_value = map[string]int32{
 		"EVENT_TYPE_UNSPECIFIED":          0,
@@ -124,6 +182,7 @@ var (
 		"EVENT_TYPE_APPROVAL_RESOLVED":    4,
 		"EVENT_TYPE_ERROR":                5,
 		"EVENT_TYPE_PANE_CONTENT_CHANGED": 6,
+		"EVENT_TYPE_RESOURCE_VIOLATION":   7,
 	}
 )
 
@@ -138,11 +197,11 @@ func (x EventType) String() string {
 }
 
 func (EventType) Descriptor() protoreflect.EnumDescriptor {
-	return file_swarmd_v1_swarmd_proto_enumTypes[1].Descriptor()
+	return file_swarmd_v1_swarmd_proto_enumTypes[2].Descriptor()
 }
 
 func (EventType) Type() protoreflect.EnumType {
-	return &file_swarmd_v1_swarmd_proto_enumTypes[1]
+	return &file_swarmd_v1_swarmd_proto_enumTypes[2]
 }
 
 func (x EventType) Number() protoreflect.EnumNumber {
@@ -151,7 +210,57 @@ func (x EventType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EventType.Descriptor instead.
 func (EventType) EnumDescriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{1}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{2}
+}
+
+// ResourceType identifies the type of resource being monitored.
+type ResourceType int32
+
+const (
+	ResourceType_RESOURCE_TYPE_UNSPECIFIED ResourceType = 0
+	ResourceType_RESOURCE_TYPE_CPU         ResourceType = 1
+	ResourceType_RESOURCE_TYPE_MEMORY      ResourceType = 2
+)
+
+// Enum value maps for ResourceType.
+var (
+	ResourceType_name = map[int32]string{
+		0: "RESOURCE_TYPE_UNSPECIFIED",
+		1: "RESOURCE_TYPE_CPU",
+		2: "RESOURCE_TYPE_MEMORY",
+	}
+	ResourceType_value = map[string]int32{
+		"RESOURCE_TYPE_UNSPECIFIED": 0,
+		"RESOURCE_TYPE_CPU":         1,
+		"RESOURCE_TYPE_MEMORY":      2,
+	}
+)
+
+func (x ResourceType) Enum() *ResourceType {
+	p := new(ResourceType)
+	*p = x
+	return p
+}
+
+func (x ResourceType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ResourceType) Descriptor() protoreflect.EnumDescriptor {
+	return file_swarmd_v1_swarmd_proto_enumTypes[3].Descriptor()
+}
+
+func (ResourceType) Type() protoreflect.EnumType {
+	return &file_swarmd_v1_swarmd_proto_enumTypes[3]
+}
+
+func (x ResourceType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ResourceType.Descriptor instead.
+func (ResourceType) EnumDescriptor() ([]byte, []int) {
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{3}
 }
 
 type TranscriptEntryType int32
@@ -199,11 +308,11 @@ func (x TranscriptEntryType) String() string {
 }
 
 func (TranscriptEntryType) Descriptor() protoreflect.EnumDescriptor {
-	return file_swarmd_v1_swarmd_proto_enumTypes[2].Descriptor()
+	return file_swarmd_v1_swarmd_proto_enumTypes[4].Descriptor()
 }
 
 func (TranscriptEntryType) Type() protoreflect.EnumType {
-	return &file_swarmd_v1_swarmd_proto_enumTypes[2]
+	return &file_swarmd_v1_swarmd_proto_enumTypes[4]
 }
 
 func (x TranscriptEntryType) Number() protoreflect.EnumNumber {
@@ -212,7 +321,7 @@ func (x TranscriptEntryType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TranscriptEntryType.Descriptor instead.
 func (TranscriptEntryType) EnumDescriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{2}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{4}
 }
 
 type Health int32
@@ -251,11 +360,11 @@ func (x Health) String() string {
 }
 
 func (Health) Descriptor() protoreflect.EnumDescriptor {
-	return file_swarmd_v1_swarmd_proto_enumTypes[3].Descriptor()
+	return file_swarmd_v1_swarmd_proto_enumTypes[5].Descriptor()
 }
 
 func (Health) Type() protoreflect.EnumType {
-	return &file_swarmd_v1_swarmd_proto_enumTypes[3]
+	return &file_swarmd_v1_swarmd_proto_enumTypes[5]
 }
 
 func (x Health) Number() protoreflect.EnumNumber {
@@ -264,7 +373,7 @@ func (x Health) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Health.Descriptor instead.
 func (Health) EnumDescriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{3}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{5}
 }
 
 type SpawnAgentRequest struct {
@@ -284,9 +393,11 @@ type SpawnAgentRequest struct {
 	// Tmux session name (defaults to workspace-based naming).
 	SessionName string `protobuf:"bytes,7,opt,name=session_name,json=sessionName,proto3" json:"session_name,omitempty"`
 	// Adapter type hint (e.g., "opencode", "claude_code", "codex").
-	Adapter       string `protobuf:"bytes,8,opt,name=adapter,proto3" json:"adapter,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Adapter string `protobuf:"bytes,8,opt,name=adapter,proto3" json:"adapter,omitempty"`
+	// Resource limits for the agent (optional).
+	ResourceLimits *ResourceLimits `protobuf:"bytes,9,opt,name=resource_limits,json=resourceLimits,proto3" json:"resource_limits,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SpawnAgentRequest) Reset() {
@@ -375,6 +486,96 @@ func (x *SpawnAgentRequest) GetAdapter() string {
 	return ""
 }
 
+func (x *SpawnAgentRequest) GetResourceLimits() *ResourceLimits {
+	if x != nil {
+		return x.ResourceLimits
+	}
+	return nil
+}
+
+// ResourceLimits defines resource constraints for an agent.
+type ResourceLimits struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Maximum CPU usage as percentage (0-100 per core, 0 = no limit).
+	// e.g., 100 = 1 core, 200 = 2 cores.
+	MaxCpuPercent float64 `protobuf:"fixed64,1,opt,name=max_cpu_percent,json=maxCpuPercent,proto3" json:"max_cpu_percent,omitempty"`
+	// Maximum memory usage in bytes (0 = no limit).
+	MaxMemoryBytes int64 `protobuf:"varint,2,opt,name=max_memory_bytes,json=maxMemoryBytes,proto3" json:"max_memory_bytes,omitempty"`
+	// Action to take when limits are exceeded.
+	Action ResourceLimitAction `protobuf:"varint,3,opt,name=action,proto3,enum=swarmd.v1.ResourceLimitAction" json:"action,omitempty"`
+	// Grace period before taking action on violation.
+	GracePeriod *durationpb.Duration `protobuf:"bytes,4,opt,name=grace_period,json=gracePeriod,proto3" json:"grace_period,omitempty"`
+	// Number of consecutive violations before action.
+	ViolationThreshold int32 `protobuf:"varint,5,opt,name=violation_threshold,json=violationThreshold,proto3" json:"violation_threshold,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ResourceLimits) Reset() {
+	*x = ResourceLimits{}
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResourceLimits) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResourceLimits) ProtoMessage() {}
+
+func (x *ResourceLimits) ProtoReflect() protoreflect.Message {
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResourceLimits.ProtoReflect.Descriptor instead.
+func (*ResourceLimits) Descriptor() ([]byte, []int) {
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ResourceLimits) GetMaxCpuPercent() float64 {
+	if x != nil {
+		return x.MaxCpuPercent
+	}
+	return 0
+}
+
+func (x *ResourceLimits) GetMaxMemoryBytes() int64 {
+	if x != nil {
+		return x.MaxMemoryBytes
+	}
+	return 0
+}
+
+func (x *ResourceLimits) GetAction() ResourceLimitAction {
+	if x != nil {
+		return x.Action
+	}
+	return ResourceLimitAction_RESOURCE_LIMIT_ACTION_UNSPECIFIED
+}
+
+func (x *ResourceLimits) GetGracePeriod() *durationpb.Duration {
+	if x != nil {
+		return x.GracePeriod
+	}
+	return nil
+}
+
+func (x *ResourceLimits) GetViolationThreshold() int32 {
+	if x != nil {
+		return x.ViolationThreshold
+	}
+	return 0
+}
+
 type SpawnAgentResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The spawned agent details.
@@ -387,7 +588,7 @@ type SpawnAgentResponse struct {
 
 func (x *SpawnAgentResponse) Reset() {
 	*x = SpawnAgentResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[1]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -399,7 +600,7 @@ func (x *SpawnAgentResponse) String() string {
 func (*SpawnAgentResponse) ProtoMessage() {}
 
 func (x *SpawnAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[1]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -412,7 +613,7 @@ func (x *SpawnAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpawnAgentResponse.ProtoReflect.Descriptor instead.
 func (*SpawnAgentResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{1}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SpawnAgentResponse) GetAgent() *Agent {
@@ -443,7 +644,7 @@ type KillAgentRequest struct {
 
 func (x *KillAgentRequest) Reset() {
 	*x = KillAgentRequest{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[2]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -455,7 +656,7 @@ func (x *KillAgentRequest) String() string {
 func (*KillAgentRequest) ProtoMessage() {}
 
 func (x *KillAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[2]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -468,7 +669,7 @@ func (x *KillAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillAgentRequest.ProtoReflect.Descriptor instead.
 func (*KillAgentRequest) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{2}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *KillAgentRequest) GetAgentId() string {
@@ -502,7 +703,7 @@ type KillAgentResponse struct {
 
 func (x *KillAgentResponse) Reset() {
 	*x = KillAgentResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[3]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -514,7 +715,7 @@ func (x *KillAgentResponse) String() string {
 func (*KillAgentResponse) ProtoMessage() {}
 
 func (x *KillAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[3]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -527,7 +728,7 @@ func (x *KillAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillAgentResponse.ProtoReflect.Descriptor instead.
 func (*KillAgentResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{3}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *KillAgentResponse) GetSuccess() bool {
@@ -553,7 +754,7 @@ type SendInputRequest struct {
 
 func (x *SendInputRequest) Reset() {
 	*x = SendInputRequest{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[4]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -565,7 +766,7 @@ func (x *SendInputRequest) String() string {
 func (*SendInputRequest) ProtoMessage() {}
 
 func (x *SendInputRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[4]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -578,7 +779,7 @@ func (x *SendInputRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendInputRequest.ProtoReflect.Descriptor instead.
 func (*SendInputRequest) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{4}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SendInputRequest) GetAgentId() string {
@@ -619,7 +820,7 @@ type SendInputResponse struct {
 
 func (x *SendInputResponse) Reset() {
 	*x = SendInputResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[5]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -631,7 +832,7 @@ func (x *SendInputResponse) String() string {
 func (*SendInputResponse) ProtoMessage() {}
 
 func (x *SendInputResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[5]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -644,7 +845,7 @@ func (x *SendInputResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendInputResponse.ProtoReflect.Descriptor instead.
 func (*SendInputResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{5}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SendInputResponse) GetSuccess() bool {
@@ -666,7 +867,7 @@ type ListAgentsRequest struct {
 
 func (x *ListAgentsRequest) Reset() {
 	*x = ListAgentsRequest{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[6]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -678,7 +879,7 @@ func (x *ListAgentsRequest) String() string {
 func (*ListAgentsRequest) ProtoMessage() {}
 
 func (x *ListAgentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[6]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -691,7 +892,7 @@ func (x *ListAgentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentsRequest.ProtoReflect.Descriptor instead.
 func (*ListAgentsRequest) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{6}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListAgentsRequest) GetWorkspaceId() string {
@@ -717,7 +918,7 @@ type ListAgentsResponse struct {
 
 func (x *ListAgentsResponse) Reset() {
 	*x = ListAgentsResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[7]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -729,7 +930,7 @@ func (x *ListAgentsResponse) String() string {
 func (*ListAgentsResponse) ProtoMessage() {}
 
 func (x *ListAgentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[7]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -742,7 +943,7 @@ func (x *ListAgentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentsResponse.ProtoReflect.Descriptor instead.
 func (*ListAgentsResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{7}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListAgentsResponse) GetAgents() []*Agent {
@@ -761,7 +962,7 @@ type GetAgentRequest struct {
 
 func (x *GetAgentRequest) Reset() {
 	*x = GetAgentRequest{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[8]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -773,7 +974,7 @@ func (x *GetAgentRequest) String() string {
 func (*GetAgentRequest) ProtoMessage() {}
 
 func (x *GetAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[8]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -786,7 +987,7 @@ func (x *GetAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentRequest.ProtoReflect.Descriptor instead.
 func (*GetAgentRequest) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{8}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetAgentRequest) GetAgentId() string {
@@ -805,7 +1006,7 @@ type GetAgentResponse struct {
 
 func (x *GetAgentResponse) Reset() {
 	*x = GetAgentResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[9]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -817,7 +1018,7 @@ func (x *GetAgentResponse) String() string {
 func (*GetAgentResponse) ProtoMessage() {}
 
 func (x *GetAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[9]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -830,7 +1031,7 @@ func (x *GetAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentResponse.ProtoReflect.Descriptor instead.
 func (*GetAgentResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{9}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetAgentResponse) GetAgent() *Agent {
@@ -861,14 +1062,18 @@ type Agent struct {
 	// Last activity timestamp.
 	LastActivityAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_activity_at,json=lastActivityAt,proto3" json:"last_activity_at,omitempty"`
 	// Current pane content hash (for change detection).
-	ContentHash   string `protobuf:"bytes,10,opt,name=content_hash,json=contentHash,proto3" json:"content_hash,omitempty"`
+	ContentHash string `protobuf:"bytes,10,opt,name=content_hash,json=contentHash,proto3" json:"content_hash,omitempty"`
+	// Configured resource limits for this agent.
+	ResourceLimits *ResourceLimits `protobuf:"bytes,11,opt,name=resource_limits,json=resourceLimits,proto3" json:"resource_limits,omitempty"`
+	// Current resource usage.
+	ResourceUsage *AgentResourceUsage `protobuf:"bytes,12,opt,name=resource_usage,json=resourceUsage,proto3" json:"resource_usage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Agent) Reset() {
 	*x = Agent{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[10]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -880,7 +1085,7 @@ func (x *Agent) String() string {
 func (*Agent) ProtoMessage() {}
 
 func (x *Agent) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[10]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -893,7 +1098,7 @@ func (x *Agent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Agent.ProtoReflect.Descriptor instead.
 func (*Agent) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{10}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Agent) GetId() string {
@@ -966,6 +1171,102 @@ func (x *Agent) GetContentHash() string {
 	return ""
 }
 
+func (x *Agent) GetResourceLimits() *ResourceLimits {
+	if x != nil {
+		return x.ResourceLimits
+	}
+	return nil
+}
+
+func (x *Agent) GetResourceUsage() *AgentResourceUsage {
+	if x != nil {
+		return x.ResourceUsage
+	}
+	return nil
+}
+
+// AgentResourceUsage tracks current resource consumption of an agent.
+type AgentResourceUsage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Current CPU usage percentage.
+	CpuPercent float64 `protobuf:"fixed64,1,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
+	// Current memory usage in bytes.
+	MemoryBytes int64 `protobuf:"varint,2,opt,name=memory_bytes,json=memoryBytes,proto3" json:"memory_bytes,omitempty"`
+	// Peak memory usage since spawn.
+	PeakMemoryBytes int64 `protobuf:"varint,3,opt,name=peak_memory_bytes,json=peakMemoryBytes,proto3" json:"peak_memory_bytes,omitempty"`
+	// Number of resource limit violations.
+	ViolationCount int32 `protobuf:"varint,4,opt,name=violation_count,json=violationCount,proto3" json:"violation_count,omitempty"`
+	// Last measurement timestamp.
+	MeasuredAt    *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=measured_at,json=measuredAt,proto3" json:"measured_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentResourceUsage) Reset() {
+	*x = AgentResourceUsage{}
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentResourceUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentResourceUsage) ProtoMessage() {}
+
+func (x *AgentResourceUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentResourceUsage.ProtoReflect.Descriptor instead.
+func (*AgentResourceUsage) Descriptor() ([]byte, []int) {
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *AgentResourceUsage) GetCpuPercent() float64 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *AgentResourceUsage) GetMemoryBytes() int64 {
+	if x != nil {
+		return x.MemoryBytes
+	}
+	return 0
+}
+
+func (x *AgentResourceUsage) GetPeakMemoryBytes() int64 {
+	if x != nil {
+		return x.PeakMemoryBytes
+	}
+	return 0
+}
+
+func (x *AgentResourceUsage) GetViolationCount() int32 {
+	if x != nil {
+		return x.ViolationCount
+	}
+	return 0
+}
+
+func (x *AgentResourceUsage) GetMeasuredAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.MeasuredAt
+	}
+	return nil
+}
+
 type CapturePaneRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Agent whose pane to capture.
@@ -980,7 +1281,7 @@ type CapturePaneRequest struct {
 
 func (x *CapturePaneRequest) Reset() {
 	*x = CapturePaneRequest{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[11]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -992,7 +1293,7 @@ func (x *CapturePaneRequest) String() string {
 func (*CapturePaneRequest) ProtoMessage() {}
 
 func (x *CapturePaneRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[11]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1005,7 +1306,7 @@ func (x *CapturePaneRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapturePaneRequest.ProtoReflect.Descriptor instead.
 func (*CapturePaneRequest) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{11}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CapturePaneRequest) GetAgentId() string {
@@ -1049,7 +1350,7 @@ type CapturePaneResponse struct {
 
 func (x *CapturePaneResponse) Reset() {
 	*x = CapturePaneResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[12]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1061,7 +1362,7 @@ func (x *CapturePaneResponse) String() string {
 func (*CapturePaneResponse) ProtoMessage() {}
 
 func (x *CapturePaneResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[12]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1074,7 +1375,7 @@ func (x *CapturePaneResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapturePaneResponse.ProtoReflect.Descriptor instead.
 func (*CapturePaneResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{12}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *CapturePaneResponse) GetContent() string {
@@ -1142,7 +1443,7 @@ type StreamPaneUpdatesRequest struct {
 
 func (x *StreamPaneUpdatesRequest) Reset() {
 	*x = StreamPaneUpdatesRequest{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[13]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1154,7 +1455,7 @@ func (x *StreamPaneUpdatesRequest) String() string {
 func (*StreamPaneUpdatesRequest) ProtoMessage() {}
 
 func (x *StreamPaneUpdatesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[13]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1167,7 +1468,7 @@ func (x *StreamPaneUpdatesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamPaneUpdatesRequest.ProtoReflect.Descriptor instead.
 func (*StreamPaneUpdatesRequest) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{13}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *StreamPaneUpdatesRequest) GetAgentId() string {
@@ -1218,7 +1519,7 @@ type StreamPaneUpdatesResponse struct {
 
 func (x *StreamPaneUpdatesResponse) Reset() {
 	*x = StreamPaneUpdatesResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[14]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1230,7 +1531,7 @@ func (x *StreamPaneUpdatesResponse) String() string {
 func (*StreamPaneUpdatesResponse) ProtoMessage() {}
 
 func (x *StreamPaneUpdatesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[14]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1243,7 +1544,7 @@ func (x *StreamPaneUpdatesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamPaneUpdatesResponse.ProtoReflect.Descriptor instead.
 func (*StreamPaneUpdatesResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{14}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *StreamPaneUpdatesResponse) GetAgentId() string {
@@ -1304,7 +1605,7 @@ type StreamEventsRequest struct {
 
 func (x *StreamEventsRequest) Reset() {
 	*x = StreamEventsRequest{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[15]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1316,7 +1617,7 @@ func (x *StreamEventsRequest) String() string {
 func (*StreamEventsRequest) ProtoMessage() {}
 
 func (x *StreamEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[15]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1329,7 +1630,7 @@ func (x *StreamEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamEventsRequest.ProtoReflect.Descriptor instead.
 func (*StreamEventsRequest) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{15}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *StreamEventsRequest) GetCursor() string {
@@ -1370,7 +1671,7 @@ type StreamEventsResponse struct {
 
 func (x *StreamEventsResponse) Reset() {
 	*x = StreamEventsResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[16]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1382,7 +1683,7 @@ func (x *StreamEventsResponse) String() string {
 func (*StreamEventsResponse) ProtoMessage() {}
 
 func (x *StreamEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[16]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1395,7 +1696,7 @@ func (x *StreamEventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamEventsResponse.ProtoReflect.Descriptor instead.
 func (*StreamEventsResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{16}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *StreamEventsResponse) GetEvent() *Event {
@@ -1427,6 +1728,7 @@ type Event struct {
 	//	*Event_ApprovalResolved
 	//	*Event_Error
 	//	*Event_PaneContentChanged
+	//	*Event_ResourceViolation
 	Payload       isEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1434,7 +1736,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[17]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1446,7 +1748,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[17]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1459,7 +1761,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{17}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *Event) GetId() string {
@@ -1558,6 +1860,15 @@ func (x *Event) GetPaneContentChanged() *PaneContentChangedEvent {
 	return nil
 }
 
+func (x *Event) GetResourceViolation() *ResourceViolationEvent {
+	if x != nil {
+		if x, ok := x.Payload.(*Event_ResourceViolation); ok {
+			return x.ResourceViolation
+		}
+	}
+	return nil
+}
+
 type isEvent_Payload interface {
 	isEvent_Payload()
 }
@@ -1586,6 +1897,10 @@ type Event_PaneContentChanged struct {
 	PaneContentChanged *PaneContentChangedEvent `protobuf:"bytes,15,opt,name=pane_content_changed,json=paneContentChanged,proto3,oneof"`
 }
 
+type Event_ResourceViolation struct {
+	ResourceViolation *ResourceViolationEvent `protobuf:"bytes,16,opt,name=resource_violation,json=resourceViolation,proto3,oneof"`
+}
+
 func (*Event_AgentStateChanged) isEvent_Payload() {}
 
 func (*Event_AgentOutput) isEvent_Payload() {}
@@ -1598,6 +1913,8 @@ func (*Event_Error) isEvent_Payload() {}
 
 func (*Event_PaneContentChanged) isEvent_Payload() {}
 
+func (*Event_ResourceViolation) isEvent_Payload() {}
+
 type AgentStateChangedEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PreviousState AgentState             `protobuf:"varint,1,opt,name=previous_state,json=previousState,proto3,enum=swarmd.v1.AgentState" json:"previous_state,omitempty"`
@@ -1609,7 +1926,7 @@ type AgentStateChangedEvent struct {
 
 func (x *AgentStateChangedEvent) Reset() {
 	*x = AgentStateChangedEvent{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[18]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1621,7 +1938,7 @@ func (x *AgentStateChangedEvent) String() string {
 func (*AgentStateChangedEvent) ProtoMessage() {}
 
 func (x *AgentStateChangedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[18]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1634,7 +1951,7 @@ func (x *AgentStateChangedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStateChangedEvent.ProtoReflect.Descriptor instead.
 func (*AgentStateChangedEvent) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{18}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *AgentStateChangedEvent) GetPreviousState() AgentState {
@@ -1670,7 +1987,7 @@ type AgentOutputEvent struct {
 
 func (x *AgentOutputEvent) Reset() {
 	*x = AgentOutputEvent{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[19]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1682,7 +1999,7 @@ func (x *AgentOutputEvent) String() string {
 func (*AgentOutputEvent) ProtoMessage() {}
 
 func (x *AgentOutputEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[19]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1695,7 +2012,7 @@ func (x *AgentOutputEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentOutputEvent.ProtoReflect.Descriptor instead.
 func (*AgentOutputEvent) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{19}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *AgentOutputEvent) GetText() string {
@@ -1728,7 +2045,7 @@ type ApprovalRequestedEvent struct {
 
 func (x *ApprovalRequestedEvent) Reset() {
 	*x = ApprovalRequestedEvent{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[20]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1740,7 +2057,7 @@ func (x *ApprovalRequestedEvent) String() string {
 func (*ApprovalRequestedEvent) ProtoMessage() {}
 
 func (x *ApprovalRequestedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[20]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1753,7 +2070,7 @@ func (x *ApprovalRequestedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovalRequestedEvent.ProtoReflect.Descriptor instead.
 func (*ApprovalRequestedEvent) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{20}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ApprovalRequestedEvent) GetApprovalId() string {
@@ -1798,7 +2115,7 @@ type ApprovalResolvedEvent struct {
 
 func (x *ApprovalResolvedEvent) Reset() {
 	*x = ApprovalResolvedEvent{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[21]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1810,7 +2127,7 @@ func (x *ApprovalResolvedEvent) String() string {
 func (*ApprovalResolvedEvent) ProtoMessage() {}
 
 func (x *ApprovalResolvedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[21]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1823,7 +2140,7 @@ func (x *ApprovalResolvedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovalResolvedEvent.ProtoReflect.Descriptor instead.
 func (*ApprovalResolvedEvent) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{21}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ApprovalResolvedEvent) GetApprovalId() string {
@@ -1861,7 +2178,7 @@ type ErrorEvent struct {
 
 func (x *ErrorEvent) Reset() {
 	*x = ErrorEvent{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[22]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1873,7 +2190,7 @@ func (x *ErrorEvent) String() string {
 func (*ErrorEvent) ProtoMessage() {}
 
 func (x *ErrorEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[22]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1886,7 +2203,7 @@ func (x *ErrorEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorEvent.ProtoReflect.Descriptor instead.
 func (*ErrorEvent) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{22}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ErrorEvent) GetCode() string {
@@ -1910,6 +2227,88 @@ func (x *ErrorEvent) GetRecoverable() bool {
 	return false
 }
 
+// ResourceViolationEvent is emitted when an agent exceeds resource limits.
+type ResourceViolationEvent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Type of resource violated.
+	ResourceType ResourceType `protobuf:"varint,1,opt,name=resource_type,json=resourceType,proto3,enum=swarmd.v1.ResourceType" json:"resource_type,omitempty"`
+	// Current value.
+	CurrentValue float64 `protobuf:"fixed64,2,opt,name=current_value,json=currentValue,proto3" json:"current_value,omitempty"`
+	// Limit value.
+	LimitValue float64 `protobuf:"fixed64,3,opt,name=limit_value,json=limitValue,proto3" json:"limit_value,omitempty"`
+	// Number of consecutive violations.
+	ViolationCount int32 `protobuf:"varint,4,opt,name=violation_count,json=violationCount,proto3" json:"violation_count,omitempty"`
+	// Action taken in response.
+	ActionTaken   ResourceLimitAction `protobuf:"varint,5,opt,name=action_taken,json=actionTaken,proto3,enum=swarmd.v1.ResourceLimitAction" json:"action_taken,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResourceViolationEvent) Reset() {
+	*x = ResourceViolationEvent{}
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResourceViolationEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResourceViolationEvent) ProtoMessage() {}
+
+func (x *ResourceViolationEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResourceViolationEvent.ProtoReflect.Descriptor instead.
+func (*ResourceViolationEvent) Descriptor() ([]byte, []int) {
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *ResourceViolationEvent) GetResourceType() ResourceType {
+	if x != nil {
+		return x.ResourceType
+	}
+	return ResourceType_RESOURCE_TYPE_UNSPECIFIED
+}
+
+func (x *ResourceViolationEvent) GetCurrentValue() float64 {
+	if x != nil {
+		return x.CurrentValue
+	}
+	return 0
+}
+
+func (x *ResourceViolationEvent) GetLimitValue() float64 {
+	if x != nil {
+		return x.LimitValue
+	}
+	return 0
+}
+
+func (x *ResourceViolationEvent) GetViolationCount() int32 {
+	if x != nil {
+		return x.ViolationCount
+	}
+	return 0
+}
+
+func (x *ResourceViolationEvent) GetActionTaken() ResourceLimitAction {
+	if x != nil {
+		return x.ActionTaken
+	}
+	return ResourceLimitAction_RESOURCE_LIMIT_ACTION_UNSPECIFIED
+}
+
 type PaneContentChangedEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// New content hash.
@@ -1922,7 +2321,7 @@ type PaneContentChangedEvent struct {
 
 func (x *PaneContentChangedEvent) Reset() {
 	*x = PaneContentChangedEvent{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[23]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1934,7 +2333,7 @@ func (x *PaneContentChangedEvent) String() string {
 func (*PaneContentChangedEvent) ProtoMessage() {}
 
 func (x *PaneContentChangedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[23]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1947,7 +2346,7 @@ func (x *PaneContentChangedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PaneContentChangedEvent.ProtoReflect.Descriptor instead.
 func (*PaneContentChangedEvent) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{23}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *PaneContentChangedEvent) GetContentHash() string {
@@ -1980,7 +2379,7 @@ type GetTranscriptRequest struct {
 
 func (x *GetTranscriptRequest) Reset() {
 	*x = GetTranscriptRequest{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[24]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1992,7 +2391,7 @@ func (x *GetTranscriptRequest) String() string {
 func (*GetTranscriptRequest) ProtoMessage() {}
 
 func (x *GetTranscriptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[24]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2005,7 +2404,7 @@ func (x *GetTranscriptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTranscriptRequest.ProtoReflect.Descriptor instead.
 func (*GetTranscriptRequest) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{24}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *GetTranscriptRequest) GetAgentId() string {
@@ -2052,7 +2451,7 @@ type GetTranscriptResponse struct {
 
 func (x *GetTranscriptResponse) Reset() {
 	*x = GetTranscriptResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[25]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2064,7 +2463,7 @@ func (x *GetTranscriptResponse) String() string {
 func (*GetTranscriptResponse) ProtoMessage() {}
 
 func (x *GetTranscriptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[25]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2077,7 +2476,7 @@ func (x *GetTranscriptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTranscriptResponse.ProtoReflect.Descriptor instead.
 func (*GetTranscriptResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{25}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *GetTranscriptResponse) GetAgentId() string {
@@ -2124,7 +2523,7 @@ type TranscriptEntry struct {
 
 func (x *TranscriptEntry) Reset() {
 	*x = TranscriptEntry{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[26]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2136,7 +2535,7 @@ func (x *TranscriptEntry) String() string {
 func (*TranscriptEntry) ProtoMessage() {}
 
 func (x *TranscriptEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[26]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2149,7 +2548,7 @@ func (x *TranscriptEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TranscriptEntry.ProtoReflect.Descriptor instead.
 func (*TranscriptEntry) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{26}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *TranscriptEntry) GetTimestamp() *timestamppb.Timestamp {
@@ -2192,7 +2591,7 @@ type StreamTranscriptRequest struct {
 
 func (x *StreamTranscriptRequest) Reset() {
 	*x = StreamTranscriptRequest{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[27]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2204,7 +2603,7 @@ func (x *StreamTranscriptRequest) String() string {
 func (*StreamTranscriptRequest) ProtoMessage() {}
 
 func (x *StreamTranscriptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[27]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2217,7 +2616,7 @@ func (x *StreamTranscriptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamTranscriptRequest.ProtoReflect.Descriptor instead.
 func (*StreamTranscriptRequest) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{27}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *StreamTranscriptRequest) GetAgentId() string {
@@ -2246,7 +2645,7 @@ type StreamTranscriptResponse struct {
 
 func (x *StreamTranscriptResponse) Reset() {
 	*x = StreamTranscriptResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[28]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2258,7 +2657,7 @@ func (x *StreamTranscriptResponse) String() string {
 func (*StreamTranscriptResponse) ProtoMessage() {}
 
 func (x *StreamTranscriptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[28]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2271,7 +2670,7 @@ func (x *StreamTranscriptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamTranscriptResponse.ProtoReflect.Descriptor instead.
 func (*StreamTranscriptResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{28}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *StreamTranscriptResponse) GetEntries() []*TranscriptEntry {
@@ -2296,7 +2695,7 @@ type GetStatusRequest struct {
 
 func (x *GetStatusRequest) Reset() {
 	*x = GetStatusRequest{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[29]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2308,7 +2707,7 @@ func (x *GetStatusRequest) String() string {
 func (*GetStatusRequest) ProtoMessage() {}
 
 func (x *GetStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[29]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2321,7 +2720,7 @@ func (x *GetStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetStatusRequest) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{29}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{32}
 }
 
 type GetStatusResponse struct {
@@ -2334,7 +2733,7 @@ type GetStatusResponse struct {
 
 func (x *GetStatusResponse) Reset() {
 	*x = GetStatusResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[30]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2346,7 +2745,7 @@ func (x *GetStatusResponse) String() string {
 func (*GetStatusResponse) ProtoMessage() {}
 
 func (x *GetStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[30]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2359,7 +2758,7 @@ func (x *GetStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetStatusResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{30}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *GetStatusResponse) GetStatus() *DaemonStatus {
@@ -2391,7 +2790,7 @@ type DaemonStatus struct {
 
 func (x *DaemonStatus) Reset() {
 	*x = DaemonStatus{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[31]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2403,7 +2802,7 @@ func (x *DaemonStatus) String() string {
 func (*DaemonStatus) ProtoMessage() {}
 
 func (x *DaemonStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[31]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2416,7 +2815,7 @@ func (x *DaemonStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonStatus.ProtoReflect.Descriptor instead.
 func (*DaemonStatus) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{31}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *DaemonStatus) GetVersion() string {
@@ -2484,7 +2883,7 @@ type ResourceUsage struct {
 
 func (x *ResourceUsage) Reset() {
 	*x = ResourceUsage{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[32]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2496,7 +2895,7 @@ func (x *ResourceUsage) String() string {
 func (*ResourceUsage) ProtoMessage() {}
 
 func (x *ResourceUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[32]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2509,7 +2908,7 @@ func (x *ResourceUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceUsage.ProtoReflect.Descriptor instead.
 func (*ResourceUsage) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{32}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ResourceUsage) GetCpuPercent() float64 {
@@ -2552,7 +2951,7 @@ type HealthStatus struct {
 
 func (x *HealthStatus) Reset() {
 	*x = HealthStatus{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[33]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2564,7 +2963,7 @@ func (x *HealthStatus) String() string {
 func (*HealthStatus) ProtoMessage() {}
 
 func (x *HealthStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[33]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2577,7 +2976,7 @@ func (x *HealthStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthStatus.ProtoReflect.Descriptor instead.
 func (*HealthStatus) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{33}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *HealthStatus) GetHealth() Health {
@@ -2610,7 +3009,7 @@ type HealthCheck struct {
 
 func (x *HealthCheck) Reset() {
 	*x = HealthCheck{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[34]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2622,7 +3021,7 @@ func (x *HealthCheck) String() string {
 func (*HealthCheck) ProtoMessage() {}
 
 func (x *HealthCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[34]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2635,7 +3034,7 @@ func (x *HealthCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheck.ProtoReflect.Descriptor instead.
 func (*HealthCheck) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{34}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *HealthCheck) GetName() string {
@@ -2674,7 +3073,7 @@ type PingRequest struct {
 
 func (x *PingRequest) Reset() {
 	*x = PingRequest{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[35]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2686,7 +3085,7 @@ func (x *PingRequest) String() string {
 func (*PingRequest) ProtoMessage() {}
 
 func (x *PingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[35]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2699,7 +3098,7 @@ func (x *PingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingRequest.ProtoReflect.Descriptor instead.
 func (*PingRequest) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{35}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{38}
 }
 
 type PingResponse struct {
@@ -2714,7 +3113,7 @@ type PingResponse struct {
 
 func (x *PingResponse) Reset() {
 	*x = PingResponse{}
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[36]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2726,7 +3125,7 @@ func (x *PingResponse) String() string {
 func (*PingResponse) ProtoMessage() {}
 
 func (x *PingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmd_v1_swarmd_proto_msgTypes[36]
+	mi := &file_swarmd_v1_swarmd_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2739,7 +3138,7 @@ func (x *PingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingResponse.ProtoReflect.Descriptor instead.
 func (*PingResponse) Descriptor() ([]byte, []int) {
-	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{36}
+	return file_swarmd_v1_swarmd_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *PingResponse) GetTimestamp() *timestamppb.Timestamp {
@@ -2760,7 +3159,7 @@ var File_swarmd_v1_swarmd_proto protoreflect.FileDescriptor
 
 const file_swarmd_v1_swarmd_proto_rawDesc = "" +
 	"\n" +
-	"\x16swarmd/v1/swarmd.proto\x12\tswarmd.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/duration.proto\"\xce\x02\n" +
+	"\x16swarmd/v1/swarmd.proto\x12\tswarmd.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/duration.proto\"\x92\x03\n" +
 	"\x11SpawnAgentRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x18\n" +
@@ -2770,10 +3169,17 @@ const file_swarmd_v1_swarmd_proto_rawDesc = "" +
 	"\vworking_dir\x18\x06 \x01(\tR\n" +
 	"workingDir\x12!\n" +
 	"\fsession_name\x18\a \x01(\tR\vsessionName\x12\x18\n" +
-	"\aadapter\x18\b \x01(\tR\aadapter\x1a6\n" +
+	"\aadapter\x18\b \x01(\tR\aadapter\x12B\n" +
+	"\x0fresource_limits\x18\t \x01(\v2\x19.swarmd.v1.ResourceLimitsR\x0eresourceLimits\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"U\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x89\x02\n" +
+	"\x0eResourceLimits\x12&\n" +
+	"\x0fmax_cpu_percent\x18\x01 \x01(\x01R\rmaxCpuPercent\x12(\n" +
+	"\x10max_memory_bytes\x18\x02 \x01(\x03R\x0emaxMemoryBytes\x126\n" +
+	"\x06action\x18\x03 \x01(\x0e2\x1e.swarmd.v1.ResourceLimitActionR\x06action\x12<\n" +
+	"\fgrace_period\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\vgracePeriod\x12/\n" +
+	"\x13violation_threshold\x18\x05 \x01(\x05R\x12violationThreshold\"U\n" +
 	"\x12SpawnAgentResponse\x12&\n" +
 	"\x05agent\x18\x01 \x01(\v2\x10.swarmd.v1.AgentR\x05agent\x12\x17\n" +
 	"\apane_id\x18\x02 \x01(\tR\x06paneId\"\x81\x01\n" +
@@ -2799,7 +3205,7 @@ const file_swarmd_v1_swarmd_proto_rawDesc = "" +
 	"\x0fGetAgentRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\":\n" +
 	"\x10GetAgentResponse\x12&\n" +
-	"\x05agent\x18\x01 \x01(\v2\x10.swarmd.v1.AgentR\x05agent\"\xea\x02\n" +
+	"\x05agent\x18\x01 \x01(\v2\x10.swarmd.v1.AgentR\x05agent\"\xf4\x03\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12+\n" +
@@ -2812,7 +3218,17 @@ const file_swarmd_v1_swarmd_proto_rawDesc = "" +
 	"spawned_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tspawnedAt\x12D\n" +
 	"\x10last_activity_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x0elastActivityAt\x12!\n" +
 	"\fcontent_hash\x18\n" +
-	" \x01(\tR\vcontentHash\"\x7f\n" +
+	" \x01(\tR\vcontentHash\x12B\n" +
+	"\x0fresource_limits\x18\v \x01(\v2\x19.swarmd.v1.ResourceLimitsR\x0eresourceLimits\x12D\n" +
+	"\x0eresource_usage\x18\f \x01(\v2\x1d.swarmd.v1.AgentResourceUsageR\rresourceUsage\"\xea\x01\n" +
+	"\x12AgentResourceUsage\x12\x1f\n" +
+	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
+	"cpuPercent\x12!\n" +
+	"\fmemory_bytes\x18\x02 \x01(\x03R\vmemoryBytes\x12*\n" +
+	"\x11peak_memory_bytes\x18\x03 \x01(\x03R\x0fpeakMemoryBytes\x12'\n" +
+	"\x0fviolation_count\x18\x04 \x01(\x05R\x0eviolationCount\x12;\n" +
+	"\vmeasured_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"measuredAt\"\x7f\n" +
 	"\x12CapturePaneRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x128\n" +
 	"\x18include_escape_sequences\x18\x02 \x01(\bR\x16includeEscapeSequences\x12\x14\n" +
@@ -2844,7 +3260,7 @@ const file_swarmd_v1_swarmd_proto_rawDesc = "" +
 	"\tagent_ids\x18\x03 \x03(\tR\bagentIds\x12#\n" +
 	"\rworkspace_ids\x18\x04 \x03(\tR\fworkspaceIds\">\n" +
 	"\x14StreamEventsResponse\x12&\n" +
-	"\x05event\x18\x01 \x01(\v2\x10.swarmd.v1.EventR\x05event\"\x87\x05\n" +
+	"\x05event\x18\x01 \x01(\v2\x10.swarmd.v1.EventR\x05event\"\xdb\x05\n" +
 	"\x05Event\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12(\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x14.swarmd.v1.EventTypeR\x04type\x128\n" +
@@ -2857,7 +3273,8 @@ const file_swarmd_v1_swarmd_proto_rawDesc = "" +
 	"\x12approval_requested\x18\f \x01(\v2!.swarmd.v1.ApprovalRequestedEventH\x00R\x11approvalRequested\x12O\n" +
 	"\x11approval_resolved\x18\r \x01(\v2 .swarmd.v1.ApprovalResolvedEventH\x00R\x10approvalResolved\x12-\n" +
 	"\x05error\x18\x0e \x01(\v2\x15.swarmd.v1.ErrorEventH\x00R\x05error\x12V\n" +
-	"\x14pane_content_changed\x18\x0f \x01(\v2\".swarmd.v1.PaneContentChangedEventH\x00R\x12paneContentChangedB\t\n" +
+	"\x14pane_content_changed\x18\x0f \x01(\v2\".swarmd.v1.PaneContentChangedEventH\x00R\x12paneContentChanged\x12R\n" +
+	"\x12resource_violation\x18\x10 \x01(\v2!.swarmd.v1.ResourceViolationEventH\x00R\x11resourceViolationB\t\n" +
 	"\apayload\"\xa2\x01\n" +
 	"\x16AgentStateChangedEvent\x12<\n" +
 	"\x0eprevious_state\x18\x01 \x01(\x0e2\x15.swarmd.v1.AgentStateR\rpreviousState\x122\n" +
@@ -2883,7 +3300,14 @@ const file_swarmd_v1_swarmd_proto_rawDesc = "" +
 	"ErrorEvent\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12 \n" +
-	"\vrecoverable\x18\x03 \x01(\bR\vrecoverable\"a\n" +
+	"\vrecoverable\x18\x03 \x01(\bR\vrecoverable\"\x88\x02\n" +
+	"\x16ResourceViolationEvent\x12<\n" +
+	"\rresource_type\x18\x01 \x01(\x0e2\x17.swarmd.v1.ResourceTypeR\fresourceType\x12#\n" +
+	"\rcurrent_value\x18\x02 \x01(\x01R\fcurrentValue\x12\x1f\n" +
+	"\vlimit_value\x18\x03 \x01(\x01R\n" +
+	"limitValue\x12'\n" +
+	"\x0fviolation_count\x18\x04 \x01(\x05R\x0eviolationCount\x12A\n" +
+	"\faction_taken\x18\x05 \x01(\x0e2\x1e.swarmd.v1.ResourceLimitActionR\vactionTaken\"a\n" +
 	"\x17PaneContentChangedEvent\x12!\n" +
 	"\fcontent_hash\x18\x01 \x01(\tR\vcontentHash\x12#\n" +
 	"\rlines_changed\x18\x02 \x01(\x05R\flinesChanged\"\xb9\x01\n" +
@@ -2944,7 +3368,12 @@ const file_swarmd_v1_swarmd_proto_rawDesc = "" +
 	"\vPingRequest\"b\n" +
 	"\fPingResponse\x128\n" +
 	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion*\xf7\x01\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion*\xa0\x01\n" +
+	"\x13ResourceLimitAction\x12%\n" +
+	"!RESOURCE_LIMIT_ACTION_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aRESOURCE_LIMIT_ACTION_WARN\x10\x01\x12\"\n" +
+	"\x1eRESOURCE_LIMIT_ACTION_THROTTLE\x10\x02\x12\x1e\n" +
+	"\x1aRESOURCE_LIMIT_ACTION_KILL\x10\x03*\xf7\x01\n" +
 	"\n" +
 	"AgentState\x12\x1b\n" +
 	"\x17AGENT_STATE_UNSPECIFIED\x10\x00\x12\x18\n" +
@@ -2955,7 +3384,7 @@ const file_swarmd_v1_swarmd_proto_rawDesc = "" +
 	"\x12AGENT_STATE_PAUSED\x10\x05\x12\x18\n" +
 	"\x14AGENT_STATE_STOPPING\x10\x06\x12\x17\n" +
 	"\x13AGENT_STATE_STOPPED\x10\a\x12\x16\n" +
-	"\x12AGENT_STATE_FAILED\x10\b*\xe8\x01\n" +
+	"\x12AGENT_STATE_FAILED\x10\b*\x8b\x02\n" +
 	"\tEventType\x12\x1a\n" +
 	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eEVENT_TYPE_AGENT_STATE_CHANGED\x10\x01\x12\x1b\n" +
@@ -2963,7 +3392,12 @@ const file_swarmd_v1_swarmd_proto_rawDesc = "" +
 	"\x1dEVENT_TYPE_APPROVAL_REQUESTED\x10\x03\x12 \n" +
 	"\x1cEVENT_TYPE_APPROVAL_RESOLVED\x10\x04\x12\x14\n" +
 	"\x10EVENT_TYPE_ERROR\x10\x05\x12#\n" +
-	"\x1fEVENT_TYPE_PANE_CONTENT_CHANGED\x10\x06*\x94\x02\n" +
+	"\x1fEVENT_TYPE_PANE_CONTENT_CHANGED\x10\x06\x12!\n" +
+	"\x1dEVENT_TYPE_RESOURCE_VIOLATION\x10\a*^\n" +
+	"\fResourceType\x12\x1d\n" +
+	"\x19RESOURCE_TYPE_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11RESOURCE_TYPE_CPU\x10\x01\x12\x18\n" +
+	"\x14RESOURCE_TYPE_MEMORY\x10\x02*\x94\x02\n" +
 	"\x13TranscriptEntryType\x12%\n" +
 	"!TRANSCRIPT_ENTRY_TYPE_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dTRANSCRIPT_ENTRY_TYPE_COMMAND\x10\x01\x12 \n" +
@@ -3007,127 +3441,141 @@ func file_swarmd_v1_swarmd_proto_rawDescGZIP() []byte {
 	return file_swarmd_v1_swarmd_proto_rawDescData
 }
 
-var file_swarmd_v1_swarmd_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_swarmd_v1_swarmd_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
+var file_swarmd_v1_swarmd_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_swarmd_v1_swarmd_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_swarmd_v1_swarmd_proto_goTypes = []any{
-	(AgentState)(0),                   // 0: swarmd.v1.AgentState
-	(EventType)(0),                    // 1: swarmd.v1.EventType
-	(TranscriptEntryType)(0),          // 2: swarmd.v1.TranscriptEntryType
-	(Health)(0),                       // 3: swarmd.v1.Health
-	(*SpawnAgentRequest)(nil),         // 4: swarmd.v1.SpawnAgentRequest
-	(*SpawnAgentResponse)(nil),        // 5: swarmd.v1.SpawnAgentResponse
-	(*KillAgentRequest)(nil),          // 6: swarmd.v1.KillAgentRequest
-	(*KillAgentResponse)(nil),         // 7: swarmd.v1.KillAgentResponse
-	(*SendInputRequest)(nil),          // 8: swarmd.v1.SendInputRequest
-	(*SendInputResponse)(nil),         // 9: swarmd.v1.SendInputResponse
-	(*ListAgentsRequest)(nil),         // 10: swarmd.v1.ListAgentsRequest
-	(*ListAgentsResponse)(nil),        // 11: swarmd.v1.ListAgentsResponse
-	(*GetAgentRequest)(nil),           // 12: swarmd.v1.GetAgentRequest
-	(*GetAgentResponse)(nil),          // 13: swarmd.v1.GetAgentResponse
-	(*Agent)(nil),                     // 14: swarmd.v1.Agent
-	(*CapturePaneRequest)(nil),        // 15: swarmd.v1.CapturePaneRequest
-	(*CapturePaneResponse)(nil),       // 16: swarmd.v1.CapturePaneResponse
-	(*StreamPaneUpdatesRequest)(nil),  // 17: swarmd.v1.StreamPaneUpdatesRequest
-	(*StreamPaneUpdatesResponse)(nil), // 18: swarmd.v1.StreamPaneUpdatesResponse
-	(*StreamEventsRequest)(nil),       // 19: swarmd.v1.StreamEventsRequest
-	(*StreamEventsResponse)(nil),      // 20: swarmd.v1.StreamEventsResponse
-	(*Event)(nil),                     // 21: swarmd.v1.Event
-	(*AgentStateChangedEvent)(nil),    // 22: swarmd.v1.AgentStateChangedEvent
-	(*AgentOutputEvent)(nil),          // 23: swarmd.v1.AgentOutputEvent
-	(*ApprovalRequestedEvent)(nil),    // 24: swarmd.v1.ApprovalRequestedEvent
-	(*ApprovalResolvedEvent)(nil),     // 25: swarmd.v1.ApprovalResolvedEvent
-	(*ErrorEvent)(nil),                // 26: swarmd.v1.ErrorEvent
-	(*PaneContentChangedEvent)(nil),   // 27: swarmd.v1.PaneContentChangedEvent
-	(*GetTranscriptRequest)(nil),      // 28: swarmd.v1.GetTranscriptRequest
-	(*GetTranscriptResponse)(nil),     // 29: swarmd.v1.GetTranscriptResponse
-	(*TranscriptEntry)(nil),           // 30: swarmd.v1.TranscriptEntry
-	(*StreamTranscriptRequest)(nil),   // 31: swarmd.v1.StreamTranscriptRequest
-	(*StreamTranscriptResponse)(nil),  // 32: swarmd.v1.StreamTranscriptResponse
-	(*GetStatusRequest)(nil),          // 33: swarmd.v1.GetStatusRequest
-	(*GetStatusResponse)(nil),         // 34: swarmd.v1.GetStatusResponse
-	(*DaemonStatus)(nil),              // 35: swarmd.v1.DaemonStatus
-	(*ResourceUsage)(nil),             // 36: swarmd.v1.ResourceUsage
-	(*HealthStatus)(nil),              // 37: swarmd.v1.HealthStatus
-	(*HealthCheck)(nil),               // 38: swarmd.v1.HealthCheck
-	(*PingRequest)(nil),               // 39: swarmd.v1.PingRequest
-	(*PingResponse)(nil),              // 40: swarmd.v1.PingResponse
-	nil,                               // 41: swarmd.v1.SpawnAgentRequest.EnvEntry
-	nil,                               // 42: swarmd.v1.TranscriptEntry.MetadataEntry
-	(*durationpb.Duration)(nil),       // 43: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil),     // 44: google.protobuf.Timestamp
+	(ResourceLimitAction)(0),          // 0: swarmd.v1.ResourceLimitAction
+	(AgentState)(0),                   // 1: swarmd.v1.AgentState
+	(EventType)(0),                    // 2: swarmd.v1.EventType
+	(ResourceType)(0),                 // 3: swarmd.v1.ResourceType
+	(TranscriptEntryType)(0),          // 4: swarmd.v1.TranscriptEntryType
+	(Health)(0),                       // 5: swarmd.v1.Health
+	(*SpawnAgentRequest)(nil),         // 6: swarmd.v1.SpawnAgentRequest
+	(*ResourceLimits)(nil),            // 7: swarmd.v1.ResourceLimits
+	(*SpawnAgentResponse)(nil),        // 8: swarmd.v1.SpawnAgentResponse
+	(*KillAgentRequest)(nil),          // 9: swarmd.v1.KillAgentRequest
+	(*KillAgentResponse)(nil),         // 10: swarmd.v1.KillAgentResponse
+	(*SendInputRequest)(nil),          // 11: swarmd.v1.SendInputRequest
+	(*SendInputResponse)(nil),         // 12: swarmd.v1.SendInputResponse
+	(*ListAgentsRequest)(nil),         // 13: swarmd.v1.ListAgentsRequest
+	(*ListAgentsResponse)(nil),        // 14: swarmd.v1.ListAgentsResponse
+	(*GetAgentRequest)(nil),           // 15: swarmd.v1.GetAgentRequest
+	(*GetAgentResponse)(nil),          // 16: swarmd.v1.GetAgentResponse
+	(*Agent)(nil),                     // 17: swarmd.v1.Agent
+	(*AgentResourceUsage)(nil),        // 18: swarmd.v1.AgentResourceUsage
+	(*CapturePaneRequest)(nil),        // 19: swarmd.v1.CapturePaneRequest
+	(*CapturePaneResponse)(nil),       // 20: swarmd.v1.CapturePaneResponse
+	(*StreamPaneUpdatesRequest)(nil),  // 21: swarmd.v1.StreamPaneUpdatesRequest
+	(*StreamPaneUpdatesResponse)(nil), // 22: swarmd.v1.StreamPaneUpdatesResponse
+	(*StreamEventsRequest)(nil),       // 23: swarmd.v1.StreamEventsRequest
+	(*StreamEventsResponse)(nil),      // 24: swarmd.v1.StreamEventsResponse
+	(*Event)(nil),                     // 25: swarmd.v1.Event
+	(*AgentStateChangedEvent)(nil),    // 26: swarmd.v1.AgentStateChangedEvent
+	(*AgentOutputEvent)(nil),          // 27: swarmd.v1.AgentOutputEvent
+	(*ApprovalRequestedEvent)(nil),    // 28: swarmd.v1.ApprovalRequestedEvent
+	(*ApprovalResolvedEvent)(nil),     // 29: swarmd.v1.ApprovalResolvedEvent
+	(*ErrorEvent)(nil),                // 30: swarmd.v1.ErrorEvent
+	(*ResourceViolationEvent)(nil),    // 31: swarmd.v1.ResourceViolationEvent
+	(*PaneContentChangedEvent)(nil),   // 32: swarmd.v1.PaneContentChangedEvent
+	(*GetTranscriptRequest)(nil),      // 33: swarmd.v1.GetTranscriptRequest
+	(*GetTranscriptResponse)(nil),     // 34: swarmd.v1.GetTranscriptResponse
+	(*TranscriptEntry)(nil),           // 35: swarmd.v1.TranscriptEntry
+	(*StreamTranscriptRequest)(nil),   // 36: swarmd.v1.StreamTranscriptRequest
+	(*StreamTranscriptResponse)(nil),  // 37: swarmd.v1.StreamTranscriptResponse
+	(*GetStatusRequest)(nil),          // 38: swarmd.v1.GetStatusRequest
+	(*GetStatusResponse)(nil),         // 39: swarmd.v1.GetStatusResponse
+	(*DaemonStatus)(nil),              // 40: swarmd.v1.DaemonStatus
+	(*ResourceUsage)(nil),             // 41: swarmd.v1.ResourceUsage
+	(*HealthStatus)(nil),              // 42: swarmd.v1.HealthStatus
+	(*HealthCheck)(nil),               // 43: swarmd.v1.HealthCheck
+	(*PingRequest)(nil),               // 44: swarmd.v1.PingRequest
+	(*PingResponse)(nil),              // 45: swarmd.v1.PingResponse
+	nil,                               // 46: swarmd.v1.SpawnAgentRequest.EnvEntry
+	nil,                               // 47: swarmd.v1.TranscriptEntry.MetadataEntry
+	(*durationpb.Duration)(nil),       // 48: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil),     // 49: google.protobuf.Timestamp
 }
 var file_swarmd_v1_swarmd_proto_depIdxs = []int32{
-	41, // 0: swarmd.v1.SpawnAgentRequest.env:type_name -> swarmd.v1.SpawnAgentRequest.EnvEntry
-	14, // 1: swarmd.v1.SpawnAgentResponse.agent:type_name -> swarmd.v1.Agent
-	43, // 2: swarmd.v1.KillAgentRequest.grace_period:type_name -> google.protobuf.Duration
-	0,  // 3: swarmd.v1.ListAgentsRequest.states:type_name -> swarmd.v1.AgentState
-	14, // 4: swarmd.v1.ListAgentsResponse.agents:type_name -> swarmd.v1.Agent
-	14, // 5: swarmd.v1.GetAgentResponse.agent:type_name -> swarmd.v1.Agent
-	0,  // 6: swarmd.v1.Agent.state:type_name -> swarmd.v1.AgentState
-	44, // 7: swarmd.v1.Agent.spawned_at:type_name -> google.protobuf.Timestamp
-	44, // 8: swarmd.v1.Agent.last_activity_at:type_name -> google.protobuf.Timestamp
-	44, // 9: swarmd.v1.CapturePaneResponse.captured_at:type_name -> google.protobuf.Timestamp
-	43, // 10: swarmd.v1.StreamPaneUpdatesRequest.min_interval:type_name -> google.protobuf.Duration
-	44, // 11: swarmd.v1.StreamPaneUpdatesResponse.timestamp:type_name -> google.protobuf.Timestamp
-	0,  // 12: swarmd.v1.StreamPaneUpdatesResponse.detected_state:type_name -> swarmd.v1.AgentState
-	1,  // 13: swarmd.v1.StreamEventsRequest.types:type_name -> swarmd.v1.EventType
-	21, // 14: swarmd.v1.StreamEventsResponse.event:type_name -> swarmd.v1.Event
-	1,  // 15: swarmd.v1.Event.type:type_name -> swarmd.v1.EventType
-	44, // 16: swarmd.v1.Event.timestamp:type_name -> google.protobuf.Timestamp
-	22, // 17: swarmd.v1.Event.agent_state_changed:type_name -> swarmd.v1.AgentStateChangedEvent
-	23, // 18: swarmd.v1.Event.agent_output:type_name -> swarmd.v1.AgentOutputEvent
-	24, // 19: swarmd.v1.Event.approval_requested:type_name -> swarmd.v1.ApprovalRequestedEvent
-	25, // 20: swarmd.v1.Event.approval_resolved:type_name -> swarmd.v1.ApprovalResolvedEvent
-	26, // 21: swarmd.v1.Event.error:type_name -> swarmd.v1.ErrorEvent
-	27, // 22: swarmd.v1.Event.pane_content_changed:type_name -> swarmd.v1.PaneContentChangedEvent
-	0,  // 23: swarmd.v1.AgentStateChangedEvent.previous_state:type_name -> swarmd.v1.AgentState
-	0,  // 24: swarmd.v1.AgentStateChangedEvent.new_state:type_name -> swarmd.v1.AgentState
-	44, // 25: swarmd.v1.GetTranscriptRequest.start_time:type_name -> google.protobuf.Timestamp
-	44, // 26: swarmd.v1.GetTranscriptRequest.end_time:type_name -> google.protobuf.Timestamp
-	30, // 27: swarmd.v1.GetTranscriptResponse.entries:type_name -> swarmd.v1.TranscriptEntry
-	44, // 28: swarmd.v1.TranscriptEntry.timestamp:type_name -> google.protobuf.Timestamp
-	2,  // 29: swarmd.v1.TranscriptEntry.type:type_name -> swarmd.v1.TranscriptEntryType
-	42, // 30: swarmd.v1.TranscriptEntry.metadata:type_name -> swarmd.v1.TranscriptEntry.MetadataEntry
-	30, // 31: swarmd.v1.StreamTranscriptResponse.entries:type_name -> swarmd.v1.TranscriptEntry
-	35, // 32: swarmd.v1.GetStatusResponse.status:type_name -> swarmd.v1.DaemonStatus
-	44, // 33: swarmd.v1.DaemonStatus.started_at:type_name -> google.protobuf.Timestamp
-	43, // 34: swarmd.v1.DaemonStatus.uptime:type_name -> google.protobuf.Duration
-	36, // 35: swarmd.v1.DaemonStatus.resources:type_name -> swarmd.v1.ResourceUsage
-	37, // 36: swarmd.v1.DaemonStatus.health:type_name -> swarmd.v1.HealthStatus
-	3,  // 37: swarmd.v1.HealthStatus.health:type_name -> swarmd.v1.Health
-	38, // 38: swarmd.v1.HealthStatus.checks:type_name -> swarmd.v1.HealthCheck
-	3,  // 39: swarmd.v1.HealthCheck.health:type_name -> swarmd.v1.Health
-	44, // 40: swarmd.v1.HealthCheck.last_check:type_name -> google.protobuf.Timestamp
-	44, // 41: swarmd.v1.PingResponse.timestamp:type_name -> google.protobuf.Timestamp
-	4,  // 42: swarmd.v1.SwarmdService.SpawnAgent:input_type -> swarmd.v1.SpawnAgentRequest
-	6,  // 43: swarmd.v1.SwarmdService.KillAgent:input_type -> swarmd.v1.KillAgentRequest
-	8,  // 44: swarmd.v1.SwarmdService.SendInput:input_type -> swarmd.v1.SendInputRequest
-	10, // 45: swarmd.v1.SwarmdService.ListAgents:input_type -> swarmd.v1.ListAgentsRequest
-	12, // 46: swarmd.v1.SwarmdService.GetAgent:input_type -> swarmd.v1.GetAgentRequest
-	15, // 47: swarmd.v1.SwarmdService.CapturePane:input_type -> swarmd.v1.CapturePaneRequest
-	17, // 48: swarmd.v1.SwarmdService.StreamPaneUpdates:input_type -> swarmd.v1.StreamPaneUpdatesRequest
-	19, // 49: swarmd.v1.SwarmdService.StreamEvents:input_type -> swarmd.v1.StreamEventsRequest
-	28, // 50: swarmd.v1.SwarmdService.GetTranscript:input_type -> swarmd.v1.GetTranscriptRequest
-	31, // 51: swarmd.v1.SwarmdService.StreamTranscript:input_type -> swarmd.v1.StreamTranscriptRequest
-	33, // 52: swarmd.v1.SwarmdService.GetStatus:input_type -> swarmd.v1.GetStatusRequest
-	39, // 53: swarmd.v1.SwarmdService.Ping:input_type -> swarmd.v1.PingRequest
-	5,  // 54: swarmd.v1.SwarmdService.SpawnAgent:output_type -> swarmd.v1.SpawnAgentResponse
-	7,  // 55: swarmd.v1.SwarmdService.KillAgent:output_type -> swarmd.v1.KillAgentResponse
-	9,  // 56: swarmd.v1.SwarmdService.SendInput:output_type -> swarmd.v1.SendInputResponse
-	11, // 57: swarmd.v1.SwarmdService.ListAgents:output_type -> swarmd.v1.ListAgentsResponse
-	13, // 58: swarmd.v1.SwarmdService.GetAgent:output_type -> swarmd.v1.GetAgentResponse
-	16, // 59: swarmd.v1.SwarmdService.CapturePane:output_type -> swarmd.v1.CapturePaneResponse
-	18, // 60: swarmd.v1.SwarmdService.StreamPaneUpdates:output_type -> swarmd.v1.StreamPaneUpdatesResponse
-	20, // 61: swarmd.v1.SwarmdService.StreamEvents:output_type -> swarmd.v1.StreamEventsResponse
-	29, // 62: swarmd.v1.SwarmdService.GetTranscript:output_type -> swarmd.v1.GetTranscriptResponse
-	32, // 63: swarmd.v1.SwarmdService.StreamTranscript:output_type -> swarmd.v1.StreamTranscriptResponse
-	34, // 64: swarmd.v1.SwarmdService.GetStatus:output_type -> swarmd.v1.GetStatusResponse
-	40, // 65: swarmd.v1.SwarmdService.Ping:output_type -> swarmd.v1.PingResponse
-	54, // [54:66] is the sub-list for method output_type
-	42, // [42:54] is the sub-list for method input_type
-	42, // [42:42] is the sub-list for extension type_name
-	42, // [42:42] is the sub-list for extension extendee
-	0,  // [0:42] is the sub-list for field type_name
+	46, // 0: swarmd.v1.SpawnAgentRequest.env:type_name -> swarmd.v1.SpawnAgentRequest.EnvEntry
+	7,  // 1: swarmd.v1.SpawnAgentRequest.resource_limits:type_name -> swarmd.v1.ResourceLimits
+	0,  // 2: swarmd.v1.ResourceLimits.action:type_name -> swarmd.v1.ResourceLimitAction
+	48, // 3: swarmd.v1.ResourceLimits.grace_period:type_name -> google.protobuf.Duration
+	17, // 4: swarmd.v1.SpawnAgentResponse.agent:type_name -> swarmd.v1.Agent
+	48, // 5: swarmd.v1.KillAgentRequest.grace_period:type_name -> google.protobuf.Duration
+	1,  // 6: swarmd.v1.ListAgentsRequest.states:type_name -> swarmd.v1.AgentState
+	17, // 7: swarmd.v1.ListAgentsResponse.agents:type_name -> swarmd.v1.Agent
+	17, // 8: swarmd.v1.GetAgentResponse.agent:type_name -> swarmd.v1.Agent
+	1,  // 9: swarmd.v1.Agent.state:type_name -> swarmd.v1.AgentState
+	49, // 10: swarmd.v1.Agent.spawned_at:type_name -> google.protobuf.Timestamp
+	49, // 11: swarmd.v1.Agent.last_activity_at:type_name -> google.protobuf.Timestamp
+	7,  // 12: swarmd.v1.Agent.resource_limits:type_name -> swarmd.v1.ResourceLimits
+	18, // 13: swarmd.v1.Agent.resource_usage:type_name -> swarmd.v1.AgentResourceUsage
+	49, // 14: swarmd.v1.AgentResourceUsage.measured_at:type_name -> google.protobuf.Timestamp
+	49, // 15: swarmd.v1.CapturePaneResponse.captured_at:type_name -> google.protobuf.Timestamp
+	48, // 16: swarmd.v1.StreamPaneUpdatesRequest.min_interval:type_name -> google.protobuf.Duration
+	49, // 17: swarmd.v1.StreamPaneUpdatesResponse.timestamp:type_name -> google.protobuf.Timestamp
+	1,  // 18: swarmd.v1.StreamPaneUpdatesResponse.detected_state:type_name -> swarmd.v1.AgentState
+	2,  // 19: swarmd.v1.StreamEventsRequest.types:type_name -> swarmd.v1.EventType
+	25, // 20: swarmd.v1.StreamEventsResponse.event:type_name -> swarmd.v1.Event
+	2,  // 21: swarmd.v1.Event.type:type_name -> swarmd.v1.EventType
+	49, // 22: swarmd.v1.Event.timestamp:type_name -> google.protobuf.Timestamp
+	26, // 23: swarmd.v1.Event.agent_state_changed:type_name -> swarmd.v1.AgentStateChangedEvent
+	27, // 24: swarmd.v1.Event.agent_output:type_name -> swarmd.v1.AgentOutputEvent
+	28, // 25: swarmd.v1.Event.approval_requested:type_name -> swarmd.v1.ApprovalRequestedEvent
+	29, // 26: swarmd.v1.Event.approval_resolved:type_name -> swarmd.v1.ApprovalResolvedEvent
+	30, // 27: swarmd.v1.Event.error:type_name -> swarmd.v1.ErrorEvent
+	32, // 28: swarmd.v1.Event.pane_content_changed:type_name -> swarmd.v1.PaneContentChangedEvent
+	31, // 29: swarmd.v1.Event.resource_violation:type_name -> swarmd.v1.ResourceViolationEvent
+	1,  // 30: swarmd.v1.AgentStateChangedEvent.previous_state:type_name -> swarmd.v1.AgentState
+	1,  // 31: swarmd.v1.AgentStateChangedEvent.new_state:type_name -> swarmd.v1.AgentState
+	3,  // 32: swarmd.v1.ResourceViolationEvent.resource_type:type_name -> swarmd.v1.ResourceType
+	0,  // 33: swarmd.v1.ResourceViolationEvent.action_taken:type_name -> swarmd.v1.ResourceLimitAction
+	49, // 34: swarmd.v1.GetTranscriptRequest.start_time:type_name -> google.protobuf.Timestamp
+	49, // 35: swarmd.v1.GetTranscriptRequest.end_time:type_name -> google.protobuf.Timestamp
+	35, // 36: swarmd.v1.GetTranscriptResponse.entries:type_name -> swarmd.v1.TranscriptEntry
+	49, // 37: swarmd.v1.TranscriptEntry.timestamp:type_name -> google.protobuf.Timestamp
+	4,  // 38: swarmd.v1.TranscriptEntry.type:type_name -> swarmd.v1.TranscriptEntryType
+	47, // 39: swarmd.v1.TranscriptEntry.metadata:type_name -> swarmd.v1.TranscriptEntry.MetadataEntry
+	35, // 40: swarmd.v1.StreamTranscriptResponse.entries:type_name -> swarmd.v1.TranscriptEntry
+	40, // 41: swarmd.v1.GetStatusResponse.status:type_name -> swarmd.v1.DaemonStatus
+	49, // 42: swarmd.v1.DaemonStatus.started_at:type_name -> google.protobuf.Timestamp
+	48, // 43: swarmd.v1.DaemonStatus.uptime:type_name -> google.protobuf.Duration
+	41, // 44: swarmd.v1.DaemonStatus.resources:type_name -> swarmd.v1.ResourceUsage
+	42, // 45: swarmd.v1.DaemonStatus.health:type_name -> swarmd.v1.HealthStatus
+	5,  // 46: swarmd.v1.HealthStatus.health:type_name -> swarmd.v1.Health
+	43, // 47: swarmd.v1.HealthStatus.checks:type_name -> swarmd.v1.HealthCheck
+	5,  // 48: swarmd.v1.HealthCheck.health:type_name -> swarmd.v1.Health
+	49, // 49: swarmd.v1.HealthCheck.last_check:type_name -> google.protobuf.Timestamp
+	49, // 50: swarmd.v1.PingResponse.timestamp:type_name -> google.protobuf.Timestamp
+	6,  // 51: swarmd.v1.SwarmdService.SpawnAgent:input_type -> swarmd.v1.SpawnAgentRequest
+	9,  // 52: swarmd.v1.SwarmdService.KillAgent:input_type -> swarmd.v1.KillAgentRequest
+	11, // 53: swarmd.v1.SwarmdService.SendInput:input_type -> swarmd.v1.SendInputRequest
+	13, // 54: swarmd.v1.SwarmdService.ListAgents:input_type -> swarmd.v1.ListAgentsRequest
+	15, // 55: swarmd.v1.SwarmdService.GetAgent:input_type -> swarmd.v1.GetAgentRequest
+	19, // 56: swarmd.v1.SwarmdService.CapturePane:input_type -> swarmd.v1.CapturePaneRequest
+	21, // 57: swarmd.v1.SwarmdService.StreamPaneUpdates:input_type -> swarmd.v1.StreamPaneUpdatesRequest
+	23, // 58: swarmd.v1.SwarmdService.StreamEvents:input_type -> swarmd.v1.StreamEventsRequest
+	33, // 59: swarmd.v1.SwarmdService.GetTranscript:input_type -> swarmd.v1.GetTranscriptRequest
+	36, // 60: swarmd.v1.SwarmdService.StreamTranscript:input_type -> swarmd.v1.StreamTranscriptRequest
+	38, // 61: swarmd.v1.SwarmdService.GetStatus:input_type -> swarmd.v1.GetStatusRequest
+	44, // 62: swarmd.v1.SwarmdService.Ping:input_type -> swarmd.v1.PingRequest
+	8,  // 63: swarmd.v1.SwarmdService.SpawnAgent:output_type -> swarmd.v1.SpawnAgentResponse
+	10, // 64: swarmd.v1.SwarmdService.KillAgent:output_type -> swarmd.v1.KillAgentResponse
+	12, // 65: swarmd.v1.SwarmdService.SendInput:output_type -> swarmd.v1.SendInputResponse
+	14, // 66: swarmd.v1.SwarmdService.ListAgents:output_type -> swarmd.v1.ListAgentsResponse
+	16, // 67: swarmd.v1.SwarmdService.GetAgent:output_type -> swarmd.v1.GetAgentResponse
+	20, // 68: swarmd.v1.SwarmdService.CapturePane:output_type -> swarmd.v1.CapturePaneResponse
+	22, // 69: swarmd.v1.SwarmdService.StreamPaneUpdates:output_type -> swarmd.v1.StreamPaneUpdatesResponse
+	24, // 70: swarmd.v1.SwarmdService.StreamEvents:output_type -> swarmd.v1.StreamEventsResponse
+	34, // 71: swarmd.v1.SwarmdService.GetTranscript:output_type -> swarmd.v1.GetTranscriptResponse
+	37, // 72: swarmd.v1.SwarmdService.StreamTranscript:output_type -> swarmd.v1.StreamTranscriptResponse
+	39, // 73: swarmd.v1.SwarmdService.GetStatus:output_type -> swarmd.v1.GetStatusResponse
+	45, // 74: swarmd.v1.SwarmdService.Ping:output_type -> swarmd.v1.PingResponse
+	63, // [63:75] is the sub-list for method output_type
+	51, // [51:63] is the sub-list for method input_type
+	51, // [51:51] is the sub-list for extension type_name
+	51, // [51:51] is the sub-list for extension extendee
+	0,  // [0:51] is the sub-list for field type_name
 }
 
 func init() { file_swarmd_v1_swarmd_proto_init() }
@@ -3135,21 +3583,22 @@ func file_swarmd_v1_swarmd_proto_init() {
 	if File_swarmd_v1_swarmd_proto != nil {
 		return
 	}
-	file_swarmd_v1_swarmd_proto_msgTypes[17].OneofWrappers = []any{
+	file_swarmd_v1_swarmd_proto_msgTypes[19].OneofWrappers = []any{
 		(*Event_AgentStateChanged)(nil),
 		(*Event_AgentOutput)(nil),
 		(*Event_ApprovalRequested)(nil),
 		(*Event_ApprovalResolved)(nil),
 		(*Event_Error)(nil),
 		(*Event_PaneContentChanged)(nil),
+		(*Event_ResourceViolation)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_swarmd_v1_swarmd_proto_rawDesc), len(file_swarmd_v1_swarmd_proto_rawDesc)),
-			NumEnums:      4,
-			NumMessages:   39,
+			NumEnums:      6,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
