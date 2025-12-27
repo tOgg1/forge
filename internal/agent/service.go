@@ -47,6 +47,7 @@ type Service struct {
 	paneMap          *PaneMap
 	publisher        events.Publisher
 	logger           zerolog.Logger
+	eventWatcher     *adapters.OpenCodeEventWatcher
 }
 
 // ServiceOption configures an AgentService.
@@ -84,6 +85,13 @@ func WithArchiveAfter(duration time.Duration) ServiceOption {
 func WithPortRepository(repo *db.PortRepository) ServiceOption {
 	return func(s *Service) {
 		s.portRepo = repo
+	}
+}
+
+// WithEventWatcher configures an OpenCode SSE event watcher for real-time state updates.
+func WithEventWatcher(watcher *adapters.OpenCodeEventWatcher) ServiceOption {
+	return func(s *Service) {
+		s.eventWatcher = watcher
 	}
 }
 
@@ -293,6 +301,9 @@ func (s *Service) SpawnAgent(ctx context.Context, opts SpawnOptions) (*models.Ag
 		Str("type", string(opts.Type)).
 		Str("pane", paneTarget).
 		Msg("agent spawned")
+
+	// Start SSE event watcher for OpenCode agents
+	s.startEventWatcher(ctx, agent)
 
 	// Emit event
 	s.publishEvent(ctx, models.EventTypeAgentSpawned, agent.ID, nil)
@@ -890,6 +901,9 @@ func (s *Service) RestartAgentWithAccount(ctx context.Context, id, accountID str
 func (s *Service) TerminateAgent(ctx context.Context, id string) error {
 	s.logger.Debug().Str("agent_id", id).Msg("terminating agent")
 
+	// Stop SSE event watcher first
+	s.stopEventWatcher(id)
+
 	agent, err := s.GetAgent(ctx, id)
 	if err != nil {
 		return err
@@ -1334,4 +1348,51 @@ func (s *Service) publishEvent(ctx context.Context, eventType models.EventType, 
 	}
 
 	s.publisher.Publish(ctx, event)
+}
+
+// startEventWatcher starts SSE event watching for OpenCode agents.
+func (s *Service) startEventWatcher(ctx context.Context, agent *models.Agent) {
+	if s.eventWatcher == nil || agent == nil {
+		return
+	}
+	if !agent.HasOpenCodeConnection() {
+		return
+	}
+
+	if err := s.eventWatcher.WatchAgent(ctx, agent); err != nil {
+		s.logger.Warn().
+			Err(err).
+			Str("agent_id", agent.ID).
+			Msg("failed to start SSE event watcher")
+	} else {
+		s.logger.Debug().
+			Str("agent_id", agent.ID).
+			Msg("started SSE event watcher for OpenCode agent")
+	}
+}
+
+// stopEventWatcher stops SSE event watching for an agent.
+func (s *Service) stopEventWatcher(agentID string) {
+	if s.eventWatcher == nil || agentID == "" {
+		return
+	}
+	if !s.eventWatcher.IsWatching(agentID) {
+		return
+	}
+
+	if err := s.eventWatcher.Unwatch(agentID); err != nil {
+		s.logger.Warn().
+			Err(err).
+			Str("agent_id", agentID).
+			Msg("failed to stop SSE event watcher")
+	} else {
+		s.logger.Debug().
+			Str("agent_id", agentID).
+			Msg("stopped SSE event watcher")
+	}
+}
+
+// GetEventWatcher returns the configured event watcher (may be nil).
+func (s *Service) GetEventWatcher() *adapters.OpenCodeEventWatcher {
+	return s.eventWatcher
 }
