@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"strings"
@@ -53,6 +54,15 @@ func runTUI() error {
 
 	// Create and start state engine
 	stateEngine := state.NewEngine(agentRepo, eventRepo, tmuxClient, registry)
+
+	// Create and start the state poller for live agent updates
+	poller := state.NewPoller(state.DefaultPollerConfig(), stateEngine, agentRepo)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := poller.Start(ctx); err != nil {
+		return err
+	}
+	defer poller.Stop()
 
 	// Build TUI config from app config
 	tuiConfig := tui.Config{
