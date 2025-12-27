@@ -30,7 +30,7 @@ type SessionStatus struct {
 func NewOpenCodeClient(baseURL string) *OpenCodeClient {
 	return &OpenCodeClient{
 		BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		Client: &http.Client{Timeout: defaultOpenCodeTimeout},
+		Client:  &http.Client{Timeout: defaultOpenCodeTimeout},
 	}
 }
 
@@ -91,7 +91,7 @@ func (c *OpenCodeClient) GetStatus(ctx context.Context) (*SessionStatus, error) 
 }
 
 type openCodePromptPayload struct {
-	Text string `json:"text"`
+	Text string `json:"text,omitempty"`
 }
 
 func (c *OpenCodeClient) baseURL() (string, error) {

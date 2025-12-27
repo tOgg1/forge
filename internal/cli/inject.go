@@ -11,7 +11,6 @@ import (
 	"github.com/opencode-ai/swarm/internal/db"
 	"github.com/opencode-ai/swarm/internal/models"
 	"github.com/opencode-ai/swarm/internal/node"
-	"github.com/opencode-ai/swarm/internal/queue"
 	"github.com/opencode-ai/swarm/internal/tmux"
 	"github.com/opencode-ai/swarm/internal/workspace"
 	"github.com/spf13/cobra"

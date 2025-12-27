@@ -66,34 +66,41 @@ func (c *Context) SetAgent(id, name string) {
 	c.UpdatedAt = time.Now()
 }
 
+// ClearAgent clears only the agent context, preserving workspace.
+func (c *Context) ClearAgent() {
+	c.AgentID = ""
+	c.AgentName = ""
+	c.UpdatedAt = time.Now()
+}
+
 // String returns a human-readable representation of the context.
+// Format: "workspace:agent" where either part can be empty.
 func (c *Context) String() string {
 	if c.IsEmpty() {
-		return "(no context set)"
+		return "(none)"
 	}
-	var parts []string
-	if c.HasWorkspace() {
-		name := c.WorkspaceName
-		if name == "" {
-			name = shortID(c.WorkspaceID)
-		}
-		parts = append(parts, fmt.Sprintf("workspace:%s", name))
+
+	wsName := c.WorkspaceName
+	if wsName == "" && c.WorkspaceID != "" {
+		wsName = c.WorkspaceID
 	}
-	if c.HasAgent() {
-		name := c.AgentName
-		if name == "" {
-			name = shortID(c.AgentID)
-		}
-		parts = append(parts, fmt.Sprintf("agent:%s", name))
+
+	agentName := c.AgentName
+	if agentName == "" && c.AgentID != "" {
+		agentName = shortID(c.AgentID)
 	}
-	if len(parts) == 0 {
-		return "(no context set)"
+
+	// Format: "workspace:agent" or just "workspace" or ":agent"
+	if wsName != "" && agentName != "" {
+		return fmt.Sprintf("%s:%s", wsName, agentName)
 	}
-	result := parts[0]
-	for i := 1; i < len(parts); i++ {
-		result += " " + parts[i]
+	if wsName != "" {
+		return wsName
 	}
-	return result
+	if agentName != "" {
+		return fmt.Sprintf(":%s", agentName)
+	}
+	return "(none)"
 }
 
 func shortID(id string) string {

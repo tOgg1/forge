@@ -111,7 +111,7 @@ func (r *PortRepository) AllocateSpecific(ctx context.Context, nodeID string, po
 	var count int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM port_allocations 
-		WHERE node_id = ? AND port = ? AND released_at IS NULL
+		WHERE node_id = ? AND port = ?
 	`, nodeID, port).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to check port availability: %w", err)
@@ -251,16 +251,12 @@ func (r *PortRepository) IsPortAvailable(ctx context.Context, nodeID string, por
 // CleanupExpired releases allocations for agents that no longer exist.
 // This handles orphaned allocations from crashed agents.
 func (r *PortRepository) CleanupExpired(ctx context.Context) (int, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	// Release allocations where the agent no longer exists
+	// Delete allocations where the agent no longer exists
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE port_allocations 
-		SET released_at = ?
+		DELETE FROM port_allocations 
 		WHERE agent_id IS NOT NULL 
-		AND released_at IS NULL
 		AND agent_id NOT IN (SELECT id FROM agents)
-	`, now)
+	`)
 	if err != nil {
 		return 0, fmt.Errorf("failed to cleanup expired allocations: %w", err)
 	}
@@ -275,10 +271,10 @@ func (r *PortRepository) CleanupExpired(ctx context.Context) (int, error) {
 
 // findAvailablePort finds the first available port in the configured range.
 func (r *PortRepository) findAvailablePort(ctx context.Context, tx *sql.Tx, nodeID string) (int, error) {
-	// Get all allocated (non-released) ports for this node
+	// Get all allocated ports for this node
 	rows, err := tx.QueryContext(ctx, `
 		SELECT port FROM port_allocations
-		WHERE node_id = ? AND released_at IS NULL
+		WHERE node_id = ?
 		ORDER BY port
 	`, nodeID)
 	if err != nil {
@@ -314,7 +310,6 @@ func (r *PortRepository) scanAllocation(row *sql.Row) (*PortAllocation, error) {
 	var agentID sql.NullString
 	var reason sql.NullString
 	var allocatedAt string
-	var releasedAt sql.NullString
 
 	err := row.Scan(
 		&alloc.ID,
@@ -323,7 +318,6 @@ func (r *PortRepository) scanAllocation(row *sql.Row) (*PortAllocation, error) {
 		&agentID,
 		&reason,
 		&allocatedAt,
-		&releasedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -341,11 +335,6 @@ func (r *PortRepository) scanAllocation(row *sql.Row) (*PortAllocation, error) {
 	if t, err := time.Parse(time.RFC3339, allocatedAt); err == nil {
 		alloc.AllocatedAt = t
 	}
-	if releasedAt.Valid {
-		if t, err := time.Parse(time.RFC3339, releasedAt.String); err == nil {
-			alloc.ReleasedAt = &t
-		}
-	}
 
 	return &alloc, nil
 }
@@ -358,7 +347,6 @@ func (r *PortRepository) scanAllocations(rows *sql.Rows) ([]*PortAllocation, err
 		var agentID sql.NullString
 		var reason sql.NullString
 		var allocatedAt string
-		var releasedAt sql.NullString
 
 		err := rows.Scan(
 			&alloc.ID,
@@ -367,7 +355,6 @@ func (r *PortRepository) scanAllocations(rows *sql.Rows) ([]*PortAllocation, err
 			&agentID,
 			&reason,
 			&allocatedAt,
-			&releasedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan port allocation: %w", err)
@@ -381,11 +368,6 @@ func (r *PortRepository) scanAllocations(rows *sql.Rows) ([]*PortAllocation, err
 		}
 		if t, err := time.Parse(time.RFC3339, allocatedAt); err == nil {
 			alloc.AllocatedAt = t
-		}
-		if releasedAt.Valid {
-			if t, err := time.Parse(time.RFC3339, releasedAt.String); err == nil {
-				alloc.ReleasedAt = &t
-			}
 		}
 
 		allocations = append(allocations, &alloc)

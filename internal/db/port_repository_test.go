@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/opencode-ai/swarm/internal/models"
@@ -11,7 +12,7 @@ func createTestNode(t *testing.T, db *DB) *models.Node {
 	t.Helper()
 	repo := NewNodeRepository(db)
 	node := &models.Node{
-		Name:       "test-node",
+		Name:       fmt.Sprintf("test-node-%s", t.Name()),
 		SSHBackend: models.SSHBackendAuto,
 		Status:     models.NodeStatusUnknown,
 		IsLocal:    true,
@@ -352,7 +353,7 @@ func TestPortRepository_CleanupExpired(t *testing.T) {
 		t.Fatalf("Allocate failed: %v", err)
 	}
 
-	// Cleanup should not release anything yet
+	// Cleanup should not release anything yet (agent still exists)
 	cleaned, err := repo.CleanupExpired(ctx)
 	if err != nil {
 		t.Fatalf("CleanupExpired failed: %v", err)
@@ -361,24 +362,24 @@ func TestPortRepository_CleanupExpired(t *testing.T) {
 		t.Errorf("expected 0 cleaned, got %d", cleaned)
 	}
 
-	// Delete the agent
+	// Delete the agent - ON DELETE CASCADE automatically removes the port allocation
 	if err := agentRepo.Delete(ctx, agent.ID); err != nil {
 		t.Fatalf("delete agent: %v", err)
 	}
 
-	// Cleanup should now release the orphaned allocation
+	// Port should be available because CASCADE deleted the allocation
+	available, _ := repo.IsPortAvailable(ctx, node.ID, port)
+	if !available {
+		t.Error("expected port to be available after agent deletion (cascade)")
+	}
+
+	// CleanupExpired should have nothing to clean (cascade already handled it)
 	cleaned, err = repo.CleanupExpired(ctx)
 	if err != nil {
 		t.Fatalf("CleanupExpired failed: %v", err)
 	}
-	if cleaned != 1 {
-		t.Errorf("expected 1 cleaned, got %d", cleaned)
-	}
-
-	// Port should be available again
-	available, _ := repo.IsPortAvailable(ctx, node.ID, port)
-	if !available {
-		t.Error("expected port to be available after cleanup")
+	if cleaned != 0 {
+		t.Errorf("expected 0 cleaned (cascade already handled), got %d", cleaned)
 	}
 }
 
@@ -429,6 +430,7 @@ func TestPortRepository_NodeIsolation(t *testing.T) {
 	}
 	node2 := &models.Node{
 		Name:       "node-2",
+		SSHTarget:  "user@remote-host",
 		SSHBackend: models.SSHBackendAuto,
 		Status:     models.NodeStatusUnknown,
 		IsLocal:    false,

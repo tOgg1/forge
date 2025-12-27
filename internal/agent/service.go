@@ -37,6 +37,7 @@ var (
 type Service struct {
 	repo             *db.AgentRepository
 	queueRepo        *db.QueueRepository
+	portRepo         *db.PortRepository
 	workspaceService *workspace.Service
 	accountService   *account.Service
 	tmuxClient       *tmux.Client
@@ -76,6 +77,13 @@ func WithArchiveDir(path string) ServiceOption {
 func WithArchiveAfter(duration time.Duration) ServiceOption {
 	return func(s *Service) {
 		s.archiveAfter = duration
+	}
+}
+
+// WithPortRepository configures a port repository for OpenCode port allocation.
+func WithPortRepository(repo *db.PortRepository) ServiceOption {
+	return func(s *Service) {
+		s.portRepo = repo
 	}
 }
 
@@ -212,10 +220,32 @@ func (s *Service) SpawnAgent(ctx context.Context, opts SpawnOptions) (*models.Ag
 		},
 	}
 
+	// Allocate port for OpenCode agents
+	var allocatedPort int
+	if opts.Type == models.AgentTypeOpenCode && s.portRepo != nil {
+		port, err := s.portRepo.Allocate(ctx, ws.NodeID, "", "opencode-agent-spawn")
+		if err != nil {
+			_ = s.tmuxClient.KillPane(ctx, paneTarget)
+			return nil, fmt.Errorf("%w: failed to allocate port: %v", ErrSpawnFailed, err)
+		}
+		allocatedPort = port
+		agent.Metadata.OpenCode = &models.OpenCodeConnection{
+			Host: "127.0.0.1",
+			Port: port,
+		}
+		s.logger.Debug().
+			Str("workspace_id", opts.WorkspaceID).
+			Int("port", port).
+			Msg("allocated port for OpenCode agent")
+	}
+
 	// Persist agent to database
 	if err := s.repo.Create(ctx, agent); err != nil {
-		// Clean up pane on failure
+		// Clean up pane and port on failure
 		_ = s.tmuxClient.KillPane(ctx, paneTarget)
+		if allocatedPort > 0 && s.portRepo != nil {
+			_ = s.portRepo.Release(ctx, ws.NodeID, allocatedPort)
+		}
 		if errors.Is(err, db.ErrAgentAlreadyExists) {
 			return nil, ErrAgentAlreadyExists
 		}
@@ -388,6 +418,13 @@ func (s *Service) cleanupSpawnFailure(ctx context.Context, agent *models.Agent) 
 	if s.queueRepo != nil {
 		if _, err := s.queueRepo.Clear(ctx, agent.ID); err != nil {
 			s.logger.Warn().Err(err).Str("agent_id", agent.ID).Msg("failed to clear queue after spawn failure")
+		}
+	}
+
+	// Release allocated port for OpenCode agents
+	if s.portRepo != nil && agent.Metadata.OpenCode != nil && agent.Metadata.OpenCode.Port > 0 {
+		if _, err := s.portRepo.ReleaseByAgent(ctx, agent.ID); err != nil {
+			s.logger.Warn().Err(err).Str("agent_id", agent.ID).Msg("failed to release port after spawn failure")
 		}
 	}
 
@@ -901,6 +938,15 @@ func (s *Service) TerminateAgent(ctx context.Context, id string) error {
 	// Unregister pane mapping
 	if err := s.paneMap.UnregisterAgent(id); err != nil && !errors.Is(err, ErrAgentNotFound) {
 		s.logger.Warn().Err(err).Str("agent_id", id).Msg("failed to unregister pane mapping")
+	}
+
+	// Release allocated port for OpenCode agents
+	if s.portRepo != nil && agent.Metadata.OpenCode != nil && agent.Metadata.OpenCode.Port > 0 {
+		if released, err := s.portRepo.ReleaseByAgent(ctx, id); err != nil {
+			s.logger.Warn().Err(err).Str("agent_id", id).Msg("failed to release port on termination")
+		} else if released > 0 {
+			s.logger.Debug().Str("agent_id", id).Int("released", released).Msg("released port allocation")
+		}
 	}
 
 	// Delete agent from database
