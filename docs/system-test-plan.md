@@ -1,1114 +1,518 @@
 # Swarm System Test Plan
 
-Comprehensive test plan covering all Swarm components, from unit tests to full end-to-end scenarios.
+This test plan prioritizes the **happy path** and core user workflows. Tests are ordered by importance - complete the Critical Path tests before moving to secondary tests.
 
 ---
 
 ## Table of Contents
 
-1. [Test Environment Setup](#1-test-environment-setup)
-2. [Automated Unit Tests](#2-automated-unit-tests)
-3. [Database & Migration Tests](#3-database--migration-tests)
-4. [Node Management Tests](#4-node-management-tests)
-5. [Workspace Management Tests](#5-workspace-management-tests)
-6. [Agent Lifecycle Tests](#6-agent-lifecycle-tests)
-7. [Queue & Scheduler Tests](#7-queue--scheduler-tests)
-8. [Account & Credential Tests](#8-account--credential-tests)
-9. [State Detection Tests](#9-state-detection-tests)
-10. [SSH & Remote Execution Tests](#10-ssh--remote-execution-tests)
-11. [Swarmd Daemon Tests](#11-swarmd-daemon-tests)
-12. [TUI Tests](#12-tui-tests)
-13. [CLI Integration Tests](#13-cli-integration-tests)
-14. [End-to-End Scenarios](#14-end-to-end-scenarios)
-15. [Performance Tests](#15-performance-tests)
-16. [Security Tests](#16-security-tests)
-17. [Test Results Template](#17-test-results-template)
+1. [Prerequisites](#1-prerequisites)
+2. [Critical Path: Happy Path Tests](#2-critical-path-happy-path-tests)
+3. [Core Workflow Tests](#3-core-workflow-tests)
+4. [TUI Live Experience Tests](#4-tui-live-experience-tests)
+5. [Multi-Agent Orchestration Tests](#5-multi-agent-orchestration-tests)
+6. [Secondary Tests](#6-secondary-tests)
+7. [Test Results Template](#7-test-results-template)
 
 ---
 
-## 1. Test Environment Setup
+## 1. Prerequisites
 
-### 1.1 Prerequisites
-
-| Requirement | Version | Check Command |
-|-------------|---------|---------------|
-| Go | 1.25+ | `go version` |
-| Git | 2.x+ | `git --version` |
-| tmux | 3.x+ | `tmux -V` |
-| SSH | OpenSSH 8+ | `ssh -V` |
-| SQLite | 3.x | `sqlite3 --version` |
-
-### 1.2 Build Swarm
+### 1.1 Environment Check
 
 ```bash
-# Clone and build
-git clone https://github.com/tOgg1/swarm.git
-cd swarm
+# Run the doctor command first
+swarm doctor
+
+# Expected output should show:
+# ✓ tmux 3.x+
+# ✓ git 2.x+
+# ✓ opencode (for OpenCode agents)
+# ✓ Database accessible
+# ✓ Migrations applied
+```
+
+### 1.2 Quick Build & Verify
+
+```bash
+# Build
 make build
 
-# Verify binaries
+# Verify
 ./build/swarm --version
-./build/swarmd --version
-```
-
-### 1.3 Test Database Setup
-
-```bash
-# Use isolated test database
-export SWARM_DATA_DIR=$(mktemp -d)
-./build/swarm migrate up
-```
-
-### 1.4 Test Node Setup
-
-For integration tests, you'll need:
-- **Local node**: The machine running tests
-- **Remote node** (optional): SSH-accessible server for remote tests
-- **tmux running**: `tmux new-session -d -s test`
-
----
-
-## 2. Automated Unit Tests
-
-### 2.1 Run All Unit Tests
-
-```bash
-# Run all tests
-go test ./... -v
-
-# Run with coverage
-go test ./... -coverprofile=coverage.out
-go tool cover -html=coverage.out
-
-# Run specific package
-go test ./internal/scheduler/... -v
-```
-
-### 2.2 Test Package Summary
-
-| Package | Tests | Focus Area |
-|---------|-------|------------|
-| `internal/account` | Account service, cooldowns, credential resolution |
-| `internal/adapters` | Agent adapters (OpenCode, Claude, Codex, Gemini, Generic), OpenCode event watcher |
-| `internal/agent` | Agent service, pane mapping, archive |
-| `internal/agent/runner` | Agent runner harness for reliable state detection |
-| `internal/agentmail` | Agent Mail MCP detection |
-| `internal/beads` | Beads issue tracker integration |
-| `internal/cli` | CLI command tests, output formatting |
-| `internal/config` | Configuration loading, approval policies |
-| `internal/db` | Repository tests for all entities |
-| `internal/events` | Event publishing, logging, retention |
-| `internal/hooks` | Event hook management and execution |
-| `internal/logging` | Log redaction, formatting |
-| `internal/models` | Model validation, account states |
-| `internal/node` | Node service, doctor, fallback |
-| `internal/queue` | Queue service |
-| `internal/recipes` | Recipe system for mass agent spawning |
-| `internal/scheduler` | Dispatch conditions, scheduling, deterministic Tick() |
-| `internal/sequences` | Sequence management and execution |
-| `internal/ssh` | SSH executors (native, system, local), keys, forwarding |
-| `internal/state` | State engine, polling, transcript parsing, snapshots |
-| `internal/swarmd` | Daemon, gRPC client/server, rate limiting |
-| `internal/templates` | Message template management |
-| `internal/tmux` | tmux client, layouts, snapshots, transcripts, idempotent operations |
-| `internal/tui/components` | TUI components (cards, panels, viewers, message palette, launchpad) |
-| `internal/vault` | Credential vault, profiles, encrypted storage |
-| `internal/workspace` | Workspace service, recovery, repo detection |
-
-### 2.3 Expected Results
-
-```bash
-# All packages should pass
-go test ./... 2>&1 | grep -c "^ok"
-# Expected: 24 packages OK
+./build/swarm doctor
 ```
 
 ---
 
-## 3. Database & Migration Tests
+## 2. Critical Path: Happy Path Tests
 
-### 3.1 Fresh Database Setup
+> **These are the most important tests.** They validate the core user journey from UX_FEEDBACK_2.md: "I'm in a repo → create/open workspace → spawn OpenCode agent → send instructions → watch status"
+
+### 2.1 Test: Single Agent Happy Path (MUST PASS)
+
+This is the golden path. If this doesn't work, nothing else matters.
 
 ```bash
-# Test: Initialize new database
-rm -f ~/.local/share/swarm/swarm.db
+# 1. Start in a git repository
+cd /path/to/your/repo
+git status  # Verify it's a git repo
+
+# 2. Initialize Swarm (one-time setup)
 swarm migrate up
 
-# Expected: All migrations applied (currently 4)
-# Verify:
-swarm migrate status --json
+# 3. Create workspace for current repo
+swarm ws create --path .
+WS_ID=$(swarm ws list --json | jq -r '.[0].id')
+echo "Workspace ID: $WS_ID"
+
+# 4. Spawn an OpenCode agent
+swarm agent spawn --workspace $WS_ID --type opencode
+AGENT_ID=$(swarm agent list --workspace $WS_ID --json | jq -r '.[0].id')
+echo "Agent ID: $AGENT_ID"
+
+# 5. Send a simple instruction
+swarm send $AGENT_ID "List all files in this repository"
+
+# 6. Check agent status
+swarm ps
+# Expected: Agent shows state (idle, working, etc.)
+
+# 7. Attach to see the agent working
+swarm attach $AGENT_ID
+# Press Ctrl-b d to detach
+
+# 8. Clean up
+swarm agent terminate $AGENT_ID
+swarm ws remove $WS_ID --destroy
 ```
 
-### 3.2 Migration Up/Down
+**Expected Results:**
+- [ ] Workspace created successfully
+- [ ] Agent spawned in tmux pane
+- [ ] Message sent to agent
+- [ ] Agent processes the message
+- [ ] Status shows correct state
+- [ ] Can attach and see agent output
+
+### 2.2 Test: TUI Happy Path (MUST PASS)
 
 ```bash
-# Test: Migrate up to specific version
-swarm migrate up --to 2
-
-# Test: Migrate down
-swarm migrate down --steps 1
-
-# Test: Full up then verify
-swarm migrate up
-swarm migrate version
-# Expected: Version 4
-```
-
-### 3.3 Schema Verification
-
-```bash
-# Verify tables exist
-sqlite3 ~/.local/share/swarm/swarm.db ".tables"
-
-# Expected tables:
-# - nodes
-# - workspaces  
-# - agents
-# - accounts
-# - queue_items
-# - events
-# - approvals
-# - usage_history
-# - schema_version
-```
-
----
-
-## 4. Node Management Tests
-
-### 4.1 Local Node
-
-```bash
-# Test: Add local node
-swarm node add --name test-local --local
-
-# Verify:
-swarm node list --json | jq '.[] | select(.name=="test-local")'
-# Expected: Node with is_local=true
-```
-
-### 4.2 Remote Node (SSH)
-
-```bash
-# Test: Add remote node (requires accessible SSH host)
-swarm node add --name test-remote --ssh user@hostname
-
-# Test: Add with custom key
-swarm node add --name test-remote-2 --ssh user@hostname --key ~/.ssh/custom_key
-
-# Test: Skip connection test
-swarm node add --name untested --ssh user@unreachable --no-test
-```
-
-### 4.3 Node Operations
-
-```bash
-# Test: Doctor check
-swarm node doctor test-local
-# Expected: Checks for tmux, git, agent CLIs
-
-# Test: Execute command
-swarm node exec test-local -- uname -a
-# Expected: System info output
-
-# Test: Refresh status
-swarm node refresh test-local
-swarm node list --json | jq '.[] | select(.name=="test-local") | .status'
-# Expected: "online"
-```
-
-### 4.4 Node Removal
-
-```bash
-# Test: Remove node (should fail if workspaces exist)
-swarm node remove test-local
-
-# Test: Force remove
-swarm node remove test-local --force
-```
-
-### 4.5 SSH Tunneling
-
-```bash
-# Test: Port forward
-swarm node forward test-remote --local-port 8080 --remote 127.0.0.1:3000 &
-curl http://localhost:8080
-# Expected: Response from remote service
-
-# Test: Swarmd tunnel shortcut
-swarm node tunnel test-remote
-# Expected: Tunnel to swarmd on remote
-```
-
----
-
-## 5. Workspace Management Tests
-
-### 5.1 Create Workspace
-
-```bash
-# Setup: Create test repo
-mkdir -p /tmp/test-repo && cd /tmp/test-repo && git init
-
-# Test: Create workspace
-swarm ws create --node test-local --path /tmp/test-repo
-
-# Verify:
-swarm ws list --json
-# Expected: Workspace with node_id, repo_path, tmux_session
-```
-
-### 5.2 Import Existing Session
-
-```bash
-# Setup: Create tmux session manually
-cd /tmp/test-repo
-tmux new-session -d -s existing-session
-
-# Test: Import
-swarm ws import --node test-local --session existing-session
-
-# Verify:
-swarm ws list | grep existing-session
-```
-
-### 5.3 Workspace Status
-
-```bash
-# Test: Status command
-swarm ws status <workspace-id>
-
-# Test: JSON output
-swarm ws status <workspace-id> --json
-# Expected: JSON with agents, git status, tmux info
-```
-
-### 5.4 Workspace Attach
-
-```bash
-# Test: Attach to workspace tmux session
-swarm ws attach <workspace-id>
-# Expected: Opens tmux session
-# Exit with: Ctrl-b d
-```
-
-### 5.5 Workspace Removal
-
-```bash
-# Test: Remove without destroying tmux
-swarm ws remove <workspace-id>
-
-# Test: Remove and destroy tmux session
-swarm ws remove <workspace-id> --destroy
-# Verify: tmux list-sessions should not show the session
-```
-
-### 5.6 Beads Integration
-
-```bash
-# Setup: Initialize beads in workspace
-cd /tmp/test-repo
-bd init
-
-# Test: Beads status
-swarm ws beads-status <workspace-id>
-# Expected: Shows beads issues
-```
-
----
-
-## 6. Agent Lifecycle Tests
-
-### 6.1 Spawn Agent
-
-```bash
-# Test: Spawn single agent
-swarm agent spawn --workspace <ws-id> --type opencode --count 1
-
-# Test: Spawn multiple agents
-swarm agent spawn --workspace <ws-id> --type claude --count 3
-
-# Verify:
-swarm agent list --workspace <ws-id>
-# Expected: Agent(s) listed with status
-```
-
-### 6.2 Agent Status
-
-```bash
-# Test: Get agent status
-swarm agent status <agent-id>
-
-# Test: JSON output
-swarm agent status <agent-id> --json
-# Expected: state, reason, queue_length, account info
-```
-
-### 6.3 Send Messages
-
-```bash
-# Test: Send inline message
-swarm agent send <agent-id> "Hello, please list files"
-
-# Test: Send from file
-echo "Describe the codebase structure" > /tmp/prompt.txt
-swarm agent send <agent-id> --file /tmp/prompt.txt
-
-# Test: Send from stdin
-echo "What is 2+2?" | swarm agent send <agent-id> --stdin
-
-# Test: Send with editor (opens $EDITOR)
-swarm agent send <agent-id> --editor
-```
-
-### 6.4 Agent Control
-
-```bash
-# Test: Pause agent
-swarm agent pause <agent-id> --duration 5m
-
-# Verify: Status shows paused
-swarm agent status <agent-id> | grep -i paused
-
-# Test: Resume agent
-swarm agent resume <agent-id>
-
-# Test: Interrupt agent
-swarm agent interrupt <agent-id>
-
-# Test: Restart agent
-swarm agent restart <agent-id>
-
-# Test: Terminate agent
-swarm agent terminate <agent-id>
-```
-
-### 6.5 Queue Management
-
-```bash
-# Test: Queue multiple messages
-cat > /tmp/prompts.txt <<EOF
-First: List all files
-Second: Show git status
-Third: Describe main.go
-EOF
-swarm agent queue <agent-id> --file /tmp/prompts.txt
-
-# Verify queue:
-swarm agent status <agent-id> --json | jq '.queue_length'
-# Expected: 3
-```
-
----
-
-## 7. Queue & Scheduler Tests
-
-### 7.1 Queue Operations
-
-```bash
-# Covered by unit tests: internal/queue/service_test.go
-go test ./internal/queue/... -v
-```
-
-### 7.2 Dispatch Conditions
-
-```bash
-# Covered by unit tests: internal/scheduler/condition_test.go
-go test ./internal/scheduler/... -v
-
-# Test conditions:
-# - Wait for idle
-# - Wait for cooldown clear
-# - Time-based gates
-```
-
-### 7.3 Scheduler Behavior
-
-```bash
-# Test: Queue with condition
-# (Requires extending CLI or using internal tests)
-
-# Verify scheduler processes queue items in order
-# Verify scheduler respects pause durations
-# Verify scheduler handles agent state changes
-```
-
----
-
-## 8. Account & Credential Tests
-
-### 8.1 Add Account
-
-```bash
-# Test: Interactive add
-swarm accounts add
-# Follow prompts: provider, profile, credential source
-
-# Test: Non-interactive add with env var
-swarm accounts add --provider anthropic --profile work \
-  --credential-ref 'env:ANTHROPIC_API_KEY' --non-interactive
-
-# Test: Add with file credential
-swarm accounts add --provider openai --profile default \
-  --credential-ref 'file:/path/to/key.txt' --non-interactive
-```
-
-### 8.2 List Accounts
-
-```bash
-# Test: List all
-swarm accounts list
-
-# Test: Filter by provider
-swarm accounts list --provider anthropic
-
-# Test: JSON output
-swarm accounts list --json
-```
-
-### 8.3 Cooldown Management
-
-```bash
-# Test: Set cooldown
-swarm accounts cooldown set <account-id> --until 30m
-
-# Verify:
-swarm accounts cooldown list
-
-# Test: Clear cooldown
-swarm accounts cooldown clear <account-id>
-```
-
-### 8.4 Account Rotation
-
-```bash
-# Test: Rotate agent to new account
-swarm accounts rotate <agent-id> --reason "rate-limit"
-
-# Verify: Agent now uses different account
-swarm agent status <agent-id> --json | jq '.account_id'
-```
-
-### 8.5 Vault Credential Tests
-
-```bash
-# Test: Initialize vault
-swarm vault init
-
-# Test: Backup current auth
-swarm vault backup claude work
-
-# Test: List profiles
-swarm vault list
-
-# Test: Activate profile
-swarm vault activate claude work
-
-# Test: Status
-swarm vault status
-
-# Test: vault: credential reference
-swarm accounts add --provider anthropic --profile vault-test \
-  --credential-ref 'vault:claude/work' --non-interactive
-```
-
----
-
-## 9. State Detection Tests
-
-### 9.1 State Engine
-
-```bash
-# Covered by unit tests
-go test ./internal/state/... -v
-```
-
-### 9.2 Manual State Verification
-
-```bash
-# Test: Agent state after spawn
-swarm agent spawn --workspace <ws-id> --type opencode --count 1
-sleep 2
-swarm agent status <agent-id> --json | jq '.state'
-# Expected: "idle" or "working"
-
-# Test: State after sending message
-swarm agent send <agent-id> "Hello"
-swarm agent status <agent-id> --json | jq '.state'
-# Expected: "working" (briefly)
-
-# Test: State reason
-swarm agent status <agent-id> --json | jq '.state_reason'
-# Expected: Human-readable explanation
-```
-
-### 9.3 Transcript Parsing
-
-```bash
-# Covered by: internal/state/transcript_parser_test.go
-# Test that transcript patterns are correctly identified:
-# - Idle patterns
-# - Working patterns
-# - Approval requests
-# - Rate limit messages
-# - Error patterns
-```
-
----
-
-## 10. SSH & Remote Execution Tests
-
-### 10.1 SSH Backend Tests
-
-```bash
-# Unit tests
-go test ./internal/ssh/... -v
-
-# Tests cover:
-# - Native Go SSH client
-# - System ssh binary fallback
-# - Local execution (no SSH)
-# - Key management
-# - Known hosts handling
-# - SSH config parsing
-# - Port forwarding
-```
-
-### 10.2 Remote Command Execution
-
-```bash
-# Test: Execute on remote
-swarm node exec test-remote -- whoami
-swarm node exec test-remote -- tmux -V
-swarm node exec test-remote -- ls -la
-
-# Test: With timeout
-swarm node exec test-remote --timeout 5s -- sleep 10
-# Expected: Timeout error
-```
-
-### 10.3 SSH Configuration
-
-```bash
-# Test: Node with proxy jump
-swarm node add --name behind-bastion --ssh user@internal \
-  --proxy-jump user@bastion
-
-# Test: Node with control master
-swarm node add --name fast-node --ssh user@host \
-  --control-master
-
-# Test: Custom SSH backend
-swarm node add --name native-ssh --ssh user@host \
-  --ssh-backend native
-```
-
----
-
-## 11. Swarmd Daemon Tests
-
-### 11.1 Daemon Unit Tests
-
-```bash
-go test ./internal/swarmd/... -v
-```
-
-### 11.2 Start Daemon
-
-```bash
-# Test: Start daemon
-./build/swarmd &
-SWARMD_PID=$!
-
-# Verify: Health check
-grpcurl -plaintext localhost:50051 swarmd.v1.SwarmDaemon/Health
-
-# Cleanup
-kill $SWARMD_PID
-```
-
-### 11.3 Resource Monitoring
-
-```bash
-# Test: Resource stats (requires running daemon)
-grpcurl -plaintext localhost:50051 swarmd.v1.SwarmDaemon/GetResourceStats
-```
-
-### 11.4 Rate Limiting
-
-```bash
-# Covered by: internal/swarmd/ratelimit_test.go
-# Tests rate limit detection and backoff
-```
-
----
-
-## 12. TUI Tests
-
-### 12.1 TUI Component Tests
-
-```bash
-go test ./internal/tui/... -v
-
-# Component tests:
-# - Agent card rendering
-# - Beads panel
-# - Empty state
-# - Git panel
-# - Spinner
-# - Transcript viewer
-# - Message palette
-# - Launchpad wizard
-# - Bulk action panel
-# - Queue editor timeline
-```
-
-### 12.2 Manual TUI Testing
-
-```bash
-# Test: Launch TUI
+# 1. Setup (if not already done)
+swarm ws create --path /path/to/repo
+WS_ID=$(swarm ws list --json | jq -r '.[0].id')
+swarm agent spawn --workspace $WS_ID --type opencode
+AGENT_ID=$(swarm agent list --json | jq -r '.[0].id')
+
+# 2. Launch TUI
 swarm ui
 
-# Verify:
-# - Fleet dashboard renders
-# - Nodes list shows nodes
-# - Workspaces display
-# - Keyboard navigation works (j/k, Enter, q)
-# - Command palette opens (Ctrl+K or :)
-# - Message palette opens (Ctrl+P)
+# 3. In TUI, verify:
+#    - Press 3 to go to Agent view
+#    - Agent card shows with correct state
+#    - Press Enter on agent to see details
+#    - Press t to see transcript
+#    - Press Q to see queue
+#    - Press q to quit
+
+# 4. Send message from another terminal while TUI is open
+swarm send $AGENT_ID "What is 2+2?"
+
+# 5. Watch TUI update:
+#    - Agent state should change to "working"
+#    - Then back to "idle" when done
+#    - No manual refresh needed!
 ```
 
-### 12.3 Live State Updates
+**Expected Results:**
+- [ ] TUI launches without errors
+- [ ] Agent cards display correctly
+- [ ] State updates appear automatically (within 5 seconds)
+- [ ] Navigation works (j/k, numbers, Enter)
+- [ ] Transcript shows agent output
+
+### 2.3 Test: Queue-First Workflow (MUST PASS)
+
+From UX_FEEDBACK_3.md: "send" should mean **enqueue + scheduler dispatch**
 
 ```bash
-# Test: TUI shows live agent data
-# 1. Launch TUI in one terminal
-swarm ui
+# 1. Setup agent
+AGENT_ID=$(swarm agent list --json | jq -r '.[0].id')
 
-# 2. In another terminal, spawn an agent
-swarm agent spawn --workspace $WS_ID --type opencode --count 1
+# 2. Queue multiple messages (not immediate injection)
+swarm send $AGENT_ID "First: List all Go files"
+swarm send $AGENT_ID "Second: Count lines of code"
+swarm send $AGENT_ID "Third: Find TODO comments"
 
-# 3. Verify: Agent appears in TUI within 2-5 seconds
-# 4. Send a message to the agent
-swarm agent send $AGENT_ID "Hello"
+# 3. Check queue
+swarm queue list --agent $AGENT_ID
+# Expected: 3 items queued (or 2 if first already dispatched)
 
-# 5. Verify: Agent state changes to "working" in TUI
-# 6. Wait for agent to finish
-# 7. Verify: Agent state changes to "idle" in TUI
-
-# Expected behavior:
-# - State changes appear within polling interval (500ms-5s depending on state)
-# - No manual refresh needed
-# - "Last updated" timestamp updates on state changes
+# 4. Watch agent process queue
+swarm ps --watch
+# Expected: Agent works through queue items in order
 ```
 
-### 12.4 TUI Responsiveness
-
-```bash
-# Test: Resize terminal
-# Expected: TUI adapts to new size
-
-# Test: Rapid key presses
-# Expected: No lag or missed inputs
-
-# Test: Large data sets
-# Create 10+ workspaces, 20+ agents
-# Expected: Smooth scrolling, no freezes
-```
-
-### 12.5 TUI Features
-
-```bash
-# Test: Multi-select agents
-# Press 3 to go to Agent view
-# Press Space to toggle selection
-# Press Shift+Space to select range
-# Press Ctrl+A to select all
-# Expected: Selection indicators appear, bulk action panel shows
-
-# Test: Message Palette (Ctrl+P)
-# Opens template/sequence browser
-# Navigate with j/k, select with Enter
-# Expected: Can browse templates and sequences
-
-# Test: Inspector Panel (Tab or i)
-# Toggle inspector sidebar
-# Shows details of selected agent/workspace
-# Expected: Details update when selection changes
-
-# Test: Queue Editor (Q in Agent view)
-# Opens queue editor for selected agent
-# Can add/edit/remove queue items
-# Expected: Queue changes persist
-
-# Test: Transcript Viewer (t in Agent view)
-# Shows live transcript from agent's tmux pane
-# Scroll with j/k, search with /
-# Expected: Updates as agent produces output
-```
+**Expected Results:**
+- [ ] Messages queued, not immediately injected
+- [ ] Queue shows pending items
+- [ ] Agent processes items in order
+- [ ] Queue empties as items complete
 
 ---
 
-## 13. CLI Integration Tests
+## 3. Core Workflow Tests
 
-### 13.1 Output Formats
+### 3.1 Test: Agent State Detection
+
+The TUI should answer these questions within 2 seconds:
+- What is working?
+- What is stuck?
+- What needs my permission?
+- What is cooling down?
 
 ```bash
-# Test: Human output
-swarm node list
+# 1. Spawn agent and send work
+AGENT_ID=$(swarm agent list --json | jq -r '.[0].id')
+swarm send $AGENT_ID "Analyze this codebase in detail"
 
-# Test: JSON output
-swarm node list --json | jq '.'
+# 2. Check state (should be "working")
+swarm agent status $AGENT_ID --json | jq '.state'
+# Expected: "working"
 
-# Test: JSONL output (where supported)
-swarm export events --jsonl | head -5
+# 3. Wait for completion, check again
+sleep 30
+swarm agent status $AGENT_ID --json | jq '.state'
+# Expected: "idle"
+
+# 4. Check state info
+swarm agent status $AGENT_ID --json | jq '.state_info'
+# Expected: Shows confidence, reason, evidence
 ```
 
-### 13.2 Watch Mode
+**Expected Results:**
+- [ ] Working state detected while agent is processing
+- [ ] Idle state detected when agent is done
+- [ ] State confidence is medium or high
+- [ ] State reason explains why
+
+### 3.2 Test: Templates and Sequences
 
 ```bash
-# Test: Watch for changes
-swarm export events --watch --jsonl &
-WATCH_PID=$!
-
-# Trigger event
-swarm agent spawn --workspace <ws-id> --type opencode --count 1
-
-# Verify event appears
-# Cleanup
-kill $WATCH_PID
-```
-
-### 13.3 Error Handling
-
-```bash
-# Test: Invalid command
-swarm invalid-command 2>&1
-# Expected: Error message with suggestion
-
-# Test: Missing required flag
-swarm node add 2>&1
-# Expected: Error about missing --name or --ssh/--local
-
-# Test: Invalid JSON
-swarm node add --name test --local --config '{invalid'
-# Expected: Clear parse error
-```
-
-### 13.4 Templates and Sequences
-
-```bash
-# Test: List templates
+# 1. List available templates
 swarm template list
-# Expected: Shows built-in templates
+# Expected: Shows built-in templates (continue, review, etc.)
 
-# Test: Show template details
-swarm template show continue
-# Expected: Shows template content and variables
-
-# Test: Run template
+# 2. Run a template
+AGENT_ID=$(swarm agent list --json | jq -r '.[0].id')
 swarm template run continue --agent $AGENT_ID
-# Expected: Message queued to agent
+# Expected: Template message queued
 
-# Test: List sequences
+# 3. List sequences
 swarm seq list
 # Expected: Shows built-in sequences
 
-# Test: Show sequence details
-swarm seq show baseline
-# Expected: Shows sequence steps
-
-# Test: Run sequence
+# 4. Run a sequence
 swarm seq run baseline --agent $AGENT_ID
 # Expected: All sequence steps queued
 ```
 
-### 13.5 Mail and Lock Commands
+### 3.3 Test: Message Palette in TUI
 
 ```bash
-# Test: Check inbox
-swarm mail inbox
-# Expected: Shows messages for current agent (or error if not configured)
+# 1. Launch TUI
+swarm ui
 
-# Test: Send mail
-swarm mail send --to other-agent --subject "Test" --body "Hello"
-# Expected: Message sent confirmation
+# 2. Press Ctrl+P to open message palette
+# Expected: Shows templates and sequences
 
-# Test: Acquire lock
-swarm lock acquire --path src/main.go --ttl 30m
-# Expected: Lock acquired confirmation
+# 3. Select a template with Enter
+# Expected: Prompts for target agent
 
-# Test: List locks
-swarm lock list
-# Expected: Shows active locks
-
-# Test: Release lock
-swarm lock release --path src/main.go
-# Expected: Lock released confirmation
-```
-
-### 13.6 Doctor Command
-
-```bash
-# Test: Run doctor
-swarm doctor
-# Expected: Checks for:
-# - tmux installed and version
-# - git installed
-# - OpenCode installed
-# - Database accessible
-# - Migrations applied
-
-# Test: Doctor on specific node
-swarm doctor --node test-local
-# Expected: Runs checks on specified node
-```
-
-### 13.7 Preflight Checks
-
-```bash
-# Test: Without database
-mv ~/.local/share/swarm/swarm.db ~/.local/share/swarm/swarm.db.bak
-swarm ws list 2>&1
-# Expected: Error about database, suggests swarm migrate up
-mv ~/.local/share/swarm/swarm.db.bak ~/.local/share/swarm/swarm.db
-
-# Test: Without tmux (for tmux-requiring commands)
-# Expected: Error about tmux not installed
+# 4. Select agent and confirm
+# Expected: Message queued to agent
 ```
 
 ---
 
-## 14. End-to-End Scenarios
+## 4. TUI Live Experience Tests
 
-### 14.1 Scenario: Single Agent Workflow
+### 4.1 Test: Real-time State Updates
 
 ```bash
-# 1. Setup
-swarm node add --name local --local
-swarm ws create --node local --path /path/to/repo
-WS_ID=$(swarm ws list --json | jq -r '.[0].id')
+# Terminal 1: Launch TUI
+swarm ui
 
-# 2. Spawn agent
-swarm agent spawn --workspace $WS_ID --type opencode --count 1
-AGENT_ID=$(swarm agent list --workspace $WS_ID --json | jq -r '.[0].id')
+# Terminal 2: Trigger state changes
+AGENT_ID=$(swarm agent list --json | jq -r '.[0].id')
+swarm send $AGENT_ID "Count to 10 slowly"
 
-# 3. Interact
-swarm agent send $AGENT_ID "List all Go files"
-sleep 5
-swarm agent status $AGENT_ID
-
-# 4. Queue work
-swarm agent queue $AGENT_ID --file prompts.txt
-
-# 5. Monitor
-swarm ws status $WS_ID
-
-# 6. Cleanup
-swarm agent terminate $AGENT_ID
-swarm ws remove $WS_ID --destroy
-swarm node remove local --force
+# Watch Terminal 1:
+# - Agent state should change from idle → working
+# - "Last updated" timestamp should update
+# - No need to press 'r' to refresh
 ```
 
-### 14.2 Scenario: Multi-Agent Parallel Work
+**Expected Results:**
+- [ ] State change appears within 5 seconds
+- [ ] No manual refresh needed
+- [ ] Timestamp updates on state change
+
+### 4.2 Test: Multi-Select and Bulk Actions
 
 ```bash
-# 1. Setup workspace
-swarm ws create --node local --path /path/to/repo
-WS_ID=$(swarm ws list --json | jq -r '.[0].id')
+# 1. Launch TUI with multiple agents
+swarm ui
 
-# 2. Spawn multiple agents
+# 2. Go to Agent view (press 3)
+
+# 3. Multi-select:
+#    - Space: toggle selection on current agent
+#    - Shift+Space: select range
+#    - Ctrl+A: select all
+
+# 4. Bulk action:
+#    - T: open message palette for selected agents
+#    - P: pause all selected
+#    - K: terminate all selected (with confirm)
+```
+
+### 4.3 Test: Queue Editor
+
+```bash
+# 1. In TUI, select an agent and press Q
+# Expected: Queue editor opens
+
+# 2. Add items:
+#    - i: insert message
+#    - p: insert pause
+#    - t: insert from template
+
+# 3. Reorder:
+#    - J/K: move item down/up
+
+# 4. Delete:
+#    - d: delete item (with confirm)
+```
+
+### 4.4 Test: Inspector Panel
+
+```bash
+# 1. In TUI, press Tab or i
+# Expected: Inspector panel toggles
+
+# 2. Navigate to different agents
+# Expected: Inspector shows details for selected agent
+
+# 3. Check inspector shows:
+#    - Agent ID and name
+#    - Current state with confidence
+#    - Queue length
+#    - Account info
+#    - Recent activity
+```
+
+---
+
+## 5. Multi-Agent Orchestration Tests
+
+### 5.1 Test: Spawn Multiple Agents
+
+```bash
+# 1. Spawn 3 agents
 swarm agent spawn --workspace $WS_ID --type opencode --count 3
 
-# 3. Assign different tasks
-AGENTS=$(swarm agent list --workspace $WS_ID --json | jq -r '.[].id')
-echo "$AGENTS" | while read AGENT_ID; do
-  swarm agent send $AGENT_ID "Work on assigned task"
-done
+# 2. Verify all spawned
+swarm agent list --workspace $WS_ID
+# Expected: 3 agents listed
 
-# 4. Monitor all agents
-swarm ws status $WS_ID
-
-# 5. Pause all on cooldown
-for AGENT_ID in $AGENTS; do
-  swarm agent pause $AGENT_ID --duration 5m
-done
+# 3. Check TUI shows all agents
+swarm ui
+# Press 3 for agent view
+# Expected: All 3 agents visible with cards
 ```
 
-### 14.3 Scenario: Account Rotation on Rate Limit
+### 5.2 Test: Parallel Work Assignment
 
 ```bash
-# 1. Setup multiple accounts
-swarm accounts add --provider anthropic --profile account1 \
-  --credential-ref 'env:ANTHROPIC_API_KEY_1' --non-interactive
-swarm accounts add --provider anthropic --profile account2 \
-  --credential-ref 'env:ANTHROPIC_API_KEY_2' --non-interactive
+# 1. Get agent IDs
+AGENTS=$(swarm agent list --json | jq -r '.[].id')
 
-# 2. Spawn agent with first account
-swarm agent spawn --workspace $WS_ID --type claude --profile account1
+# 2. Assign different tasks
+echo "$AGENTS" | head -1 | xargs -I {} swarm send {} "Review auth code"
+echo "$AGENTS" | sed -n 2p | xargs -I {} swarm send {} "Review database code"
+echo "$AGENTS" | tail -1 | xargs -I {} swarm send {} "Review API handlers"
 
-# 3. Simulate rate limit (set cooldown)
-AGENT_ID=$(swarm agent list --workspace $WS_ID --json | jq -r '.[0].id')
-ACCOUNT_ID=$(swarm agent status $AGENT_ID --json | jq -r '.account_id')
-swarm accounts cooldown set $ACCOUNT_ID --until 30m
-
-# 4. Rotate to available account
-swarm accounts rotate $AGENT_ID --reason rate-limit
-
-# 5. Verify rotation
-swarm agent status $AGENT_ID --json | jq '.account_id'
-# Expected: Different account
+# 3. Monitor all agents
+swarm ps
+# Expected: All agents working on different tasks
 ```
 
-### 14.4 Scenario: Remote Node Workflow
+### 5.3 Test: Recipe-Based Spawning
 
 ```bash
-# 1. Add remote node
-swarm node add --name remote-server --ssh user@hostname
+# 1. List available recipes
+swarm recipe list
 
-# 2. Verify connectivity
-swarm node doctor remote-server
+# 2. Run a recipe (spawns multiple configured agents)
+swarm recipe run baseline --workspace $WS_ID
 
-# 3. Create workspace on remote
-swarm ws create --node remote-server --path /home/user/project
-WS_ID=$(swarm ws list --json | jq -r '.[] | select(.node_name=="remote-server") | .id')
-
-# 4. Spawn agent
-swarm agent spawn --workspace $WS_ID --type opencode --count 1
-
-# 5. Attach to remote session
-swarm ws attach $WS_ID
-
-# 6. Monitor remotely
-swarm ws status $WS_ID
-```
-
-### 14.5 Scenario: Workspace Recovery
-
-```bash
-# 1. Create orphaned tmux session
-tmux new-session -d -s orphan-session
-tmux send-keys -t orphan-session "cd /path/to/repo" Enter
-
-# 2. Import session
-swarm ws import --node local --session orphan-session
-
-# 3. Verify import
-swarm ws list | grep orphan-session
+# 3. Verify agents spawned with correct configuration
+swarm agent list --workspace $WS_ID
 ```
 
 ---
 
-## 15. Performance Tests
+## 6. Secondary Tests
 
-### 15.1 Agent Spawn Time
+These tests are important but should be run after the critical path passes.
+
+### 6.1 Unit Tests
 
 ```bash
-# Test: Time to spawn agent
+# Run all unit tests
+go test ./... -v
+
+# Expected: All tests pass
+# Key packages:
+# - internal/state: State detection
+# - internal/scheduler: Queue dispatch
+# - internal/tmux: tmux operations
+# - internal/adapters: Agent adapters
+```
+
+### 6.2 Account and Credential Tests
+
+```bash
+# Add account
+swarm accounts add --provider anthropic --profile work \
+  --credential-ref 'env:ANTHROPIC_API_KEY' --non-interactive
+
+# List accounts
+swarm accounts list
+
+# Set cooldown
+swarm accounts cooldown set <account-id> --until 30m
+
+# Clear cooldown
+swarm accounts cooldown clear <account-id>
+```
+
+### 6.3 Vault Tests
+
+```bash
+# Initialize vault
+swarm vault init
+
+# Backup credentials
+swarm vault backup claude work
+
+# List profiles
+swarm vault list
+
+# Activate profile
+swarm vault activate claude work
+```
+
+### 6.4 Remote Node Tests (Optional)
+
+```bash
+# Add remote node
+swarm node add --name remote --ssh user@hostname
+
+# Run doctor on remote
+swarm node doctor remote
+
+# Create workspace on remote
+swarm ws create --node remote --path /home/user/project
+
+# Spawn agent on remote
+swarm agent spawn --workspace $REMOTE_WS_ID --type opencode
+```
+
+### 6.5 Mail and Lock Tests
+
+```bash
+# Send mail between agents
+swarm mail send --to agent-2 --subject "Handoff" --body "Please review my changes"
+
+# Check inbox
+swarm mail inbox --agent agent-2
+
+# Acquire file lock
+swarm lock acquire --path src/main.go --ttl 30m
+
+# Check locks
+swarm lock list
+
+# Release lock
+swarm lock release --path src/main.go
+```
+
+### 6.6 Database Tests
+
+```bash
+# Check migrations
+swarm migrate status
+
+# Verify schema
+sqlite3 ~/.local/share/swarm/swarm.db ".tables"
+# Expected: nodes, workspaces, agents, accounts, queue_items, events, etc.
+```
+
+### 6.7 Performance Tests
+
+```bash
+# Spawn latency
 time swarm agent spawn --workspace $WS_ID --type opencode --count 1
 # Target: < 2 seconds
-```
 
-### 15.2 State Polling Latency
-
-```bash
-# Test: State update latency
-# 1. Spawn agent
-# 2. Measure time from agent becoming idle to Swarm detecting it
-# Target: < 5 seconds (polling interval)
-```
-
-### 15.3 Queue Throughput
-
-```bash
-# Test: Queue 100 items
-for i in {1..100}; do echo "Task $i"; done > /tmp/100tasks.txt
-time swarm agent queue $AGENT_ID --file /tmp/100tasks.txt
+# Queue throughput
+for i in {1..100}; do echo "Task $i"; done > /tmp/tasks.txt
+time swarm queue add --agent $AGENT_ID --file /tmp/tasks.txt
 # Target: < 1 second
-```
 
-### 15.4 TUI Responsiveness
-
-```bash
-# Test: TUI with many entities
-# Create 50 workspaces, 100 agents
-# Navigate quickly through lists
+# TUI responsiveness with many agents
+# Create 20+ agents, navigate quickly
 # Target: No perceptible lag
 ```
 
-### 15.5 Vault Operations
-
-```bash
-# Test: Profile activation
-time swarm vault activate claude work
-# Target: < 100ms
-```
-
 ---
 
-## 16. Security Tests
+## 7. Test Results Template
 
-### 16.1 Credential Handling
+### Critical Path Results
 
-```bash
-# Test: Credentials not in logs
-ANTHROPIC_API_KEY="sk-ant-secret123" swarm agent spawn \
-  --workspace $WS_ID --type claude 2>&1 | grep -c "sk-ant"
-# Expected: 0 (not found)
+| Test | Status | Notes |
+|------|--------|-------|
+| 2.1 Single Agent Happy Path | ⬜ | |
+| 2.2 TUI Happy Path | ⬜ | |
+| 2.3 Queue-First Workflow | ⬜ | |
 
-# Test: Credentials not in database
-sqlite3 ~/.local/share/swarm/swarm.db \
-  "SELECT * FROM accounts" | grep -c "sk-ant"
-# Expected: 0 (credential_ref stored, not actual key)
-```
+### Core Workflow Results
 
-### 16.2 File Permissions
+| Test | Status | Notes |
+|------|--------|-------|
+| 3.1 Agent State Detection | ⬜ | |
+| 3.2 Templates and Sequences | ⬜ | |
+| 3.3 Message Palette in TUI | ⬜ | |
 
-```bash
-# Test: Database permissions
-ls -la ~/.local/share/swarm/swarm.db
-# Expected: -rw------- (600)
+### TUI Experience Results
 
-# Test: Vault file permissions
-ls -la ~/.config/swarm/vault/profiles/anthropic/work/
-# Expected: Directory 700, files 600
-```
+| Test | Status | Notes |
+|------|--------|-------|
+| 4.1 Real-time State Updates | ⬜ | |
+| 4.2 Multi-Select and Bulk Actions | ⬜ | |
+| 4.3 Queue Editor | ⬜ | |
+| 4.4 Inspector Panel | ⬜ | |
 
-### 16.3 SSH Key Security
+### Multi-Agent Results
 
-```bash
-# Test: SSH keys not logged
-swarm node add --name test --ssh user@host 2>&1 | grep -c "PRIVATE"
-# Expected: 0
-
-# Test: SSH agent forwarding (if enabled)
-# Verify agent socket not exposed publicly
-```
-
----
-
-## 17. Test Results Template
-
-### Summary
-
-| Category | Total | Pass | Fail | Skip | Notes |
-|----------|-------|------|------|------|-------|
-| Unit Tests | | | | | `go test ./...` |
-| Database | | | | | |
-| Node Management | | | | | |
-| Workspace Management | | | | | |
-| Agent Lifecycle | | | | | |
-| Queue & Scheduler | | | | | |
-| Account & Credentials | | | | | |
-| State Detection | | | | | |
-| SSH & Remote | | | | | |
-| Swarmd Daemon | | | | | |
-| TUI | | | | | |
-| CLI Integration | | | | | |
-| E2E Scenarios | | | | | |
-| Performance | | | | | |
-| Security | | | | | |
-| **Total** | | | | | |
+| Test | Status | Notes |
+|------|--------|-------|
+| 5.1 Spawn Multiple Agents | ⬜ | |
+| 5.2 Parallel Work Assignment | ⬜ | |
+| 5.3 Recipe-Based Spawning | ⬜ | |
 
 ### Environment
 
@@ -1116,44 +520,42 @@ swarm node add --name test --ssh user@host 2>&1 | grep -c "PRIVATE"
 Date: YYYY-MM-DD
 Tester: 
 Swarm Version: 
-Go Version: 
 OS: 
 tmux Version: 
-SSH Version: 
 ```
 
 ### Issues Found
 
-| ID | Category | Severity | Description | Steps to Reproduce | Status |
-|----|----------|----------|-------------|-------------------|--------|
-| | | | | | |
+| ID | Severity | Description | Steps to Reproduce |
+|----|----------|-------------|-------------------|
+| | | | |
 
 ### Notes
 
 - 
 - 
-- 
 
 ---
 
-## Appendix: Quick Test Commands
+## Quick Reference: Key Commands
 
 ```bash
-# Run all unit tests
-go test ./... -v
+# Happy path commands
+swarm doctor                    # Check environment
+swarm ws create --path .        # Create workspace
+swarm agent spawn --workspace $WS_ID --type opencode  # Spawn agent
+swarm send $AGENT_ID "message"  # Send message (queued)
+swarm ps                        # List agents with status
+swarm attach $AGENT_ID          # Attach to agent tmux pane
+swarm ui                        # Launch TUI
 
-# Run with race detector
-go test ./... -race
-
-# Run with coverage
-go test ./... -coverprofile=coverage.out && go tool cover -func=coverage.out
-
-# Run specific test
-go test ./internal/scheduler/... -run TestDispatchCondition -v
-
-# Build and quick smoke test
-make build && ./build/swarm --version && ./build/swarm node list
-
-# Full E2E smoke test
-./scripts/smoke-test.sh  # (if exists)
+# TUI shortcuts
+3           # Agent view
+Tab / i     # Toggle inspector
+t           # Toggle transcript
+Q           # Queue editor
+Ctrl+P      # Message palette
+Ctrl+K / :  # Command palette
+Space       # Toggle selection
+q           # Quit
 ```
