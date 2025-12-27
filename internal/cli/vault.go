@@ -40,6 +40,8 @@ func init() {
 	vaultCmd.AddCommand(vaultStatusCmd)
 	vaultCmd.AddCommand(vaultPathsCmd)
 	vaultCmd.AddCommand(vaultClearCmd)
+	vaultCmd.AddCommand(vaultPushCmd)
+	vaultCmd.AddCommand(vaultPullCmd)
 
 	// Global vault flags
 	vaultCmd.PersistentFlags().StringVar(&vaultPath, "vault-path", "", "path to vault directory (default: ~/.config/swarm/vault)")
@@ -71,7 +73,9 @@ Examples:
   swarm vault backup claude work        # Save current Claude auth as "work"
   swarm vault activate claude personal  # Switch to "personal" Claude profile
   swarm vault list                      # List all profiles
-  swarm vault status                    # Show active profile for each adapter`,
+  swarm vault status                    # Show active profile for each adapter
+  swarm vault push node-1 --profile claude/work  # Sync profile to a node
+  swarm vault pull node-1 --all                 # Pull all profiles from a node`,
 }
 
 var vaultInitCmd = &cobra.Command{
