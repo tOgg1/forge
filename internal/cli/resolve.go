@@ -5,9 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/opencode-ai/swarm/internal/config"
 	"github.com/opencode-ai/swarm/internal/db"
 	"github.com/opencode-ai/swarm/internal/models"
 	"github.com/opencode-ai/swarm/internal/node"
@@ -369,4 +373,182 @@ func formatMatchList(count int, format func(int) string) string {
 	}
 
 	return strings.Join(parts, ", ")
+}
+
+// ResolvedContext holds the result of context resolution.
+type ResolvedContext struct {
+	WorkspaceID   string
+	WorkspaceName string
+	AgentID       string
+	AgentName     string
+	Source        string // "flag", "directory", "stored", or ""
+}
+
+// ResolveWorkspaceContext resolves a workspace using the priority order:
+// 1. Explicit flag (if provided)
+// 2. Current directory detection (if in a git repo matching a workspace)
+// 3. Stored context from `swarm use`
+func ResolveWorkspaceContext(ctx context.Context, repo *db.WorkspaceRepository, explicitFlag string) (*ResolvedContext, error) {
+	result := &ResolvedContext{}
+
+	// Priority 1: Explicit flag
+	if explicitFlag != "" {
+		ws, err := findWorkspace(ctx, repo, explicitFlag)
+		if err != nil {
+			return nil, err
+		}
+		result.WorkspaceID = ws.ID
+		result.WorkspaceName = ws.Name
+		result.Source = "flag"
+		return result, nil
+	}
+
+	// Priority 2: Current directory detection
+	if ws := detectWorkspaceFromCwd(ctx, repo); ws != nil {
+		result.WorkspaceID = ws.ID
+		result.WorkspaceName = ws.Name
+		result.Source = "directory"
+		return result, nil
+	}
+
+	// Priority 3: Stored context
+	store := config.DefaultContextStore()
+	storedCtx, err := store.Load()
+	if err == nil && storedCtx.HasWorkspace() {
+		// Verify the workspace still exists
+		ws, err := repo.Get(ctx, storedCtx.WorkspaceID)
+		if err == nil {
+			result.WorkspaceID = ws.ID
+			result.WorkspaceName = ws.Name
+			result.Source = "stored"
+			return result, nil
+		}
+		// Workspace no longer exists, ignore stored context
+	}
+
+	return result, nil
+}
+
+// ResolveAgentContext resolves an agent using the priority order:
+// 1. Explicit flag (if provided)
+// 2. Stored context from `swarm use`
+func ResolveAgentContext(ctx context.Context, repo *db.AgentRepository, explicitFlag string, workspaceID string) (*ResolvedContext, error) {
+	result := &ResolvedContext{}
+
+	// Priority 1: Explicit flag
+	if explicitFlag != "" {
+		agent, err := findAgent(ctx, repo, explicitFlag)
+		if err != nil {
+			return nil, err
+		}
+		// Verify agent belongs to workspace if specified
+		if workspaceID != "" && agent.WorkspaceID != workspaceID {
+			return nil, fmt.Errorf("agent %s does not belong to workspace %s", explicitFlag, workspaceID)
+		}
+		result.AgentID = agent.ID
+		result.Source = "flag"
+		return result, nil
+	}
+
+	// Priority 2: Stored context
+	store := config.DefaultContextStore()
+	storedCtx, err := store.Load()
+	if err == nil && storedCtx.HasAgent() {
+		// Verify the agent still exists
+		agent, err := repo.Get(ctx, storedCtx.AgentID)
+		if err == nil {
+			// If workspace is specified, verify agent belongs to it
+			if workspaceID != "" && agent.WorkspaceID != workspaceID {
+				// Agent doesn't match workspace, ignore stored context
+				return result, nil
+			}
+			result.AgentID = agent.ID
+			result.AgentName = storedCtx.AgentName
+			result.Source = "stored"
+			return result, nil
+		}
+		// Agent no longer exists, ignore stored context
+	}
+
+	return result, nil
+}
+
+// RequireWorkspaceContext is like ResolveWorkspaceContext but returns an error
+// if no workspace could be resolved.
+func RequireWorkspaceContext(ctx context.Context, repo *db.WorkspaceRepository, explicitFlag string) (*ResolvedContext, error) {
+	resolved, err := ResolveWorkspaceContext(ctx, repo, explicitFlag)
+	if err != nil {
+		return nil, err
+	}
+	if resolved.WorkspaceID == "" {
+		return nil, errors.New("workspace required: use --workspace flag, run from a workspace directory, or set context with 'swarm use <workspace>'")
+	}
+	return resolved, nil
+}
+
+// RequireAgentContext is like ResolveAgentContext but returns an error
+// if no agent could be resolved.
+func RequireAgentContext(ctx context.Context, repo *db.AgentRepository, explicitFlag string, workspaceID string) (*ResolvedContext, error) {
+	resolved, err := ResolveAgentContext(ctx, repo, explicitFlag, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if resolved.AgentID == "" {
+		return nil, errors.New("agent required: provide agent ID as argument or set context with 'swarm use --agent <agent>'")
+	}
+	return resolved, nil
+}
+
+// detectWorkspaceFromCwd attempts to find a workspace that matches the current
+// working directory by looking for a git repository root.
+func detectWorkspaceFromCwd(ctx context.Context, repo *db.WorkspaceRepository) *models.Workspace {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+
+	// Get git root directory
+	gitRoot := getGitRoot(cwd)
+	if gitRoot == "" {
+		return nil
+	}
+
+	// Normalize path
+	gitRoot, err = filepath.Abs(gitRoot)
+	if err != nil {
+		return nil
+	}
+
+	// Look for a workspace with matching repo path
+	workspaces, err := repo.List(ctx)
+	if err != nil {
+		return nil
+	}
+
+	for _, ws := range workspaces {
+		if ws.RepoPath == "" {
+			continue
+		}
+		wsPath, err := filepath.Abs(ws.RepoPath)
+		if err != nil {
+			continue
+		}
+		if wsPath == gitRoot {
+			return ws
+		}
+	}
+
+	return nil
+}
+
+// getGitRoot returns the root directory of the git repository containing the
+// given path, or empty string if not in a git repo.
+func getGitRoot(path string) string {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = path
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
