@@ -89,25 +89,29 @@ go test ./internal/scheduler/... -v
 | Package | Tests | Focus Area |
 |---------|-------|------------|
 | `internal/account` | Account service, cooldowns, credential resolution |
-| `internal/account/caam` | CAAM vault parsing (deprecated) |
-| `internal/adapters` | Agent adapters (OpenCode, Claude, Codex, Gemini, Generic) |
+| `internal/adapters` | Agent adapters (OpenCode, Claude, Codex, Gemini, Generic), OpenCode event watcher |
 | `internal/agent` | Agent service, pane mapping, archive |
+| `internal/agent/runner` | Agent runner harness for reliable state detection |
 | `internal/agentmail` | Agent Mail MCP detection |
 | `internal/beads` | Beads issue tracker integration |
 | `internal/cli` | CLI command tests, output formatting |
 | `internal/config` | Configuration loading, approval policies |
 | `internal/db` | Repository tests for all entities |
 | `internal/events` | Event publishing, logging, retention |
+| `internal/hooks` | Event hook management and execution |
 | `internal/logging` | Log redaction, formatting |
 | `internal/models` | Model validation, account states |
 | `internal/node` | Node service, doctor, fallback |
 | `internal/queue` | Queue service |
-| `internal/scheduler` | Dispatch conditions, scheduling |
+| `internal/recipes` | Recipe system for mass agent spawning |
+| `internal/scheduler` | Dispatch conditions, scheduling, deterministic Tick() |
+| `internal/sequences` | Sequence management and execution |
 | `internal/ssh` | SSH executors (native, system, local), keys, forwarding |
 | `internal/state` | State engine, polling, transcript parsing, snapshots |
 | `internal/swarmd` | Daemon, gRPC client/server, rate limiting |
-| `internal/tmux` | tmux client, layouts, snapshots, transcripts |
-| `internal/tui/components` | TUI components (cards, panels, viewers) |
+| `internal/templates` | Message template management |
+| `internal/tmux` | tmux client, layouts, snapshots, transcripts, idempotent operations |
+| `internal/tui/components` | TUI components (cards, panels, viewers, message palette, launchpad) |
 | `internal/vault` | Credential vault, profiles, encrypted storage |
 | `internal/workspace` | Workspace service, recovery, repo detection |
 
@@ -653,23 +657,52 @@ go test ./internal/tui/... -v
 # - Git panel
 # - Spinner
 # - Transcript viewer
+# - Message palette
+# - Launchpad wizard
+# - Bulk action panel
+# - Queue editor timeline
 ```
 
 ### 12.2 Manual TUI Testing
 
 ```bash
 # Test: Launch TUI
-swarm
+swarm ui
 
 # Verify:
 # - Fleet dashboard renders
 # - Nodes list shows nodes
 # - Workspaces display
 # - Keyboard navigation works (j/k, Enter, q)
-# - Command palette opens (?)
+# - Command palette opens (Ctrl+K or :)
+# - Message palette opens (Ctrl+P)
 ```
 
-### 12.3 TUI Responsiveness
+### 12.3 Live State Updates
+
+```bash
+# Test: TUI shows live agent data
+# 1. Launch TUI in one terminal
+swarm ui
+
+# 2. In another terminal, spawn an agent
+swarm agent spawn --workspace $WS_ID --type opencode --count 1
+
+# 3. Verify: Agent appears in TUI within 2-5 seconds
+# 4. Send a message to the agent
+swarm agent send $AGENT_ID "Hello"
+
+# 5. Verify: Agent state changes to "working" in TUI
+# 6. Wait for agent to finish
+# 7. Verify: Agent state changes to "idle" in TUI
+
+# Expected behavior:
+# - State changes appear within polling interval (500ms-5s depending on state)
+# - No manual refresh needed
+# - "Last updated" timestamp updates on state changes
+```
+
+### 12.4 TUI Responsiveness
 
 ```bash
 # Test: Resize terminal
@@ -681,6 +714,37 @@ swarm
 # Test: Large data sets
 # Create 10+ workspaces, 20+ agents
 # Expected: Smooth scrolling, no freezes
+```
+
+### 12.5 TUI Features
+
+```bash
+# Test: Multi-select agents
+# Press 3 to go to Agent view
+# Press Space to toggle selection
+# Press Shift+Space to select range
+# Press Ctrl+A to select all
+# Expected: Selection indicators appear, bulk action panel shows
+
+# Test: Message Palette (Ctrl+P)
+# Opens template/sequence browser
+# Navigate with j/k, select with Enter
+# Expected: Can browse templates and sequences
+
+# Test: Inspector Panel (Tab or i)
+# Toggle inspector sidebar
+# Shows details of selected agent/workspace
+# Expected: Details update when selection changes
+
+# Test: Queue Editor (Q in Agent view)
+# Opens queue editor for selected agent
+# Can add/edit/remove queue items
+# Expected: Queue changes persist
+
+# Test: Transcript Viewer (t in Agent view)
+# Shows live transcript from agent's tmux pane
+# Scroll with j/k, search with /
+# Expected: Updates as agent produces output
 ```
 
 ---
@@ -731,7 +795,76 @@ swarm node add --name test --local --config '{invalid'
 # Expected: Clear parse error
 ```
 
-### 13.4 Preflight Checks
+### 13.4 Templates and Sequences
+
+```bash
+# Test: List templates
+swarm template list
+# Expected: Shows built-in templates
+
+# Test: Show template details
+swarm template show continue
+# Expected: Shows template content and variables
+
+# Test: Run template
+swarm template run continue --agent $AGENT_ID
+# Expected: Message queued to agent
+
+# Test: List sequences
+swarm seq list
+# Expected: Shows built-in sequences
+
+# Test: Show sequence details
+swarm seq show baseline
+# Expected: Shows sequence steps
+
+# Test: Run sequence
+swarm seq run baseline --agent $AGENT_ID
+# Expected: All sequence steps queued
+```
+
+### 13.5 Mail and Lock Commands
+
+```bash
+# Test: Check inbox
+swarm mail inbox
+# Expected: Shows messages for current agent (or error if not configured)
+
+# Test: Send mail
+swarm mail send --to other-agent --subject "Test" --body "Hello"
+# Expected: Message sent confirmation
+
+# Test: Acquire lock
+swarm lock acquire --path src/main.go --ttl 30m
+# Expected: Lock acquired confirmation
+
+# Test: List locks
+swarm lock list
+# Expected: Shows active locks
+
+# Test: Release lock
+swarm lock release --path src/main.go
+# Expected: Lock released confirmation
+```
+
+### 13.6 Doctor Command
+
+```bash
+# Test: Run doctor
+swarm doctor
+# Expected: Checks for:
+# - tmux installed and version
+# - git installed
+# - OpenCode installed
+# - Database accessible
+# - Migrations applied
+
+# Test: Doctor on specific node
+swarm doctor --node test-local
+# Expected: Runs checks on specified node
+```
+
+### 13.7 Preflight Checks
 
 ```bash
 # Test: Without database
