@@ -163,6 +163,7 @@ func (c *Client) HasSession(ctx context.Context, session string) (bool, error) {
 }
 
 // NewSession creates a new tmux session with the given name and working directory.
+// Returns ErrSessionExists if the session already exists.
 func (c *Client) NewSession(ctx context.Context, session, workDir string) error {
 	if strings.TrimSpace(session) == "" {
 		return fmt.Errorf("session name is required")
@@ -179,6 +180,36 @@ func (c *Client) NewSession(ctx context.Context, session, workDir string) error 
 			return ErrSessionExists
 		}
 		return fmt.Errorf("tmux new-session failed: %w", err)
+	}
+
+	return nil
+}
+
+// EnsureSession creates a new tmux session if it doesn't exist.
+// This is an idempotent operation - calling it multiple times with the same
+// session name is safe and will succeed if the session exists.
+func (c *Client) EnsureSession(ctx context.Context, session, workDir string) error {
+	if strings.TrimSpace(session) == "" {
+		return fmt.Errorf("session name is required")
+	}
+
+	// Check if session already exists
+	exists, err := c.HasSession(ctx, session)
+	if err != nil {
+		return fmt.Errorf("failed to check session existence: %w", err)
+	}
+	if exists {
+		return nil // Session already exists, nothing to do
+	}
+
+	// Create the session
+	err = c.NewSession(ctx, session, workDir)
+	if err != nil {
+		// Handle race condition: session may have been created between check and create
+		if err == ErrSessionExists {
+			return nil
+		}
+		return err
 	}
 
 	return nil
@@ -203,6 +234,65 @@ func (c *Client) NewWindow(ctx context.Context, session, name, workDir string) e
 	}
 
 	return nil
+}
+
+// HasWindow checks if a window with the given name exists in the session.
+func (c *Client) HasWindow(ctx context.Context, session, name string) (bool, error) {
+	if strings.TrimSpace(session) == "" {
+		return false, fmt.Errorf("session name is required")
+	}
+	if strings.TrimSpace(name) == "" {
+		return false, fmt.Errorf("window name is required")
+	}
+
+	cmd := fmt.Sprintf("tmux list-windows -t %s -F '#{window_name}'", escapeSessionName(session))
+	stdout, stderr, err := c.exec.Exec(ctx, cmd)
+	if err != nil {
+		if isNoServerRunning(stderr) || isSessionNotFound(stderr) {
+			return false, nil
+		}
+		return false, fmt.Errorf("tmux list-windows failed: %w", err)
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(stdout)), "\n") {
+		if strings.TrimSpace(line) == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// EnsureWindow creates a new tmux window if it doesn't exist.
+// This is an idempotent operation - calling it multiple times with the same
+// session and window name is safe and will succeed if the window exists.
+func (c *Client) EnsureWindow(ctx context.Context, session, name, workDir string) error {
+	if strings.TrimSpace(session) == "" {
+		return fmt.Errorf("session name is required")
+	}
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("window name is required")
+	}
+
+	// First ensure the session exists
+	exists, err := c.HasSession(ctx, session)
+	if err != nil {
+		return fmt.Errorf("failed to check session existence: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("session %q does not exist", session)
+	}
+
+	// Check if window already exists
+	windowExists, err := c.HasWindow(ctx, session, name)
+	if err != nil {
+		return fmt.Errorf("failed to check window existence: %w", err)
+	}
+	if windowExists {
+		return nil // Window already exists, nothing to do
+	}
+
+	// Create the window
+	return c.NewWindow(ctx, session, name, workDir)
 }
 
 // SelectWindow focuses the specified tmux window.
@@ -237,6 +327,7 @@ func (c *Client) SelectLayout(ctx context.Context, target string, layout string)
 }
 
 // KillSession terminates a tmux session.
+// Returns ErrSessionNotFound if the session doesn't exist.
 func (c *Client) KillSession(ctx context.Context, session string) error {
 	if strings.TrimSpace(session) == "" {
 		return fmt.Errorf("session name is required")
@@ -252,6 +343,21 @@ func (c *Client) KillSession(ctx context.Context, session string) error {
 	}
 
 	return nil
+}
+
+// KillSessionIfExists terminates a tmux session if it exists.
+// This is an idempotent operation - calling it on a non-existent session
+// is safe and will not return an error.
+func (c *Client) KillSessionIfExists(ctx context.Context, session string) error {
+	if strings.TrimSpace(session) == "" {
+		return fmt.Errorf("session name is required")
+	}
+
+	err := c.KillSession(ctx, session)
+	if err == ErrSessionNotFound {
+		return nil // Session doesn't exist, nothing to do
+	}
+	return err
 }
 
 // Pane describes a tmux pane.
@@ -553,17 +659,37 @@ func (c *Client) GetPanePID(ctx context.Context, target string) (int, error) {
 }
 
 // KillPane kills a specific pane.
+// Returns ErrPaneNotFound if the pane doesn't exist.
 func (c *Client) KillPane(ctx context.Context, target string) error {
 	if strings.TrimSpace(target) == "" {
 		return fmt.Errorf("target is required")
 	}
 
 	cmd := fmt.Sprintf("tmux kill-pane -t %s", escapeArg(target))
-	if _, _, err := c.exec.Exec(ctx, cmd); err != nil {
+	_, stderr, err := c.exec.Exec(ctx, cmd)
+	if err != nil {
+		if isPaneNotFound(stderr) {
+			return ErrPaneNotFound
+		}
 		return fmt.Errorf("tmux kill-pane failed: %w", err)
 	}
 
 	return nil
+}
+
+// KillPaneIfExists kills a specific pane if it exists.
+// This is an idempotent operation - calling it on a non-existent pane
+// is safe and will not return an error.
+func (c *Client) KillPaneIfExists(ctx context.Context, target string) error {
+	if strings.TrimSpace(target) == "" {
+		return fmt.Errorf("target is required")
+	}
+
+	err := c.KillPane(ctx, target)
+	if err == ErrPaneNotFound {
+		return nil // Pane doesn't exist, nothing to do
+	}
+	return err
 }
 
 // SelectPane selects (focuses) a pane.
@@ -584,6 +710,7 @@ func (c *Client) SelectPane(ctx context.Context, target string) error {
 var (
 	ErrSessionExists   = fmt.Errorf("session already exists")
 	ErrSessionNotFound = fmt.Errorf("session not found")
+	ErrPaneNotFound    = fmt.Errorf("pane not found")
 )
 
 func isNoServerRunning(stderr []byte) bool {
@@ -594,6 +721,13 @@ func isSessionNotFound(stderr []byte) bool {
 	s := strings.ToLower(string(stderr))
 	return strings.Contains(s, "session not found") ||
 		strings.Contains(s, "can't find session")
+}
+
+func isPaneNotFound(stderr []byte) bool {
+	s := strings.ToLower(string(stderr))
+	return strings.Contains(s, "can't find pane") ||
+		strings.Contains(s, "pane not found") ||
+		strings.Contains(s, "no such pane")
 }
 
 func isDuplicateSession(stderr []byte) bool {

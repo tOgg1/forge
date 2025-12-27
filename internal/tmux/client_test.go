@@ -1375,3 +1375,246 @@ func containsAll(s string, substrings ...string) bool {
 	}
 	return true
 }
+
+// -------------------------
+// Idempotent operation tests
+// -------------------------
+
+func TestEnsureSession_CreatesNewSession(t *testing.T) {
+	exec := &fakeExecutor{
+		// First call: has-session returns "session not found"
+		errQueue:    []error{errors.New("exit status 1"), nil},
+		stderrQueue: [][]byte{[]byte("session not found"), nil},
+	}
+	client := NewClient(exec)
+
+	err := client.EnsureSession(context.Background(), "test-session", "/work")
+	if err != nil {
+		t.Fatalf("EnsureSession failed: %v", err)
+	}
+
+	// Should have called has-session then new-session
+	if len(exec.commands) != 2 {
+		t.Fatalf("expected 2 commands, got %d: %v", len(exec.commands), exec.commands)
+	}
+	if !strings.Contains(exec.commands[0], "has-session") {
+		t.Errorf("first command should be has-session: %s", exec.commands[0])
+	}
+	if !strings.Contains(exec.commands[1], "new-session") {
+		t.Errorf("second command should be new-session: %s", exec.commands[1])
+	}
+}
+
+func TestEnsureSession_SessionExists(t *testing.T) {
+	exec := &fakeExecutor{
+		// has-session succeeds (session exists)
+		err: nil,
+	}
+	client := NewClient(exec)
+
+	err := client.EnsureSession(context.Background(), "test-session", "/work")
+	if err != nil {
+		t.Fatalf("EnsureSession failed: %v", err)
+	}
+
+	// Should have only called has-session
+	if len(exec.commands) != 1 {
+		t.Fatalf("expected 1 command, got %d: %v", len(exec.commands), exec.commands)
+	}
+	if !strings.Contains(exec.commands[0], "has-session") {
+		t.Errorf("should only call has-session: %s", exec.commands[0])
+	}
+}
+
+func TestEnsureSession_IdempotentOnRace(t *testing.T) {
+	exec := &fakeExecutor{
+		// has-session returns not found, but new-session returns duplicate (race condition)
+		errQueue:    []error{errors.New("exit status 1"), errors.New("exit status 1")},
+		stderrQueue: [][]byte{[]byte("session not found"), []byte("duplicate session")},
+	}
+	client := NewClient(exec)
+
+	err := client.EnsureSession(context.Background(), "test-session", "/work")
+	if err != nil {
+		t.Fatalf("EnsureSession should handle race condition: %v", err)
+	}
+}
+
+func TestEnsureSession_EmptyName(t *testing.T) {
+	exec := &fakeExecutor{}
+	client := NewClient(exec)
+
+	err := client.EnsureSession(context.Background(), "", "/work")
+	if err == nil {
+		t.Fatal("expected error for empty session name")
+	}
+}
+
+func TestHasWindow(t *testing.T) {
+	exec := &fakeExecutor{
+		stdout: []byte("agents\nmain\nother\n"),
+	}
+	client := NewClient(exec)
+
+	exists, err := client.HasWindow(context.Background(), "my-session", "agents")
+	if err != nil {
+		t.Fatalf("HasWindow failed: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected window to exist")
+	}
+
+	// Reset for negative test
+	exec.commands = nil
+	exists, err = client.HasWindow(context.Background(), "my-session", "nonexistent")
+	if err != nil {
+		t.Fatalf("HasWindow failed: %v", err)
+	}
+	if exists {
+		t.Fatal("expected window to not exist")
+	}
+}
+
+func TestHasWindow_EmptyName(t *testing.T) {
+	exec := &fakeExecutor{}
+	client := NewClient(exec)
+
+	_, err := client.HasWindow(context.Background(), "session", "")
+	if err == nil {
+		t.Fatal("expected error for empty window name")
+	}
+}
+
+func TestEnsureWindow_CreatesNewWindow(t *testing.T) {
+	exec := &fakeExecutor{
+		// has-session succeeds, list-windows returns no match, new-window succeeds
+		stdoutQueue: [][]byte{nil, []byte("main\nother\n"), nil},
+		errQueue:    []error{nil, nil, nil},
+	}
+	client := NewClient(exec)
+
+	err := client.EnsureWindow(context.Background(), "test-session", "agents", "/work")
+	if err != nil {
+		t.Fatalf("EnsureWindow failed: %v", err)
+	}
+
+	if len(exec.commands) != 3 {
+		t.Fatalf("expected 3 commands, got %d: %v", len(exec.commands), exec.commands)
+	}
+}
+
+func TestEnsureWindow_WindowExists(t *testing.T) {
+	exec := &fakeExecutor{
+		// has-session succeeds, list-windows returns match
+		stdoutQueue: [][]byte{nil, []byte("agents\nmain\n")},
+		errQueue:    []error{nil, nil},
+	}
+	client := NewClient(exec)
+
+	err := client.EnsureWindow(context.Background(), "test-session", "agents", "/work")
+	if err != nil {
+		t.Fatalf("EnsureWindow failed: %v", err)
+	}
+
+	// Should not call new-window
+	if len(exec.commands) != 2 {
+		t.Fatalf("expected 2 commands (not 3), got %d: %v", len(exec.commands), exec.commands)
+	}
+}
+
+func TestEnsureWindow_SessionNotExists(t *testing.T) {
+	exec := &fakeExecutor{
+		// has-session returns not found
+		errQueue:    []error{errors.New("exit status 1")},
+		stderrQueue: [][]byte{[]byte("session not found")},
+	}
+	client := NewClient(exec)
+
+	err := client.EnsureWindow(context.Background(), "test-session", "agents", "/work")
+	if err == nil {
+		t.Fatal("expected error when session doesn't exist")
+	}
+}
+
+func TestKillSessionIfExists_SessionExists(t *testing.T) {
+	exec := &fakeExecutor{
+		err: nil, // kill succeeds
+	}
+	client := NewClient(exec)
+
+	err := client.KillSessionIfExists(context.Background(), "test-session")
+	if err != nil {
+		t.Fatalf("KillSessionIfExists failed: %v", err)
+	}
+}
+
+func TestKillSessionIfExists_SessionNotExists(t *testing.T) {
+	exec := &fakeExecutor{
+		err:    errors.New("exit status 1"),
+		stderr: []byte("session not found"),
+	}
+	client := NewClient(exec)
+
+	err := client.KillSessionIfExists(context.Background(), "test-session")
+	if err != nil {
+		t.Fatalf("KillSessionIfExists should not error when session doesn't exist: %v", err)
+	}
+}
+
+func TestKillSessionIfExists_EmptyName(t *testing.T) {
+	exec := &fakeExecutor{}
+	client := NewClient(exec)
+
+	err := client.KillSessionIfExists(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty session name")
+	}
+}
+
+func TestKillPaneIfExists_PaneExists(t *testing.T) {
+	exec := &fakeExecutor{
+		err: nil, // kill succeeds
+	}
+	client := NewClient(exec)
+
+	err := client.KillPaneIfExists(context.Background(), "%1")
+	if err != nil {
+		t.Fatalf("KillPaneIfExists failed: %v", err)
+	}
+}
+
+func TestKillPaneIfExists_PaneNotExists(t *testing.T) {
+	exec := &fakeExecutor{
+		err:    errors.New("exit status 1"),
+		stderr: []byte("can't find pane"),
+	}
+	client := NewClient(exec)
+
+	err := client.KillPaneIfExists(context.Background(), "%999")
+	if err != nil {
+		t.Fatalf("KillPaneIfExists should not error when pane doesn't exist: %v", err)
+	}
+}
+
+func TestKillPaneIfExists_EmptyTarget(t *testing.T) {
+	exec := &fakeExecutor{}
+	client := NewClient(exec)
+
+	err := client.KillPaneIfExists(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty target")
+	}
+}
+
+func TestKillPane_PaneNotFound(t *testing.T) {
+	exec := &fakeExecutor{
+		err:    errors.New("exit status 1"),
+		stderr: []byte("can't find pane: %999"),
+	}
+	client := NewClient(exec)
+
+	err := client.KillPane(context.Background(), "%999")
+	if err != ErrPaneNotFound {
+		t.Fatalf("expected ErrPaneNotFound, got: %v", err)
+	}
+}
