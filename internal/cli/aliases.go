@@ -191,6 +191,19 @@ spawns one or more agents. This is the fastest way to get started.`,
 			fmt.Printf("Attach with: tmux attach -t %s\n", ws.TmuxSession)
 		}
 
+		// Print next steps
+		agentIDs := make([]string, 0, len(spawnedAgents))
+		for _, a := range spawnedAgents {
+			agentIDs = append(agentIDs, a.ID)
+		}
+		PrintNextSteps(HintContext{
+			Action:        "up",
+			AgentIDs:      agentIDs,
+			WorkspaceID:   ws.ID,
+			WorkspaceName: ws.Name,
+			TmuxSession:   ws.TmuxSession,
+		})
+
 		return nil
 	},
 }

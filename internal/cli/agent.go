@@ -248,6 +248,18 @@ If --workspace is not specified, the workspace is resolved from:
 			}
 		}
 
+		// Print next steps
+		agentIDs := make([]string, 0, len(agents))
+		for _, a := range agents {
+			agentIDs = append(agentIDs, a.ID)
+		}
+		PrintNextSteps(HintContext{
+			Action:        "spawn",
+			AgentIDs:      agentIDs,
+			WorkspaceID:   ws.ID,
+			WorkspaceName: ws.Name,
+		})
+
 		return nil
 	},
 }

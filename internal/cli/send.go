@@ -7,20 +7,26 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/opencode-ai/swarm/internal/agent"
 	"github.com/opencode-ai/swarm/internal/db"
 	"github.com/opencode-ai/swarm/internal/models"
 	"github.com/opencode-ai/swarm/internal/node"
 	"github.com/opencode-ai/swarm/internal/queue"
+	"github.com/opencode-ai/swarm/internal/tmux"
 	"github.com/opencode-ai/swarm/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
 var (
 	sendPriority string
+	sendAfter    string
 	sendFront    bool
 	sendWhenIdle bool
 	sendAll      bool
+	sendImmediate bool
+	sendSkipIdle  bool
 	sendFile     string
 	sendStdin    bool
 	sendEditor   bool
@@ -30,12 +36,18 @@ func init() {
 	rootCmd.AddCommand(sendCmd)
 
 	sendCmd.Flags().StringVar(&sendPriority, "priority", "normal", "queue priority (high, normal, low)")
+	sendCmd.Flags().StringVar(&sendAfter, "after", "", "insert after a specific queue item (queue-only)")
 	sendCmd.Flags().BoolVar(&sendFront, "front", false, "insert at front of queue")
 	sendCmd.Flags().BoolVar(&sendWhenIdle, "when-idle", false, "only dispatch when agent is idle (conditional)")
 	sendCmd.Flags().BoolVar(&sendAll, "all", false, "send to all agents in workspace")
+	sendCmd.Flags().BoolVar(&sendImmediate, "immediate", false, "send immediately (deprecated; bypasses queue)")
+	sendCmd.Flags().BoolVar(&sendSkipIdle, "skip-idle-check", false, "send even if agent is not idle (immediate only)")
 	sendCmd.Flags().StringVarP(&sendFile, "file", "f", "", "read message from file")
 	sendCmd.Flags().BoolVar(&sendStdin, "stdin", false, "read message from stdin")
 	sendCmd.Flags().BoolVar(&sendEditor, "editor", false, "compose message in $EDITOR")
+
+	_ = sendCmd.Flags().MarkDeprecated("immediate", "use 'swarm inject' for immediate tmux injection")
+	_ = sendCmd.Flags().MarkDeprecated("skip-idle-check", "use 'swarm inject --force' to bypass idle checks")
 }
 
 var sendCmd = &cobra.Command{
@@ -92,6 +104,23 @@ If no agent is specified, uses the agent from current context.`,
 		_ = wsService // for future use with --all
 
 		queueService := queue.NewService(queueRepo)
+
+		if sendImmediate {
+			if sendWhenIdle {
+				return errors.New("--when-idle cannot be used with --immediate")
+			}
+			if sendFront {
+				return errors.New("--front cannot be used with --immediate")
+			}
+			if sendAfter != "" {
+				return errors.New("--after cannot be used with --immediate")
+			}
+			if cmd.Flags().Changed("priority") {
+				return errors.New("--priority cannot be used with --immediate")
+			}
+		} else if sendSkipIdle {
+			return errors.New("--skip-idle-check can only be used with --immediate")
+		}
 
 		// Resolve agent(s) to send to
 		var targetAgents []*models.Agent
@@ -250,6 +279,20 @@ If no agent is specified, uses the agent from current context.`,
 
 		if len(results) == 1 && results[0].Error == "" {
 			fmt.Printf("  \"%s\"\n", truncateMessage(message, 60))
+		}
+
+		// Print next steps for successful sends
+		successAgentIDs := make([]string, 0, len(results))
+		for _, r := range results {
+			if r.Error == "" {
+				successAgentIDs = append(successAgentIDs, r.AgentID)
+			}
+		}
+		if len(successAgentIDs) > 0 {
+			PrintNextSteps(HintContext{
+				Action:   "send",
+				AgentIDs: successAgentIDs,
+			})
 		}
 
 		return nil
