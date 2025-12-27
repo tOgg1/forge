@@ -138,6 +138,21 @@ Notes:
 - `agent send` is deprecated and now queues messages (alias for `swarm send`).
 - Use `swarm send --immediate` or `swarm inject` for immediate dispatch.
 
+### `swarm mail`
+
+Send and read Agent Mail messages.
+
+```bash
+swarm mail send --to agent-a1 --subject "Task handoff" --body "Please review PR #123"
+swarm mail inbox --agent agent-a1
+swarm mail read m-001 --agent agent-a1
+swarm mail ack m-001 --agent agent-a1
+```
+
+Notes:
+- Uses Agent Mail MCP when configured; otherwise stores messages in `~/.config/swarm/mail.db`.
+- Configure MCP with `SWARM_AGENT_MAIL_URL`, `SWARM_AGENT_MAIL_PROJECT`, and `SWARM_AGENT_MAIL_AGENT`.
+
 ### `swarm send`
 
 Queue messages for agents (safe, queue-first).
