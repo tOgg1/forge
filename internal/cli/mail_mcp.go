@@ -198,7 +198,7 @@ func (c *mailMCPClient) call(ctx context.Context, method string, params any) (js
 
 	req := mcpRequest{
 		JSONRPC: "2.0",
-		ID:      fmt.Sprintf("swarm-mail-%d", time.Now().UnixNano()),
+		ID:      fmt.Sprintf("forge-mail-%d", time.Now().UnixNano()),
 		Method:  method,
 		Params:  params,
 	}

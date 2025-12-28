@@ -1,4 +1,4 @@
-// Package cli provides Swarm Mail CLI commands.
+// Package cli provides Forge Mail CLI commands.
 package cli
 
 import (
@@ -62,11 +62,11 @@ func init() {
 	mailCmd.AddCommand(mailReadCmd)
 	mailCmd.AddCommand(mailAckCmd)
 
-	mailCmd.PersistentFlags().StringVar(&mailURL, "url", "", "Agent Mail MCP URL (default SWARM_AGENT_MAIL_URL)")
-	mailCmd.PersistentFlags().StringVar(&mailProject, "project", "", "Agent Mail project key (default SWARM_AGENT_MAIL_PROJECT or repo root)")
-	mailCmd.PersistentFlags().StringVar(&mailAgent, "agent", "", "Agent Mail agent name (default SWARM_AGENT_MAIL_AGENT)")
-	mailCmd.PersistentFlags().IntVar(&mailLimit, "limit", 0, "max inbox messages to fetch (default SWARM_AGENT_MAIL_LIMIT or 50)")
-	mailCmd.PersistentFlags().DurationVar(&mailTimeout, "timeout", 0, "Agent Mail request timeout (default SWARM_AGENT_MAIL_TIMEOUT or 5s)")
+	mailCmd.PersistentFlags().StringVar(&mailURL, "url", "", "Agent Mail MCP URL (default FORGE_AGENT_MAIL_URL)")
+	mailCmd.PersistentFlags().StringVar(&mailProject, "project", "", "Agent Mail project key (default FORGE_AGENT_MAIL_PROJECT or repo root)")
+	mailCmd.PersistentFlags().StringVar(&mailAgent, "agent", "", "Agent Mail agent name (default FORGE_AGENT_MAIL_AGENT)")
+	mailCmd.PersistentFlags().IntVar(&mailLimit, "limit", 0, "max inbox messages to fetch (default FORGE_AGENT_MAIL_LIMIT or 50)")
+	mailCmd.PersistentFlags().DurationVar(&mailTimeout, "timeout", 0, "Agent Mail request timeout (default FORGE_AGENT_MAIL_TIMEOUT or 5s)")
 
 	mailSendCmd.Flags().StringSliceVar(&mailTo, "to", nil, "recipient agent name (required)")
 	mailSendCmd.Flags().StringVarP(&mailSubject, "subject", "s", "", "message subject (required)")
@@ -75,18 +75,19 @@ func init() {
 	mailSendCmd.Flags().BoolVar(&mailStdin, "stdin", false, "read message body from stdin")
 	mailSendCmd.Flags().StringVar(&mailPriority, "priority", "normal", "message priority (low, normal, high, urgent)")
 	mailSendCmd.Flags().BoolVar(&mailAckRequired, "ack-required", false, "request acknowledgement")
-	mailSendCmd.Flags().StringVar(&mailFrom, "from", "", "sender agent name (default --agent or SWARM_AGENT_MAIL_AGENT)")
+	mailSendCmd.Flags().StringVar(&mailFrom, "from", "", "sender agent name (default --agent or FORGE_AGENT_MAIL_AGENT)")
 
 	mailInboxCmd.Flags().BoolVar(&mailUnread, "unread", false, "show only unread messages")
 }
 
 var mailCmd = &cobra.Command{
 	Use:   "mail",
-	Short: "Swarm Mail messaging",
-	Long: `Swarm Mail provides lightweight agent-to-agent messaging.
+	Short: "Forge Mail messaging",
+	Long: `Forge Mail provides lightweight agent-to-agent messaging.
 
 If Agent Mail MCP is configured, messages are sent through the MCP server.
-Otherwise, Swarm falls back to a local mail store in ~/.config/swarm/mail.db.`,
+Otherwise, Forge falls back to a local mail store in ~/.config/forge/mail.db.
+Legacy SWARM_AGENT_MAIL_* environment variables are still accepted.`,
 }
 
 var mailSendCmd = &cobra.Command{
@@ -96,9 +97,9 @@ var mailSendCmd = &cobra.Command{
 
 Use --to to specify the recipient(s), and --subject/--body to provide content.
 You can also provide the body via --file or --stdin.`,
-	Example: `  swarm mail send --to agent-a1 --subject "Task handoff" --body "Please review PR #123"
-  swarm mail send --to agent-a1 --subject "Task handoff" --file message.md
-  cat message.md | swarm mail send --to agent-a1 --subject "Task handoff" --stdin`,
+	Example: `  forge mail send --to agent-a1 --subject "Task handoff" --body "Please review PR #123"
+  forge mail send --to agent-a1 --subject "Task handoff" --file message.md
+  cat message.md | forge mail send --to agent-a1 --subject "Task handoff" --stdin`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, backend, err := resolveMailConfig()
@@ -111,7 +112,7 @@ You can also provide the body via --file or --stdin.`,
 			from = cfg.Agent
 		}
 		if from == "" {
-			return errors.New("sender required (set --from or SWARM_AGENT_MAIL_AGENT)")
+			return errors.New("sender required (set --from or FORGE_AGENT_MAIL_AGENT)")
 		}
 
 		recipients := normalizeMailRecipients(mailTo)
@@ -203,10 +204,10 @@ var mailInboxCmd = &cobra.Command{
 	Short: "List mailbox messages",
 	Long: `List messages for an agent mailbox.
 
-By default, reads the inbox for --agent or SWARM_AGENT_MAIL_AGENT.`,
-	Example: `  swarm mail inbox --agent agent-a1
-  swarm mail inbox --agent agent-a1 --unread
-  swarm mail inbox --agent agent-a1 --since 1h`,
+By default, reads the inbox for --agent or FORGE_AGENT_MAIL_AGENT.`,
+	Example: `  forge mail inbox --agent agent-a1
+  forge mail inbox --agent agent-a1 --unread
+  forge mail inbox --agent agent-a1 --since 1h`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, backend, err := resolveMailConfig()
@@ -214,7 +215,7 @@ By default, reads the inbox for --agent or SWARM_AGENT_MAIL_AGENT.`,
 			return err
 		}
 		if strings.TrimSpace(cfg.Agent) == "" {
-			return errors.New("--agent is required (or set SWARM_AGENT_MAIL_AGENT)")
+			return errors.New("--agent is required (or set FORGE_AGENT_MAIL_AGENT)")
 		}
 
 		since, err := GetSinceTime()
@@ -298,7 +299,7 @@ var mailReadCmd = &cobra.Command{
 	Long: `Read a specific message by ID.
 
 Use --agent to specify which mailbox to read from.`,
-	Example: `  swarm mail read m-001 --agent agent-a1`,
+	Example: `  forge mail read m-001 --agent agent-a1`,
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, backend, err := resolveMailConfig()
@@ -306,7 +307,7 @@ Use --agent to specify which mailbox to read from.`,
 			return err
 		}
 		if strings.TrimSpace(cfg.Agent) == "" {
-			return errors.New("--agent is required (or set SWARM_AGENT_MAIL_AGENT)")
+			return errors.New("--agent is required (or set FORGE_AGENT_MAIL_AGENT)")
 		}
 
 		messageID, err := parseMailID(args[0])
@@ -399,7 +400,7 @@ var mailAckCmd = &cobra.Command{
 	Use:     "ack <message-id>",
 	Short:   "Acknowledge a mailbox message",
 	Long:    "Send an acknowledgement for a specific message.",
-	Example: `  swarm mail ack m-001 --agent agent-a1`,
+	Example: `  forge mail ack m-001 --agent agent-a1`,
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, backend, err := resolveMailConfig()
@@ -407,7 +408,7 @@ var mailAckCmd = &cobra.Command{
 			return err
 		}
 		if strings.TrimSpace(cfg.Agent) == "" {
-			return errors.New("--agent is required (or set SWARM_AGENT_MAIL_AGENT)")
+			return errors.New("--agent is required (or set FORGE_AGENT_MAIL_AGENT)")
 		}
 
 		messageID, err := parseMailID(args[0])
@@ -567,9 +568,9 @@ func resolveMailConfig() (mailConfig, mailBackendKind, error) {
 		useMCP = true
 	}
 	if !useMCP {
-		if strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_URL")) != "" ||
-			strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_PROJECT")) != "" ||
-			strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_AGENT")) != "" {
+		if getEnvWithFallback("FORGE_AGENT_MAIL_URL", "SWARM_AGENT_MAIL_URL") != "" ||
+			getEnvWithFallback("FORGE_AGENT_MAIL_PROJECT", "SWARM_AGENT_MAIL_PROJECT") != "" ||
+			getEnvWithFallback("FORGE_AGENT_MAIL_AGENT", "SWARM_AGENT_MAIL_AGENT") != "" {
 			useMCP = true
 		}
 	}
@@ -588,18 +589,18 @@ func resolveMailConfig() (mailConfig, mailBackendKind, error) {
 
 func mailConfigFromEnv() mailConfig {
 	cfg := mailConfig{
-		URL:     strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_URL")),
-		Project: strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_PROJECT")),
-		Agent:   strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_AGENT")),
+		URL:     getEnvWithFallback("FORGE_AGENT_MAIL_URL", "SWARM_AGENT_MAIL_URL"),
+		Project: getEnvWithFallback("FORGE_AGENT_MAIL_PROJECT", "SWARM_AGENT_MAIL_PROJECT"),
+		Agent:   getEnvWithFallback("FORGE_AGENT_MAIL_AGENT", "SWARM_AGENT_MAIL_AGENT"),
 	}
 
-	if value := strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_LIMIT")); value != "" {
+	if value := getEnvWithFallback("FORGE_AGENT_MAIL_LIMIT", "SWARM_AGENT_MAIL_LIMIT"); value != "" {
 		if limit, err := strconv.Atoi(value); err == nil && limit > 0 {
 			cfg.Limit = limit
 		}
 	}
 
-	if value := strings.TrimSpace(os.Getenv("SWARM_AGENT_MAIL_TIMEOUT")); value != "" {
+	if value := getEnvWithFallback("FORGE_AGENT_MAIL_TIMEOUT", "SWARM_AGENT_MAIL_TIMEOUT"); value != "" {
 		if parsed, ok := parseEnvDuration(value); ok {
 			cfg.Timeout = parsed
 		}

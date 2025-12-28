@@ -1,5 +1,5 @@
-// Package swarmd provides the daemon scaffolding for the Swarm node service.
-package swarmd
+// Package forged provides the daemon scaffolding for the Forge node service.
+package forged
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	swarmdv1 "github.com/tOgg1/forge/gen/swarmd/v1"
+	forgedv1 "github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/tOgg1/forge/internal/config"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
@@ -85,7 +85,7 @@ func New(cfg *config.Config, logger zerolog.Logger, opts Options) (*Daemon, erro
 		grpc.ChainUnaryInterceptor(rateLimiter.UnaryServerInterceptor()),
 		grpc.ChainStreamInterceptor(rateLimiter.StreamServerInterceptor()),
 	)
-	swarmdv1.RegisterSwarmdServiceServer(grpcServer, server)
+	forgedv1.RegisterForgedServiceServer(grpcServer, server)
 
 	// Store rate limiter reference in server for status reporting
 	server.SetRateLimiter(rateLimiter)
@@ -107,7 +107,7 @@ func New(cfg *config.Config, logger zerolog.Logger, opts Options) (*Daemon, erro
 				// Kill the agent via the server
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
-				_, err := server.KillAgent(ctx, &swarmdv1.KillAgentRequest{
+				_, err := server.KillAgent(ctx, &forgedv1.KillAgentRequest{
 					AgentId: agentID,
 					Force:   true,
 				})
@@ -160,7 +160,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.logger.Info().
 		Str("bind", bindAddr).
 		Str("version", d.opts.Version).
-		Msg("swarmd gRPC server starting")
+		Msg("forged gRPC server starting")
 
 	// Start resource monitor if configured
 	if d.resourceMonitor != nil {
@@ -180,7 +180,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Wait for shutdown signal or error
 	select {
 	case <-ctx.Done():
-		d.logger.Info().Msg("swarmd shutting down...")
+		d.logger.Info().Msg("forged shutting down...")
 		d.grpcServer.GracefulStop()
 	case err := <-errCh:
 		if err != nil {
@@ -188,7 +188,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}
 
-	d.logger.Info().Msg("swarmd shutdown complete")
+	d.logger.Info().Msg("forged shutdown complete")
 	return nil
 }
 

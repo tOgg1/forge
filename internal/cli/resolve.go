@@ -387,7 +387,7 @@ type ResolvedContext struct {
 // ResolveWorkspaceContext resolves a workspace using the priority order:
 // 1. Explicit flag (if provided)
 // 2. Current directory detection (if in a git repo matching a workspace)
-// 3. Stored context from `swarm use`
+// 3. Stored context from `forge use`
 func ResolveWorkspaceContext(ctx context.Context, repo *db.WorkspaceRepository, explicitFlag string) (*ResolvedContext, error) {
 	result := &ResolvedContext{}
 
@@ -431,7 +431,7 @@ func ResolveWorkspaceContext(ctx context.Context, repo *db.WorkspaceRepository, 
 
 // ResolveAgentContext resolves an agent using the priority order:
 // 1. Explicit flag (if provided)
-// 2. Stored context from `swarm use`
+// 2. Stored context from `forge use`
 func ResolveAgentContext(ctx context.Context, repo *db.AgentRepository, explicitFlag string, workspaceID string) (*ResolvedContext, error) {
 	result := &ResolvedContext{}
 
@@ -481,7 +481,7 @@ func RequireWorkspaceContext(ctx context.Context, repo *db.WorkspaceRepository, 
 		return nil, err
 	}
 	if resolved.WorkspaceID == "" {
-		return nil, errors.New("workspace required: use --workspace flag, run from a workspace directory, or set context with 'swarm use <workspace>'")
+		return nil, errors.New("workspace required: use --workspace flag, run from a workspace directory, or set context with 'forge use <workspace>'")
 	}
 	return resolved, nil
 }
@@ -494,7 +494,7 @@ func RequireAgentContext(ctx context.Context, repo *db.AgentRepository, explicit
 		return nil, err
 	}
 	if resolved.AgentID == "" {
-		return nil, errors.New("agent required: provide agent ID as argument or set context with 'swarm use --agent <agent>'")
+		return nil, errors.New("agent required: provide agent ID as argument or set context with 'forge use --agent <agent>'")
 	}
 	return resolved, nil
 }

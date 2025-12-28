@@ -9,14 +9,14 @@ import (
 func RecipeSearchPaths(projectDir string) []string {
 	paths := make([]string, 0, 3)
 	if projectDir != "" {
-		paths = append(paths, filepath.Join(projectDir, ".swarm", "recipes"))
+		paths = append(paths, filepath.Join(projectDir, ".forge", "recipes"))
 	}
 
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		paths = append(paths, filepath.Join(home, ".config", "swarm", "recipes"))
+		paths = append(paths, filepath.Join(home, ".config", "forge", "recipes"))
 	}
 
-	paths = append(paths, filepath.Join(string(filepath.Separator), "usr", "share", "swarm", "recipes"))
+	paths = append(paths, filepath.Join(string(filepath.Separator), "usr", "share", "forge", "recipes"))
 	return paths
 }
 

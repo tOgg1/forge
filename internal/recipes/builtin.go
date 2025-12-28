@@ -10,7 +10,7 @@ import (
 //go:embed builtin/*.yaml
 var builtinFS embed.FS
 
-// LoadBuiltinRecipes returns the built-in recipes bundled with Swarm.
+// LoadBuiltinRecipes returns the built-in recipes bundled with Forge.
 func LoadBuiltinRecipes() ([]*Recipe, error) {
 	entries, err := fs.ReadDir(builtinFS, "builtin")
 	if err != nil {

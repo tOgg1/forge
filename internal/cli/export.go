@@ -1,4 +1,4 @@
-// Package cli provides export commands for Swarm data.
+// Package cli provides export commands for Forge data.
 package cli
 
 import (
@@ -27,8 +27,8 @@ func init() {
 
 var exportCmd = &cobra.Command{
 	Use:   "export",
-	Short: "Export Swarm data",
-	Long:  "Export Swarm state for automation or reporting.",
+	Short: "Export Forge data",
+	Long:  "Export Forge state for automation or reporting.",
 }
 
 var exportStatusCmd = &cobra.Command{
@@ -283,7 +283,7 @@ func filterEventsByType(events []*models.Event, eventTypes []models.EventType) [
 	return filtered
 }
 
-// ExportStatus is the payload returned by `swarm export status`.
+// ExportStatus is the payload returned by `forge export status`.
 type ExportStatus struct {
 	Nodes      []*models.Node      `json:"nodes"`
 	Workspaces []*models.Workspace `json:"workspaces"`

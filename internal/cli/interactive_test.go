@@ -67,9 +67,9 @@ func TestSkipConfirmation(t *testing.T) {
 }
 
 func TestSkipConfirmation_EnvVar(t *testing.T) {
-	// Test SWARM_NON_INTERACTIVE environment variable
-	origVal := os.Getenv("SWARM_NON_INTERACTIVE")
-	defer os.Setenv("SWARM_NON_INTERACTIVE", origVal)
+	// Test FORGE_NON_INTERACTIVE environment variable
+	origVal := os.Getenv("FORGE_NON_INTERACTIVE")
+	defer os.Setenv("FORGE_NON_INTERACTIVE", origVal)
 
 	// Save original flags
 	origYes := yesFlag
@@ -90,6 +90,33 @@ func TestSkipConfirmation_EnvVar(t *testing.T) {
 	jsonlOutput = false
 
 	// Set env var
+	os.Setenv("FORGE_NON_INTERACTIVE", "1")
+
+	if !SkipConfirmation() {
+		t.Error("SkipConfirmation() should return true when FORGE_NON_INTERACTIVE is set")
+	}
+}
+
+func TestSkipConfirmation_LegacyEnvVar(t *testing.T) {
+	origVal := os.Getenv("SWARM_NON_INTERACTIVE")
+	defer os.Setenv("SWARM_NON_INTERACTIVE", origVal)
+
+	origYes := yesFlag
+	origNonInteractive := nonInteractive
+	origJSON := jsonOutput
+	origJSONL := jsonlOutput
+	defer func() {
+		yesFlag = origYes
+		nonInteractive = origNonInteractive
+		jsonOutput = origJSON
+		jsonlOutput = origJSONL
+	}()
+
+	yesFlag = false
+	nonInteractive = false
+	jsonOutput = false
+	jsonlOutput = false
+
 	os.Setenv("SWARM_NON_INTERACTIVE", "1")
 
 	if !SkipConfirmation() {

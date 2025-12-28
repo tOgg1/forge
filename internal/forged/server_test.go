@@ -1,4 +1,4 @@
-package swarmd
+package forged
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	swarmdv1 "github.com/tOgg1/forge/gen/swarmd/v1"
+	forgedv1 "github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc/metadata"
@@ -16,7 +16,7 @@ import (
 func TestServerPing(t *testing.T) {
 	server := NewServer(zerolog.Nop(), WithVersion("test-version"))
 
-	resp, err := server.Ping(context.Background(), &swarmdv1.PingRequest{})
+	resp, err := server.Ping(context.Background(), &forgedv1.PingRequest{})
 	if err != nil {
 		t.Fatalf("Ping() error = %v", err)
 	}
@@ -32,7 +32,7 @@ func TestServerPing(t *testing.T) {
 func TestServerGetStatus(t *testing.T) {
 	server := NewServer(zerolog.Nop(), WithVersion("test-version"))
 
-	resp, err := server.GetStatus(context.Background(), &swarmdv1.GetStatusRequest{})
+	resp, err := server.GetStatus(context.Background(), &forgedv1.GetStatusRequest{})
 	if err != nil {
 		t.Fatalf("GetStatus() error = %v", err)
 	}
@@ -51,7 +51,7 @@ func TestServerGetStatus(t *testing.T) {
 func TestServerListAgentsEmpty(t *testing.T) {
 	server := NewServer(zerolog.Nop())
 
-	resp, err := server.ListAgents(context.Background(), &swarmdv1.ListAgentsRequest{})
+	resp, err := server.ListAgents(context.Background(), &forgedv1.ListAgentsRequest{})
 	if err != nil {
 		t.Fatalf("ListAgents() error = %v", err)
 	}
@@ -64,7 +64,7 @@ func TestServerListAgentsEmpty(t *testing.T) {
 func TestServerGetAgentNotFound(t *testing.T) {
 	server := NewServer(zerolog.Nop())
 
-	_, err := server.GetAgent(context.Background(), &swarmdv1.GetAgentRequest{
+	_, err := server.GetAgent(context.Background(), &forgedv1.GetAgentRequest{
 		AgentId: "nonexistent",
 	})
 	if err == nil {
@@ -77,17 +77,17 @@ func TestServerSpawnAgentValidation(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		req     *swarmdv1.SpawnAgentRequest
+		req     *forgedv1.SpawnAgentRequest
 		wantErr bool
 	}{
 		{
 			name:    "empty agent_id",
-			req:     &swarmdv1.SpawnAgentRequest{Command: "echo"},
+			req:     &forgedv1.SpawnAgentRequest{Command: "echo"},
 			wantErr: true,
 		},
 		{
 			name:    "empty command",
-			req:     &swarmdv1.SpawnAgentRequest{AgentId: "test-agent"},
+			req:     &forgedv1.SpawnAgentRequest{AgentId: "test-agent"},
 			wantErr: true,
 		},
 	}
@@ -105,7 +105,7 @@ func TestServerSpawnAgentValidation(t *testing.T) {
 func TestServerKillAgentNotFound(t *testing.T) {
 	server := NewServer(zerolog.Nop())
 
-	_, err := server.KillAgent(context.Background(), &swarmdv1.KillAgentRequest{
+	_, err := server.KillAgent(context.Background(), &forgedv1.KillAgentRequest{
 		AgentId: "nonexistent",
 	})
 	if err == nil {
@@ -116,7 +116,7 @@ func TestServerKillAgentNotFound(t *testing.T) {
 func TestServerSendInputNotFound(t *testing.T) {
 	server := NewServer(zerolog.Nop())
 
-	_, err := server.SendInput(context.Background(), &swarmdv1.SendInputRequest{
+	_, err := server.SendInput(context.Background(), &forgedv1.SendInputRequest{
 		AgentId: "nonexistent",
 		Text:    "hello",
 	})
@@ -128,7 +128,7 @@ func TestServerSendInputNotFound(t *testing.T) {
 func TestServerCapturePaneNotFound(t *testing.T) {
 	server := NewServer(zerolog.Nop())
 
-	_, err := server.CapturePane(context.Background(), &swarmdv1.CapturePaneRequest{
+	_, err := server.CapturePane(context.Background(), &forgedv1.CapturePaneRequest{
 		AgentId: "nonexistent",
 	})
 	if err == nil {
@@ -142,52 +142,52 @@ func TestDetectAgentState(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
-		want    swarmdv1.AgentState
+		want    forgedv1.AgentState
 	}{
 		{
 			name:    "waiting for approval with y/n",
 			content: "Do you want to proceed? [y/n]",
-			want:    swarmdv1.AgentState_AGENT_STATE_WAITING_APPROVAL,
+			want:    forgedv1.AgentState_AGENT_STATE_WAITING_APPROVAL,
 		},
 		{
 			name:    "waiting for approval with confirm",
 			content: "Please confirm this action",
-			want:    swarmdv1.AgentState_AGENT_STATE_WAITING_APPROVAL,
+			want:    forgedv1.AgentState_AGENT_STATE_WAITING_APPROVAL,
 		},
 		{
 			name:    "idle with prompt",
 			content: "some output\n$",
-			want:    swarmdv1.AgentState_AGENT_STATE_IDLE,
+			want:    forgedv1.AgentState_AGENT_STATE_IDLE,
 		},
 		{
 			name:    "idle with arrow prompt",
 			content: "done\n❯",
-			want:    swarmdv1.AgentState_AGENT_STATE_IDLE,
+			want:    forgedv1.AgentState_AGENT_STATE_IDLE,
 		},
 		{
 			name:    "running with spinner",
 			content: "⠋ Processing...",
-			want:    swarmdv1.AgentState_AGENT_STATE_RUNNING,
+			want:    forgedv1.AgentState_AGENT_STATE_RUNNING,
 		},
 		{
 			name:    "running with thinking",
 			content: "Thinking...",
-			want:    swarmdv1.AgentState_AGENT_STATE_RUNNING,
+			want:    forgedv1.AgentState_AGENT_STATE_RUNNING,
 		},
 		{
 			name:    "failed with error",
 			content: "error: something went wrong",
-			want:    swarmdv1.AgentState_AGENT_STATE_FAILED,
+			want:    forgedv1.AgentState_AGENT_STATE_FAILED,
 		},
 		{
 			name:    "failed with panic",
 			content: "panic: runtime error",
-			want:    swarmdv1.AgentState_AGENT_STATE_FAILED,
+			want:    forgedv1.AgentState_AGENT_STATE_FAILED,
 		},
 		{
 			name:    "default to running",
 			content: "some random output",
-			want:    swarmdv1.AgentState_AGENT_STATE_RUNNING,
+			want:    forgedv1.AgentState_AGENT_STATE_RUNNING,
 		},
 	}
 
@@ -301,7 +301,7 @@ func TestSplitLines(t *testing.T) {
 func TestServerGetTranscriptNotFound(t *testing.T) {
 	server := NewServer(zerolog.Nop())
 
-	_, err := server.GetTranscript(context.Background(), &swarmdv1.GetTranscriptRequest{
+	_, err := server.GetTranscript(context.Background(), &forgedv1.GetTranscriptRequest{
 		AgentId: "nonexistent",
 	})
 	if err == nil {
@@ -312,7 +312,7 @@ func TestServerGetTranscriptNotFound(t *testing.T) {
 func TestServerGetTranscriptValidation(t *testing.T) {
 	server := NewServer(zerolog.Nop())
 
-	_, err := server.GetTranscript(context.Background(), &swarmdv1.GetTranscriptRequest{})
+	_, err := server.GetTranscript(context.Background(), &forgedv1.GetTranscriptRequest{})
 	if err == nil {
 		t.Error("GetTranscript() should return error for empty agent_id")
 	}
@@ -330,10 +330,10 @@ func TestAddTranscriptEntry(t *testing.T) {
 	server.mu.Unlock()
 
 	// Add a transcript entry
-	server.addTranscriptEntry("test-agent", swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_COMMAND, "echo hello", map[string]string{"key": "value"})
+	server.addTranscriptEntry("test-agent", forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_COMMAND, "echo hello", map[string]string{"key": "value"})
 
 	// Verify the entry was added
-	resp, err := server.GetTranscript(context.Background(), &swarmdv1.GetTranscriptRequest{
+	resp, err := server.GetTranscript(context.Background(), &forgedv1.GetTranscriptRequest{
 		AgentId: "test-agent",
 	})
 	if err != nil {
@@ -348,8 +348,8 @@ func TestAddTranscriptEntry(t *testing.T) {
 	if entry.Content != "echo hello" {
 		t.Errorf("Content = %q, want %q", entry.Content, "echo hello")
 	}
-	if entry.Type != swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_COMMAND {
-		t.Errorf("Type = %v, want %v", entry.Type, swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_COMMAND)
+	if entry.Type != forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_COMMAND {
+		t.Errorf("Type = %v, want %v", entry.Type, forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_COMMAND)
 	}
 	if entry.Metadata["key"] != "value" {
 		t.Errorf("Metadata[key] = %q, want %q", entry.Metadata["key"], "value")
@@ -369,11 +369,11 @@ func TestGetTranscriptWithLimit(t *testing.T) {
 
 	// Add 10 entries
 	for i := 0; i < 10; i++ {
-		server.addTranscriptEntry("test-agent", swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_OUTPUT, "output", nil)
+		server.addTranscriptEntry("test-agent", forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_OUTPUT, "output", nil)
 	}
 
 	// Get with limit of 5
-	resp, err := server.GetTranscript(context.Background(), &swarmdv1.GetTranscriptRequest{
+	resp, err := server.GetTranscript(context.Background(), &forgedv1.GetTranscriptRequest{
 		AgentId: "test-agent",
 		Limit:   5,
 	})
@@ -456,7 +456,7 @@ func TestTranscriptEntryToProto(t *testing.T) {
 
 	entry := &transcriptEntry{
 		id:        42,
-		entryType: swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_USER_INPUT,
+		entryType: forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_USER_INPUT,
 		content:   "user input text",
 		metadata:  map[string]string{"source": "keyboard"},
 	}
@@ -466,8 +466,8 @@ func TestTranscriptEntryToProto(t *testing.T) {
 	if proto.Content != "user input text" {
 		t.Errorf("Content = %q, want %q", proto.Content, "user input text")
 	}
-	if proto.Type != swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_USER_INPUT {
-		t.Errorf("Type = %v, want %v", proto.Type, swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_USER_INPUT)
+	if proto.Type != forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_USER_INPUT {
+		t.Errorf("Type = %v, want %v", proto.Type, forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_USER_INPUT)
 	}
 	if proto.Metadata["source"] != "keyboard" {
 		t.Errorf("Metadata[source] = %q, want %q", proto.Metadata["source"], "keyboard")
@@ -484,7 +484,7 @@ func TestTranscriptEntryToProto(t *testing.T) {
 type eventStreamRecorder struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
-	responses []*swarmdv1.StreamEventsResponse
+	responses []*forgedv1.StreamEventsResponse
 	want      int
 }
 
@@ -497,7 +497,7 @@ func newEventStreamRecorder(want int) *eventStreamRecorder {
 	}
 }
 
-func (s *eventStreamRecorder) Send(resp *swarmdv1.StreamEventsResponse) error {
+func (s *eventStreamRecorder) Send(resp *forgedv1.StreamEventsResponse) error {
 	s.responses = append(s.responses, resp)
 	if s.want > 0 && len(s.responses) >= s.want {
 		s.cancel()
@@ -528,7 +528,7 @@ func (e *staticExecutor) Exec(ctx context.Context, cmd string) ([]byte, []byte, 
 type paneUpdateRecorder struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
-	responses []*swarmdv1.StreamPaneUpdatesResponse
+	responses []*forgedv1.StreamPaneUpdatesResponse
 }
 
 func newPaneUpdateRecorder(timeout time.Duration) *paneUpdateRecorder {
@@ -536,7 +536,7 @@ func newPaneUpdateRecorder(timeout time.Duration) *paneUpdateRecorder {
 	return &paneUpdateRecorder{ctx: ctx, cancel: cancel}
 }
 
-func (s *paneUpdateRecorder) Send(resp *swarmdv1.StreamPaneUpdatesResponse) error {
+func (s *paneUpdateRecorder) Send(resp *forgedv1.StreamPaneUpdatesResponse) error {
 	s.responses = append(s.responses, resp)
 	return nil
 }
@@ -562,7 +562,7 @@ func TestStreamPaneUpdatesSkipsUnchangedContent(t *testing.T) {
 	server.mu.Unlock()
 
 	stream := newPaneUpdateRecorder(60 * time.Millisecond)
-	req := &swarmdv1.StreamPaneUpdatesRequest{
+	req := &forgedv1.StreamPaneUpdatesRequest{
 		AgentId:     "agent-1",
 		MinInterval: durationpb.New(5 * time.Millisecond),
 	}
@@ -601,7 +601,7 @@ func TestStreamPaneUpdatesRespectsLastKnownHash(t *testing.T) {
 
 	lastHash := tmux.HashSnapshot("no change")
 	stream := newPaneUpdateRecorder(60 * time.Millisecond)
-	req := &swarmdv1.StreamPaneUpdatesRequest{
+	req := &forgedv1.StreamPaneUpdatesRequest{
 		AgentId:       "agent-1",
 		LastKnownHash: lastHash,
 		MinInterval:   durationpb.New(5 * time.Millisecond),
@@ -624,8 +624,8 @@ func TestPublishEvent(t *testing.T) {
 	server.publishAgentStateChanged(
 		"agent-1",
 		"workspace-1",
-		swarmdv1.AgentState_AGENT_STATE_STARTING,
-		swarmdv1.AgentState_AGENT_STATE_RUNNING,
+		forgedv1.AgentState_AGENT_STATE_STARTING,
+		forgedv1.AgentState_AGENT_STATE_RUNNING,
 		"test reason",
 	)
 
@@ -644,19 +644,19 @@ func TestPublishEvent(t *testing.T) {
 	if event.WorkspaceId != "workspace-1" {
 		t.Errorf("WorkspaceId = %q, want %q", event.WorkspaceId, "workspace-1")
 	}
-	if event.Type != swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED {
-		t.Errorf("Type = %v, want %v", event.Type, swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED)
+	if event.Type != forgedv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED {
+		t.Errorf("Type = %v, want %v", event.Type, forgedv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED)
 	}
 
 	stateChanged := event.GetAgentStateChanged()
 	if stateChanged == nil {
 		t.Fatal("Expected AgentStateChanged payload")
 	}
-	if stateChanged.PreviousState != swarmdv1.AgentState_AGENT_STATE_STARTING {
-		t.Errorf("PreviousState = %v, want %v", stateChanged.PreviousState, swarmdv1.AgentState_AGENT_STATE_STARTING)
+	if stateChanged.PreviousState != forgedv1.AgentState_AGENT_STATE_STARTING {
+		t.Errorf("PreviousState = %v, want %v", stateChanged.PreviousState, forgedv1.AgentState_AGENT_STATE_STARTING)
 	}
-	if stateChanged.NewState != swarmdv1.AgentState_AGENT_STATE_RUNNING {
-		t.Errorf("NewState = %v, want %v", stateChanged.NewState, swarmdv1.AgentState_AGENT_STATE_RUNNING)
+	if stateChanged.NewState != forgedv1.AgentState_AGENT_STATE_RUNNING {
+		t.Errorf("NewState = %v, want %v", stateChanged.NewState, forgedv1.AgentState_AGENT_STATE_RUNNING)
 	}
 	if stateChanged.Reason != "test reason" {
 		t.Errorf("Reason = %q, want %q", stateChanged.Reason, "test reason")
@@ -676,8 +676,8 @@ func TestPublishErrorEvent(t *testing.T) {
 	}
 
 	event := server.events[0].event
-	if event.Type != swarmdv1.EventType_EVENT_TYPE_ERROR {
-		t.Errorf("Type = %v, want %v", event.Type, swarmdv1.EventType_EVENT_TYPE_ERROR)
+	if event.Type != forgedv1.EventType_EVENT_TYPE_ERROR {
+		t.Errorf("Type = %v, want %v", event.Type, forgedv1.EventType_EVENT_TYPE_ERROR)
 	}
 
 	errEvent := event.GetError()
@@ -708,8 +708,8 @@ func TestPublishPaneContentChangedEvent(t *testing.T) {
 	}
 
 	event := server.events[0].event
-	if event.Type != swarmdv1.EventType_EVENT_TYPE_PANE_CONTENT_CHANGED {
-		t.Errorf("Type = %v, want %v", event.Type, swarmdv1.EventType_EVENT_TYPE_PANE_CONTENT_CHANGED)
+	if event.Type != forgedv1.EventType_EVENT_TYPE_PANE_CONTENT_CHANGED {
+		t.Errorf("Type = %v, want %v", event.Type, forgedv1.EventType_EVENT_TYPE_PANE_CONTENT_CHANGED)
 	}
 
 	paneEvent := event.GetPaneContentChanged()
@@ -727,12 +727,12 @@ func TestPublishPaneContentChangedEvent(t *testing.T) {
 func TestStreamEventsReplayFromCursor(t *testing.T) {
 	server := NewServer(zerolog.Nop())
 
-	server.publishAgentStateChanged("agent-1", "workspace-1", swarmdv1.AgentState_AGENT_STATE_STARTING, swarmdv1.AgentState_AGENT_STATE_RUNNING, "first")
-	server.publishAgentStateChanged("agent-2", "workspace-1", swarmdv1.AgentState_AGENT_STATE_STARTING, swarmdv1.AgentState_AGENT_STATE_RUNNING, "second")
-	server.publishAgentStateChanged("agent-3", "workspace-1", swarmdv1.AgentState_AGENT_STATE_STARTING, swarmdv1.AgentState_AGENT_STATE_RUNNING, "third")
+	server.publishAgentStateChanged("agent-1", "workspace-1", forgedv1.AgentState_AGENT_STATE_STARTING, forgedv1.AgentState_AGENT_STATE_RUNNING, "first")
+	server.publishAgentStateChanged("agent-2", "workspace-1", forgedv1.AgentState_AGENT_STATE_STARTING, forgedv1.AgentState_AGENT_STATE_RUNNING, "second")
+	server.publishAgentStateChanged("agent-3", "workspace-1", forgedv1.AgentState_AGENT_STATE_STARTING, forgedv1.AgentState_AGENT_STATE_RUNNING, "third")
 
 	stream := newEventStreamRecorder(2)
-	err := server.StreamEvents(&swarmdv1.StreamEventsRequest{Cursor: "1"}, stream)
+	err := server.StreamEvents(&forgedv1.StreamEventsRequest{Cursor: "1"}, stream)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("StreamEvents() error = %v", err)
 	}
@@ -758,8 +758,8 @@ func TestStreamEventsReplayFromCursor(t *testing.T) {
 func TestEventMatchesFilter(t *testing.T) {
 	server := NewServer(zerolog.Nop())
 
-	event := &swarmdv1.Event{
-		Type:        swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED,
+	event := &forgedv1.Event{
+		Type:        forgedv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED,
 		AgentId:     "agent-1",
 		WorkspaceId: "workspace-1",
 	}
@@ -777,8 +777,8 @@ func TestEventMatchesFilter(t *testing.T) {
 		{
 			name: "matching event type",
 			sub: &eventSubscriber{
-				eventTypes: map[swarmdv1.EventType]bool{
-					swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED: true,
+				eventTypes: map[forgedv1.EventType]bool{
+					forgedv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED: true,
 				},
 			},
 			want: true,
@@ -786,8 +786,8 @@ func TestEventMatchesFilter(t *testing.T) {
 		{
 			name: "non-matching event type",
 			sub: &eventSubscriber{
-				eventTypes: map[swarmdv1.EventType]bool{
-					swarmdv1.EventType_EVENT_TYPE_ERROR: true,
+				eventTypes: map[forgedv1.EventType]bool{
+					forgedv1.EventType_EVENT_TYPE_ERROR: true,
 				},
 			},
 			want: false,
@@ -823,7 +823,7 @@ func TestEventMatchesFilter(t *testing.T) {
 		{
 			name: "all filters matching",
 			sub: &eventSubscriber{
-				eventTypes:   map[swarmdv1.EventType]bool{swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED: true},
+				eventTypes:   map[forgedv1.EventType]bool{forgedv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED: true},
 				agentIDs:     map[string]bool{"agent-1": true},
 				workspaceIDs: map[string]bool{"workspace-1": true},
 			},
@@ -832,7 +832,7 @@ func TestEventMatchesFilter(t *testing.T) {
 		{
 			name: "one filter not matching",
 			sub: &eventSubscriber{
-				eventTypes:   map[swarmdv1.EventType]bool{swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED: true},
+				eventTypes:   map[forgedv1.EventType]bool{forgedv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED: true},
 				agentIDs:     map[string]bool{"agent-2": true}, // not matching
 				workspaceIDs: map[string]bool{"workspace-1": true},
 			},
@@ -858,8 +858,8 @@ func TestEventCircularBuffer(t *testing.T) {
 		server.publishAgentStateChanged(
 			"agent-1",
 			"workspace-1",
-			swarmdv1.AgentState_AGENT_STATE_RUNNING,
-			swarmdv1.AgentState_AGENT_STATE_IDLE,
+			forgedv1.AgentState_AGENT_STATE_RUNNING,
+			forgedv1.AgentState_AGENT_STATE_IDLE,
 			"test",
 		)
 	}
@@ -885,7 +885,7 @@ func TestEventSubscriberBroadcast(t *testing.T) {
 	// Create a subscriber
 	sub := &eventSubscriber{
 		id: "test-sub",
-		ch: make(chan *swarmdv1.Event, 10),
+		ch: make(chan *forgedv1.Event, 10),
 	}
 
 	server.eventsMu.Lock()
@@ -896,8 +896,8 @@ func TestEventSubscriberBroadcast(t *testing.T) {
 	server.publishAgentStateChanged(
 		"agent-1",
 		"workspace-1",
-		swarmdv1.AgentState_AGENT_STATE_STARTING,
-		swarmdv1.AgentState_AGENT_STATE_RUNNING,
+		forgedv1.AgentState_AGENT_STATE_STARTING,
+		forgedv1.AgentState_AGENT_STATE_RUNNING,
 		"test",
 	)
 
@@ -924,7 +924,7 @@ func TestEventSubscriberFiltering(t *testing.T) {
 	sub := &eventSubscriber{
 		id:       "test-sub",
 		agentIDs: map[string]bool{"agent-1": true},
-		ch:       make(chan *swarmdv1.Event, 10),
+		ch:       make(chan *forgedv1.Event, 10),
 	}
 
 	server.eventsMu.Lock()
@@ -932,10 +932,10 @@ func TestEventSubscriberFiltering(t *testing.T) {
 	server.eventsMu.Unlock()
 
 	// Publish event for agent-1 (should be received)
-	server.publishAgentStateChanged("agent-1", "workspace-1", swarmdv1.AgentState_AGENT_STATE_STARTING, swarmdv1.AgentState_AGENT_STATE_RUNNING, "test")
+	server.publishAgentStateChanged("agent-1", "workspace-1", forgedv1.AgentState_AGENT_STATE_STARTING, forgedv1.AgentState_AGENT_STATE_RUNNING, "test")
 
 	// Publish event for agent-2 (should NOT be received)
-	server.publishAgentStateChanged("agent-2", "workspace-1", swarmdv1.AgentState_AGENT_STATE_STARTING, swarmdv1.AgentState_AGENT_STATE_RUNNING, "test")
+	server.publishAgentStateChanged("agent-2", "workspace-1", forgedv1.AgentState_AGENT_STATE_STARTING, forgedv1.AgentState_AGENT_STATE_RUNNING, "test")
 
 	// Check that subscriber received only agent-1 event
 	receivedCount := 0

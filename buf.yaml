@@ -2,7 +2,7 @@
 version: v2
 modules:
   - path: proto
-    name: buf.build/opencode-ai/swarm
+    name: buf.build/opencode-ai/forge
 lint:
   use:
     - STANDARD

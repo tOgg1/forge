@@ -1,5 +1,5 @@
-// Package main is the entry point for the swarm CLI/TUI application.
-// Swarm is a control plane for running and supervising AI coding agents
+// Package main is the entry point for the forge CLI/TUI application.
+// Forge is a control plane for running and supervising AI coding agents
 // across multiple repositories and servers.
 package main
 

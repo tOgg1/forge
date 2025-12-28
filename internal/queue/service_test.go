@@ -51,8 +51,8 @@ func createTestWorkspace(t *testing.T, testDB *db.DB) *models.Workspace {
 
 	ws := &models.Workspace{
 		NodeID:      node.ID,
-		RepoPath:    "/tmp/swarm-test",
-		TmuxSession: "swarm-test",
+		RepoPath:    "/tmp/forge-test",
+		TmuxSession: "forge-test",
 	}
 	if err := wsRepo.Create(context.Background(), ws); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -68,7 +68,7 @@ func createTestAgent(t *testing.T, testDB *db.DB, ws *models.Workspace) *models.
 	agent := &models.Agent{
 		WorkspaceID: ws.ID,
 		Type:        models.AgentTypeOpenCode,
-		TmuxPane:    "swarm-test:0.1",
+		TmuxPane:    "forge-test:0.1",
 		State:       models.AgentStateIdle,
 	}
 

@@ -174,13 +174,13 @@ var accountsAddCmd = &cobra.Command{
 var accountsImportCaamCmd = &cobra.Command{
 	Use:        "import-caam",
 	Short:      "Import accounts from caam vault (DEPRECATED)",
-	Deprecated: "Use 'swarm vault' commands instead. The native vault provides better integration.",
+	Deprecated: "Use 'forge vault' commands instead. The native vault provides better integration.",
 	Long: `DEPRECATED: Import accounts from a coding_agent_account_manager (caam) vault.
 
-This command is deprecated. Use the native Swarm vault instead:
-  swarm vault backup <adapter> <profile>  # Save current auth
-  swarm vault list                        # List saved profiles
-  swarm vault activate <adapter> <profile> # Switch profiles
+This command is deprecated. Use the native Forge vault instead:
+  forge vault backup <adapter> <profile>  # Save current auth
+  forge vault list                        # List saved profiles
+  forge vault activate <adapter> <profile> # Switch profiles
 
 The caam vault stores account profiles for various AI coding assistants
 (Claude, Codex, Gemini) in a standard directory structure.
@@ -189,7 +189,7 @@ By default, looks for the vault at ~/.local/share/caam/vault.
 Use --path to specify a different location.
 
 Credential references are created using the caam: prefix, which allows
-Swarm to resolve credentials from the caam vault at runtime.`,
+Forge to resolve credentials from the caam vault at runtime.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		reader := bufio.NewReader(os.Stdin)
@@ -246,7 +246,7 @@ Swarm to resolve credentials from the caam vault at runtime.`,
 		var results []CaamImportResult
 
 		for _, profile := range validProfiles {
-			account := profile.ToSwarmAccount()
+			account := profile.ToForgeAccount()
 
 			// Check if already exists
 			existing, _ := findAccountByProfile(ctx, repo, account.Provider, account.ProfileName)
@@ -340,8 +340,8 @@ func showCaamImportPreview(profiles []*caam.Profile) error {
 			previews = append(previews, map[string]string{
 				"provider":       p.Provider,
 				"email":          p.Email,
-				"swarm_provider": string(p.ToSwarmAccount().Provider),
-				"credential_ref": p.ToSwarmAccount().CredentialRef,
+				"forge_provider": string(p.ToForgeAccount().Provider),
+				"credential_ref": p.ToForgeAccount().CredentialRef,
 			})
 		}
 		return WriteOutput(os.Stdout, previews)
@@ -351,9 +351,9 @@ func showCaamImportPreview(profiles []*caam.Profile) error {
 	fmt.Fprintln(os.Stdout)
 
 	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(writer, "CAAM PROVIDER\tEMAIL\tSWARM PROVIDER\tCREDENTIAL REF")
+	fmt.Fprintln(writer, "CAAM PROVIDER\tEMAIL\tFORGE PROVIDER\tCREDENTIAL REF")
 	for _, p := range profiles {
-		account := p.ToSwarmAccount()
+		account := p.ToForgeAccount()
 		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\n",
 			p.Provider,
 			p.Email,

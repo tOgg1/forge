@@ -20,7 +20,7 @@ testdata/
 Use the `ReadFixture` function to load fixtures:
 
 ```go
-import "github.com/opencode-ai/swarm/internal/testutil"
+import "github.com/opencode-ai/forge/internal/testutil"
 
 func TestStateDetection(t *testing.T) {
     transcript := testutil.ReadFixture(t, "transcripts", "claude_code_idle.txt")

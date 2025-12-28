@@ -1,4 +1,4 @@
-# Swarm CLI Reference
+# Forge CLI Reference
 
 This document describes the current CLI surface. Commands that are not wired
 up yet are listed under Planned.
@@ -6,12 +6,12 @@ up yet are listed under Planned.
 ## Global usage
 
 ```bash
-swarm [flags] [command]
+forge [flags] [command]
 ```
 
 ### Global flags
 
-- `--config <path>`: Path to config file (default: `~/.config/swarm/config.yaml`).
+- `--config <path>`: Path to config file (default: `~/.config/forge/config.yaml`).
 - `--json`: Emit JSON output (where supported).
 - `--jsonl`: Emit JSON Lines output (streaming friendly).
 - `--watch`: Stream updates until interrupted (reserved for future commands).
@@ -22,90 +22,90 @@ swarm [flags] [command]
 
 ## Commands
 
-### `swarm`
+### `forge`
 
 Launches the TUI. Current builds print a placeholder message.
 
 ```bash
-swarm
+forge
 ```
 
-### `swarm migrate`
+### `forge migrate`
 
 Manage database migrations.
 
 ```bash
-swarm migrate [command]
+forge migrate [command]
 ```
 
-#### `swarm migrate up`
+#### `forge migrate up`
 
 ```bash
-swarm migrate up
-swarm migrate up --to 1
+forge migrate up
+forge migrate up --to 1
 ```
 
-#### `swarm migrate down`
+#### `forge migrate down`
 
 ```bash
-swarm migrate down
-swarm migrate down --steps 2
+forge migrate down
+forge migrate down --steps 2
 ```
 
-#### `swarm migrate status`
+#### `forge migrate status`
 
 ```bash
-swarm migrate status
-swarm migrate status --json
+forge migrate status
+forge migrate status --json
 ```
 
-#### `swarm migrate version`
+#### `forge migrate version`
 
 ```bash
-swarm migrate version
-swarm migrate version --json
+forge migrate version
+forge migrate version --json
 ```
 
-### `swarm node`
+### `forge node`
 
 Manage nodes.
 
 ```bash
-swarm node list
-swarm node add --name local --local
-swarm node add --name prod --ssh ubuntu@host --key ~/.ssh/id_rsa
-swarm node remove <name-or-id> --force
-swarm node doctor <name-or-id>
-swarm node refresh [name-or-id]
-swarm node exec <name-or-id> -- uname -a
-swarm node forward <name-or-id> --local-port 8080 --remote 127.0.0.1:3000
-swarm node tunnel <name-or-id>
+forge node list
+forge node add --name local --local
+forge node add --name prod --ssh ubuntu@host --key ~/.ssh/id_rsa
+forge node remove <name-or-id> --force
+forge node doctor <name-or-id>
+forge node refresh [name-or-id]
+forge node exec <name-or-id> -- uname -a
+forge node forward <name-or-id> --local-port 8080 --remote 127.0.0.1:3000
+forge node tunnel <name-or-id>
 ```
 
 Notes:
-- `swarm node bootstrap` exists but only reports missing deps today.
+- `forge node bootstrap` exists but only reports missing deps today.
 - Use `--no-test` on `node add` to skip connection test.
 - `node add` supports per-node SSH preferences (backend, timeout, proxy jump, control master) via flags.
 - `node forward` creates a local SSH tunnel for remote services (binds to `127.0.0.1` by default).
-- `node tunnel` is a shortcut for forwarding swarmd (defaults to `127.0.0.1:50051`).
+- `node tunnel` is a shortcut for forwarding forged (defaults to `127.0.0.1:50051`).
 
 Secure access tip:
-Use `swarm node forward` instead of opening remote ports. Keep remote services bound to
+Use `forge node forward` instead of opening remote ports. Keep remote services bound to
 `127.0.0.1` and expose them locally via an SSH tunnel when needed.
 
-### `swarm ws`
+### `forge ws`
 
 Manage workspaces.
 
 ```bash
-swarm ws create --path /path/to/repo --node local
-swarm ws import --session repo-session --node local
-swarm ws list
-swarm ws status <id-or-name>
-swarm ws beads-status <id-or-name>
-swarm ws attach <id-or-name>
-swarm ws remove <id-or-name> --destroy
-swarm ws refresh [id-or-name]
+forge ws create --path /path/to/repo --node local
+forge ws import --session repo-session --node local
+forge ws list
+forge ws status <id-or-name>
+forge ws beads-status <id-or-name>
+forge ws attach <id-or-name>
+forge ws remove <id-or-name> --destroy
+forge ws refresh [id-or-name]
 ```
 
 Notes:
@@ -114,139 +114,139 @@ Notes:
 - If multiple repo roots are detected during `ws import`, pass `--repo-path` to select the correct root.
 - New workspaces create a tmux session with window 0/pane 0 reserved for human interaction; agents are spawned in the `agents` window.
 
-### `swarm agent`
+### `forge agent`
 
 Manage agents.
 
 ```bash
-swarm agent spawn --workspace <ws> --type opencode --count 1
-swarm agent list --workspace <ws>
-swarm agent status <agent-id>
-swarm agent send <agent-id> "message"
-swarm agent send <agent-id> --file prompt.txt
-swarm agent send <agent-id> --stdin
-swarm agent send <agent-id> --editor
-swarm agent queue <agent-id> --file prompts.txt
-swarm agent pause <agent-id> --duration 5m
-swarm agent resume <agent-id>
-swarm agent interrupt <agent-id>
-swarm agent restart <agent-id>
-swarm agent terminate <agent-id>
+forge agent spawn --workspace <ws> --type opencode --count 1
+forge agent list --workspace <ws>
+forge agent status <agent-id>
+forge agent send <agent-id> "message"
+forge agent send <agent-id> --file prompt.txt
+forge agent send <agent-id> --stdin
+forge agent send <agent-id> --editor
+forge agent queue <agent-id> --file prompts.txt
+forge agent pause <agent-id> --duration 5m
+forge agent resume <agent-id>
+forge agent interrupt <agent-id>
+forge agent restart <agent-id>
+forge agent terminate <agent-id>
 ```
 
 Notes:
-- `agent send` is deprecated and now queues messages (alias for `swarm send`).
-- Use `swarm send --immediate` or `swarm inject` for immediate dispatch.
+- `agent send` is deprecated and now queues messages (alias for `forge send`).
+- Use `forge send --immediate` or `forge inject` for immediate dispatch.
 
-### `swarm mail`
+### `forge mail`
 
 Send and read Agent Mail messages.
 
 ```bash
-swarm mail send --to agent-a1 --subject "Task handoff" --body "Please review PR #123"
-swarm mail inbox --agent agent-a1
-swarm mail read m-001 --agent agent-a1
-swarm mail ack m-001 --agent agent-a1
+forge mail send --to agent-a1 --subject "Task handoff" --body "Please review PR #123"
+forge mail inbox --agent agent-a1
+forge mail read m-001 --agent agent-a1
+forge mail ack m-001 --agent agent-a1
 ```
 
 Notes:
-- Uses Agent Mail MCP when configured; otherwise stores messages in `~/.config/swarm/mail.db`.
-- Configure MCP with `SWARM_AGENT_MAIL_URL`, `SWARM_AGENT_MAIL_PROJECT`, and `SWARM_AGENT_MAIL_AGENT`.
+- Uses Agent Mail MCP when configured; otherwise stores messages in `~/.config/forge/mail.db`.
+- Configure MCP with `FORGE_AGENT_MAIL_URL`, `FORGE_AGENT_MAIL_PROJECT`, and `FORGE_AGENT_MAIL_AGENT` (legacy `SWARM_*` also works).
 
-### `swarm send`
+### `forge send`
 
 Queue messages for agents (safe, queue-first).
 
 ```bash
-swarm send <agent-id> "message"
-swarm send "message"                     # Uses agent context
-swarm send --all "message"               # Sends to all agents in workspace
-swarm send --priority high <agent-id> "message"
-swarm send --front <agent-id> "message"
-swarm send --after <queue-item-id> <agent-id> "message"
-swarm send --when-idle <agent-id> "message"
-swarm send --immediate <agent-id> "message"   # Deprecated; bypasses queue
+forge send <agent-id> "message"
+forge send "message"                     # Uses agent context
+forge send --all "message"               # Sends to all agents in workspace
+forge send --priority high <agent-id> "message"
+forge send --front <agent-id> "message"
+forge send --after <queue-item-id> <agent-id> "message"
+forge send --when-idle <agent-id> "message"
+forge send --immediate <agent-id> "message"   # Deprecated; bypasses queue
 ```
 
 Notes:
-- `--immediate` is deprecated; prefer `swarm inject` when you need direct tmux injection.
+- `--immediate` is deprecated; prefer `forge inject` when you need direct tmux injection.
 
-### `swarm queue`
+### `forge queue`
 
 Inspect queued messages and dispatch status.
 
 ```bash
-swarm queue ls
-swarm queue ls --agent <agent-id>
-swarm queue ls --status pending
-swarm queue ls --all
+forge queue ls
+forge queue ls --agent <agent-id>
+forge queue ls --status pending
+forge queue ls --all
 ```
 
 Notes:
 - Uses workspace context by default; pass `--agent` to scope to one agent.
 - `--status blocked` shows pending items that are blocked by dependencies or agent state.
 
-### `swarm accounts`
+### `forge accounts`
 
 Manage provider accounts and cooldowns.
 
 ```bash
-swarm accounts add
-swarm accounts list
-swarm accounts cooldown list
-swarm accounts cooldown set <account> --until 30m
-swarm accounts cooldown clear <account>
-swarm accounts rotate <agent-id> --reason manual
+forge accounts add
+forge accounts list
+forge accounts cooldown list
+forge accounts cooldown set <account> --until 30m
+forge accounts cooldown clear <account>
+forge accounts rotate <agent-id> --reason manual
 ```
 
-`swarm accounts add` prompts for provider, profile, and credential source. If you enter a secret directly, Swarm stores it in `~/.local/share/swarm/credentials` and records a `file:` reference.
+`forge accounts add` prompts for provider, profile, and credential source. If you enter a secret directly, Forge stores it in `~/.local/share/forge/credentials` and records a `file:` reference.
 
-### `swarm export`
+### `forge export`
 
-Export Swarm status.
+Export Forge status.
 
 ```bash
-swarm export status --json
+forge export status --json
 ```
 
 Human mode prints a summary; JSON/JSONL return full payloads.
 
-### `swarm export events`
+### `forge export events`
 
 Export the event log with optional filters.
 
 ```bash
-swarm export events --since 1h --jsonl
-swarm export events --since 1h --until now --jsonl
-swarm export events --type agent.state_changed,node.online --jsonl
-swarm export events --agent <agent-id> --jsonl
-swarm export events --watch --jsonl
+forge export events --since 1h --jsonl
+forge export events --since 1h --until now --jsonl
+forge export events --type agent.state_changed,node.online --jsonl
+forge export events --agent <agent-id> --jsonl
+forge export events --watch --jsonl
 ```
 
-### `swarm audit`
+### `forge audit`
 
 View the audit log with filters for time, entity, and action.
 
 ```bash
-swarm audit --since 1h
-swarm audit --type agent.state_changed --entity-type agent
-swarm audit --action message.dispatched --limit 200
-swarm audit --json
+forge audit --since 1h
+forge audit --type agent.state_changed --entity-type agent
+forge audit --action message.dispatched --limit 200
+forge audit --json
 ```
 
 ## Planned commands
 
 These are defined in the product spec but not wired up yet.
 
-### `swarm agent approve`
+### `forge agent approve`
 
 ```bash
-swarm agent approve <agent-id> [--all]
+forge agent approve <agent-id> [--all]
 ```
 
-### `swarm ws kill` / `swarm ws unmanage`
+### `forge ws kill` / `forge ws unmanage`
 
 ```bash
-swarm ws kill <id-or-name>
-swarm ws unmanage <id-or-name>
+forge ws kill <id-or-name>
+forge ws unmanage <id-or-name>
 ```

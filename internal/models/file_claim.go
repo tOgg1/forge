@@ -8,7 +8,7 @@ type FileClaim struct {
 	// ID is the unique identifier for the claim.
 	ID int64 `json:"id"`
 
-	// AgentID is the Swarm agent ID that holds this claim.
+	// AgentID is the Forge agent ID that holds this claim.
 	AgentID string `json:"agent_id"`
 
 	// AgentMailName is the Agent Mail agent name (e.g., "GreenCastle").

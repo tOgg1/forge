@@ -89,7 +89,7 @@ func DefaultPath() string {
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".swarm", "vault")
+	return filepath.Join(home, ".forge", "vault")
 }
 
 // IsInitialized checks if the vault has been initialized.

@@ -40,10 +40,10 @@ var nodeForwardCmd = &cobra.Command{
 The remote target should typically be bound to 127.0.0.1 on the node.
 The local bind defaults to 127.0.0.1 for safety.`,
 	Example: `  # Forward local 8080 to a remote service on port 3000
-  swarm node forward prod-server --local-port 8080 --remote 127.0.0.1:3000
+  forge node forward prod-server --local-port 8080 --remote 127.0.0.1:3000
 
   # Bind to a different local host
-  swarm node forward prod-server --local-host 0.0.0.0 --local-port 9090 --remote 127.0.0.1:9090`,
+  forge node forward prod-server --local-host 0.0.0.0 --local-port 9090 --remote 127.0.0.1:9090`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

@@ -224,7 +224,7 @@ You want:
 
 This turns template usage into a **two-keystroke operation**.
 
-### B) Multi-select + bulk actions is mandatory for real swarms
+### B) Multi-select + bulk actions is mandatory for real forges
 
 You need:
 
@@ -264,7 +264,7 @@ For elite UX, it should show:
 
 ### D) “Launchpad” wizard: spawn + task agents in one flow
 
-A dedicated modal (think: `N` for “new swarm batch”):
+A dedicated modal (think: `N` for “new forge batch”):
 
 1. Choose workspace (or create from current repo)
 2. Choose agent type (OpenCode default)

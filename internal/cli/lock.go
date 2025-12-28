@@ -393,7 +393,7 @@ func resolveAgentMailConfig() (agentMailConfig, error) {
 		}
 	}
 	if project == "" {
-		return agentMailConfig{}, errors.New("agent mail project not configured (set SWARM_AGENT_MAIL_PROJECT or run inside a git repo)")
+		return agentMailConfig{}, errors.New("agent mail project not configured (set FORGE_AGENT_MAIL_PROJECT or run inside a git repo)")
 	}
 
 	urlValue := strings.TrimSpace(cfg.URL)
@@ -423,7 +423,7 @@ func resolveAgentMailAgent(flagValue, fallback string) (string, error) {
 	if value != "" {
 		return value, nil
 	}
-	return "", errors.New("agent name is required (use --agent or set SWARM_AGENT_MAIL_AGENT)")
+	return "", errors.New("agent name is required (use --agent or set FORGE_AGENT_MAIL_AGENT)")
 }
 
 func newAgentMailClient(url string, timeout time.Duration) *agentMailClient {

@@ -1,4 +1,4 @@
-# Swarm System Test Plan
+# Forge System Test Plan
 
 This test plan prioritizes the **happy path** and core user workflows. Tests are ordered by importance - complete the Critical Path tests before moving to secondary tests.
 
@@ -22,7 +22,7 @@ This test plan prioritizes the **happy path** and core user workflows. Tests are
 
 ```bash
 # Run the doctor command first
-swarm doctor
+forge doctor
 
 # Expected output should show:
 # ✓ tmux 3.x+
@@ -39,8 +39,8 @@ swarm doctor
 make build
 
 # Verify
-./build/swarm --version
-./build/swarm doctor
+./build/forge --version
+./build/forge doctor
 ```
 
 ---
@@ -58,33 +58,33 @@ This is the golden path. If this doesn't work, nothing else matters.
 cd /path/to/your/repo
 git status  # Verify it's a git repo
 
-# 2. Initialize Swarm (one-time setup)
-swarm migrate up
+# 2. Initialize Forge (one-time setup)
+forge migrate up
 
 # 3. Create workspace for current repo
-swarm ws create --path .
-WS_ID=$(swarm ws list --json | jq -r '.[0].id')
+forge ws create --path .
+WS_ID=$(forge ws list --json | jq -r '.[0].id')
 echo "Workspace ID: $WS_ID"
 
 # 4. Spawn an OpenCode agent
-swarm agent spawn --workspace $WS_ID --type opencode
-AGENT_ID=$(swarm agent list --workspace $WS_ID --json | jq -r '.[0].id')
+forge agent spawn --workspace $WS_ID --type opencode
+AGENT_ID=$(forge agent list --workspace $WS_ID --json | jq -r '.[0].id')
 echo "Agent ID: $AGENT_ID"
 
 # 5. Send a simple instruction
-swarm send $AGENT_ID "List all files in this repository"
+forge send $AGENT_ID "List all files in this repository"
 
 # 6. Check agent status
-swarm ps
+forge ps
 # Expected: Agent shows state (idle, working, etc.)
 
 # 7. Attach to see the agent working
-swarm attach $AGENT_ID
+forge attach $AGENT_ID
 # Press Ctrl-b d to detach
 
 # 8. Clean up
-swarm agent terminate $AGENT_ID
-swarm ws remove $WS_ID --destroy
+forge agent terminate $AGENT_ID
+forge ws remove $WS_ID --destroy
 ```
 
 **Expected Results:**
@@ -99,13 +99,13 @@ swarm ws remove $WS_ID --destroy
 
 ```bash
 # 1. Setup (if not already done)
-swarm ws create --path /path/to/repo
-WS_ID=$(swarm ws list --json | jq -r '.[0].id')
-swarm agent spawn --workspace $WS_ID --type opencode
-AGENT_ID=$(swarm agent list --json | jq -r '.[0].id')
+forge ws create --path /path/to/repo
+WS_ID=$(forge ws list --json | jq -r '.[0].id')
+forge agent spawn --workspace $WS_ID --type opencode
+AGENT_ID=$(forge agent list --json | jq -r '.[0].id')
 
 # 2. Launch TUI
-swarm ui
+forge ui
 
 # 3. In TUI, verify:
 #    - Press 3 to go to Agent view
@@ -116,7 +116,7 @@ swarm ui
 #    - Press q to quit
 
 # 4. Send message from another terminal while TUI is open
-swarm send $AGENT_ID "What is 2+2?"
+forge send $AGENT_ID "What is 2+2?"
 
 # 5. Watch TUI update:
 #    - Agent state should change to "working"
@@ -137,19 +137,19 @@ From UX_FEEDBACK_3.md: "send" should mean **enqueue + scheduler dispatch**
 
 ```bash
 # 1. Setup agent
-AGENT_ID=$(swarm agent list --json | jq -r '.[0].id')
+AGENT_ID=$(forge agent list --json | jq -r '.[0].id')
 
 # 2. Queue multiple messages (not immediate injection)
-swarm send $AGENT_ID "First: List all Go files"
-swarm send $AGENT_ID "Second: Count lines of code"
-swarm send $AGENT_ID "Third: Find TODO comments"
+forge send $AGENT_ID "First: List all Go files"
+forge send $AGENT_ID "Second: Count lines of code"
+forge send $AGENT_ID "Third: Find TODO comments"
 
 # 3. Check queue
-swarm queue list --agent $AGENT_ID
+forge queue list --agent $AGENT_ID
 # Expected: 3 items queued (or 2 if first already dispatched)
 
 # 4. Watch agent process queue
-swarm ps --watch
+forge ps --watch
 # Expected: Agent works through queue items in order
 ```
 
@@ -173,20 +173,20 @@ The TUI should answer these questions within 2 seconds:
 
 ```bash
 # 1. Spawn agent and send work
-AGENT_ID=$(swarm agent list --json | jq -r '.[0].id')
-swarm send $AGENT_ID "Analyze this codebase in detail"
+AGENT_ID=$(forge agent list --json | jq -r '.[0].id')
+forge send $AGENT_ID "Analyze this codebase in detail"
 
 # 2. Check state (should be "working")
-swarm agent status $AGENT_ID --json | jq '.state'
+forge agent status $AGENT_ID --json | jq '.state'
 # Expected: "working"
 
 # 3. Wait for completion, check again
 sleep 30
-swarm agent status $AGENT_ID --json | jq '.state'
+forge agent status $AGENT_ID --json | jq '.state'
 # Expected: "idle"
 
 # 4. Check state info
-swarm agent status $AGENT_ID --json | jq '.state_info'
+forge agent status $AGENT_ID --json | jq '.state_info'
 # Expected: Shows confidence, reason, evidence
 ```
 
@@ -200,20 +200,20 @@ swarm agent status $AGENT_ID --json | jq '.state_info'
 
 ```bash
 # 1. List available templates
-swarm template list
+forge template list
 # Expected: Shows built-in templates (continue, review, etc.)
 
 # 2. Run a template
-AGENT_ID=$(swarm agent list --json | jq -r '.[0].id')
-swarm template run continue --agent $AGENT_ID
+AGENT_ID=$(forge agent list --json | jq -r '.[0].id')
+forge template run continue --agent $AGENT_ID
 # Expected: Template message queued
 
 # 3. List sequences
-swarm seq list
+forge seq list
 # Expected: Shows built-in sequences
 
 # 4. Run a sequence
-swarm seq run baseline --agent $AGENT_ID
+forge seq run baseline --agent $AGENT_ID
 # Expected: All sequence steps queued
 ```
 
@@ -221,7 +221,7 @@ swarm seq run baseline --agent $AGENT_ID
 
 ```bash
 # 1. Launch TUI
-swarm ui
+forge ui
 
 # 2. Press Ctrl+P to open message palette
 # Expected: Shows templates and sequences
@@ -241,11 +241,11 @@ swarm ui
 
 ```bash
 # Terminal 1: Launch TUI
-swarm ui
+forge ui
 
 # Terminal 2: Trigger state changes
-AGENT_ID=$(swarm agent list --json | jq -r '.[0].id')
-swarm send $AGENT_ID "Count to 10 slowly"
+AGENT_ID=$(forge agent list --json | jq -r '.[0].id')
+forge send $AGENT_ID "Count to 10 slowly"
 
 # Watch Terminal 1:
 # - Agent state should change from idle → working
@@ -262,7 +262,7 @@ swarm send $AGENT_ID "Count to 10 slowly"
 
 ```bash
 # 1. Launch TUI with multiple agents
-swarm ui
+forge ui
 
 # 2. Go to Agent view (press 3)
 
@@ -320,14 +320,14 @@ swarm ui
 
 ```bash
 # 1. Spawn 3 agents
-swarm agent spawn --workspace $WS_ID --type opencode --count 3
+forge agent spawn --workspace $WS_ID --type opencode --count 3
 
 # 2. Verify all spawned
-swarm agent list --workspace $WS_ID
+forge agent list --workspace $WS_ID
 # Expected: 3 agents listed
 
 # 3. Check TUI shows all agents
-swarm ui
+forge ui
 # Press 3 for agent view
 # Expected: All 3 agents visible with cards
 ```
@@ -336,15 +336,15 @@ swarm ui
 
 ```bash
 # 1. Get agent IDs
-AGENTS=$(swarm agent list --json | jq -r '.[].id')
+AGENTS=$(forge agent list --json | jq -r '.[].id')
 
 # 2. Assign different tasks
-echo "$AGENTS" | head -1 | xargs -I {} swarm send {} "Review auth code"
-echo "$AGENTS" | sed -n 2p | xargs -I {} swarm send {} "Review database code"
-echo "$AGENTS" | tail -1 | xargs -I {} swarm send {} "Review API handlers"
+echo "$AGENTS" | head -1 | xargs -I {} forge send {} "Review auth code"
+echo "$AGENTS" | sed -n 2p | xargs -I {} forge send {} "Review database code"
+echo "$AGENTS" | tail -1 | xargs -I {} forge send {} "Review API handlers"
 
 # 3. Monitor all agents
-swarm ps
+forge ps
 # Expected: All agents working on different tasks
 ```
 
@@ -352,13 +352,13 @@ swarm ps
 
 ```bash
 # 1. List available recipes
-swarm recipe list
+forge recipe list
 
 # 2. Run a recipe (spawns multiple configured agents)
-swarm recipe run baseline --workspace $WS_ID
+forge recipe run baseline --workspace $WS_ID
 
 # 3. Verify agents spawned with correct configuration
-swarm agent list --workspace $WS_ID
+forge agent list --workspace $WS_ID
 ```
 
 ---
@@ -385,78 +385,78 @@ go test ./... -v
 
 ```bash
 # Add account
-swarm accounts add --provider anthropic --profile work \
+forge accounts add --provider anthropic --profile work \
   --credential-ref 'env:ANTHROPIC_API_KEY' --non-interactive
 
 # List accounts
-swarm accounts list
+forge accounts list
 
 # Set cooldown
-swarm accounts cooldown set <account-id> --until 30m
+forge accounts cooldown set <account-id> --until 30m
 
 # Clear cooldown
-swarm accounts cooldown clear <account-id>
+forge accounts cooldown clear <account-id>
 ```
 
 ### 6.3 Vault Tests
 
 ```bash
 # Initialize vault
-swarm vault init
+forge vault init
 
 # Backup credentials
-swarm vault backup claude work
+forge vault backup claude work
 
 # List profiles
-swarm vault list
+forge vault list
 
 # Activate profile
-swarm vault activate claude work
+forge vault activate claude work
 ```
 
 ### 6.4 Remote Node Tests (Optional)
 
 ```bash
 # Add remote node
-swarm node add --name remote --ssh user@hostname
+forge node add --name remote --ssh user@hostname
 
 # Run doctor on remote
-swarm node doctor remote
+forge node doctor remote
 
 # Create workspace on remote
-swarm ws create --node remote --path /home/user/project
+forge ws create --node remote --path /home/user/project
 
 # Spawn agent on remote
-swarm agent spawn --workspace $REMOTE_WS_ID --type opencode
+forge agent spawn --workspace $REMOTE_WS_ID --type opencode
 ```
 
 ### 6.5 Mail and Lock Tests
 
 ```bash
 # Send mail between agents
-swarm mail send --to agent-2 --subject "Handoff" --body "Please review my changes"
+forge mail send --to agent-2 --subject "Handoff" --body "Please review my changes"
 
 # Check inbox
-swarm mail inbox --agent agent-2
+forge mail inbox --agent agent-2
 
 # Acquire file lock
-swarm lock acquire --path src/main.go --ttl 30m
+forge lock acquire --path src/main.go --ttl 30m
 
 # Check locks
-swarm lock list
+forge lock list
 
 # Release lock
-swarm lock release --path src/main.go
+forge lock release --path src/main.go
 ```
 
 ### 6.6 Database Tests
 
 ```bash
 # Check migrations
-swarm migrate status
+forge migrate status
 
 # Verify schema
-sqlite3 ~/.local/share/swarm/swarm.db ".tables"
+sqlite3 ~/.local/share/forge/forge.db ".tables"
 # Expected: nodes, workspaces, agents, accounts, queue_items, events, etc.
 ```
 
@@ -464,12 +464,12 @@ sqlite3 ~/.local/share/swarm/swarm.db ".tables"
 
 ```bash
 # Spawn latency
-time swarm agent spawn --workspace $WS_ID --type opencode --count 1
+time forge agent spawn --workspace $WS_ID --type opencode --count 1
 # Target: < 2 seconds
 
 # Queue throughput
 for i in {1..100}; do echo "Task $i"; done > /tmp/tasks.txt
-time swarm queue add --agent $AGENT_ID --file /tmp/tasks.txt
+time forge queue add --agent $AGENT_ID --file /tmp/tasks.txt
 # Target: < 1 second
 
 # TUI responsiveness with many agents
@@ -519,7 +519,7 @@ time swarm queue add --agent $AGENT_ID --file /tmp/tasks.txt
 ```
 Date: YYYY-MM-DD
 Tester: 
-Swarm Version: 
+Forge Version: 
 OS: 
 tmux Version: 
 ```
@@ -541,13 +541,13 @@ tmux Version:
 
 ```bash
 # Happy path commands
-swarm doctor                    # Check environment
-swarm ws create --path .        # Create workspace
-swarm agent spawn --workspace $WS_ID --type opencode  # Spawn agent
-swarm send $AGENT_ID "message"  # Send message (queued)
-swarm ps                        # List agents with status
-swarm attach $AGENT_ID          # Attach to agent tmux pane
-swarm ui                        # Launch TUI
+forge doctor                    # Check environment
+forge ws create --path .        # Create workspace
+forge agent spawn --workspace $WS_ID --type opencode  # Spawn agent
+forge send $AGENT_ID "message"  # Send message (queued)
+forge ps                        # List agents with status
+forge attach $AGENT_ID          # Attach to agent tmux pane
+forge ui                        # Launch TUI
 
 # TUI shortcuts
 3           # Agent view

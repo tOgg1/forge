@@ -457,7 +457,7 @@ func (e *NativeExecutor) keepAlive(client *xssh.Client) {
 
 	for range ticker.C {
 		// Send keep-alive request
-		_, _, err := client.SendRequest("keepalive@swarm", true, nil)
+		_, _, err := client.SendRequest("keepalive@forge", true, nil)
 		if err != nil {
 			e.logger.Debug().Err(err).Msg("keep-alive failed, connection may be dead")
 			return
@@ -656,7 +656,7 @@ func (p *connectionPool) get(addr string) *xssh.Client {
 			continue
 		}
 
-		_, _, err := pc.client.SendRequest("keepalive@swarm", true, nil)
+		_, _, err := pc.client.SendRequest("keepalive@forge", true, nil)
 		if err != nil {
 			pc.client.Close()
 			continue

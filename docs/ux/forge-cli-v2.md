@@ -1,6 +1,6 @@
-# Swarm CLI v2 Specification (UX/DX First)
+# Forge CLI v2 Specification (UX/DX First)
 
-This document specifies the **new CLI surface** for Swarm.
+This document specifies the **new CLI surface** for Forge.
 It focuses on:
 - **Discoverability** (help output teaches workflows)
 - **Safe defaults** (queue-first, no accidental injection)
@@ -15,18 +15,18 @@ It focuses on:
 
 ### 1) “Happy path” is 3 commands
 Most users should be able to:
-1. `swarm up` (bootstrap workspace + tmux + agents)
-2. `swarm send` (queue instructions)
-3. `swarm ui` (watch and intervene)
+1. `forge up` (bootstrap workspace + tmux + agents)
+2. `forge send` (queue instructions)
+3. `forge ui` (watch and intervene)
 
 ### 2) Queue-first UX
-- `swarm send` **enqueues** by default (safe)
+- `forge send` **enqueues** by default (safe)
 - Scheduler dispatches when agent becomes eligible (idle, not paused, account not cooling down)
-- “Direct injection” exists but is **explicit** (`swarm inject ...`)
+- “Direct injection” exists but is **explicit** (`forge inject ...`)
 
 ### 3) Context-aware defaults
 If you run commands inside a git repo:
-- Swarm should auto-select the matching workspace (or offer an interactive pick).
+- Forge should auto-select the matching workspace (or offer an interactive pick).
 - If multiple workspaces match, prompt unless `--non-interactive`.
 
 ### 4) Everything scriptable
@@ -40,11 +40,11 @@ Every command supports:
 ## Command tree (exact)
 
 ```text
-swarm [flags]                       # default: launch TUI (same as `swarm ui`)
+forge [flags]                       # default: launch TUI (same as `forge ui`)
   ui                                # launch TUI explicitly
   up [path]                         # create/open workspace for repo, ensure tmux, spawn agents
-  ls                                # list workspaces (alias: `swarm ws list`)
-  ps                                # list agents (alias: `swarm agent list`)
+  ls                                # list workspaces (alias: `forge ws list`)
+  ps                                # list agents (alias: `forge agent list`)
   use <workspace|agent>             # set default context for subsequent commands (kubectl-like)
 
   send [message]                    # enqueue message(s) to agent(s) / workspace
@@ -92,11 +92,11 @@ swarm [flags]                       # default: launch TUI (same as `swarm ui`)
     resume <agent-id>
     stop <agent-id>                 # (rename of terminate; keep alias)
     restart <agent-id>
-    send <agent-id> [message]       # low-level direct message; prefer `swarm send`
-    queue <agent-id> [...]          # low-level queue; prefer `swarm queue`
+    send <agent-id> [message]       # low-level direct message; prefer `forge send`
+    queue <agent-id> [...]          # low-level queue; prefer `forge queue`
     approve <agent-id>              # approvals / continue gates
 
-  mail                              # Swarm Mail (human CLI)
+  mail                              # Forge Mail (human CLI)
     inbox
     send
     read
@@ -136,17 +136,17 @@ swarm [flags]                       # default: launch TUI (same as `swarm ui`)
 
 ### Aliases and “fast path” commands
 
-- `swarm` = `swarm ui`
-- `swarm ls` = `swarm ws list`
-- `swarm ps` = `swarm agent list`
-- `swarm stop` = `swarm agent terminate` (keep old spelling as alias for backwards-compat)
-- `swarm seq` = `swarm sequence` (optional long name; short is default)
+- `forge` = `forge ui`
+- `forge ls` = `forge ws list`
+- `forge ps` = `forge agent list`
+- `forge stop` = `forge agent terminate` (keep old spelling as alias for backwards-compat)
+- `forge seq` = `forge sequence` (optional long name; short is default)
 
 ---
 
 ## Global flags (proposed)
 
-These are global so you can do: `swarm --workspace myrepo send "continue"`.
+These are global so you can do: `forge --workspace myrepo send "continue"`.
 
 - `--workspace, -w <name|id>`: default workspace context
 - `--agent, -a <id|name>`: default agent target
@@ -154,7 +154,7 @@ These are global so you can do: `swarm --workspace myrepo send "continue"`.
 - `--profile, -p <profile>`: default account profile
 - `--json | --jsonl`: output mode
 - `--watch`: for commands that can stream
-- `--non-interactive`: disable prompts (also `SWARM_NON_INTERACTIVE=1`)
+- `--non-interactive`: disable prompts (also `FORGE_NON_INTERACTIVE=1`, legacy `SWARM_NON_INTERACTIVE=1`)
 - `--no-color`: disable ANSI output (also `NO_COLOR=1`)
 - `--config <path>`: explicit config file
 - `--db <path>`: explicit local DB path (advanced)
@@ -165,32 +165,32 @@ These are global so you can do: `swarm --workspace myrepo send "continue"`.
 
 Below are suggested `Short`, `Long`, and `Example` strings to paste into Cobra commands.
 
-### `swarm` (root)
+### `forge` (root)
 
 **Short:**  
-Launch the Swarm TUI or run CLI subcommands.
+Launch the Forge TUI or run CLI subcommands.
 
 **Long:**  
-Swarm manages agent workspaces (repo + node + tmux) and controls OpenCode agents.
+Forge manages agent workspaces (repo + node + tmux) and controls OpenCode agents.
 Run without a subcommand to open the TUI.
 
 **Examples:**
-- `swarm`  
-- `swarm up`  
-- `swarm send "run tests and fix failures"`  
-- `swarm ps --workspace myrepo`  
-- `swarm queue ls --agent A1 --json`
+- `forge`  
+- `forge up`  
+- `forge send "run tests and fix failures"`  
+- `forge ps --workspace myrepo`  
+- `forge queue ls --agent A1 --json`
 
-### `swarm up`
+### `forge up`
 
 **Short:**  
 Create or open a workspace for a repo, ensure tmux, and optionally spawn agents.
 
 **Examples:**
-- `swarm up` (uses current repo; prompts if ambiguous)
-- `swarm up . --agents 6 --type opencode`
-- `swarm up /srv/repos/api --node buildbox-1`
-- `swarm up --attach` (open tmux/session after bringing it up)
+- `forge up` (uses current repo; prompts if ambiguous)
+- `forge up . --agents 6 --type opencode`
+- `forge up /srv/repos/api --node buildbox-1`
+- `forge up --attach` (open tmux/session after bringing it up)
 
 **Key flags (proposed):**
 - `--node <node>` (default: local)
@@ -202,7 +202,7 @@ Create or open a workspace for a repo, ensure tmux, and optionally spawn agents.
 - `--recipe <name>` (optional preset: agents + templates + sequences)
 - `--attach` (attach tmux after provisioning)
 
-### `swarm send`
+### `forge send`
 
 **Short:**  
 Queue a message for one or more agents (safe default).
@@ -210,14 +210,14 @@ Queue a message for one or more agents (safe default).
 **Long:**  
 Queues message(s) to the target agent(s). If the scheduler is running and an agent
 is eligible (idle, not paused, not cooling down), the message will dispatch
-automatically. Use `swarm inject` only when you explicitly need immediate tmux injection.
+automatically. Use `forge inject` only when you explicitly need immediate tmux injection.
 
 **Examples:**
-- `swarm send "continue"` (targets current context)
-- `swarm send -a A1 "fix the failing test"`
-- `swarm send -w myrepo --all "pull latest, run tests, report status"`
-- `swarm send --template pr-review --to agent:A1` (template expansion)
-- `swarm send --pause 10m --then "resume and continue"` (sequence sugar)
+- `forge send "continue"` (targets current context)
+- `forge send -a A1 "fix the failing test"`
+- `forge send -w myrepo --all "pull latest, run tests, report status"`
+- `forge send --template pr-review --to agent:A1` (template expansion)
+- `forge send --pause 10m --then "resume and continue"` (sequence sugar)
 
 **Key flags (proposed):**
 - `--to <selector>` repeatable (e.g. `--to agent:A1 --to agent:A2`)
@@ -227,31 +227,31 @@ automatically. Use `swarm inject` only when you explicitly need immediate tmux i
 - `--when-idle` (insert conditional gate)
 - `--after-cooldown <duration>` (insert conditional gate)
 
-### `swarm template`
+### `forge template`
 
 **Short:**  
 Manage reusable message templates.
 
 **Examples:**
-- `swarm template add implement-feature`
-- `swarm template run implement-feature -a A1 --var branch=feat/x`
-- `swarm template ls`
+- `forge template add implement-feature`
+- `forge template run implement-feature -a A1 --var branch=feat/x`
+- `forge template ls`
 
 **Template format (proposed):**
 - stored as YAML or Markdown in:
-  - project: `.swarm/templates/*.md|*.yaml`
-  - global: `~/.config/swarm/templates/...`
+  - project: `.forge/templates/*.md|*.yaml`
+  - global: `~/.config/forge/templates/...`
 - supports simple variable substitution: `${var}`
 
-### `swarm seq`
+### `forge seq`
 
 **Short:**  
 Manage multi-step sequences (macros) of queue items.
 
 **Examples:**
-- `swarm seq add bugfix-loop`
-- `swarm seq run bugfix-loop -w api --all`
-- `swarm seq show bugfix-loop`
+- `forge seq add bugfix-loop`
+- `forge seq run bugfix-loop -w api --all`
+- `forge seq show bugfix-loop`
 
 **Sequence format (proposed):**
 A YAML list of steps:
@@ -259,14 +259,14 @@ A YAML list of steps:
 - pause
 - conditional gates (when idle / after cooldown / after previous)
 
-### `swarm doctor`
+### `forge doctor`
 
 **Short:**  
 Check environment dependencies and report what to fix.
 
 **Examples:**
-- `swarm doctor`
-- `swarm doctor --json`
+- `forge doctor`
+- `forge doctor --json`
 
 Checks:
 - tmux installed + usable
@@ -281,8 +281,8 @@ Checks:
 
 These are the top things missing today to make the CLI *feel* incredible:
 
-1. **Context (`swarm use`)**
-   - store default workspace/agent in `~/.config/swarm/context.json`
+1. **Context (`forge use`)**
+   - store default workspace/agent in `~/.config/forge/context.json`
    - all commands fall back to it (and to current repo) before prompting
 
 2. **Selectors**
@@ -294,9 +294,9 @@ These are the top things missing today to make the CLI *feel* incredible:
    - integrate with TUI message palette for one-keystroke sending
 
 4. **Queue becomes first-class**
-   - `swarm send` should be queue-first
-   - add `swarm queue edit` for fast reorder/insert (no full TUI required)
+   - `forge send` should be queue-first
+   - add `forge queue edit` for fast reorder/insert (no full TUI required)
 
 5. **One-command bootstrap**
-   - `swarm up --agents 8 --recipe coding-flywheel`
+   - `forge up --agents 8 --recipe coding-flywheel`
    - prints *exactly* what it did and the next best command to run

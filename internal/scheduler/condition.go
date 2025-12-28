@@ -1,4 +1,4 @@
-// Package scheduler provides the message dispatch scheduler for Swarm agents.
+// Package scheduler provides the message dispatch scheduler for Forge agents.
 package scheduler
 
 import (

@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Swarm captures agent transcripts for state detection, debugging, and audit.
+Forge captures agent transcripts for state detection, debugging, and audit.
 Retention affects disk usage and privacy. The MVP needs a pragmatic default.
 
 ## Decision

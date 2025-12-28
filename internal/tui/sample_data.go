@@ -1,4 +1,4 @@
-// Package tui implements the Swarm terminal user interface.
+// Package tui implements the Forge terminal user interface.
 package tui
 
 import (
@@ -171,7 +171,7 @@ func sampleApprovals() map[string][]approvalItem {
 				Status:      models.ApprovalStatusPending,
 				Risk:        "low",
 				Details:     "Documentation-only change requested.",
-				Snippet:     "+ Swarm v0.3.1",
+				Snippet:     "+ Forge v0.3.1",
 				CreatedAt:   now.Add(-1 * time.Minute),
 			},
 		},

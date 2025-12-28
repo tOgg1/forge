@@ -5,9 +5,9 @@
 // caam: credential references. New integrations should use vault: references.
 //
 // Migration guide:
-//  1. Use 'swarm vault backup <adapter> <profile>' to save auth files
+//  1. Use 'forge vault backup <adapter> <profile>' to save auth files
 //  2. Update credential references from 'caam:provider/email' to 'vault:adapter/profile'
-//  3. Use 'swarm vault activate <adapter> <profile>' to switch profiles
+//  3. Use 'forge vault activate <adapter> <profile>' to switch profiles
 package caam
 
 import (
@@ -149,8 +149,8 @@ func ParseVault(vaultPath string) (*VaultConfig, error) {
 	return config, nil
 }
 
-// ToSwarmAccount converts a caam profile to a Swarm Account model.
-func (p *Profile) ToSwarmAccount() *models.Account {
+// ToForgeAccount converts a caam profile to a Forge Account model.
+func (p *Profile) ToForgeAccount() *models.Account {
 	provider := mapCaamProvider(p.Provider)
 
 	// Use email as profile name (caam convention)
@@ -176,7 +176,7 @@ func (p *Profile) ToSwarmAccount() *models.Account {
 	return account
 }
 
-// mapCaamProvider maps caam provider names to Swarm provider types.
+// mapCaamProvider maps caam provider names to Forge provider types.
 func mapCaamProvider(caamProvider string) models.Provider {
 	switch strings.ToLower(caamProvider) {
 	case "claude":
@@ -264,12 +264,12 @@ func (c *VaultConfig) GetProfile(provider, email string) *Profile {
 	return nil
 }
 
-// ToSwarmAccounts converts all valid profiles to Swarm Account models.
-func (c *VaultConfig) ToSwarmAccounts() []*models.Account {
+// ToForgeAccounts converts all valid profiles to Forge Account models.
+func (c *VaultConfig) ToForgeAccounts() []*models.Account {
 	accounts := make([]*models.Account, 0, len(c.Profiles))
 	for _, p := range c.Profiles {
 		if p.IsValid() {
-			accounts = append(accounts, p.ToSwarmAccount())
+			accounts = append(accounts, p.ToForgeAccount())
 		}
 	}
 	return accounts

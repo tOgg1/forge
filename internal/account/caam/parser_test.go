@@ -264,7 +264,7 @@ func TestMapCaamProvider(t *testing.T) {
 	}
 }
 
-func TestProfileToSwarmAccount(t *testing.T) {
+func TestProfileToForgeAccount(t *testing.T) {
 	backupTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 
 	p := &Profile{
@@ -277,7 +277,7 @@ func TestProfileToSwarmAccount(t *testing.T) {
 		AuthFiles: []string{".claude.json", "auth.json"},
 	}
 
-	account := p.ToSwarmAccount()
+	account := p.ToForgeAccount()
 
 	// Verify account fields
 	if account.Provider != models.ProviderAnthropic {
@@ -301,7 +301,7 @@ func TestProfileToSwarmAccount(t *testing.T) {
 	}
 }
 
-func TestProfileToSwarmAccountWithoutMeta(t *testing.T) {
+func TestProfileToForgeAccountWithoutMeta(t *testing.T) {
 	p := &Profile{
 		Provider:  "codex",
 		Email:     "bob@example.com",
@@ -309,7 +309,7 @@ func TestProfileToSwarmAccountWithoutMeta(t *testing.T) {
 		AuthFiles: []string{"auth.json"},
 	}
 
-	account := p.ToSwarmAccount()
+	account := p.ToForgeAccount()
 
 	if account.Provider != models.ProviderOpenAI {
 		t.Errorf("expected provider %s, got %s", models.ProviderOpenAI, account.Provider)
@@ -386,7 +386,7 @@ func TestVaultConfigGetProfile(t *testing.T) {
 	}
 }
 
-func TestVaultConfigToSwarmAccounts(t *testing.T) {
+func TestVaultConfigToForgeAccounts(t *testing.T) {
 	config := &VaultConfig{
 		Profiles: []*Profile{
 			{
@@ -407,7 +407,7 @@ func TestVaultConfigToSwarmAccounts(t *testing.T) {
 		},
 	}
 
-	accounts := config.ToSwarmAccounts()
+	accounts := config.ToForgeAccounts()
 
 	// Should only include valid profiles
 	if len(accounts) != 2 {

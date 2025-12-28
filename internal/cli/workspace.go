@@ -92,7 +92,7 @@ var wsCmd = &cobra.Command{
 	Use:     "ws",
 	Aliases: []string{"workspace"},
 	Short:   "Manage workspaces",
-	Long: `Manage Swarm workspaces.
+	Long: `Manage Forge workspaces.
 
 A workspace represents a repository with an associated tmux session where agents run.`,
 }
@@ -104,13 +104,13 @@ var wsCreateCmd = &cobra.Command{
 
 By default, a tmux session is created in the repository directory.`,
 	Example: `  # Create workspace for current directory
-  swarm ws create --path .
+  forge ws create --path .
 
   # Create with custom name
-  swarm ws create --path /home/user/myproject --name my-project
+  forge ws create --path /home/user/myproject --name my-project
 
   # Create on a specific node
-  swarm ws create --path /data/repos/api --node prod-server`,
+  forge ws create --path /data/repos/api --node prod-server`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -186,8 +186,8 @@ var wsImportCmd = &cobra.Command{
 	Short: "Import an existing tmux session",
 	Long: `Import an existing tmux session as a workspace.
 
-This allows Swarm to manage agents in sessions created outside of Swarm.`,
-	Example: `  swarm ws import --session my-project --node localhost`,
+This allows Forge to manage agents in sessions created outside of Forge.`,
+	Example: `  forge ws import --session my-project --node localhost`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -268,7 +268,7 @@ This allows Swarm to manage agents in sessions created outside of Swarm.`,
 var wsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List workspaces",
-	Long:  "List all workspaces managed by Swarm.",
+	Long:  "List all workspaces managed by Forge.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -582,9 +582,9 @@ var wsRemoveCmd = &cobra.Command{
 	Use:     "remove <id-or-name>",
 	Aliases: []string{"rm", "delete"},
 	Short:   "Remove a workspace",
-	Long: `Remove a workspace from Swarm.
+	Long: `Remove a workspace from Forge.
 
-By default, this only removes the Swarm record. The tmux session is left running.
+By default, this only removes the Forge record. The tmux session is left running.
 Use --destroy to also kill the tmux session.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -663,7 +663,7 @@ var wsKillCmd = &cobra.Command{
 	Aliases: []string{"destroy"},
 	Short:   "Destroy a workspace",
 	Long: `Destroy a workspace by terminating agents, killing the tmux session,
-and removing the Swarm record.`,
+and removing the Forge record.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()

@@ -1,4 +1,4 @@
-// Package tui implements the Swarm terminal user interface.
+// Package tui implements the Forge terminal user interface.
 package tui
 
 import (
@@ -271,7 +271,7 @@ func sampleBeadsSnapshots() map[string]beadsSnapshot {
 		"/home/user/projects/api-service/.beads/issues.jsonl",
 		[]beads.TaskSummary{
 			{
-				ID:        "swarm-vyxb",
+				ID:        "forge-vyxb",
 				Title:     "Display beads task panel in TUI",
 				Status:    "in_progress",
 				Priority:  2,
@@ -279,7 +279,7 @@ func sampleBeadsSnapshots() map[string]beadsSnapshot {
 				UpdatedAt: now.Add(-15 * time.Minute),
 			},
 			{
-				ID:        "swarm-ma6h",
+				ID:        "forge-ma6h",
 				Title:     "Detect Agent Mail MCP in workspace",
 				Status:    "open",
 				Priority:  2,
@@ -287,7 +287,7 @@ func sampleBeadsSnapshots() map[string]beadsSnapshot {
 				UpdatedAt: now.Add(-90 * time.Minute),
 			},
 			{
-				ID:        "swarm-dga",
+				ID:        "forge-dga",
 				Title:     "EPIC 1: Project Foundation and Core Infrastructure",
 				Status:    "open",
 				Priority:  0,
@@ -301,7 +301,7 @@ func sampleBeadsSnapshots() map[string]beadsSnapshot {
 		"/home/user/projects/frontend-ui/.beads/issues.jsonl",
 		[]beads.TaskSummary{
 			{
-				ID:        "swarm-eli6.4",
+				ID:        "forge-eli6.4",
 				Title:     "TUI polish and premium feel",
 				Status:    "in_progress",
 				Priority:  1,
@@ -309,7 +309,7 @@ func sampleBeadsSnapshots() map[string]beadsSnapshot {
 				UpdatedAt: now.Add(-25 * time.Minute),
 			},
 			{
-				ID:        "swarm-eli6.4.1",
+				ID:        "forge-eli6.4.1",
 				Title:     "Workspace empty states and onboarding prompts",
 				Status:    "blocked",
 				Priority:  1,
@@ -317,7 +317,7 @@ func sampleBeadsSnapshots() map[string]beadsSnapshot {
 				UpdatedAt: now.Add(-40 * time.Minute),
 			},
 			{
-				ID:        "swarm-cmtw",
+				ID:        "forge-cmtw",
 				Title:     "TUI mailbox view",
 				Status:    "closed",
 				Priority:  2,

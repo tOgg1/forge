@@ -156,7 +156,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, input CreateWorkspaceInpu
 	// Generate tmux session name if not provided
 	tmuxSession := input.TmuxSession
 	if tmuxSession == "" {
-		tmuxSession, err = GenerateTmuxSessionName("swarm", input.RepoPath)
+		tmuxSession, err = GenerateTmuxSessionName("forge", input.RepoPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate tmux session name: %w", err)
 		}
@@ -492,7 +492,7 @@ func (s *Service) GetWorkspaceStatus(ctx context.Context, id string) (*Workspace
 	return result, nil
 }
 
-// DeleteWorkspace removes a workspace from Swarm.
+// DeleteWorkspace removes a workspace from Forge.
 // It does not terminate the tmux session or delete files.
 func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
 	s.logger.Debug().Str("workspace_id", id).Msg("deleting workspace")

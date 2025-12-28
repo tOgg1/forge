@@ -25,7 +25,7 @@ func NewTmuxSession(t *testing.T, session, workDir string) (*tmux.Client, string
 	t.Helper()
 	client := RequireTmux(t)
 	if session == "" {
-		session = fmt.Sprintf("swarm-test-%d", time.Now().UnixNano())
+		session = fmt.Sprintf("forge-test-%d", time.Now().UnixNano())
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/adapters"
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/state"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/tOgg1/forge/internal/tui"
-	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
@@ -49,7 +49,7 @@ func runTUI() error {
 	// Create state engine dependencies
 	agentRepo := db.NewAgentRepository(database)
 	eventRepo := db.NewEventRepository(database)
-	tmuxClient := tmux.NewClient(nil) // local tmux
+	tmuxClient := tmux.NewLocalClient()
 	registry := adapters.NewRegistry()
 
 	// Create and start state engine

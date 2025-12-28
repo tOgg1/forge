@@ -1,5 +1,5 @@
-// Package swarmd provides the daemon scaffolding and client for the Swarm node service.
-package swarmd
+// Package forged provides the daemon scaffolding and client for the Forge node service.
+package forged
 
 import (
 	"context"
@@ -7,18 +7,18 @@ import (
 	"net"
 	"sync"
 
-	swarmdv1 "github.com/tOgg1/forge/gen/swarmd/v1"
+	forgedv1 "github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/tOgg1/forge/internal/ssh"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// Client provides a gRPC client connection to a swarmd daemon.
+// Client provides a gRPC client connection to a forged daemon.
 // It supports both direct connections and connections over SSH tunnels.
 type Client struct {
 	conn   *grpc.ClientConn
-	svc    swarmdv1.SwarmdServiceClient
+	svc    forgedv1.ForgedServiceClient
 	tunnel ssh.PortForward
 	logger zerolog.Logger
 
@@ -56,7 +56,7 @@ func WithSSHOptions(opts ...ssh.NativeExecutorOption) ClientOption {
 	}
 }
 
-// Dial creates a direct connection to a swarmd daemon.
+// Dial creates a direct connection to a forged daemon.
 // Use this for local connections or when the daemon is directly reachable.
 func Dial(ctx context.Context, target string, opts ...ClientOption) (*Client, error) {
 	cfg := &clientConfig{
@@ -72,23 +72,23 @@ func Dial(ctx context.Context, target string, opts ...ClientOption) (*Client, er
 
 	conn, err := grpc.DialContext(ctx, target, dialOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial swarmd at %s: %w", target, err)
+		return nil, fmt.Errorf("failed to dial forged at %s: %w", target, err)
 	}
 
 	cfg.logger.Debug().
 		Str("target", target).
-		Msg("connected to swarmd directly")
+		Msg("connected to forged directly")
 
 	return &Client{
 		conn:   conn,
-		svc:    swarmdv1.NewSwarmdServiceClient(conn),
+		svc:    forgedv1.NewForgedServiceClient(conn),
 		logger: cfg.logger,
 	}, nil
 }
 
-// DialSSH creates a connection to a remote swarmd daemon over an SSH tunnel.
-// This is the recommended way to connect to swarmd on remote nodes.
-func DialSSH(ctx context.Context, sshHost string, sshPort int, swarmdPort int, opts ...ClientOption) (*Client, error) {
+// DialSSH creates a connection to a remote forged daemon over an SSH tunnel.
+// This is the recommended way to connect to forged on remote nodes.
+func DialSSH(ctx context.Context, sshHost string, sshPort int, forgedPort int, opts ...ClientOption) (*Client, error) {
 	cfg := &clientConfig{
 		logger: zerolog.Nop(),
 	}
@@ -102,8 +102,8 @@ func DialSSH(ctx context.Context, sshHost string, sshPort int, swarmdPort int, o
 	if sshPort <= 0 {
 		sshPort = 22
 	}
-	if swarmdPort <= 0 {
-		swarmdPort = DefaultPort
+	if forgedPort <= 0 {
+		forgedPort = DefaultPort
 	}
 
 	// Create SSH executor for the target host
@@ -117,12 +117,12 @@ func DialSSH(ctx context.Context, sshHost string, sshPort int, swarmdPort int, o
 		return nil, fmt.Errorf("failed to create SSH executor: %w", err)
 	}
 
-	// Start port forward to swarmd
+	// Start port forward to forged
 	spec := ssh.PortForwardSpec{
 		LocalHost:  "127.0.0.1",
 		LocalPort:  0, // Let the system assign a free port
 		RemoteHost: "127.0.0.1",
-		RemotePort: swarmdPort,
+		RemotePort: forgedPort,
 	}
 
 	tunnel, err := executor.StartPortForward(ctx, spec)
@@ -130,12 +130,12 @@ func DialSSH(ctx context.Context, sshHost string, sshPort int, swarmdPort int, o
 		return nil, fmt.Errorf("failed to start SSH tunnel: %w", err)
 	}
 
-	// Connect to swarmd through the tunnel
+	// Connect to forged through the tunnel
 	localAddr := tunnel.LocalAddr()
 	cfg.logger.Debug().
 		Str("ssh_host", sshHost).
 		Int("ssh_port", sshPort).
-		Int("swarmd_port", swarmdPort).
+		Int("forged_port", forgedPort).
 		Str("local_addr", localAddr).
 		Msg("SSH tunnel established")
 
@@ -146,17 +146,17 @@ func DialSSH(ctx context.Context, sshHost string, sshPort int, swarmdPort int, o
 	conn, err := grpc.DialContext(ctx, localAddr, dialOpts...)
 	if err != nil {
 		_ = tunnel.Close()
-		return nil, fmt.Errorf("failed to dial swarmd through tunnel: %w", err)
+		return nil, fmt.Errorf("failed to dial forged through tunnel: %w", err)
 	}
 
 	cfg.logger.Info().
 		Str("ssh_host", sshHost).
 		Str("local_addr", localAddr).
-		Msg("connected to swarmd via SSH tunnel")
+		Msg("connected to forged via SSH tunnel")
 
 	return &Client{
 		conn:   conn,
-		svc:    swarmdv1.NewSwarmdServiceClient(conn),
+		svc:    forgedv1.NewForgedServiceClient(conn),
 		tunnel: tunnel,
 		logger: cfg.logger,
 	}, nil
@@ -164,7 +164,7 @@ func DialSSH(ctx context.Context, sshHost string, sshPort int, swarmdPort int, o
 
 // DialSSHWithExecutor creates a connection using an existing SSH executor.
 // This is useful when you want to reuse an SSH connection or have custom SSH configuration.
-func DialSSHWithExecutor(ctx context.Context, executor ssh.PortForwarder, swarmdPort int, opts ...ClientOption) (*Client, error) {
+func DialSSHWithExecutor(ctx context.Context, executor ssh.PortForwarder, forgedPort int, opts ...ClientOption) (*Client, error) {
 	cfg := &clientConfig{
 		logger: zerolog.Nop(),
 	}
@@ -175,16 +175,16 @@ func DialSSHWithExecutor(ctx context.Context, executor ssh.PortForwarder, swarmd
 	if executor == nil {
 		return nil, fmt.Errorf("SSH executor is required")
 	}
-	if swarmdPort <= 0 {
-		swarmdPort = DefaultPort
+	if forgedPort <= 0 {
+		forgedPort = DefaultPort
 	}
 
-	// Start port forward to swarmd
+	// Start port forward to forged
 	spec := ssh.PortForwardSpec{
 		LocalHost:  "127.0.0.1",
 		LocalPort:  0,
 		RemoteHost: "127.0.0.1",
-		RemotePort: swarmdPort,
+		RemotePort: forgedPort,
 	}
 
 	tunnel, err := executor.StartPortForward(ctx, spec)
@@ -195,7 +195,7 @@ func DialSSHWithExecutor(ctx context.Context, executor ssh.PortForwarder, swarmd
 	localAddr := tunnel.LocalAddr()
 	cfg.logger.Debug().
 		Str("local_addr", localAddr).
-		Int("swarmd_port", swarmdPort).
+		Int("forged_port", forgedPort).
 		Msg("SSH tunnel established via executor")
 
 	dialOpts := append([]grpc.DialOption{
@@ -205,79 +205,79 @@ func DialSSHWithExecutor(ctx context.Context, executor ssh.PortForwarder, swarmd
 	conn, err := grpc.DialContext(ctx, localAddr, dialOpts...)
 	if err != nil {
 		_ = tunnel.Close()
-		return nil, fmt.Errorf("failed to dial swarmd through tunnel: %w", err)
+		return nil, fmt.Errorf("failed to dial forged through tunnel: %w", err)
 	}
 
 	return &Client{
 		conn:   conn,
-		svc:    swarmdv1.NewSwarmdServiceClient(conn),
+		svc:    forgedv1.NewForgedServiceClient(conn),
 		tunnel: tunnel,
 		logger: cfg.logger,
 	}, nil
 }
 
 // Service returns the underlying gRPC service client.
-func (c *Client) Service() swarmdv1.SwarmdServiceClient {
+func (c *Client) Service() forgedv1.ForgedServiceClient {
 	return c.svc
 }
 
 // Ping checks if the daemon is responsive.
-func (c *Client) Ping(ctx context.Context) (*swarmdv1.PingResponse, error) {
-	return c.svc.Ping(ctx, &swarmdv1.PingRequest{})
+func (c *Client) Ping(ctx context.Context) (*forgedv1.PingResponse, error) {
+	return c.svc.Ping(ctx, &forgedv1.PingRequest{})
 }
 
 // GetStatus returns the daemon's status.
-func (c *Client) GetStatus(ctx context.Context) (*swarmdv1.GetStatusResponse, error) {
-	return c.svc.GetStatus(ctx, &swarmdv1.GetStatusRequest{})
+func (c *Client) GetStatus(ctx context.Context) (*forgedv1.GetStatusResponse, error) {
+	return c.svc.GetStatus(ctx, &forgedv1.GetStatusRequest{})
 }
 
 // SpawnAgent creates a new agent in a tmux pane.
-func (c *Client) SpawnAgent(ctx context.Context, req *swarmdv1.SpawnAgentRequest) (*swarmdv1.SpawnAgentResponse, error) {
+func (c *Client) SpawnAgent(ctx context.Context, req *forgedv1.SpawnAgentRequest) (*forgedv1.SpawnAgentResponse, error) {
 	return c.svc.SpawnAgent(ctx, req)
 }
 
 // KillAgent terminates an agent.
-func (c *Client) KillAgent(ctx context.Context, req *swarmdv1.KillAgentRequest) (*swarmdv1.KillAgentResponse, error) {
+func (c *Client) KillAgent(ctx context.Context, req *forgedv1.KillAgentRequest) (*forgedv1.KillAgentResponse, error) {
 	return c.svc.KillAgent(ctx, req)
 }
 
 // ListAgents returns all agents.
-func (c *Client) ListAgents(ctx context.Context, req *swarmdv1.ListAgentsRequest) (*swarmdv1.ListAgentsResponse, error) {
+func (c *Client) ListAgents(ctx context.Context, req *forgedv1.ListAgentsRequest) (*forgedv1.ListAgentsResponse, error) {
 	return c.svc.ListAgents(ctx, req)
 }
 
 // GetAgent returns details for a specific agent.
-func (c *Client) GetAgent(ctx context.Context, req *swarmdv1.GetAgentRequest) (*swarmdv1.GetAgentResponse, error) {
+func (c *Client) GetAgent(ctx context.Context, req *forgedv1.GetAgentRequest) (*forgedv1.GetAgentResponse, error) {
 	return c.svc.GetAgent(ctx, req)
 }
 
 // SendInput sends text or keys to an agent.
-func (c *Client) SendInput(ctx context.Context, req *swarmdv1.SendInputRequest) (*swarmdv1.SendInputResponse, error) {
+func (c *Client) SendInput(ctx context.Context, req *forgedv1.SendInputRequest) (*forgedv1.SendInputResponse, error) {
 	return c.svc.SendInput(ctx, req)
 }
 
 // CapturePane captures the content of an agent's pane.
-func (c *Client) CapturePane(ctx context.Context, req *swarmdv1.CapturePaneRequest) (*swarmdv1.CapturePaneResponse, error) {
+func (c *Client) CapturePane(ctx context.Context, req *forgedv1.CapturePaneRequest) (*forgedv1.CapturePaneResponse, error) {
 	return c.svc.CapturePane(ctx, req)
 }
 
 // StreamPaneUpdates streams pane content updates.
-func (c *Client) StreamPaneUpdates(ctx context.Context, req *swarmdv1.StreamPaneUpdatesRequest) (swarmdv1.SwarmdService_StreamPaneUpdatesClient, error) {
+func (c *Client) StreamPaneUpdates(ctx context.Context, req *forgedv1.StreamPaneUpdatesRequest) (forgedv1.ForgedService_StreamPaneUpdatesClient, error) {
 	return c.svc.StreamPaneUpdates(ctx, req)
 }
 
 // StreamEvents streams daemon events.
-func (c *Client) StreamEvents(ctx context.Context, req *swarmdv1.StreamEventsRequest) (swarmdv1.SwarmdService_StreamEventsClient, error) {
+func (c *Client) StreamEvents(ctx context.Context, req *forgedv1.StreamEventsRequest) (forgedv1.ForgedService_StreamEventsClient, error) {
 	return c.svc.StreamEvents(ctx, req)
 }
 
 // GetTranscript retrieves an agent's transcript.
-func (c *Client) GetTranscript(ctx context.Context, req *swarmdv1.GetTranscriptRequest) (*swarmdv1.GetTranscriptResponse, error) {
+func (c *Client) GetTranscript(ctx context.Context, req *forgedv1.GetTranscriptRequest) (*forgedv1.GetTranscriptResponse, error) {
 	return c.svc.GetTranscript(ctx, req)
 }
 
 // StreamTranscript streams transcript updates.
-func (c *Client) StreamTranscript(ctx context.Context, req *swarmdv1.StreamTranscriptRequest) (swarmdv1.SwarmdService_StreamTranscriptClient, error) {
+func (c *Client) StreamTranscript(ctx context.Context, req *forgedv1.StreamTranscriptRequest) (forgedv1.ForgedService_StreamTranscriptClient, error) {
 	return c.svc.StreamTranscript(ctx, req)
 }
 

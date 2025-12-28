@@ -66,7 +66,7 @@ func TestCreateConfigFile(t *testing.T) {
 		t.Fatalf("failed to read config file: %v", err)
 	}
 
-	if !strings.Contains(string(content), "Swarm Configuration File") {
+	if !strings.Contains(string(content), "Forge Configuration File") {
 		t.Error("config file doesn't contain expected header")
 	}
 	if !strings.Contains(string(content), "auto_register_local_node: true") {
@@ -118,15 +118,15 @@ func TestGetConfigDir(t *testing.T) {
 
 	os.Setenv("XDG_CONFIG_HOME", "/custom/config")
 	dir := defaultConfigDir()
-	if dir != "/custom/config/swarm" {
-		t.Errorf("expected /custom/config/swarm, got %s", dir)
+	if dir != "/custom/config/forge" {
+		t.Errorf("expected /custom/config/forge, got %s", dir)
 	}
 
 	// Test without XDG_CONFIG_HOME
 	os.Unsetenv("XDG_CONFIG_HOME")
 	dir = defaultConfigDir()
 	homeDir, _ := os.UserHomeDir()
-	expected := filepath.Join(homeDir, ".config", "swarm")
+	expected := filepath.Join(homeDir, ".config", "forge")
 	if dir != expected {
 		t.Errorf("expected %s, got %s", expected, dir)
 	}
@@ -134,7 +134,7 @@ func TestGetConfigDir(t *testing.T) {
 
 func TestConfigTemplate(t *testing.T) {
 	// Verify template is valid YAML-like
-	if !strings.HasPrefix(configTemplate, "# Swarm Configuration File") {
+	if !strings.HasPrefix(configTemplate, "# Forge Configuration File") {
 		t.Error("config template doesn't have expected header")
 	}
 

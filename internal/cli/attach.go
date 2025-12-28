@@ -36,16 +36,16 @@ If no target is specified:
 - Uses current context (agent or workspace)
 - Falls back to interactive selection with --select`,
 	Example: `  # Attach using context
-  swarm attach
+  forge attach
 
   # Attach to specific agent's pane
-  swarm attach abc123
+  forge attach abc123
 
   # Attach to workspace session
-  swarm attach my-project
+  forge attach my-project
 
   # Interactive selection
-  swarm attach --select`,
+  forge attach --select`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
@@ -181,7 +181,7 @@ func interactiveAttach(ctx context.Context, wsRepo *db.WorkspaceRepository, agen
 	fmt.Println()
 	fmt.Println("Workspaces:")
 	for _, ws := range workspaces {
-		fmt.Printf("  swarm attach %s  # %s\n", shortID(ws.ID), ws.Name)
+		fmt.Printf("  forge attach %s  # %s\n", shortID(ws.ID), ws.Name)
 	}
 
 	// List agents
@@ -196,7 +196,7 @@ func interactiveAttach(ctx context.Context, wsRepo *db.WorkspaceRepository, agen
 			fmt.Printf("  [%s]\n", ws.Name)
 			for _, a := range agents {
 				stateStr := formatAgentState(a.State)
-				fmt.Printf("    swarm attach %s  # %s %s\n", shortID(a.ID), a.Type, stateStr)
+				fmt.Printf("    forge attach %s  # %s %s\n", shortID(a.ID), a.Type, stateStr)
 			}
 		}
 	}

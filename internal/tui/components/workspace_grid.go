@@ -196,7 +196,7 @@ func (g *WorkspaceGrid) Render(styleSet styles.Styles) string {
 			return styleSet.Warning.Render(fmt.Sprintf("No workspaces match '%s'.", g.Filter)) + "\n" +
 				styleSet.Muted.Render("Press / to edit or clear the filter.")
 		}
-		return styleSet.Muted.Render("No workspaces. Use 'swarm ws create' to create one.")
+		return styleSet.Muted.Render("No workspaces. Use 'forge ws create' to create one.")
 	}
 
 	// Calculate card width based on available width

@@ -1,4 +1,4 @@
-// Package logging provides structured logging for Swarm using zerolog.
+// Package logging provides structured logging for Forge using zerolog.
 package logging
 
 import (

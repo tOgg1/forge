@@ -45,19 +45,19 @@ Sources:
 - Tmux pane capture (primary)
 - Event log history (when available)`,
 	Example: `  # Show current output for context agent
-  swarm log
+  forge log
 
   # Show last 50 lines
-  swarm log abc123 --last 50
+  forge log abc123 --last 50
 
   # Follow output continuously
-  swarm log abc123 --follow
+  forge log abc123 --follow
 
   # Show output from last hour
-  swarm log abc123 --since 1h
+  forge log abc123 --since 1h
 
   # Raw output (no formatting)
-  swarm log abc123 --raw`,
+  forge log abc123 --raw`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()

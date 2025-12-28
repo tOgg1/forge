@@ -1,4 +1,4 @@
-// Package db provides SQLite database access for Swarm.
+// Package db provides SQLite database access for Forge.
 package db
 
 import (

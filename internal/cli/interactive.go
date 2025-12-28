@@ -13,7 +13,7 @@ func IsNonInteractive() bool {
 	if nonInteractive {
 		return true
 	}
-	if _, ok := os.LookupEnv("SWARM_NON_INTERACTIVE"); ok {
+	if getEnvWithFallback("FORGE_NON_INTERACTIVE", "SWARM_NON_INTERACTIVE") != "" {
 		return true
 	}
 	return !hasTTY()
@@ -47,7 +47,7 @@ func SkipConfirmation() bool {
 //
 // Example usage:
 //
-//	if !ConfirmAction("node", node.Name, "This will unregister the node from the swarm.") {
+//	if !ConfirmAction("node", node.Name, "This will unregister the node from the forge.") {
 //	    return nil // User cancelled
 //	}
 func ConfirmAction(resourceType, resourceID, impact string) bool {

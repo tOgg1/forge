@@ -1,5 +1,5 @@
-// Package swarmd provides the daemon scaffolding for the Swarm node service.
-package swarmd
+// Package forged provides the daemon scaffolding for the Forge node service.
+package forged
 
 import (
 	"context"
@@ -23,28 +23,28 @@ type RateLimitConfig struct {
 // DefaultRateLimits provides sensible defaults for different RPC categories.
 var DefaultRateLimits = map[string]RateLimitConfig{
 	// Heavy operations - spawn/kill agents
-	"/swarmd.v1.SwarmdService/SpawnAgent": {RequestsPerSecond: 5, BurstSize: 10},
-	"/swarmd.v1.SwarmdService/KillAgent":  {RequestsPerSecond: 10, BurstSize: 20},
+	"/forged.v1.ForgedService/SpawnAgent": {RequestsPerSecond: 5, BurstSize: 10},
+	"/forged.v1.ForgedService/KillAgent":  {RequestsPerSecond: 10, BurstSize: 20},
 
 	// Input operations - moderate limits
-	"/swarmd.v1.SwarmdService/SendInput": {RequestsPerSecond: 50, BurstSize: 100},
+	"/forged.v1.ForgedService/SendInput": {RequestsPerSecond: 50, BurstSize: 100},
 
 	// Read operations - higher limits
-	"/swarmd.v1.SwarmdService/ListAgents":  {RequestsPerSecond: 100, BurstSize: 200},
-	"/swarmd.v1.SwarmdService/GetAgent":    {RequestsPerSecond: 100, BurstSize: 200},
-	"/swarmd.v1.SwarmdService/CapturePane": {RequestsPerSecond: 50, BurstSize: 100},
+	"/forged.v1.ForgedService/ListAgents":  {RequestsPerSecond: 100, BurstSize: 200},
+	"/forged.v1.ForgedService/GetAgent":    {RequestsPerSecond: 100, BurstSize: 200},
+	"/forged.v1.ForgedService/CapturePane": {RequestsPerSecond: 50, BurstSize: 100},
 
 	// Transcript operations
-	"/swarmd.v1.SwarmdService/GetTranscript": {RequestsPerSecond: 50, BurstSize: 100},
+	"/forged.v1.ForgedService/GetTranscript": {RequestsPerSecond: 50, BurstSize: 100},
 
 	// Health/status - very high limits (essentially unlimited)
-	"/swarmd.v1.SwarmdService/GetStatus": {RequestsPerSecond: 1000, BurstSize: 1000},
-	"/swarmd.v1.SwarmdService/Ping":      {RequestsPerSecond: 1000, BurstSize: 1000},
+	"/forged.v1.ForgedService/GetStatus": {RequestsPerSecond: 1000, BurstSize: 1000},
+	"/forged.v1.ForgedService/Ping":      {RequestsPerSecond: 1000, BurstSize: 1000},
 
 	// Streaming operations - limit connection rate, not message rate
-	"/swarmd.v1.SwarmdService/StreamPaneUpdates": {RequestsPerSecond: 10, BurstSize: 20},
-	"/swarmd.v1.SwarmdService/StreamEvents":      {RequestsPerSecond: 10, BurstSize: 20},
-	"/swarmd.v1.SwarmdService/StreamTranscript":  {RequestsPerSecond: 10, BurstSize: 20},
+	"/forged.v1.ForgedService/StreamPaneUpdates": {RequestsPerSecond: 10, BurstSize: 20},
+	"/forged.v1.ForgedService/StreamEvents":      {RequestsPerSecond: 10, BurstSize: 20},
+	"/forged.v1.ForgedService/StreamTranscript":  {RequestsPerSecond: 10, BurstSize: 20},
 }
 
 // tokenBucket implements the token bucket algorithm for rate limiting.

@@ -109,8 +109,8 @@ func TestDefaultVaultPath(t *testing.T) {
 	if !filepath.IsAbs(path) {
 		t.Error("DefaultVaultPath should return absolute path")
 	}
-	if !contains(path, ".config/swarm/vault") {
-		t.Errorf("expected path to contain .config/swarm/vault, got %q", path)
+	if !contains(path, ".config/forge/vault") {
+		t.Errorf("expected path to contain .config/forge/vault, got %q", path)
 	}
 }
 

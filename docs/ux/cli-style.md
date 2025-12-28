@@ -1,4 +1,4 @@
-# Swarm CLI Output Style Guide
+# Forge CLI Output Style Guide
 
 This guide defines how CLI output should look in human, JSON, and JSONL modes.
 It should align with `docs/ux/terminology.md`.
@@ -29,7 +29,7 @@ support them. Always provide a no-color mode (`--no-color` or `NO_COLOR=1`).
 
 ## Column order and table layouts
 
-### `swarm node list`
+### `forge node list`
 
 Columns (in order):
 1. NAME
@@ -39,7 +39,7 @@ Columns (in order):
 5. SSH
 6. AGENTS
 
-### `swarm ws list`
+### `forge ws list`
 
 Columns:
 1. NAME
@@ -50,7 +50,7 @@ Columns:
 6. AGENTS
 7. SESSION
 
-### `swarm agent list`
+### `forge agent list`
 
 Columns:
 1. ID (short)
@@ -60,7 +60,7 @@ Columns:
 5. PANE
 6. QUEUE
 
-### `swarm agent status`
+### `forge agent status`
 
 Human layout should be a labeled block:
 - Agent ID, Type, State, Confidence, Reason
@@ -93,7 +93,7 @@ When `--json` or `--jsonl` is set, errors should use this envelope:
   "error": {
     "code": "ERR_NOT_FOUND",
     "message": "agent not found",
-    "hint": "Run swarm agent list to see valid IDs",
+    "hint": "Run forge agent list to see valid IDs",
     "details": {
       "resource": "agent",
       "id": "abc123"

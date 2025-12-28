@@ -1,32 +1,32 @@
-# Swarm Operational Runbook
+# Forge Operational Runbook
 
 This runbook covers day-to-day operational tasks: monitoring, troubleshooting,
-backup/restore, and scaling. Swarm is early-stage; some commands are planned
+backup/restore, and scaling. Forge is early-stage; some commands are planned
 but not yet wired up. Planned steps are labeled.
 
 ## Scope and assumptions
 
-- Control plane runs locally via `./build/swarm`.
-- Data is stored in a local SQLite database (default: `~/.local/share/swarm/swarm.db`).
+- Control plane runs locally via `./build/forge`.
+- Data is stored in a local SQLite database (default: `~/.local/share/forge/forge.db`).
 - tmux and ssh are required for most orchestration workflows.
 
 ## Monitoring
 
 ### Current (implemented)
 
-- **Logs**: Swarm logs to stderr by default. Enable verbose logging with:
+- **Logs**: Forge logs to stderr by default. Enable verbose logging with:
 
   ```bash
-  ./build/swarm --log-level debug
+  ./build/forge --log-level debug
   # or
-  ./build/swarm -v
+  ./build/forge -v
   ```
 
 - **Database health**: Verify migrations are applied:
 
   ```bash
-  ./build/swarm migrate status
-  ./build/swarm migrate version
+  ./build/forge migrate status
+  ./build/forge migrate version
   ```
 
 ### Planned
@@ -39,8 +39,8 @@ but not yet wired up. Planned steps are labeled.
 ### Config loading errors
 
 - Check file locations (first match wins):
-  - `$XDG_CONFIG_HOME/swarm/config.yaml`
-  - `~/.config/swarm/config.yaml`
+  - `$XDG_CONFIG_HOME/forge/config.yaml`
+  - `~/.config/forge/config.yaml`
   - `./config.yaml`
 - Validate YAML format; start from `docs/config.example.yaml`.
 
@@ -51,7 +51,7 @@ but not yet wired up. Planned steps are labeled.
 - Retry:
 
   ```bash
-  ./build/swarm migrate up
+  ./build/forge migrate up
   ```
 
 ### SSH/tmux issues (planned workflows)
@@ -65,24 +65,24 @@ but not yet wired up. Planned steps are labeled.
 
 ### Backup
 
-1. Stop any running Swarm process.
+1. Stop any running Forge process.
 2. Copy the SQLite database and config:
 
    ```bash
-   cp ~/.local/share/swarm/swarm.db /backup/location/swarm.db
-   cp ~/.config/swarm/config.yaml /backup/location/config.yaml
+   cp ~/.local/share/forge/forge.db /backup/location/forge.db
+   cp ~/.config/forge/config.yaml /backup/location/config.yaml
    ```
 
 3. (Optional) Track your git state if repositories are managed in workspaces.
 
 ### Restore
 
-1. Stop any running Swarm process.
+1. Stop any running Forge process.
 2. Restore the database and config to their original locations.
 3. Run migrations to ensure schema is current:
 
    ```bash
-   ./build/swarm migrate up
+   ./build/forge migrate up
    ```
 
 ## Scaling nodes
@@ -94,23 +94,23 @@ but not yet wired up. Planned steps are labeled.
 
 ### Planned
 
-- `swarm node add` for registration.
-- `swarm node bootstrap` to provision dependencies.
-- `swarm node doctor` for diagnostics.
+- `forge node add` for registration.
+- `forge node bootstrap` to provision dependencies.
+- `forge node doctor` for diagnostics.
 
-## swarmd systemd service (optional)
+## forged systemd service (optional)
 
-If you install `swarmd` on a node, you can run it as a systemd service.
-Use the template in `scripts/swarmd.service`, copy it to `/etc/systemd/system/`,
+If you install `forged` on a node, you can run it as a systemd service.
+Use the template in `scripts/forged.service`, copy it to `/etc/systemd/system/`,
 then enable it:
 
 ```bash
-sudo cp scripts/swarmd.service /etc/systemd/system/swarmd.service
+sudo cp scripts/forged.service /etc/systemd/system/forged.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now swarmd
+sudo systemctl enable --now forged
 ```
 
-Note: `swarmd` is still a stub in this repo; enable this only when you are
+Note: `forged` is still a stub in this repo; enable this only when you are
 ready to run the daemon on the node.
 
 ## Secure remote access (SSH port forwarding)
@@ -121,7 +121,7 @@ ports.
 
 ```bash
 # Forward local 8080 to a service bound on the remote node
-swarm node forward prod-server --local-port 8080 --remote 127.0.0.1:3000
+forge node forward prod-server --local-port 8080 --remote 127.0.0.1:3000
 ```
 
 Tips:

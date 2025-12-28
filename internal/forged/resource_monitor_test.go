@@ -1,4 +1,4 @@
-package swarmd
+package forged
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tOgg1/forge/gen/swarmd/v1"
+	"github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/rs/zerolog"
 )
 
@@ -337,7 +337,7 @@ func TestResourceLimits_ToProtoLimits(t *testing.T) {
 }
 
 func TestFromProtoLimits(t *testing.T) {
-	proto := &swarmdv1.ResourceLimits{
+	proto := &forgedv1.ResourceLimits{
 		MaxMemoryBytes: 512 * 1024 * 1024,
 		MaxCpuPercent:  150,
 	}
@@ -381,7 +381,7 @@ func TestResourceViolation_ToProtoViolationEvent(t *testing.T) {
 	tests := []struct {
 		name           string
 		violation      ResourceViolation
-		wantType       swarmdv1.ResourceType
+		wantType       forgedv1.ResourceType
 		wantActionKill bool
 	}{
 		{
@@ -394,7 +394,7 @@ func TestResourceViolation_ToProtoViolationEvent(t *testing.T) {
 				LimitValue:    1000,
 				Severity:      "warning",
 			},
-			wantType:       swarmdv1.ResourceType_RESOURCE_TYPE_MEMORY,
+			wantType:       forgedv1.ResourceType_RESOURCE_TYPE_MEMORY,
 			wantActionKill: false,
 		},
 		{
@@ -407,7 +407,7 @@ func TestResourceViolation_ToProtoViolationEvent(t *testing.T) {
 				LimitValue:    100,
 				Severity:      "critical",
 			},
-			wantType:       swarmdv1.ResourceType_RESOURCE_TYPE_CPU,
+			wantType:       forgedv1.ResourceType_RESOURCE_TYPE_CPU,
 			wantActionKill: true,
 		},
 	}
@@ -421,11 +421,11 @@ func TestResourceViolation_ToProtoViolationEvent(t *testing.T) {
 			}
 
 			if tt.wantActionKill {
-				if proto.ActionTaken != swarmdv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_KILL {
+				if proto.ActionTaken != forgedv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_KILL {
 					t.Errorf("expected KILL action for critical violation")
 				}
 			} else {
-				if proto.ActionTaken != swarmdv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_WARN {
+				if proto.ActionTaken != forgedv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_WARN {
 					t.Errorf("expected WARN action for warning violation")
 				}
 			}

@@ -41,7 +41,7 @@ func init() {
 var hookCmd = &cobra.Command{
 	Use:   "hook",
 	Short: "Manage event hooks",
-	Long:  "Register scripts or webhooks that run when Swarm emits events.",
+	Long:  "Register scripts or webhooks that run when Forge emits events.",
 }
 
 var hookOnEventCmd = &cobra.Command{
@@ -49,7 +49,7 @@ var hookOnEventCmd = &cobra.Command{
 	Short: "Register a hook for events",
 	Long: `Register a command or webhook to run when events match the filter.
 
-The hook is stored on disk and will be loaded whenever Swarm executes commands
+The hook is stored on disk and will be loaded whenever Forge executes commands
 that publish events.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		command := strings.TrimSpace(hookCommand)
@@ -166,5 +166,5 @@ func hookStorePath() string {
 		return "hooks.json"
 	}
 
-	return filepath.Join(homeDir, ".config", "swarm", "hooks.json")
+	return filepath.Join(homeDir, ".config", "forge", "hooks.json")
 }

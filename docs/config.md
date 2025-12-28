@@ -1,6 +1,6 @@
-# Swarm Configuration Reference
+# Forge Configuration Reference
 
-Swarm uses a YAML configuration file loaded with the following precedence:
+Forge uses a YAML configuration file loaded with the following precedence:
 
 1. Defaults (built into the binary)
 2. Config file
@@ -9,22 +9,23 @@ Swarm uses a YAML configuration file loaded with the following precedence:
 
 ## Config file locations
 
-Swarm looks for `config.yaml` in these locations (first match wins):
+Forge looks for `config.yaml` in these locations (first match wins):
 
-- `$XDG_CONFIG_HOME/swarm/config.yaml`
-- `~/.config/swarm/config.yaml`
+- `$XDG_CONFIG_HOME/forge/config.yaml`
+- `~/.config/forge/config.yaml`
 - `./config.yaml` (current directory)
 
 You can also pass an explicit path with `--config` (see `internal/cli/root.go`).
 
 ## Environment variable overrides
 
-Environment variables use the prefix `SWARM_` and replace dots with underscores.
+Environment variables use the prefix `FORGE_` and replace dots with underscores.
+Legacy `SWARM_` variables are still accepted as deprecated aliases.
 
 Examples:
 
-- `logging.level` -> `SWARM_LOGGING_LEVEL`
-- `database.max_connections` -> `SWARM_DATABASE_MAX_CONNECTIONS`
+- `logging.level` -> `FORGE_LOGGING_LEVEL`
+- `database.max_connections` -> `FORGE_DATABASE_MAX_CONNECTIONS`
 
 ## Duration format
 
@@ -38,13 +39,13 @@ See `docs/config.example.yaml` for a complete example file.
 
 ### global
 
-- `global.data_dir` (string): Data directory. Default: `~/.local/share/swarm`.
-- `global.config_dir` (string): Config directory. Default: `~/.config/swarm`.
+- `global.data_dir` (string): Data directory. Default: `~/.local/share/forge`.
+- `global.config_dir` (string): Config directory. Default: `~/.config/forge`.
 - `global.auto_register_local_node` (bool): Register local node on startup. Default: `true`.
 
 ### database
 
-- `database.path` (string): SQLite database file path. Default: empty (uses `{data_dir}/swarm.db`).
+- `database.path` (string): SQLite database file path. Default: empty (uses `{data_dir}/forge.db`).
 - `database.max_connections` (int): Maximum DB connections. Default: `10`.
 - `database.busy_timeout_ms` (int): SQLite busy timeout in milliseconds. Default: `5000`.
 
@@ -68,7 +69,7 @@ Defaults applied when creating new nodes. Per-node overrides are not implemented
 
 Defaults applied when creating new workspaces.
 
-- `workspace_defaults.tmux_prefix` (string): Prefix for generated tmux sessions. Default: `swarm`.
+- `workspace_defaults.tmux_prefix` (string): Prefix for generated tmux sessions. Default: `forge`.
 - `workspace_defaults.default_agent_type` (string): `opencode`, `claude-code`, `codex`, `gemini`, `generic`. Default: `opencode`.
 - `workspace_defaults.auto_import_existing` (bool): Auto import existing tmux sessions. Default: `false`.
 

@@ -22,8 +22,8 @@ func (e *recoveryExecutor) Exec(ctx context.Context, cmd string) ([]byte, []byte
 
 	switch {
 	case strings.HasPrefix(cmd, "tmux list-sessions"):
-		return []byte("swarm-demo-1234|1\nmisc|1\n"), nil, nil
-	case strings.Contains(cmd, "tmux list-panes -t swarm-demo-1234"):
+		return []byte("forge-demo-1234|1\nmisc|1\n"), nil, nil
+	case strings.Contains(cmd, "tmux list-panes -t forge-demo-1234"):
 		return []byte(fmt.Sprintf("%%1|%s\n", e.panePath)), nil, nil
 	default:
 		return []byte(""), nil, nil
@@ -107,7 +107,7 @@ func TestRecoverOrphanedSessions(t *testing.T) {
 	}
 
 	service := NewService(wsRepo, nodeService, nil, WithTmuxClientFactory(tmuxFactory))
-	report, err := service.RecoverOrphanedSessions(ctx, localNode.ID, "swarm")
+	report, err := service.RecoverOrphanedSessions(ctx, localNode.ID, "forge")
 	if err != nil {
 		t.Fatalf("RecoverOrphanedSessions failed: %v", err)
 	}
@@ -115,8 +115,8 @@ func TestRecoverOrphanedSessions(t *testing.T) {
 		t.Fatalf("expected 1 imported session, got %+v", report)
 	}
 
-	if _, err := wsRepo.GetByTmuxSession(ctx, localNode.ID, "swarm-demo-1234"); err != nil {
-		t.Fatalf("expected workspace for swarm-demo-1234, got error: %v", err)
+	if _, err := wsRepo.GetByTmuxSession(ctx, localNode.ID, "forge-demo-1234"); err != nil {
+		t.Fatalf("expected workspace for forge-demo-1234, got error: %v", err)
 	}
 	if _, err := wsRepo.GetByTmuxSession(ctx, localNode.ID, "misc"); err == nil {
 		t.Fatalf("expected misc session to remain unimported")

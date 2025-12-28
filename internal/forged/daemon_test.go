@@ -1,4 +1,4 @@
-package swarmd
+package forged
 
 import (
 	"context"

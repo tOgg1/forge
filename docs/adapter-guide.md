@@ -1,7 +1,7 @@
-# Swarm Adapter Development Guide
+# Forge Adapter Development Guide
 
 This guide explains how to add new agent adapters. Adapters normalize different
-agent CLIs behind a shared interface so Swarm can spawn, control, and detect
+agent CLIs behind a shared interface so Forge can spawn, control, and detect
 agent state consistently.
 
 Note: the adapter interface is planned but not fully implemented yet. This

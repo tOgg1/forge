@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Swarm needs a native integration tier for OpenCode to support reliable agent
+Forge needs a native integration tier for OpenCode to support reliable agent
 control and telemetry. There are two viable deployment patterns:
 
 - One OpenCode server per agent/profile (isolated, per-account)

@@ -57,11 +57,11 @@ func TestRenderTemplate(t *testing.T) {
 		t.Fatalf("unexpected render result: %q", rendered)
 	}
 
-	rendered, err = RenderTemplate(tmpl, map[string]string{"name": "Swarm"})
+	rendered, err = RenderTemplate(tmpl, map[string]string{"name": "Forge"})
 	if err != nil {
 		t.Fatalf("RenderTemplate: %v", err)
 	}
-	if rendered != "Hello Swarm" {
+	if rendered != "Hello Forge" {
 		t.Fatalf("unexpected render result: %q", rendered)
 	}
 }
@@ -79,11 +79,11 @@ func TestRenderTemplateRequired(t *testing.T) {
 		t.Fatalf("expected error for missing required variable")
 	}
 
-	rendered, err := RenderTemplate(tmpl, map[string]string{"who": "Swarm"})
+	rendered, err := RenderTemplate(tmpl, map[string]string{"who": "Forge"})
 	if err != nil {
 		t.Fatalf("RenderTemplate: %v", err)
 	}
-	if rendered != "Hi Swarm" {
+	if rendered != "Hi Forge" {
 		t.Fatalf("unexpected render result: %q", rendered)
 	}
 }

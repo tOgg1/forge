@@ -64,8 +64,8 @@ func init() {
 
 var nodeCmd = &cobra.Command{
 	Use:   "node",
-	Short: "Manage swarm nodes",
-	Long: `Manage nodes in the swarm cluster.
+	Short: "Manage forge nodes",
+	Long: `Manage nodes in the forge cluster.
 
 Nodes are machines (local or remote) where agent workspaces can run.
 Remote nodes are accessed via SSH.`,
@@ -74,7 +74,7 @@ Remote nodes are accessed via SSH.`,
 var nodeListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List nodes",
-	Long:  "List all registered nodes in the swarm.",
+	Long:  "List all registered nodes in the forge.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -124,23 +124,23 @@ var nodeListCmd = &cobra.Command{
 var nodeAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Add a new node",
-	Long: `Register a new node in the swarm.
+	Long: `Register a new node in the forge.
 
 For remote nodes, provide the SSH target:
-  swarm node add --name myserver --ssh user@host
+  forge node add --name myserver --ssh user@host
 
 For local nodes:
-  swarm node add --name localhost --local
+  forge node add --name localhost --local
 
 By default, the connection is tested before adding. Use --no-test to skip.`,
 	Example: `  # Add a remote node
-  swarm node add --name prod-server --ssh ubuntu@192.168.1.100
+  forge node add --name prod-server --ssh ubuntu@192.168.1.100
 
   # Add with specific port and key
-  swarm node add --name staging --ssh deploy@staging.example.com:2222 --key ~/.ssh/staging_key
+  forge node add --name staging --ssh deploy@staging.example.com:2222 --key ~/.ssh/staging_key
 
   # Add the local machine
-  swarm node add --name localhost --local`,
+  forge node add --name localhost --local`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -203,7 +203,7 @@ By default, the connection is tested before adding. Use --no-test to skip.`,
 var nodeRemoveCmd = &cobra.Command{
 	Use:   "remove <name-or-id>",
 	Short: "Remove a node",
-	Long: `Unregister a node from the swarm.
+	Long: `Unregister a node from the forge.
 
 If the node has active workspaces, you must use --force to remove it.
 This does not stop agents running on the node.`,
@@ -232,7 +232,7 @@ This does not stop agents running on the node.`,
 		}
 
 		// Confirm destructive action
-		impact := "This will unregister the node from the swarm."
+		impact := "This will unregister the node from the forge."
 		if n.AgentCount > 0 {
 			impact = fmt.Sprintf("This will unregister the node and orphan %d agent(s).", n.AgentCount)
 		}
@@ -260,7 +260,7 @@ This does not stop agents running on the node.`,
 
 var nodeBootstrapCmd = &cobra.Command{
 	Use:   "bootstrap <name-or-id>",
-	Short: "Bootstrap a node with swarm dependencies",
+	Short: "Bootstrap a node with forge dependencies",
 	Long: `Bootstrap a node by installing required dependencies.
 
 This command SSHs to the node and installs:
@@ -513,16 +513,16 @@ For local nodes, the command is executed directly.
 
 The command must be specified after the -- separator.`,
 	Example: `  # Run a simple command
-  swarm node exec myserver -- uname -a
+  forge node exec myserver -- uname -a
 
   # Check disk space
-  swarm node exec prod-server -- df -h
+  forge node exec prod-server -- df -h
 
   # Run with timeout
-  swarm node exec staging --timeout 30 -- long-running-script.sh
+  forge node exec staging --timeout 30 -- long-running-script.sh
 
   # Get JSON output
-  swarm node exec myserver --json -- cat /etc/os-release`,
+  forge node exec myserver --json -- cat /etc/os-release`,
 	Args:               cobra.MinimumNArgs(1),
 	DisableFlagParsing: false,
 	RunE: func(cmd *cobra.Command, args []string) error {

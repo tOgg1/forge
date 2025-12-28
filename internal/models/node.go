@@ -1,4 +1,4 @@
-// Package models defines the core domain types for Swarm.
+// Package models defines the core domain types for Forge.
 package models
 
 import (
@@ -27,15 +27,15 @@ const (
 type ExecutionMode string
 
 const (
-	// ExecutionModeAuto tries swarmd first, falls back to SSH.
+	// ExecutionModeAuto tries forged first, falls back to SSH.
 	ExecutionModeAuto ExecutionMode = "auto"
-	// ExecutionModeSwarmd forces use of the swarmd daemon.
-	ExecutionModeSwarmd ExecutionMode = "swarmd"
+	// ExecutionModeForged forces use of the forged daemon.
+	ExecutionModeForged ExecutionMode = "forged"
 	// ExecutionModeSSH forces use of direct SSH execution.
 	ExecutionModeSSH ExecutionMode = "ssh"
 )
 
-// Node represents a machine that Swarm can control via SSH and tmux.
+// Node represents a machine that Forge can control via SSH and tmux.
 type Node struct {
 	// ID is the unique identifier for the node.
 	ID string `json:"id"`
@@ -70,19 +70,19 @@ type Node struct {
 	// SSHTimeoutSeconds overrides the default connection timeout.
 	SSHTimeoutSeconds int `json:"ssh_timeout_seconds,omitempty"`
 
-	// SwarmdEnabled indicates if swarmd daemon is expected on this node.
-	SwarmdEnabled bool `json:"swarmd_enabled,omitempty"`
+	// ForgedEnabled indicates if forged daemon is expected on this node.
+	ForgedEnabled bool `json:"forged_enabled,omitempty"`
 
-	// SwarmdPort is the port where swarmd listens (default: 50051).
-	SwarmdPort int `json:"swarmd_port,omitempty"`
+	// ForgedPort is the port where forged listens (default: 50051).
+	ForgedPort int `json:"forged_port,omitempty"`
 
 	// ExecutionMode controls how commands are executed on this node.
-	// "auto" tries swarmd first, "swarmd" forces daemon, "ssh" forces SSH.
+	// "auto" tries forged first, "forged" forces daemon, "ssh" forces SSH.
 	ExecutionMode ExecutionMode `json:"execution_mode,omitempty"`
 
-	// SwarmdAvailable indicates if swarmd was detected as running.
+	// ForgedAvailable indicates if forged was detected as running.
 	// This is set during connection tests and updated dynamically.
-	SwarmdAvailable bool `json:"swarmd_available,omitempty"`
+	ForgedAvailable bool `json:"forged_available,omitempty"`
 
 	// Status is the current connection status.
 	Status NodeStatus `json:"status"`
@@ -99,7 +99,7 @@ type Node struct {
 	// Metadata contains additional node information.
 	Metadata NodeMetadata `json:"metadata,omitempty"`
 
-	// CreatedAt is when the node was added to Swarm.
+	// CreatedAt is when the node was added to Forge.
 	CreatedAt time.Time `json:"created_at"`
 
 	// UpdatedAt is when the node was last updated.
@@ -120,11 +120,11 @@ type NodeMetadata struct {
 	// AvailableAdapters lists installed agent CLIs.
 	AvailableAdapters []string `json:"available_adapters,omitempty"`
 
-	// SwarmdVersion is the swarmd daemon version if detected.
-	SwarmdVersion string `json:"swarmd_version,omitempty"`
+	// ForgedVersion is the forged daemon version if detected.
+	ForgedVersion string `json:"forged_version,omitempty"`
 
-	// SwarmdStatus indicates the last known swarmd status ("running", "stopped", "unknown").
-	SwarmdStatus string `json:"swarmd_status,omitempty"`
+	// ForgedStatus indicates the last known forged status ("running", "stopped", "unknown").
+	ForgedStatus string `json:"forged_status,omitempty"`
 }
 
 // Validate checks if the node configuration is valid.

@@ -44,7 +44,7 @@ func init() {
 	vaultCmd.AddCommand(vaultPullCmd)
 
 	// Global vault flags
-	vaultCmd.PersistentFlags().StringVar(&vaultPath, "vault-path", "", "path to vault directory (default: ~/.config/swarm/vault)")
+	vaultCmd.PersistentFlags().StringVar(&vaultPath, "vault-path", "", "path to vault directory (default: ~/.config/forge/vault)")
 
 	// Backup flags
 	vaultBackupCmd.Flags().BoolVar(&vaultBackupForce, "force", false, "overwrite existing profile")
@@ -67,15 +67,15 @@ var vaultCmd = &cobra.Command{
 The vault stores auth files for different providers (Claude, Codex, Gemini, OpenCode)
 and allows instant switching between profiles (<100ms).
 
-Vault location: ~/.config/swarm/vault/profiles/{provider}/{profile}/
+Vault location: ~/.config/forge/vault/profiles/{provider}/{profile}/
 
 Examples:
-  swarm vault backup claude work        # Save current Claude auth as "work"
-  swarm vault activate claude personal  # Switch to "personal" Claude profile
-  swarm vault list                      # List all profiles
-  swarm vault status                    # Show active profile for each adapter
-  swarm vault push node-1 --profile claude/work  # Sync profile to a node
-  swarm vault pull node-1 --all                 # Pull all profiles from a node`,
+  forge vault backup claude work        # Save current Claude auth as "work"
+  forge vault activate claude personal  # Switch to "personal" Claude profile
+  forge vault list                      # List all profiles
+  forge vault status                    # Show active profile for each adapter
+  forge vault push node-1 --profile claude/work  # Sync profile to a node
+  forge vault pull node-1 --all                 # Pull all profiles from a node`,
 }
 
 var vaultInitCmd = &cobra.Command{
@@ -119,9 +119,9 @@ var vaultBackupCmd = &cobra.Command{
 Adapters: claude, codex, gemini, opencode
 
 Examples:
-  swarm vault backup claude work
-  swarm vault backup codex personal
-  swarm vault backup gemini default`,
+  forge vault backup claude work
+  forge vault backup codex personal
+  forge vault backup gemini default`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vp := getVaultPath()
@@ -167,9 +167,9 @@ to their standard locations.
 Adapters: claude, codex, gemini, opencode
 
 Examples:
-  swarm vault activate claude work
-  swarm vault switch codex personal
-  swarm vault use gemini default`,
+  forge vault activate claude work
+  forge vault switch codex personal
+  forge vault use gemini default`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vp := getVaultPath()
@@ -222,8 +222,8 @@ var vaultListCmd = &cobra.Command{
 Optionally filter by adapter (claude, codex, gemini, opencode).
 
 Examples:
-  swarm vault list           # List all profiles
-  swarm vault list claude    # List only Claude profiles`,
+  forge vault list           # List all profiles
+  forge vault list claude    # List only Claude profiles`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vp := getVaultPath()
@@ -277,7 +277,7 @@ Examples:
 
 		if len(profiles) == 0 {
 			fmt.Fprintln(os.Stdout, "No profiles found.")
-			fmt.Fprintln(os.Stdout, "Use 'swarm vault backup <adapter> <profile>' to save current auth.")
+			fmt.Fprintln(os.Stdout, "Use 'forge vault backup <adapter> <profile>' to save current auth.")
 			return nil
 		}
 
@@ -308,8 +308,8 @@ var vaultDeleteCmd = &cobra.Command{
 This permanently deletes the saved auth files for the profile.
 
 Examples:
-  swarm vault delete claude old-work
-  swarm vault delete codex backup --force`,
+  forge vault delete claude old-work
+  forge vault delete codex backup --force`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vp := getVaultPath()
@@ -365,7 +365,7 @@ Active profiles are detected by comparing content hashes of current
 auth files against stored profiles.
 
 Examples:
-  swarm vault status`,
+  forge vault status`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vp := getVaultPath()
 
@@ -428,8 +428,8 @@ var vaultPathsCmd = &cobra.Command{
 Shows where each adapter stores its authentication files.
 
 Examples:
-  swarm vault paths           # Show all adapter paths
-  swarm vault paths claude    # Show Claude paths only`,
+  forge vault paths           # Show all adapter paths
+  forge vault paths claude    # Show Claude paths only`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var adapters []vault.Adapter
@@ -491,8 +491,8 @@ This logs you out of the adapter by removing its auth files.
 Use this before activating a new profile to ensure a clean switch.
 
 Examples:
-  swarm vault clear claude
-  swarm vault clear codex --force`,
+  forge vault clear claude
+  forge vault clear codex --force`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		adapterName := strings.ToLower(args[0])

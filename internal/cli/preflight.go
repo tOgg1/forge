@@ -165,7 +165,7 @@ func shouldRunPreflight(cmd *cobra.Command) bool {
 		return false
 	}
 
-	if cmd.Name() == "swarm" {
+	if cmd.Name() == "forge" {
 		if flag := cmd.Flag("version"); flag != nil && flag.Changed {
 			return false
 		}
@@ -173,15 +173,15 @@ func shouldRunPreflight(cmd *cobra.Command) bool {
 
 	path := cmd.CommandPath()
 	switch {
-	case strings.HasPrefix(path, "swarm init"):
+	case strings.HasPrefix(path, "forge init"):
 		return false
-	case strings.HasPrefix(path, "swarm migrate"):
+	case strings.HasPrefix(path, "forge migrate"):
 		return false
-	case strings.HasPrefix(path, "swarm completion"):
+	case strings.HasPrefix(path, "forge completion"):
 		return false
-	case strings.HasPrefix(path, "swarm help"):
+	case strings.HasPrefix(path, "forge help"):
 		return false
-	case strings.HasPrefix(path, "swarm vault"):
+	case strings.HasPrefix(path, "forge vault"):
 		return false
 	}
 
@@ -203,7 +203,7 @@ func maybeWarnMissingConfig() {
 	}
 
 	fmt.Fprintln(os.Stderr, "Warning: no config file found.")
-	fmt.Fprintln(os.Stderr, "Hint: run `swarm init` to create a config file.")
+	fmt.Fprintln(os.Stderr, "Hint: run `forge init` to create a config file.")
 }
 
 func checkTmux(cmd *cobra.Command) error {
@@ -217,7 +217,7 @@ func checkTmux(cmd *cobra.Command) error {
 	return &PreflightError{
 		Message:  "tmux is required for this command",
 		Hint:     "Install tmux and ensure it is in PATH",
-		NextStep: "swarm init",
+		NextStep: "forge init",
 	}
 }
 
@@ -225,7 +225,7 @@ func requiresTmux(cmd *cobra.Command) bool {
 	if cmd == nil {
 		return false
 	}
-	if cmd.Parent() == nil && cmd.Name() == "swarm" {
+	if cmd.Parent() == nil && cmd.Name() == "forge" {
 		return true
 	}
 
@@ -275,7 +275,7 @@ func checkSSH(cmd *cobra.Command) error {
 	return &PreflightError{
 		Message:  "ssh binary not found for system backend",
 		Hint:     "Install OpenSSH client or switch to native SSH backend",
-		NextStep: "swarm init",
+		NextStep: "forge init",
 	}
 }
 
@@ -285,7 +285,7 @@ func checkDatabase(ctx context.Context) error {
 		return &PreflightError{
 			Message:  "database unavailable",
 			Hint:     "Check database path and permissions",
-			NextStep: "swarm init",
+			NextStep: "forge init",
 			Err:      err,
 		}
 	}
@@ -296,22 +296,22 @@ func checkDatabase(ctx context.Context) error {
 		if isMissingSchemaTable(err) {
 			return &PreflightError{
 				Message:  "database not migrated",
-				Hint:     "Run `swarm migrate up` to initialize the database",
-				NextStep: "swarm init",
+				Hint:     "Run `forge migrate up` to initialize the database",
+				NextStep: "forge init",
 			}
 		}
 		return &PreflightError{
 			Message:  "failed to read database schema version",
 			Hint:     "Ensure the database is reachable and not locked",
-			NextStep: "swarm init",
+			NextStep: "forge init",
 			Err:      err,
 		}
 	}
 	if version == 0 {
 		return &PreflightError{
 			Message:  "database has no migrations applied",
-			Hint:     "Run `swarm migrate up` to initialize the database",
-			NextStep: "swarm init",
+			Hint:     "Run `forge migrate up` to initialize the database",
+			NextStep: "forge init",
 		}
 	}
 
@@ -350,6 +350,6 @@ func checkWorkspacePath(cmd *cobra.Command) error {
 	return &PreflightError{
 		Message:  "workspace path not found",
 		Hint:     fmt.Sprintf("Check that %s exists and is readable", filepath.Clean(path)),
-		NextStep: "swarm ws create --path <repo>",
+		NextStep: "forge ws create --path <repo>",
 	}
 }

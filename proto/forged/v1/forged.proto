@@ -3,24 +3,24 @@
 
 syntax = "proto3";
 
-package swarmd.v1;
+package forged.v1;
 
-option go_package = "github.com/tOgg1/forge/internal/swarmd/proto/swarmdv1";
+option go_package = "github.com/tOgg1/forge/forged/v1;forgedv1";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 
 // =============================================================================
-// SwarmdService
+// ForgedService
 // =============================================================================
-// The SwarmdService runs on each node and provides:
+// The ForgedService runs on each node and provides:
 // - Agent lifecycle control (spawn, kill, send input)
 // - State streaming (screen snapshots, events)
 // - Transcript collection
 // - Health monitoring
 // =============================================================================
 
-service SwarmdService {
+service ForgedService {
   // -----------------------------------------------------------------------------
   // Agent Control
   // -----------------------------------------------------------------------------

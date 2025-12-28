@@ -10,7 +10,7 @@ actually connecting to remote hosts.
 ### Basic Usage
 
 ```go
-import "github.com/opencode-ai/swarm/internal/testutil/mocks"
+import "github.com/opencode-ai/forge/internal/testutil/mocks"
 
 func TestMyFunction(t *testing.T) {
     exec := mocks.NewSSHExecutor()

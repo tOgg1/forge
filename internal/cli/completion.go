@@ -1,4 +1,4 @@
-// Package cli implements the Swarm command-line interface using Cobra.
+// Package cli implements the Forge command-line interface using Cobra.
 package cli
 
 import (

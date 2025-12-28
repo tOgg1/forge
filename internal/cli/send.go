@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/agent"
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/models"
@@ -16,7 +17,6 @@ import (
 	"github.com/tOgg1/forge/internal/queue"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/tOgg1/forge/internal/workspace"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -46,8 +46,8 @@ func init() {
 	sendCmd.Flags().BoolVar(&sendStdin, "stdin", false, "read message from stdin")
 	sendCmd.Flags().BoolVar(&sendEditor, "editor", false, "compose message in $EDITOR")
 
-	_ = sendCmd.Flags().MarkDeprecated("immediate", "use 'swarm inject' for immediate tmux injection")
-	_ = sendCmd.Flags().MarkDeprecated("skip-idle-check", "use 'swarm inject --force' to bypass idle checks")
+	_ = sendCmd.Flags().MarkDeprecated("immediate", "use 'forge inject' for immediate tmux injection")
+	_ = sendCmd.Flags().MarkDeprecated("skip-idle-check", "use 'forge inject --force' to bypass idle checks")
 }
 
 var sendCmd = &cobra.Command{
@@ -57,35 +57,41 @@ var sendCmd = &cobra.Command{
 
 Messages are enqueued and dispatched when the agent is ready (idle).
 This is the safe, queue-based way to send messages. For immediate
-injection (dangerous), use 'swarm inject'.
+injection (dangerous), use 'forge inject'.
 
-If no agent is specified, uses the agent from current context.`,
-	Example: `  # Queue a message for a specific agent
-  swarm send abc123 "Fix the lint errors"
+Agent resolution (in priority order):
+  1. Explicit agent ID as first argument
+  2. Agent from stored context (set with 'forge use --agent')
+  3. Auto-detect: if workspace has exactly one agent, use it
 
-  # Queue using context (no agent specified)
-  swarm send "Continue with the task"
+This means after 'forge up', you can simply run 'forge send "message"'
+without specifying an agent ID.`,
+	Example: `  # Simple usage after 'forge up' (auto-detects single agent)
+  forge send "Fix the lint errors"
+
+  # Queue a message for a specific agent
+  forge send abc123 "Fix the lint errors"
 
   # Queue for all agents in workspace
-  swarm send --all "Pause and commit your work"
+  forge send --all "Pause and commit your work"
 
   # Queue with high priority (dispatched before normal items)
-  swarm send --priority high abc123 "Urgent: revert last change"
+  forge send --priority high abc123 "Urgent: revert last change"
 
   # Queue at front (first to be dispatched)
-  swarm send --front abc123 "Do this next"
+  forge send --front abc123 "Do this next"
 
   # Queue conditional message (only dispatch when idle)
-  swarm send --when-idle abc123 "Continue when ready"
+  forge send --when-idle abc123 "Continue when ready"
 
   # Queue from file
-  swarm send abc123 --file prompt.txt
+  forge send abc123 --file prompt.txt
 
   # Queue from stdin
-  cat prompt.txt | swarm send abc123 --stdin
+  cat prompt.txt | forge send abc123 --stdin
 
   # Compose in $EDITOR
-  swarm send abc123 --editor`,
+  forge send abc123 --editor`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -146,12 +152,17 @@ If no agent is specified, uses the agent from current context.`,
 			var messageArgs []string
 
 			if len(args) == 0 {
-				// No args - need context
-				agentCtx, err := RequireAgentContext(ctx, agentRepo, "", "")
-				if err != nil {
-					return err
+				// No args - need context or auto-detect
+				agentCtx, err := ResolveAgentContext(ctx, agentRepo, "", "")
+				if err == nil && agentCtx.AgentID != "" {
+					agentID = agentCtx.AgentID
+				} else {
+					// No agent context - try to auto-detect from workspace
+					agentID, err = autoDetectSingleAgent(ctx, wsRepo, agentRepo)
+					if err != nil {
+						return err
+					}
 				}
-				agentID = agentCtx.AgentID
 				messageArgs = args
 			} else {
 				// First arg could be agent ID or message
@@ -161,12 +172,18 @@ If no agent is specified, uses the agent from current context.`,
 					agentID = agent.ID
 					messageArgs = args[1:]
 				} else {
-					// Not a valid agent - try context
-					agentCtx, err := RequireAgentContext(ctx, agentRepo, "", "")
-					if err != nil {
-						return fmt.Errorf("first argument '%s' is not a valid agent and no context set", args[0])
+					// Not a valid agent - try context or auto-detect
+					agentCtx, ctxErr := ResolveAgentContext(ctx, agentRepo, "", "")
+					if ctxErr == nil && agentCtx.AgentID != "" {
+						agentID = agentCtx.AgentID
+					} else {
+						// No agent context - try to auto-detect from workspace
+						detectedID, detectErr := autoDetectSingleAgent(ctx, wsRepo, agentRepo)
+						if detectErr != nil {
+							return fmt.Errorf("first argument '%s' is not a valid agent and no context set: %w", args[0], detectErr)
+						}
+						agentID = detectedID
 					}
-					agentID = agentCtx.AgentID
 					messageArgs = args // entire args is the message
 				}
 			}
@@ -444,4 +461,38 @@ func truncateMessage(msg string, maxLen int) string {
 		return msg
 	}
 	return msg[:maxLen-3] + "..."
+}
+
+// autoDetectSingleAgent attempts to find a single agent in the current workspace.
+// It first tries to detect the workspace from the current directory, then checks
+// if there's exactly one agent. This enables a simpler UX where users can just
+// run `forge send "message"` without specifying an agent ID after `forge up`.
+func autoDetectSingleAgent(ctx context.Context, wsRepo *db.WorkspaceRepository, agentRepo *db.AgentRepository) (string, error) {
+	// Try to detect workspace from current directory
+	wsCtx, err := ResolveWorkspaceContext(ctx, wsRepo, "")
+	if err != nil || wsCtx.WorkspaceID == "" {
+		return "", errors.New("agent required: provide agent ID as argument, set context with 'forge use --agent <agent>', or run from a workspace directory")
+	}
+
+	// Get all agents in the workspace
+	agents, err := agentRepo.ListByWorkspace(ctx, wsCtx.WorkspaceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to list agents: %w", err)
+	}
+
+	if len(agents) == 0 {
+		return "", errors.New("no agents in workspace; spawn one with 'forge up' or 'forge agent spawn'")
+	}
+
+	if len(agents) == 1 {
+		// Auto-select the single agent
+		return agents[0].ID, nil
+	}
+
+	// Multiple agents - user must specify
+	agentHints := make([]string, 0, len(agents))
+	for _, a := range agents {
+		agentHints = append(agentHints, shortID(a.ID))
+	}
+	return "", fmt.Errorf("workspace has %d agents; specify one: %s", len(agents), strings.Join(agentHints, ", "))
 }

@@ -1,4 +1,4 @@
-// Package config provides configuration and context management for Swarm.
+// Package config provides configuration and context management for Forge.
 package config
 
 import (
@@ -117,11 +117,11 @@ type ContextStore struct {
 }
 
 // NewContextStore creates a new context store.
-// If path is empty, uses the default path (~/.config/swarm/context.yaml).
+// If path is empty, uses the default path (~/.config/forge/context.yaml).
 func NewContextStore(path string) *ContextStore {
 	if path == "" {
 		homeDir, _ := os.UserHomeDir()
-		path = filepath.Join(homeDir, ".config", "swarm", "context.yaml")
+		path = filepath.Join(homeDir, ".config", "forge", "context.yaml")
 	}
 	return &ContextStore{path: path}
 }

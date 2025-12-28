@@ -43,9 +43,9 @@ Recipes define agent configurations for batch spawning with optional
 initial tasking via templates or sequences.
 
 Recipes are stored as YAML files in:
-- Project: .swarm/recipes/
-- User: ~/.config/swarm/recipes/
-- Builtin: bundled with swarm`,
+- Project: .forge/recipes/
+- User: ~/.config/forge/recipes/
+- Builtin: bundled with forge`,
 }
 
 var recipeListCmd = &cobra.Command{
@@ -53,8 +53,8 @@ var recipeListCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Short:   "List available recipes",
 	Long:    `List all available recipes from project, user, and builtin sources.`,
-	Example: `  swarm recipe list
-  swarm recipe list --json`,
+	Example: `  forge recipe list
+  forge recipe list --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -81,7 +81,7 @@ var recipeListCmd = &cobra.Command{
 			source := r.Source
 			if source == "builtin" {
 				source = "builtin"
-			} else if strings.Contains(source, ".swarm") {
+			} else if strings.Contains(source, ".forge") {
 				source = "project"
 			} else {
 				source = "user"
@@ -99,8 +99,8 @@ var recipeShowCmd = &cobra.Command{
 	Use:   "show <name>",
 	Short: "Show recipe details",
 	Long:  `Show the full details of a recipe including agent configurations.`,
-	Example: `  swarm recipe show baseline
-  swarm recipe show heavy --json`,
+	Example: `  forge recipe show baseline
+  forge recipe show heavy --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
@@ -160,9 +160,9 @@ var recipeRunCmd = &cobra.Command{
 
 The recipe defines agent types, counts, profile assignments, and
 optional initial templates/sequences to run on each agent.`,
-	Example: `  swarm recipe run baseline --workspace my-project
-  swarm recipe run heavy --dry-run
-  swarm recipe run baseline`,
+	Example: `  forge recipe run baseline --workspace my-project
+  forge recipe run heavy --dry-run
+  forge recipe run baseline`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()

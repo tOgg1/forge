@@ -1,4 +1,4 @@
-// Package version provides version information for Swarm.
+// Package version provides version information for Forge.
 package version
 
 // These variables are set at build time using ldflags.

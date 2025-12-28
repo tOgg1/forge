@@ -1,4 +1,4 @@
-// Package node provides node diagnostics for Swarm.
+// Package node provides node diagnostics for Forge.
 package node
 
 import (

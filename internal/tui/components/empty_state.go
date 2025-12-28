@@ -22,7 +22,7 @@ type EmptyState struct {
 
 // Suggestion represents a suggested command with description.
 type Suggestion struct {
-	// Command is the CLI command to run (e.g., "swarm ws create <path>").
+	// Command is the CLI command to run (e.g., "forge ws create <path>").
 	Command string
 	// Description explains what the command does.
 	Description string
@@ -81,8 +81,8 @@ func EmptyNodes() EmptyState {
 		Title:    "No nodes registered yet",
 		Subtitle: "Nodes are machines where agents run.",
 		Suggestions: []Suggestion{
-			{Command: "swarm node add <host>", Description: "add a remote node via SSH"},
-			{Command: "swarm node add --local", Description: "register the local machine"},
+			{Command: "forge node add <host>", Description: "add a remote node via SSH"},
+			{Command: "forge node add --local", Description: "register the local machine"},
 		},
 	}
 }
@@ -94,8 +94,8 @@ func EmptyWorkspaces() EmptyState {
 		Title:    "No workspaces yet",
 		Subtitle: "Workspaces are project directories managed by agents.",
 		Suggestions: []Suggestion{
-			{Command: "swarm ws create <path>", Description: "create a new workspace"},
-			{Command: "swarm ws import <path>", Description: "import an existing project"},
+			{Command: "forge ws create <path>", Description: "create a new workspace"},
+			{Command: "forge ws import <path>", Description: "import an existing project"},
 		},
 	}
 }
@@ -107,7 +107,7 @@ func EmptyAgents() EmptyState {
 		Title:    "No agents running",
 		Subtitle: "Agents are AI coding assistants working in workspaces.",
 		Suggestions: []Suggestion{
-			{Command: "swarm agent spawn <workspace>", Description: "spawn an agent in a workspace"},
+			{Command: "forge agent spawn <workspace>", Description: "spawn an agent in a workspace"},
 		},
 	}
 }
@@ -165,12 +165,12 @@ func EmptyAudit() EmptyState {
 func EmptyDashboard() EmptyState {
 	return EmptyState{
 		Icon:     "🚀",
-		Title:    "Welcome to Swarm!",
+		Title:    "Welcome to Forge!",
 		Subtitle: "Start by adding a node and creating a workspace.",
 		Suggestions: []Suggestion{
-			{Command: "swarm init", Description: "run the setup wizard"},
-			{Command: "swarm node add --local", Description: "register this machine"},
-			{Command: "swarm ws create <path>", Description: "create your first workspace"},
+			{Command: "forge init", Description: "run the setup wizard"},
+			{Command: "forge node add --local", Description: "register this machine"},
+			{Command: "forge ws create <path>", Description: "create your first workspace"},
 		},
 	}
 }

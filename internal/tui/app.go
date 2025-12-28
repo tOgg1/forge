@@ -35,12 +35,12 @@ type Config struct {
 	AgentMail AgentMailConfig
 }
 
-// Run launches the Swarm TUI program.
+// Run launches the Forge TUI program.
 func Run() error {
 	return RunWithConfig(Config{})
 }
 
-// RunWithConfig launches the Swarm TUI program with configuration.
+// RunWithConfig launches the Forge TUI program with configuration.
 func RunWithConfig(cfg Config) error {
 	m := initialModel()
 	m.stateEngine = cfg.StateEngine
@@ -6199,7 +6199,7 @@ func (m model) mailSearchStatusLines() []string {
 
 func (m model) mailboxStatusLines(maxWidth int) []string {
 	if m.mailClient == nil {
-		line := "Agent Mail not configured. Set SWARM_AGENT_MAIL_AGENT and SWARM_AGENT_MAIL_PROJECT."
+		line := "Agent Mail not configured. Set FORGE_AGENT_MAIL_AGENT and FORGE_AGENT_MAIL_PROJECT (legacy SWARM_* also works)."
 		return []string{m.styles.Warning.Render(truncateText(line, maxWidth))}
 	}
 

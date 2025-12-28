@@ -20,7 +20,7 @@ func TestFileLockRepository_CleanupExpired(t *testing.T) {
 	agent := &models.Agent{
 		WorkspaceID: ws.ID,
 		Type:        models.AgentTypeOpenCode,
-		TmuxPane:    "swarm-test:0.1",
+		TmuxPane:    "forge-test:0.1",
 		State:       models.AgentStateIdle,
 	}
 	if err := agentRepo.Create(ctx, agent); err != nil {

@@ -49,14 +49,14 @@ func TestEmptyStateRender(t *testing.T) {
 		es := EmptyState{
 			Title: "No workspaces",
 			Suggestions: []Suggestion{
-				{Command: "swarm ws create <path>", Description: "create new"},
+				{Command: "forge ws create <path>", Description: "create new"},
 			},
 		}
 		result := es.Render(styleSet)
 		if !strings.Contains(result, "Get started") {
 			t.Errorf("Expected 'Get started' header, got: %s", result)
 		}
-		if !strings.Contains(result, "swarm ws create") {
+		if !strings.Contains(result, "forge ws create") {
 			t.Errorf("Expected command in output, got: %s", result)
 		}
 	})
@@ -104,17 +104,17 @@ func TestPrebuiltEmptyStates(t *testing.T) {
 		{
 			name:     "EmptyNodes",
 			es:       EmptyNodes(),
-			expected: []string{"No nodes", "swarm node add"},
+			expected: []string{"No nodes", "forge node add"},
 		},
 		{
 			name:     "EmptyWorkspaces",
 			es:       EmptyWorkspaces(),
-			expected: []string{"No workspaces", "swarm ws create"},
+			expected: []string{"No workspaces", "forge ws create"},
 		},
 		{
 			name:     "EmptyAgents",
 			es:       EmptyAgents(),
-			expected: []string{"No agents", "swarm agent spawn"},
+			expected: []string{"No agents", "forge agent spawn"},
 		},
 		{
 			name:     "EmptyQueue",
@@ -129,7 +129,7 @@ func TestPrebuiltEmptyStates(t *testing.T) {
 		{
 			name:     "EmptyDashboard",
 			es:       EmptyDashboard(),
-			expected: []string{"Welcome to Swarm", "swarm init"},
+			expected: []string{"Welcome to Forge", "forge init"},
 		},
 	}
 

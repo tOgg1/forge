@@ -235,7 +235,7 @@ func TestExpandTilde(t *testing.T) {
 		{name: "absolute path", input: "/var/log/test", expected: "/var/log/test"},
 		{name: "relative path", input: "data/file", expected: "data/file"},
 		{name: "tilde only", input: "~", expected: home},
-		{name: "tilde with path", input: "~/data/swarm", expected: filepath.Join(home, "data/swarm")},
+		{name: "tilde with path", input: "~/data/forge", expected: filepath.Join(home, "data/forge")},
 		{name: "tilde in middle", input: "/var/~/data", expected: "/var/~/data"}, // should not expand
 	}
 
@@ -257,8 +257,8 @@ func TestExpandPathsInConfig(t *testing.T) {
 
 	configContent := `
 global:
-  data_dir: ~/.local/share/swarm
-  config_dir: ~/.config/swarm
+  data_dir: ~/.local/share/forge
+  config_dir: ~/.config/forge
 database:
   path: ~/custom/db.sqlite
 `
@@ -271,12 +271,12 @@ database:
 		t.Fatalf("LoadFromFile() error = %v", err)
 	}
 
-	expectedDataDir := filepath.Join(home, ".local/share/swarm")
+	expectedDataDir := filepath.Join(home, ".local/share/forge")
 	if cfg.Global.DataDir != expectedDataDir {
 		t.Errorf("DataDir = %q, want %q", cfg.Global.DataDir, expectedDataDir)
 	}
 
-	expectedConfigDir := filepath.Join(home, ".config/swarm")
+	expectedConfigDir := filepath.Join(home, ".config/forge")
 	if cfg.Global.ConfigDir != expectedConfigDir {
 		t.Errorf("ConfigDir = %q, want %q", cfg.Global.ConfigDir, expectedConfigDir)
 	}

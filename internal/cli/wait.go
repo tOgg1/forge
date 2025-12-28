@@ -59,25 +59,25 @@ Exit codes:
   1: Timeout reached
   2: Agent/workspace not found`,
 	Example: `  # Wait for agent to be idle
-  swarm wait --agent abc123 --until idle
+  forge wait --agent abc123 --until idle
 
   # Wait for queue to drain
-  swarm wait --agent abc123 --until queue-empty
+  forge wait --agent abc123 --until queue-empty
 
   # Wait for account cooldown to expire
-  swarm wait --agent abc123 --until cooldown-over
+  forge wait --agent abc123 --until cooldown-over
 
   # Wait for all agents in workspace to be idle
-  swarm wait --workspace myworkspace --until all-idle
+  forge wait --workspace myworkspace --until all-idle
 
   # Wait for agent to be fully ready (idle + no cooldown + queue empty)
-  swarm wait --agent abc123 --until ready
+  forge wait --agent abc123 --until ready
 
   # With timeout
-  swarm wait --agent abc123 --until idle --timeout 5m
+  forge wait --agent abc123 --until idle --timeout 5m
 
   # Quiet mode (no output)
-  swarm wait --agent abc123 --until idle --quiet`,
+  forge wait --agent abc123 --until idle --quiet`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 

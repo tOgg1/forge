@@ -6,19 +6,19 @@ Accepted
 
 ## Context
 
-Swarm must operate both locally and across remote nodes. The product spec
+Forge must operate both locally and across remote nodes. The product spec
 outlines two modes:
 
 - SSH-only control plane (no per-node daemon)
-- swarmd per-node daemon with a structured event stream
+- forged per-node daemon with a structured event stream
 
 The MVP needs to ship quickly while keeping interfaces compatible with future
-swarmd adoption.
+forged adoption.
 
 ## Decision
 
 Start with SSH-only control plane for MVP, and keep the interfaces daemon-ready
-for a future swarmd integration.
+for a future forged integration.
 
 ## Consequences
 
@@ -27,5 +27,5 @@ for a future swarmd integration.
 
 ## Alternatives considered
 
-- Deploy swarmd from day one: better performance and telemetry, but higher
+- Deploy forged from day one: better performance and telemetry, but higher
   implementation and operational complexity for MVP.

@@ -1,4 +1,4 @@
-// Package main is the entry point for the swarm-agent-runner binary.
+// Package main is the entry point for the forge-agent-runner binary.
 package main
 
 import (
@@ -33,7 +33,7 @@ func main() {
 	heartbeat := flag.Duration("heartbeat", 5*time.Second, "heartbeat interval")
 	tailLines := flag.Int("tail-lines", 50, "output lines included in heartbeat")
 	dbPath := flag.String("db-path", "", "database path (defaults to config)")
-	configFile := flag.String("config", "", "config file (default is $HOME/.config/swarm/config.yaml)")
+	configFile := flag.String("config", "", "config file (default is $HOME/.config/forge/config.yaml)")
 	logLevel := flag.String("log-level", "", "override logging level (debug, info, warn, error)")
 	logFormat := flag.String("log-format", "", "override logging format (json, console)")
 	flag.Parse()
@@ -52,7 +52,7 @@ func main() {
 		Str("version", version).
 		Str("commit", commit).
 		Str("built", date).
-		Msg("swarm-agent-runner starting")
+		Msg("forge-agent-runner starting")
 
 	if err := cfg.EnsureDirectories(); err != nil {
 		logger.Warn().Err(err).Msg("failed to create directories")
@@ -107,7 +107,7 @@ func usage(message string) {
 	if message != "" {
 		fmt.Fprintf(os.Stderr, "Error: %s\n\n", message)
 	}
-	fmt.Fprintf(os.Stderr, "Usage: swarm-agent-runner --workspace W --agent A [options] -- <command>\n\n")
+	fmt.Fprintf(os.Stderr, "Usage: forge-agent-runner --workspace W --agent A [options] -- <command>\n\n")
 	flag.PrintDefaults()
 	os.Exit(2)
 }

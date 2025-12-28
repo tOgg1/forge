@@ -1,4 +1,4 @@
-// Package node provides the NodeService for managing Swarm nodes.
+// Package node provides the NodeService for managing Forge nodes.
 package node
 
 import (
@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	swarmdv1 "github.com/tOgg1/forge/gen/swarmd/v1"
+	forgedv1 "github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/tOgg1/forge/internal/models"
 	"github.com/tOgg1/forge/internal/ssh"
-	"github.com/tOgg1/forge/internal/swarmd"
+	"github.com/tOgg1/forge/internal/forged"
 	"github.com/rs/zerolog"
 )
 
@@ -19,8 +19,8 @@ import (
 type ExecutionMode string
 
 const (
-	// ModeSwarmd uses the swarmd daemon for execution (preferred).
-	ModeSwarmd ExecutionMode = "swarmd"
+	// ModeForged uses the forged daemon for execution (preferred).
+	ModeForged ExecutionMode = "forged"
 	// ModeSSH uses direct SSH execution (fallback).
 	ModeSSH ExecutionMode = "ssh"
 	// ModeLocal uses local execution.
@@ -29,39 +29,39 @@ const (
 
 // Common fallback errors.
 var (
-	ErrSwarmdUnavailable = errors.New("swarmd daemon unavailable")
+	ErrForgedUnavailable = errors.New("forged daemon unavailable")
 	ErrNoFallback        = errors.New("no fallback available")
 	ErrNodeClosed        = errors.New("node executor closed")
 )
 
-// FallbackPolicy controls how the executor handles swarmd unavailability.
+// FallbackPolicy controls how the executor handles forged unavailability.
 type FallbackPolicy string
 
 const (
-	// FallbackPolicyAuto automatically falls back to SSH when swarmd is unavailable.
+	// FallbackPolicyAuto automatically falls back to SSH when forged is unavailable.
 	FallbackPolicyAuto FallbackPolicy = "auto"
-	// FallbackPolicySwarmdOnly requires swarmd and fails if unavailable.
-	FallbackPolicySwarmdOnly FallbackPolicy = "swarmd_only"
-	// FallbackPolicySSHOnly only uses SSH, never tries swarmd.
+	// FallbackPolicyForgedOnly requires forged and fails if unavailable.
+	FallbackPolicyForgedOnly FallbackPolicy = "forged_only"
+	// FallbackPolicySSHOnly only uses SSH, never tries forged.
 	FallbackPolicySSHOnly FallbackPolicy = "ssh_only"
 )
 
 // NodeExecutor provides unified command execution on a node with automatic
-// fallback from swarmd to SSH when the daemon is unavailable.
+// fallback from forged to SSH when the daemon is unavailable.
 type NodeExecutor struct {
 	node   *models.Node
 	logger zerolog.Logger
 
 	// Configuration
 	policy      FallbackPolicy
-	swarmdPort  int
+	forgedPort  int
 	pingTimeout time.Duration
 
 	// Connection state
 	mu           sync.RWMutex
 	mode         ExecutionMode
 	sshExecutor  ssh.Executor
-	swarmdClient *swarmd.Client
+	forgedClient *forged.Client
 	closed       bool
 
 	// Health tracking
@@ -79,10 +79,10 @@ func WithFallbackPolicy(policy FallbackPolicy) NodeExecutorOption {
 	}
 }
 
-// WithSwarmdPort sets the swarmd port.
-func WithSwarmdPort(port int) NodeExecutorOption {
+// WithForgedPort sets the forged port.
+func WithForgedPort(port int) NodeExecutorOption {
 	return func(e *NodeExecutor) {
-		e.swarmdPort = port
+		e.forgedPort = port
 	}
 }
 
@@ -110,7 +110,7 @@ func NewNodeExecutor(ctx context.Context, node *models.Node, sshExecutor ssh.Exe
 		node:        node,
 		logger:      zerolog.Nop(),
 		policy:      FallbackPolicyAuto,
-		swarmdPort:  swarmd.DefaultPort,
+		forgedPort:  forged.DefaultPort,
 		pingTimeout: 5 * time.Second,
 		sshExecutor: sshExecutor,
 	}
@@ -126,13 +126,13 @@ func NewNodeExecutor(ctx context.Context, node *models.Node, sshExecutor ssh.Exe
 		e.mode = ModeSSH
 	}
 
-	// Try to connect to swarmd if policy allows
+	// Try to connect to forged if policy allows
 	if e.policy != FallbackPolicySSHOnly {
-		if err := e.connectSwarmd(ctx); err != nil {
-			if e.policy == FallbackPolicySwarmdOnly {
-				return nil, fmt.Errorf("swarmd required but unavailable: %w", err)
+		if err := e.connectForged(ctx); err != nil {
+			if e.policy == FallbackPolicyForgedOnly {
+				return nil, fmt.Errorf("forged required but unavailable: %w", err)
 			}
-			e.logger.Debug().Err(err).Msg("swarmd unavailable, using SSH fallback")
+			e.logger.Debug().Err(err).Msg("forged unavailable, using SSH fallback")
 		}
 	}
 
@@ -146,15 +146,15 @@ func (e *NodeExecutor) Mode() ExecutionMode {
 	return e.mode
 }
 
-// IsSwarmdAvailable returns true if swarmd is currently available.
-func (e *NodeExecutor) IsSwarmdAvailable() bool {
+// IsForgedAvailable returns true if forged is currently available.
+func (e *NodeExecutor) IsForgedAvailable() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.swarmdClient != nil && e.mode == ModeSwarmd
+	return e.forgedClient != nil && e.mode == ModeForged
 }
 
-// connectSwarmd attempts to connect to the swarmd daemon.
-func (e *NodeExecutor) connectSwarmd(ctx context.Context) error {
+// connectForged attempts to connect to the forged daemon.
+func (e *NodeExecutor) connectForged(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -163,25 +163,25 @@ func (e *NodeExecutor) connectSwarmd(ctx context.Context) error {
 	}
 
 	// Close existing client if any
-	if e.swarmdClient != nil {
-		_ = e.swarmdClient.Close()
-		e.swarmdClient = nil
+	if e.forgedClient != nil {
+		_ = e.forgedClient.Close()
+		e.forgedClient = nil
 	}
 
-	var client *swarmd.Client
+	var client *forged.Client
 	var err error
 
 	if e.node.IsLocal {
 		// Direct connection for local nodes
-		target := fmt.Sprintf("127.0.0.1:%d", e.swarmdPort)
-		client, err = swarmd.Dial(ctx, target, swarmd.WithLogger(e.logger))
+		target := fmt.Sprintf("127.0.0.1:%d", e.forgedPort)
+		client, err = forged.Dial(ctx, target, forged.WithLogger(e.logger))
 	} else if e.sshExecutor != nil {
 		// Use SSH tunnel for remote nodes
 		forwarder, ok := e.sshExecutor.(ssh.PortForwarder)
 		if !ok {
 			return fmt.Errorf("SSH executor does not support port forwarding")
 		}
-		client, err = swarmd.DialSSHWithExecutor(ctx, forwarder, e.swarmdPort, swarmd.WithLogger(e.logger))
+		client, err = forged.DialSSHWithExecutor(ctx, forwarder, e.forgedPort, forged.WithLogger(e.logger))
 	} else {
 		return fmt.Errorf("no SSH executor available for remote node")
 	}
@@ -196,30 +196,30 @@ func (e *NodeExecutor) connectSwarmd(ctx context.Context) error {
 
 	if _, err := client.Ping(pingCtx); err != nil {
 		_ = client.Close()
-		return fmt.Errorf("swarmd ping failed: %w", err)
+		return fmt.Errorf("forged ping failed: %w", err)
 	}
 
-	e.swarmdClient = client
-	e.mode = ModeSwarmd
+	e.forgedClient = client
+	e.mode = ModeForged
 	e.consecutiveFail = 0
 	e.lastHealthCheck = time.Now()
 
 	e.logger.Info().
 		Str("node", e.node.Name).
 		Str("mode", string(e.mode)).
-		Msg("connected to swarmd")
+		Msg("connected to forged")
 
 	return nil
 }
 
-// switchToSSH switches from swarmd mode to SSH fallback.
+// switchToSSH switches from forged mode to SSH fallback.
 func (e *NodeExecutor) switchToSSH() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if e.swarmdClient != nil {
-		_ = e.swarmdClient.Close()
-		e.swarmdClient = nil
+	if e.forgedClient != nil {
+		_ = e.forgedClient.Close()
+		e.forgedClient = nil
 	}
 
 	if e.node.IsLocal {
@@ -234,8 +234,8 @@ func (e *NodeExecutor) switchToSSH() {
 		Msg("switched to SSH fallback")
 }
 
-// handleSwarmdError processes a swarmd error and potentially triggers fallback.
-func (e *NodeExecutor) handleSwarmdError(err error) error {
+// handleForgedError processes a forged error and potentially triggers fallback.
+func (e *NodeExecutor) handleForgedError(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -248,20 +248,20 @@ func (e *NodeExecutor) handleSwarmdError(err error) error {
 	// After 3 consecutive failures, switch to SSH fallback
 	if fail >= 3 && e.policy == FallbackPolicyAuto {
 		e.switchToSSH()
-		return fmt.Errorf("%w: %v", ErrSwarmdUnavailable, err)
+		return fmt.Errorf("%w: %v", ErrForgedUnavailable, err)
 	}
 
 	return err
 }
 
-// TryReconnectSwarmd attempts to reconnect to swarmd if currently in fallback mode.
-func (e *NodeExecutor) TryReconnectSwarmd(ctx context.Context) error {
+// TryReconnectForged attempts to reconnect to forged if currently in fallback mode.
+func (e *NodeExecutor) TryReconnectForged(ctx context.Context) error {
 	e.mu.RLock()
 	mode := e.mode
 	policy := e.policy
 	e.mu.RUnlock()
 
-	if mode == ModeSwarmd {
+	if mode == ModeForged {
 		return nil // Already connected
 	}
 
@@ -269,11 +269,11 @@ func (e *NodeExecutor) TryReconnectSwarmd(ctx context.Context) error {
 		return nil // Don't try to reconnect
 	}
 
-	return e.connectSwarmd(ctx)
+	return e.connectForged(ctx)
 }
 
 // Exec executes a command on the node.
-// For swarmd mode, this is not directly supported - use SSH mode.
+// For forged mode, this is not directly supported - use SSH mode.
 func (e *NodeExecutor) Exec(ctx context.Context, cmd string) (stdout, stderr []byte, err error) {
 	e.mu.RLock()
 	executor := e.sshExecutor
@@ -295,7 +295,7 @@ func (e *NodeExecutor) Exec(ctx context.Context, cmd string) (stdout, stderr []b
 func (e *NodeExecutor) Ping(ctx context.Context) error {
 	e.mu.RLock()
 	mode := e.mode
-	client := e.swarmdClient
+	client := e.forgedClient
 	executor := e.sshExecutor
 	closed := e.closed
 	e.mu.RUnlock()
@@ -305,13 +305,13 @@ func (e *NodeExecutor) Ping(ctx context.Context) error {
 	}
 
 	switch mode {
-	case ModeSwarmd:
+	case ModeForged:
 		if client == nil {
-			return ErrSwarmdUnavailable
+			return ErrForgedUnavailable
 		}
 		_, err := client.Ping(ctx)
 		if err != nil {
-			return e.handleSwarmdError(err)
+			return e.handleForgedError(err)
 		}
 		e.mu.Lock()
 		e.consecutiveFail = 0
@@ -337,12 +337,12 @@ func (e *NodeExecutor) Ping(ctx context.Context) error {
 	}
 }
 
-// SwarmdClient returns the swarmd client if available.
-// Returns nil if swarmd is not connected.
-func (e *NodeExecutor) SwarmdClient() *swarmd.Client {
+// ForgedClient returns the forged client if available.
+// Returns nil if forged is not connected.
+func (e *NodeExecutor) ForgedClient() *forged.Client {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.swarmdClient
+	return e.forgedClient
 }
 
 // SSHExecutor returns the SSH executor.
@@ -352,10 +352,10 @@ func (e *NodeExecutor) SSHExecutor() ssh.Executor {
 	return e.sshExecutor
 }
 
-// SpawnAgent spawns an agent using swarmd if available, otherwise returns an error.
-func (e *NodeExecutor) SpawnAgent(ctx context.Context, req *swarmdv1.SpawnAgentRequest) (*swarmdv1.SpawnAgentResponse, error) {
+// SpawnAgent spawns an agent using forged if available, otherwise returns an error.
+func (e *NodeExecutor) SpawnAgent(ctx context.Context, req *forgedv1.SpawnAgentRequest) (*forgedv1.SpawnAgentResponse, error) {
 	e.mu.RLock()
-	client := e.swarmdClient
+	client := e.forgedClient
 	mode := e.mode
 	closed := e.closed
 	e.mu.RUnlock()
@@ -364,21 +364,21 @@ func (e *NodeExecutor) SpawnAgent(ctx context.Context, req *swarmdv1.SpawnAgentR
 		return nil, ErrNodeClosed
 	}
 
-	if mode != ModeSwarmd || client == nil {
-		return nil, ErrSwarmdUnavailable
+	if mode != ModeForged || client == nil {
+		return nil, ErrForgedUnavailable
 	}
 
 	resp, err := client.SpawnAgent(ctx, req)
 	if err != nil {
-		return nil, e.handleSwarmdError(err)
+		return nil, e.handleForgedError(err)
 	}
 	return resp, nil
 }
 
-// KillAgent kills an agent using swarmd if available.
-func (e *NodeExecutor) KillAgent(ctx context.Context, req *swarmdv1.KillAgentRequest) (*swarmdv1.KillAgentResponse, error) {
+// KillAgent kills an agent using forged if available.
+func (e *NodeExecutor) KillAgent(ctx context.Context, req *forgedv1.KillAgentRequest) (*forgedv1.KillAgentResponse, error) {
 	e.mu.RLock()
-	client := e.swarmdClient
+	client := e.forgedClient
 	mode := e.mode
 	closed := e.closed
 	e.mu.RUnlock()
@@ -387,21 +387,21 @@ func (e *NodeExecutor) KillAgent(ctx context.Context, req *swarmdv1.KillAgentReq
 		return nil, ErrNodeClosed
 	}
 
-	if mode != ModeSwarmd || client == nil {
-		return nil, ErrSwarmdUnavailable
+	if mode != ModeForged || client == nil {
+		return nil, ErrForgedUnavailable
 	}
 
 	resp, err := client.KillAgent(ctx, req)
 	if err != nil {
-		return nil, e.handleSwarmdError(err)
+		return nil, e.handleForgedError(err)
 	}
 	return resp, nil
 }
 
-// CapturePane captures pane content using swarmd if available.
-func (e *NodeExecutor) CapturePane(ctx context.Context, req *swarmdv1.CapturePaneRequest) (*swarmdv1.CapturePaneResponse, error) {
+// CapturePane captures pane content using forged if available.
+func (e *NodeExecutor) CapturePane(ctx context.Context, req *forgedv1.CapturePaneRequest) (*forgedv1.CapturePaneResponse, error) {
 	e.mu.RLock()
-	client := e.swarmdClient
+	client := e.forgedClient
 	mode := e.mode
 	closed := e.closed
 	e.mu.RUnlock()
@@ -410,21 +410,21 @@ func (e *NodeExecutor) CapturePane(ctx context.Context, req *swarmdv1.CapturePan
 		return nil, ErrNodeClosed
 	}
 
-	if mode != ModeSwarmd || client == nil {
-		return nil, ErrSwarmdUnavailable
+	if mode != ModeForged || client == nil {
+		return nil, ErrForgedUnavailable
 	}
 
 	resp, err := client.CapturePane(ctx, req)
 	if err != nil {
-		return nil, e.handleSwarmdError(err)
+		return nil, e.handleForgedError(err)
 	}
 	return resp, nil
 }
 
-// SendInput sends input to an agent using swarmd if available.
-func (e *NodeExecutor) SendInput(ctx context.Context, req *swarmdv1.SendInputRequest) (*swarmdv1.SendInputResponse, error) {
+// SendInput sends input to an agent using forged if available.
+func (e *NodeExecutor) SendInput(ctx context.Context, req *forgedv1.SendInputRequest) (*forgedv1.SendInputResponse, error) {
 	e.mu.RLock()
-	client := e.swarmdClient
+	client := e.forgedClient
 	mode := e.mode
 	closed := e.closed
 	e.mu.RUnlock()
@@ -433,21 +433,21 @@ func (e *NodeExecutor) SendInput(ctx context.Context, req *swarmdv1.SendInputReq
 		return nil, ErrNodeClosed
 	}
 
-	if mode != ModeSwarmd || client == nil {
-		return nil, ErrSwarmdUnavailable
+	if mode != ModeForged || client == nil {
+		return nil, ErrForgedUnavailable
 	}
 
 	resp, err := client.SendInput(ctx, req)
 	if err != nil {
-		return nil, e.handleSwarmdError(err)
+		return nil, e.handleForgedError(err)
 	}
 	return resp, nil
 }
 
-// ListAgents lists agents using swarmd if available.
-func (e *NodeExecutor) ListAgents(ctx context.Context, req *swarmdv1.ListAgentsRequest) (*swarmdv1.ListAgentsResponse, error) {
+// ListAgents lists agents using forged if available.
+func (e *NodeExecutor) ListAgents(ctx context.Context, req *forgedv1.ListAgentsRequest) (*forgedv1.ListAgentsResponse, error) {
 	e.mu.RLock()
-	client := e.swarmdClient
+	client := e.forgedClient
 	mode := e.mode
 	closed := e.closed
 	e.mu.RUnlock()
@@ -456,21 +456,21 @@ func (e *NodeExecutor) ListAgents(ctx context.Context, req *swarmdv1.ListAgentsR
 		return nil, ErrNodeClosed
 	}
 
-	if mode != ModeSwarmd || client == nil {
-		return nil, ErrSwarmdUnavailable
+	if mode != ModeForged || client == nil {
+		return nil, ErrForgedUnavailable
 	}
 
 	resp, err := client.ListAgents(ctx, req)
 	if err != nil {
-		return nil, e.handleSwarmdError(err)
+		return nil, e.handleForgedError(err)
 	}
 	return resp, nil
 }
 
-// GetAgent gets agent details using swarmd if available.
-func (e *NodeExecutor) GetAgent(ctx context.Context, req *swarmdv1.GetAgentRequest) (*swarmdv1.GetAgentResponse, error) {
+// GetAgent gets agent details using forged if available.
+func (e *NodeExecutor) GetAgent(ctx context.Context, req *forgedv1.GetAgentRequest) (*forgedv1.GetAgentResponse, error) {
 	e.mu.RLock()
-	client := e.swarmdClient
+	client := e.forgedClient
 	mode := e.mode
 	closed := e.closed
 	e.mu.RUnlock()
@@ -479,13 +479,13 @@ func (e *NodeExecutor) GetAgent(ctx context.Context, req *swarmdv1.GetAgentReque
 		return nil, ErrNodeClosed
 	}
 
-	if mode != ModeSwarmd || client == nil {
-		return nil, ErrSwarmdUnavailable
+	if mode != ModeForged || client == nil {
+		return nil, ErrForgedUnavailable
 	}
 
 	resp, err := client.GetAgent(ctx, req)
 	if err != nil {
-		return nil, e.handleSwarmdError(err)
+		return nil, e.handleForgedError(err)
 	}
 	return resp, nil
 }
@@ -502,11 +502,11 @@ func (e *NodeExecutor) Close() error {
 
 	var errs []error
 
-	if e.swarmdClient != nil {
-		if err := e.swarmdClient.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close swarmd client: %w", err))
+	if e.forgedClient != nil {
+		if err := e.forgedClient.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close forged client: %w", err))
 		}
-		e.swarmdClient = nil
+		e.forgedClient = nil
 	}
 
 	// Note: We don't close sshExecutor here because it may be shared

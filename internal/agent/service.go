@@ -1,4 +1,4 @@
-// Package agent provides agent lifecycle management for Swarm.
+// Package agent provides agent lifecycle management for Forge.
 package agent
 
 import (

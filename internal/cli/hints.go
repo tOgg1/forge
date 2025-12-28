@@ -83,13 +83,13 @@ func hintsForUp(ctx HintContext) []string {
 
 	if agentID != "" {
 		hints = append(hints,
-			fmt.Sprintf("swarm send %s \"your task here\"   # Send instructions", shortID(agentID)),
-			fmt.Sprintf("swarm attach %s                   # Watch agent work", shortID(agentID)),
-			fmt.Sprintf("swarm log %s                      # View transcript", shortID(agentID)),
+			fmt.Sprintf("forge send %s \"your task here\"   # Send instructions", shortID(agentID)),
+			fmt.Sprintf("forge attach %s                   # Watch agent work", shortID(agentID)),
+			fmt.Sprintf("forge log %s                      # View transcript", shortID(agentID)),
 		)
 	}
 
-	hints = append(hints, "swarm ps                            # List all agents")
+	hints = append(hints, "forge ps                            # List all agents")
 
 	return hints
 }
@@ -104,9 +104,9 @@ func hintsForSend(ctx HintContext) []string {
 
 	if agentID != "" {
 		hints = append(hints,
-			fmt.Sprintf("swarm queue ls --agent %s        # View queue", shortID(agentID)),
-			fmt.Sprintf("swarm log %s --follow            # Watch output", shortID(agentID)),
-			fmt.Sprintf("swarm explain %s                  # Check status", shortID(agentID)),
+			fmt.Sprintf("forge queue ls --agent %s        # View queue", shortID(agentID)),
+			fmt.Sprintf("forge log %s --follow            # Watch output", shortID(agentID)),
+			fmt.Sprintf("forge explain %s                  # Check status", shortID(agentID)),
 		)
 	}
 
@@ -123,9 +123,9 @@ func hintsForSpawn(ctx HintContext) []string {
 
 	if agentID != "" {
 		hints = append(hints,
-			fmt.Sprintf("swarm send %s \"your task\"        # Send instructions", shortID(agentID)),
-			fmt.Sprintf("swarm attach %s                   # Watch agent", shortID(agentID)),
-			fmt.Sprintf("swarm agent status %s            # Check status", shortID(agentID)),
+			fmt.Sprintf("forge send %s \"your task\"        # Send instructions", shortID(agentID)),
+			fmt.Sprintf("forge attach %s                   # Watch agent", shortID(agentID)),
+			fmt.Sprintf("forge agent status %s            # Check status", shortID(agentID)),
 		)
 	}
 
@@ -142,12 +142,12 @@ func hintsForQueue(ctx HintContext) []string {
 
 	if agentID != "" {
 		hints = append(hints,
-			fmt.Sprintf("swarm queue ls --agent %s        # View full queue", shortID(agentID)),
-			fmt.Sprintf("swarm explain %s                  # Check dispatch status", shortID(agentID)),
+			fmt.Sprintf("forge queue ls --agent %s        # View full queue", shortID(agentID)),
+			fmt.Sprintf("forge explain %s                  # Check dispatch status", shortID(agentID)),
 		)
 	}
 
-	hints = append(hints, "swarm queue ls                      # View all queues")
+	hints = append(hints, "forge queue ls                      # View all queues")
 
 	return hints
 }
@@ -161,8 +161,8 @@ func hintsForWorkspaceCreate(ctx HintContext) []string {
 	}
 
 	hints = append(hints,
-		fmt.Sprintf("swarm agent spawn -w %s           # Spawn an agent", wsName),
-		fmt.Sprintf("swarm use %s                       # Set as current context", wsName),
+		fmt.Sprintf("forge agent spawn -w %s           # Spawn an agent", wsName),
+		fmt.Sprintf("forge use %s                       # Set as current context", wsName),
 	)
 
 	if ctx.TmuxSession != "" {
@@ -171,7 +171,7 @@ func hintsForWorkspaceCreate(ctx HintContext) []string {
 		)
 	}
 
-	hints = append(hints, "swarm ls                            # List all workspaces")
+	hints = append(hints, "forge ls                            # List all workspaces")
 
 	return hints
 }
@@ -181,12 +181,12 @@ func hintsForAgentTerminate(ctx HintContext) []string {
 
 	if ctx.WorkspaceID != "" {
 		hints = append(hints,
-			"swarm ps                            # List remaining agents",
-			fmt.Sprintf("swarm agent spawn -w %s        # Spawn a new agent", shortID(ctx.WorkspaceID)),
+			"forge ps                            # List remaining agents",
+			fmt.Sprintf("forge agent spawn -w %s        # Spawn a new agent", shortID(ctx.WorkspaceID)),
 		)
 	} else {
 		hints = append(hints,
-			"swarm ps                            # List remaining agents",
+			"forge ps                            # List remaining agents",
 		)
 	}
 

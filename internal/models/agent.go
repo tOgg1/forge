@@ -19,7 +19,7 @@ const (
 	AgentStateStopped          AgentState = "stopped"
 )
 
-// StateConfidence indicates how confident Swarm is about the detected state.
+// StateConfidence indicates how confident Forge is about the detected state.
 type StateConfidence string
 
 const (

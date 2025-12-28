@@ -393,7 +393,7 @@ func (w *OpenCodeEventWatcher) handleEvent(agentID, eventType, data string) {
 	}
 }
 
-// mapEventToState converts an OpenCode event to a Swarm agent state.
+// mapEventToState converts an OpenCode event to a Forge agent state.
 func (w *OpenCodeEventWatcher) mapEventToState(event OpenCodeEvent) (models.AgentState, models.StateInfo, bool) {
 	now := time.Now().UTC()
 

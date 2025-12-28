@@ -54,7 +54,7 @@ Relevant flags from `claude --help`:
 - `--allow-dangerously-skip-permissions` enables the bypass option but does not force it.
 - `--add-dir` and tool allow/deny lists (`--allowedTools`, `--disallowedTools`) gate tool access.
 
-Implication for Swarm adapter: treat permission-mode and skip flags as approval policy hints, and
+Implication for Forge adapter: treat permission-mode and skip flags as approval policy hints, and
 surface the chosen mode in logs/events.
 
 ## Log/output patterns

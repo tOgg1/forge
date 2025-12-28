@@ -1,5 +1,5 @@
-// Package swarmd provides the daemon scaffolding for the Swarm node service.
-package swarmd
+// Package forged provides the daemon scaffolding for the Forge node service.
+package forged
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tOgg1/forge/gen/swarmd/v1"
+	"github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc/codes"
@@ -23,7 +23,7 @@ import (
 type transcriptEntry struct {
 	id        int64 // monotonic ID for cursor-based streaming
 	timestamp time.Time
-	entryType swarmdv1.TranscriptEntryType
+	entryType forgedv1.TranscriptEntryType
 	content   string
 	metadata  map[string]string
 }
@@ -31,16 +31,16 @@ type transcriptEntry struct {
 // storedEvent represents an event stored for cursor-based replay.
 type storedEvent struct {
 	id    int64 // monotonic ID for cursor-based streaming
-	event *swarmdv1.Event
+	event *forgedv1.Event
 }
 
 // eventSubscriber represents a client subscribed to events.
 type eventSubscriber struct {
 	id           string
-	eventTypes   map[swarmdv1.EventType]bool // nil = all types
+	eventTypes   map[forgedv1.EventType]bool // nil = all types
 	agentIDs     map[string]bool             // nil = all agents
 	workspaceIDs map[string]bool             // nil = all workspaces
-	ch           chan *swarmdv1.Event
+	ch           chan *forgedv1.Event
 }
 
 const (
@@ -59,22 +59,22 @@ type agentInfo struct {
 	command     string
 	adapter     string
 	pid         int
-	state       swarmdv1.AgentState
+	state       forgedv1.AgentState
 	spawnedAt   time.Time
 	lastActive  time.Time
 	contentHash string
 
 	// Resource limits configured for this agent
-	resourceLimits *swarmdv1.ResourceLimits
+	resourceLimits *forgedv1.ResourceLimits
 
 	// Transcript storage
 	transcript     []transcriptEntry
 	transcriptNext int64 // next ID for new entries
 }
 
-// Server implements the SwarmdService gRPC interface.
+// Server implements the ForgedService gRPC interface.
 type Server struct {
-	swarmdv1.UnimplementedSwarmdServiceServer
+	forgedv1.UnimplementedForgedServiceServer
 
 	logger    zerolog.Logger
 	tmux      *tmux.Client
@@ -109,7 +109,7 @@ func WithVersion(version string) ServerOption {
 	}
 }
 
-// NewServer creates a new gRPC server for the swarmd service.
+// NewServer creates a new gRPC server for the forged service.
 func NewServer(logger zerolog.Logger, opts ...ServerOption) *Server {
 	hostname, _ := os.Hostname()
 
@@ -156,7 +156,7 @@ func (s *Server) ResourceMonitor() *ResourceMonitor {
 // =============================================================================
 
 // SpawnAgent creates a new agent in a tmux pane.
-func (s *Server) SpawnAgent(ctx context.Context, req *swarmdv1.SpawnAgentRequest) (*swarmdv1.SpawnAgentResponse, error) {
+func (s *Server) SpawnAgent(ctx context.Context, req *forgedv1.SpawnAgentRequest) (*forgedv1.SpawnAgentResponse, error) {
 	if req.AgentId == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
@@ -175,7 +175,7 @@ func (s *Server) SpawnAgent(ctx context.Context, req *swarmdv1.SpawnAgentRequest
 	// Determine session and window names
 	sessionName := req.SessionName
 	if sessionName == "" {
-		sessionName = fmt.Sprintf("swarm-%s", req.WorkspaceId)
+		sessionName = fmt.Sprintf("forge-%s", req.WorkspaceId)
 	}
 
 	workDir := req.WorkingDir
@@ -237,7 +237,7 @@ func (s *Server) SpawnAgent(ctx context.Context, req *swarmdv1.SpawnAgentRequest
 		command:        req.Command,
 		adapter:        req.Adapter,
 		pid:            pid,
-		state:          swarmdv1.AgentState_AGENT_STATE_STARTING,
+		state:          forgedv1.AgentState_AGENT_STATE_STARTING,
 		spawnedAt:      now,
 		lastActive:     now,
 		resourceLimits: req.ResourceLimits,
@@ -246,7 +246,7 @@ func (s *Server) SpawnAgent(ctx context.Context, req *swarmdv1.SpawnAgentRequest
 	s.agents[req.AgentId] = info
 
 	// Record spawn event in transcript
-	s.addTranscriptEntryLocked(info, swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_COMMAND, cmdLine, map[string]string{
+	s.addTranscriptEntryLocked(info, forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_COMMAND, cmdLine, map[string]string{
 		"event":     "spawn",
 		"adapter":   req.Adapter,
 		"workspace": req.WorkspaceId,
@@ -271,19 +271,19 @@ func (s *Server) SpawnAgent(ctx context.Context, req *swarmdv1.SpawnAgentRequest
 	go s.publishAgentStateChanged(
 		req.AgentId,
 		req.WorkspaceId,
-		swarmdv1.AgentState_AGENT_STATE_UNSPECIFIED,
-		swarmdv1.AgentState_AGENT_STATE_STARTING,
+		forgedv1.AgentState_AGENT_STATE_UNSPECIFIED,
+		forgedv1.AgentState_AGENT_STATE_STARTING,
 		"agent spawned",
 	)
 
-	return &swarmdv1.SpawnAgentResponse{
+	return &forgedv1.SpawnAgentResponse{
 		Agent:  s.agentToProto(info),
 		PaneId: paneID,
 	}, nil
 }
 
 // KillAgent terminates an agent's process.
-func (s *Server) KillAgent(ctx context.Context, req *swarmdv1.KillAgentRequest) (*swarmdv1.KillAgentResponse, error) {
+func (s *Server) KillAgent(ctx context.Context, req *forgedv1.KillAgentRequest) (*forgedv1.KillAgentResponse, error) {
 	if req.AgentId == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
@@ -313,7 +313,7 @@ func (s *Server) KillAgent(ctx context.Context, req *swarmdv1.KillAgentRequest) 
 	}
 
 	// Record state change in transcript before killing
-	s.addTranscriptEntryLocked(info, swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_STATE_CHANGE, "stopped", map[string]string{
+	s.addTranscriptEntryLocked(info, forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_STATE_CHANGE, "stopped", map[string]string{
 		"event":    "kill",
 		"force":    fmt.Sprintf("%v", req.Force),
 		"previous": info.state.String(),
@@ -325,7 +325,7 @@ func (s *Server) KillAgent(ctx context.Context, req *swarmdv1.KillAgentRequest) 
 	}
 
 	prevState := info.state
-	info.state = swarmdv1.AgentState_AGENT_STATE_STOPPED
+	info.state = forgedv1.AgentState_AGENT_STATE_STOPPED
 	workspaceID := info.workspaceID
 	delete(s.agents, req.AgentId)
 
@@ -348,15 +348,15 @@ func (s *Server) KillAgent(ctx context.Context, req *swarmdv1.KillAgentRequest) 
 		req.AgentId,
 		workspaceID,
 		prevState,
-		swarmdv1.AgentState_AGENT_STATE_STOPPED,
+		forgedv1.AgentState_AGENT_STATE_STOPPED,
 		reason,
 	)
 
-	return &swarmdv1.KillAgentResponse{Success: true}, nil
+	return &forgedv1.KillAgentResponse{Success: true}, nil
 }
 
 // SendInput sends keystrokes or text to an agent's pane.
-func (s *Server) SendInput(ctx context.Context, req *swarmdv1.SendInputRequest) (*swarmdv1.SendInputResponse, error) {
+func (s *Server) SendInput(ctx context.Context, req *forgedv1.SendInputRequest) (*forgedv1.SendInputResponse, error) {
 	if req.AgentId == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
@@ -396,20 +396,20 @@ func (s *Server) SendInput(ctx context.Context, req *swarmdv1.SendInputRequest) 
 			inputContent = fmt.Sprintf("[keys: %v] %s", req.Keys, req.Text)
 		}
 		if inputContent != "" {
-			s.addTranscriptEntryLocked(agent, swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_USER_INPUT, inputContent, nil)
+			s.addTranscriptEntryLocked(agent, forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_USER_INPUT, inputContent, nil)
 		}
 	}
 	s.mu.Unlock()
 
-	return &swarmdv1.SendInputResponse{Success: true}, nil
+	return &forgedv1.SendInputResponse{Success: true}, nil
 }
 
 // ListAgents returns all agents managed by this daemon.
-func (s *Server) ListAgents(ctx context.Context, req *swarmdv1.ListAgentsRequest) (*swarmdv1.ListAgentsResponse, error) {
+func (s *Server) ListAgents(ctx context.Context, req *forgedv1.ListAgentsRequest) (*forgedv1.ListAgentsResponse, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var agents []*swarmdv1.Agent
+	var agents []*forgedv1.Agent
 	for _, info := range s.agents {
 		// Apply workspace filter
 		if req.WorkspaceId != "" && info.workspaceID != req.WorkspaceId {
@@ -433,11 +433,11 @@ func (s *Server) ListAgents(ctx context.Context, req *swarmdv1.ListAgentsRequest
 		agents = append(agents, s.agentToProto(info))
 	}
 
-	return &swarmdv1.ListAgentsResponse{Agents: agents}, nil
+	return &forgedv1.ListAgentsResponse{Agents: agents}, nil
 }
 
 // GetAgent returns details for a specific agent.
-func (s *Server) GetAgent(ctx context.Context, req *swarmdv1.GetAgentRequest) (*swarmdv1.GetAgentResponse, error) {
+func (s *Server) GetAgent(ctx context.Context, req *forgedv1.GetAgentRequest) (*forgedv1.GetAgentResponse, error) {
 	if req.AgentId == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
@@ -450,7 +450,7 @@ func (s *Server) GetAgent(ctx context.Context, req *swarmdv1.GetAgentRequest) (*
 		return nil, status.Errorf(codes.NotFound, "agent %q not found", req.AgentId)
 	}
 
-	return &swarmdv1.GetAgentResponse{Agent: s.agentToProto(info)}, nil
+	return &forgedv1.GetAgentResponse{Agent: s.agentToProto(info)}, nil
 }
 
 // =============================================================================
@@ -461,7 +461,7 @@ func (s *Server) GetAgent(ctx context.Context, req *swarmdv1.GetAgentRequest) (*
 const defaultPollInterval = 500 * time.Millisecond
 
 // StreamPaneUpdates streams pane content changes in real-time.
-func (s *Server) StreamPaneUpdates(req *swarmdv1.StreamPaneUpdatesRequest, stream swarmdv1.SwarmdService_StreamPaneUpdatesServer) error {
+func (s *Server) StreamPaneUpdates(req *forgedv1.StreamPaneUpdatesRequest, stream forgedv1.ForgedService_StreamPaneUpdatesServer) error {
 	if req.AgentId == "" {
 		return status.Error(codes.InvalidArgument, "agent_id is required")
 	}
@@ -521,7 +521,7 @@ func (s *Server) StreamPaneUpdates(req *swarmdv1.StreamPaneUpdatesRequest, strea
 
 			// Only send if changed, or if this is the first response
 			if changed || lastHash == "" {
-				resp := &swarmdv1.StreamPaneUpdatesResponse{
+				resp := &forgedv1.StreamPaneUpdatesResponse{
 					AgentId:     req.AgentId,
 					ContentHash: currentHash,
 					Changed:     changed,
@@ -537,7 +537,7 @@ func (s *Server) StreamPaneUpdates(req *swarmdv1.StreamPaneUpdatesRequest, strea
 				resp.DetectedState = s.detectAgentState(content, info.adapter)
 
 				// Update agent's content hash, last active time, and record output
-				var prevState swarmdv1.AgentState
+				var prevState forgedv1.AgentState
 				var stateChanged bool
 				var workspaceID string
 
@@ -552,16 +552,16 @@ func (s *Server) StreamPaneUpdates(req *swarmdv1.StreamPaneUpdatesRequest, strea
 					if len(outputContent) > 4096 {
 						outputContent = outputContent[len(outputContent)-4096:]
 					}
-					s.addTranscriptEntryLocked(agent, swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_OUTPUT, outputContent, map[string]string{
+					s.addTranscriptEntryLocked(agent, forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_OUTPUT, outputContent, map[string]string{
 						"content_hash": currentHash,
 					})
 
-					if resp.DetectedState != swarmdv1.AgentState_AGENT_STATE_UNSPECIFIED {
+					if resp.DetectedState != forgedv1.AgentState_AGENT_STATE_UNSPECIFIED {
 						// Record state change if different
 						if agent.state != resp.DetectedState {
 							prevState = agent.state
 							stateChanged = true
-							s.addTranscriptEntryLocked(agent, swarmdv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_STATE_CHANGE, resp.DetectedState.String(), map[string]string{
+							s.addTranscriptEntryLocked(agent, forgedv1.TranscriptEntryType_TRANSCRIPT_ENTRY_TYPE_STATE_CHANGE, resp.DetectedState.String(), map[string]string{
 								"previous": agent.state.String(),
 							})
 						}
@@ -591,7 +591,7 @@ func (s *Server) StreamPaneUpdates(req *swarmdv1.StreamPaneUpdatesRequest, strea
 
 // detectAgentState analyzes pane content to determine agent state.
 // This is a simplified version - full adapters have more sophisticated detection.
-func (s *Server) detectAgentState(content, adapter string) swarmdv1.AgentState {
+func (s *Server) detectAgentState(content, adapter string) forgedv1.AgentState {
 	// Look for common patterns indicating different states
 	// These patterns are simplified - real adapters have more detailed detection
 
@@ -604,7 +604,7 @@ func (s *Server) detectAgentState(content, adapter string) swarmdv1.AgentState {
 		"approve",
 		"confirm",
 		"Allow?") {
-		return swarmdv1.AgentState_AGENT_STATE_WAITING_APPROVAL
+		return forgedv1.AgentState_AGENT_STATE_WAITING_APPROVAL
 	}
 
 	// Check for idle prompts (command line ready)
@@ -620,7 +620,7 @@ func (s *Server) detectAgentState(content, adapter string) swarmdv1.AgentState {
 		if len(lines) > 0 {
 			lastLine := lines[len(lines)-1]
 			if containsAny(lastLine, "$", "❯", "→", ">") {
-				return swarmdv1.AgentState_AGENT_STATE_IDLE
+				return forgedv1.AgentState_AGENT_STATE_IDLE
 			}
 		}
 	}
@@ -631,7 +631,7 @@ func (s *Server) detectAgentState(content, adapter string) swarmdv1.AgentState {
 		"Working...",
 		"Processing...",
 		"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏") {
-		return swarmdv1.AgentState_AGENT_STATE_RUNNING
+		return forgedv1.AgentState_AGENT_STATE_RUNNING
 	}
 
 	// Check for error indicators
@@ -643,11 +643,11 @@ func (s *Server) detectAgentState(content, adapter string) swarmdv1.AgentState {
 		"Fatal:",
 		"panic:",
 		"Panic:") {
-		return swarmdv1.AgentState_AGENT_STATE_FAILED
+		return forgedv1.AgentState_AGENT_STATE_FAILED
 	}
 
 	// Default to running if we can't determine
-	return swarmdv1.AgentState_AGENT_STATE_RUNNING
+	return forgedv1.AgentState_AGENT_STATE_RUNNING
 }
 
 // containsAny checks if s contains any of the substrings.
@@ -681,7 +681,7 @@ func splitLines(content string) []string {
 }
 
 // CapturePane returns the current content of an agent's pane.
-func (s *Server) CapturePane(ctx context.Context, req *swarmdv1.CapturePaneRequest) (*swarmdv1.CapturePaneResponse, error) {
+func (s *Server) CapturePane(ctx context.Context, req *forgedv1.CapturePaneRequest) (*forgedv1.CapturePaneResponse, error) {
 	if req.AgentId == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
@@ -711,7 +711,7 @@ func (s *Server) CapturePane(ctx context.Context, req *swarmdv1.CapturePaneReque
 	}
 	s.mu.Unlock()
 
-	return &swarmdv1.CapturePaneResponse{
+	return &forgedv1.CapturePaneResponse{
 		Content:     content,
 		ContentHash: hash,
 		CapturedAt:  timestamppb.Now(),
@@ -723,15 +723,15 @@ func (s *Server) CapturePane(ctx context.Context, req *swarmdv1.CapturePaneReque
 // =============================================================================
 
 // GetStatus returns daemon health and resource usage.
-func (s *Server) GetStatus(ctx context.Context, req *swarmdv1.GetStatusRequest) (*swarmdv1.GetStatusResponse, error) {
+func (s *Server) GetStatus(ctx context.Context, req *forgedv1.GetStatusRequest) (*forgedv1.GetStatusResponse, error) {
 	s.mu.RLock()
 	agentCount := len(s.agents)
 	s.mu.RUnlock()
 
 	uptime := time.Since(s.startedAt)
 
-	return &swarmdv1.GetStatusResponse{
-		Status: &swarmdv1.DaemonStatus{
+	return &forgedv1.GetStatusResponse{
+		Status: &forgedv1.DaemonStatus{
 			Version:    s.version,
 			Hostname:   s.hostname,
 			StartedAt:  timestamppb.New(s.startedAt),
@@ -744,8 +744,8 @@ func (s *Server) GetStatus(ctx context.Context, req *swarmdv1.GetStatusRequest) 
 }
 
 // Ping is a simple health check.
-func (s *Server) Ping(ctx context.Context, req *swarmdv1.PingRequest) (*swarmdv1.PingResponse, error) {
-	return &swarmdv1.PingResponse{
+func (s *Server) Ping(ctx context.Context, req *forgedv1.PingRequest) (*forgedv1.PingResponse, error) {
+	return &forgedv1.PingResponse{
 		Timestamp: timestamppb.Now(),
 		Version:   s.version,
 	}, nil
@@ -755,8 +755,8 @@ func (s *Server) Ping(ctx context.Context, req *swarmdv1.PingRequest) (*swarmdv1
 // Helpers
 // =============================================================================
 
-func (s *Server) agentToProto(info *agentInfo) *swarmdv1.Agent {
-	return &swarmdv1.Agent{
+func (s *Server) agentToProto(info *agentInfo) *forgedv1.Agent {
+	return &forgedv1.Agent{
 		Id:             info.id,
 		WorkspaceId:    info.workspaceID,
 		State:          info.state,
@@ -770,22 +770,22 @@ func (s *Server) agentToProto(info *agentInfo) *swarmdv1.Agent {
 	}
 }
 
-func (s *Server) getResourceUsage() *swarmdv1.ResourceUsage {
+func (s *Server) getResourceUsage() *forgedv1.ResourceUsage {
 	var rusage syscall.Rusage
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &rusage); err != nil {
-		return &swarmdv1.ResourceUsage{}
+		return &forgedv1.ResourceUsage{}
 	}
 
-	return &swarmdv1.ResourceUsage{
+	return &forgedv1.ResourceUsage{
 		MemoryBytes: rusage.Maxrss * 1024, // maxrss is in KB on Linux
 	}
 }
 
-func (s *Server) getHealthStatus() *swarmdv1.HealthStatus {
-	checks := []*swarmdv1.HealthCheck{
+func (s *Server) getHealthStatus() *forgedv1.HealthStatus {
+	checks := []*forgedv1.HealthCheck{
 		{
 			Name:      "tmux",
-			Health:    swarmdv1.Health_HEALTH_HEALTHY,
+			Health:    forgedv1.Health_HEALTH_HEALTHY,
 			Message:   "tmux available",
 			LastCheck: timestamppb.Now(),
 		},
@@ -797,23 +797,23 @@ func (s *Server) getHealthStatus() *swarmdv1.HealthStatus {
 
 	_, err := s.tmux.ListSessions(ctx)
 	if err != nil {
-		checks[0].Health = swarmdv1.Health_HEALTH_UNHEALTHY
+		checks[0].Health = forgedv1.Health_HEALTH_UNHEALTHY
 		checks[0].Message = fmt.Sprintf("tmux error: %v", err)
 	}
 
 	// Determine overall health
-	overallHealth := swarmdv1.Health_HEALTH_HEALTHY
+	overallHealth := forgedv1.Health_HEALTH_HEALTHY
 	for _, check := range checks {
-		if check.Health == swarmdv1.Health_HEALTH_UNHEALTHY {
-			overallHealth = swarmdv1.Health_HEALTH_UNHEALTHY
+		if check.Health == forgedv1.Health_HEALTH_UNHEALTHY {
+			overallHealth = forgedv1.Health_HEALTH_UNHEALTHY
 			break
 		}
-		if check.Health == swarmdv1.Health_HEALTH_DEGRADED && overallHealth == swarmdv1.Health_HEALTH_HEALTHY {
-			overallHealth = swarmdv1.Health_HEALTH_DEGRADED
+		if check.Health == forgedv1.Health_HEALTH_DEGRADED && overallHealth == forgedv1.Health_HEALTH_HEALTHY {
+			overallHealth = forgedv1.Health_HEALTH_DEGRADED
 		}
 	}
 
-	return &swarmdv1.HealthStatus{
+	return &forgedv1.HealthStatus{
 		Health: overallHealth,
 		Checks: checks,
 	}
@@ -825,7 +825,7 @@ func (s *Server) getHealthStatus() *swarmdv1.HealthStatus {
 
 // addTranscriptEntryLocked adds a transcript entry to an agent's transcript.
 // The caller must hold the write lock.
-func (s *Server) addTranscriptEntryLocked(info *agentInfo, entryType swarmdv1.TranscriptEntryType, content string, metadata map[string]string) {
+func (s *Server) addTranscriptEntryLocked(info *agentInfo, entryType forgedv1.TranscriptEntryType, content string, metadata map[string]string) {
 	entry := transcriptEntry{
 		id:        info.transcriptNext,
 		timestamp: time.Now(),
@@ -838,7 +838,7 @@ func (s *Server) addTranscriptEntryLocked(info *agentInfo, entryType swarmdv1.Tr
 }
 
 // addTranscriptEntry adds a transcript entry (acquires lock).
-func (s *Server) addTranscriptEntry(agentID string, entryType swarmdv1.TranscriptEntryType, content string, metadata map[string]string) {
+func (s *Server) addTranscriptEntry(agentID string, entryType forgedv1.TranscriptEntryType, content string, metadata map[string]string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -850,7 +850,7 @@ func (s *Server) addTranscriptEntry(agentID string, entryType swarmdv1.Transcrip
 }
 
 // GetTranscript retrieves the full transcript for an agent.
-func (s *Server) GetTranscript(ctx context.Context, req *swarmdv1.GetTranscriptRequest) (*swarmdv1.GetTranscriptResponse, error) {
+func (s *Server) GetTranscript(ctx context.Context, req *forgedv1.GetTranscriptRequest) (*forgedv1.GetTranscriptResponse, error) {
 	if req.AgentId == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
@@ -890,7 +890,7 @@ func (s *Server) GetTranscript(ctx context.Context, req *swarmdv1.GetTranscriptR
 	}
 
 	// Convert to proto
-	protoEntries := make([]*swarmdv1.TranscriptEntry, len(filtered))
+	protoEntries := make([]*forgedv1.TranscriptEntry, len(filtered))
 	for i, e := range filtered {
 		protoEntries[i] = s.transcriptEntryToProto(&e)
 	}
@@ -900,7 +900,7 @@ func (s *Server) GetTranscript(ctx context.Context, req *swarmdv1.GetTranscriptR
 		nextCursor = fmt.Sprintf("%d", filtered[len(filtered)-1].id+1)
 	}
 
-	return &swarmdv1.GetTranscriptResponse{
+	return &forgedv1.GetTranscriptResponse{
 		AgentId:    req.AgentId,
 		Entries:    protoEntries,
 		HasMore:    hasMore,
@@ -909,7 +909,7 @@ func (s *Server) GetTranscript(ctx context.Context, req *swarmdv1.GetTranscriptR
 }
 
 // StreamTranscript streams transcript updates in real-time.
-func (s *Server) StreamTranscript(req *swarmdv1.StreamTranscriptRequest, stream swarmdv1.SwarmdService_StreamTranscriptServer) error {
+func (s *Server) StreamTranscript(req *forgedv1.StreamTranscriptRequest, stream forgedv1.ForgedService_StreamTranscriptServer) error {
 	if req.AgentId == "" {
 		return status.Error(codes.InvalidArgument, "agent_id is required")
 	}
@@ -959,7 +959,7 @@ func (s *Server) StreamTranscript(req *swarmdv1.StreamTranscriptRequest, stream 
 
 			if len(newEntries) > 0 {
 				// Convert to proto
-				protoEntries := make([]*swarmdv1.TranscriptEntry, len(newEntries))
+				protoEntries := make([]*forgedv1.TranscriptEntry, len(newEntries))
 				for i, e := range newEntries {
 					protoEntries[i] = s.transcriptEntryToProto(&e)
 				}
@@ -967,7 +967,7 @@ func (s *Server) StreamTranscript(req *swarmdv1.StreamTranscriptRequest, stream 
 				// Update cursor for next iteration
 				cursor = newEntries[len(newEntries)-1].id + 1
 
-				resp := &swarmdv1.StreamTranscriptResponse{
+				resp := &forgedv1.StreamTranscriptResponse{
 					Entries: protoEntries,
 					Cursor:  fmt.Sprintf("%d", cursor),
 				}
@@ -982,8 +982,8 @@ func (s *Server) StreamTranscript(req *swarmdv1.StreamTranscriptRequest, stream 
 }
 
 // transcriptEntryToProto converts a transcriptEntry to proto format.
-func (s *Server) transcriptEntryToProto(e *transcriptEntry) *swarmdv1.TranscriptEntry {
-	return &swarmdv1.TranscriptEntry{
+func (s *Server) transcriptEntryToProto(e *transcriptEntry) *forgedv1.TranscriptEntry {
+	return &forgedv1.TranscriptEntry{
 		Timestamp: timestamppb.New(e.timestamp),
 		Type:      e.entryType,
 		Content:   e.content,
@@ -1008,11 +1008,11 @@ func parseInt64(s string) (int64, error) {
 // =============================================================================
 
 // StreamEvents provides a real-time stream of daemon events with cursor-based replay.
-func (s *Server) StreamEvents(req *swarmdv1.StreamEventsRequest, stream swarmdv1.SwarmdService_StreamEventsServer) error {
+func (s *Server) StreamEvents(req *forgedv1.StreamEventsRequest, stream forgedv1.ForgedService_StreamEventsServer) error {
 	// Build filter sets from request
-	var eventTypes map[swarmdv1.EventType]bool
+	var eventTypes map[forgedv1.EventType]bool
 	if len(req.Types) > 0 {
-		eventTypes = make(map[swarmdv1.EventType]bool, len(req.Types))
+		eventTypes = make(map[forgedv1.EventType]bool, len(req.Types))
 		for _, t := range req.Types {
 			eventTypes[t] = true
 		}
@@ -1049,7 +1049,7 @@ func (s *Server) StreamEvents(req *swarmdv1.StreamEventsRequest, stream swarmdv1
 		eventTypes:   eventTypes,
 		agentIDs:     agentIDs,
 		workspaceIDs: workspaceIDs,
-		ch:           make(chan *swarmdv1.Event, eventChannelBuffer),
+		ch:           make(chan *forgedv1.Event, eventChannelBuffer),
 	}
 
 	s.eventsMu.Lock()
@@ -1058,7 +1058,7 @@ func (s *Server) StreamEvents(req *swarmdv1.StreamEventsRequest, stream swarmdv1
 	s.eventSubs[sub.id] = sub
 
 	// Replay events from cursor if provided
-	var eventsToReplay []*swarmdv1.Event
+	var eventsToReplay []*forgedv1.Event
 	if cursor > 0 {
 		for _, stored := range s.events {
 			if stored.id >= cursor && s.eventMatchesFilter(stored.event, sub) {
@@ -1084,7 +1084,7 @@ func (s *Server) StreamEvents(req *swarmdv1.StreamEventsRequest, stream swarmdv1
 
 	// Send replayed events first
 	for _, event := range eventsToReplay {
-		if err := stream.Send(&swarmdv1.StreamEventsResponse{Event: event}); err != nil {
+		if err := stream.Send(&forgedv1.StreamEventsResponse{Event: event}); err != nil {
 			s.logger.Debug().Err(err).Str("subscriber_id", sub.id).Msg("failed to send replayed event")
 			return err
 		}
@@ -1104,7 +1104,7 @@ func (s *Server) StreamEvents(req *swarmdv1.StreamEventsRequest, stream swarmdv1
 			if !ok {
 				return nil // Channel closed
 			}
-			if err := stream.Send(&swarmdv1.StreamEventsResponse{Event: event}); err != nil {
+			if err := stream.Send(&forgedv1.StreamEventsResponse{Event: event}); err != nil {
 				s.logger.Debug().Err(err).Str("subscriber_id", sub.id).Msg("failed to send event")
 				return err
 			}
@@ -1113,7 +1113,7 @@ func (s *Server) StreamEvents(req *swarmdv1.StreamEventsRequest, stream swarmdv1
 }
 
 // eventMatchesFilter checks if an event matches the subscriber's filters.
-func (s *Server) eventMatchesFilter(event *swarmdv1.Event, sub *eventSubscriber) bool {
+func (s *Server) eventMatchesFilter(event *forgedv1.Event, sub *eventSubscriber) bool {
 	// Check event type filter
 	if sub.eventTypes != nil && !sub.eventTypes[event.Type] {
 		return false
@@ -1133,7 +1133,7 @@ func (s *Server) eventMatchesFilter(event *swarmdv1.Event, sub *eventSubscriber)
 }
 
 // publishEvent stores an event and broadcasts it to all matching subscribers.
-func (s *Server) publishEvent(event *swarmdv1.Event) {
+func (s *Server) publishEvent(event *forgedv1.Event) {
 	s.eventsMu.Lock()
 	defer s.eventsMu.Unlock()
 
@@ -1176,14 +1176,14 @@ func (s *Server) publishEvent(event *swarmdv1.Event) {
 }
 
 // publishAgentStateChanged publishes an agent state changed event.
-func (s *Server) publishAgentStateChanged(agentID, workspaceID string, prevState, newState swarmdv1.AgentState, reason string) {
-	s.publishEvent(&swarmdv1.Event{
-		Type:        swarmdv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED,
+func (s *Server) publishAgentStateChanged(agentID, workspaceID string, prevState, newState forgedv1.AgentState, reason string) {
+	s.publishEvent(&forgedv1.Event{
+		Type:        forgedv1.EventType_EVENT_TYPE_AGENT_STATE_CHANGED,
 		Timestamp:   timestamppb.Now(),
 		AgentId:     agentID,
 		WorkspaceId: workspaceID,
-		Payload: &swarmdv1.Event_AgentStateChanged{
-			AgentStateChanged: &swarmdv1.AgentStateChangedEvent{
+		Payload: &forgedv1.Event_AgentStateChanged{
+			AgentStateChanged: &forgedv1.AgentStateChangedEvent{
 				PreviousState: prevState,
 				NewState:      newState,
 				Reason:        reason,
@@ -1194,13 +1194,13 @@ func (s *Server) publishAgentStateChanged(agentID, workspaceID string, prevState
 
 // publishError publishes an error event.
 func (s *Server) publishError(agentID, workspaceID, code, message string, recoverable bool) {
-	s.publishEvent(&swarmdv1.Event{
-		Type:        swarmdv1.EventType_EVENT_TYPE_ERROR,
+	s.publishEvent(&forgedv1.Event{
+		Type:        forgedv1.EventType_EVENT_TYPE_ERROR,
 		Timestamp:   timestamppb.Now(),
 		AgentId:     agentID,
 		WorkspaceId: workspaceID,
-		Payload: &swarmdv1.Event_Error{
-			Error: &swarmdv1.ErrorEvent{
+		Payload: &forgedv1.Event_Error{
+			Error: &forgedv1.ErrorEvent{
 				Code:        code,
 				Message:     message,
 				Recoverable: recoverable,
@@ -1211,13 +1211,13 @@ func (s *Server) publishError(agentID, workspaceID, code, message string, recove
 
 // publishPaneContentChanged publishes a pane content changed event.
 func (s *Server) publishPaneContentChanged(agentID, workspaceID, contentHash string, linesChanged int32) {
-	s.publishEvent(&swarmdv1.Event{
-		Type:        swarmdv1.EventType_EVENT_TYPE_PANE_CONTENT_CHANGED,
+	s.publishEvent(&forgedv1.Event{
+		Type:        forgedv1.EventType_EVENT_TYPE_PANE_CONTENT_CHANGED,
 		Timestamp:   timestamppb.Now(),
 		AgentId:     agentID,
 		WorkspaceId: workspaceID,
-		Payload: &swarmdv1.Event_PaneContentChanged{
-			PaneContentChanged: &swarmdv1.PaneContentChangedEvent{
+		Payload: &forgedv1.Event_PaneContentChanged{
+			PaneContentChanged: &forgedv1.PaneContentChangedEvent{
 				ContentHash:  contentHash,
 				LinesChanged: linesChanged,
 			},
@@ -1227,12 +1227,12 @@ func (s *Server) publishPaneContentChanged(agentID, workspaceID, contentHash str
 
 // publishResourceViolation publishes a resource violation event.
 func (s *Server) publishResourceViolation(v ResourceViolation) {
-	s.publishEvent(&swarmdv1.Event{
-		Type:        swarmdv1.EventType_EVENT_TYPE_RESOURCE_VIOLATION,
+	s.publishEvent(&forgedv1.Event{
+		Type:        forgedv1.EventType_EVENT_TYPE_RESOURCE_VIOLATION,
 		Timestamp:   timestamppb.Now(),
 		AgentId:     v.AgentID,
 		WorkspaceId: v.WorkspaceID,
-		Payload: &swarmdv1.Event_ResourceViolation{
+		Payload: &forgedv1.Event_ResourceViolation{
 			ResourceViolation: v.ToProtoViolationEvent(),
 		},
 	})

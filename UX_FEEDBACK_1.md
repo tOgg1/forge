@@ -1,8 +1,8 @@
-Below is a **cohesive, “rigid” improvement plan** that’s grounded in what your repo already declares itself to be: **a control plane for running/supervising AI coding agents across repos and servers, via SSH + tmux, with optional per-node daemon (`swarmd`)**, backed by a **SQLite + event log state engine**.
+Below is a **cohesive, “rigid” improvement plan** that’s grounded in what your repo already declares itself to be: **a control plane for running/supervising AI coding agents across repos and servers, via SSH + tmux, with optional per-node daemon (`forged`)**, backed by a **SQLite + event log state engine**.
 
 I’m also incorporating the key constraints and direction from your transcript:
 
-* **Swarm is the worker layer** (you don’t want “coordinator agents” inside this repo).
+* **Forge is the worker layer** (you don’t want “coordinator agents” inside this repo).
 * You want **much tighter CASS integration** (session search + cass-memory style learning).
 * You’re considering replacing **MCP Agent Mail** with a **non‑MCP, cross‑server messaging + file-locking layer** that agents can actually use.
 
@@ -15,10 +15,10 @@ One note: I can see your top-level structure, README, and bootstrap installer (a
 From your README and repo layout, the system is already shaped like this:
 
 * **Control plane**: TUI + CLI + scheduler sitting over a **State Engine (SQLite + event log)**.
-* **Nodes**: local/remote machines controlled via **SSH and tmux**, plus an optional per-node daemon `swarmd` for “Mode B” better performance/real-time ops.
+* **Nodes**: local/remote machines controlled via **SSH and tmux**, plus an optional per-node daemon `forged` for “Mode B” better performance/real-time ops.
 * **Core concepts** are already defined and stable: `Node`, `Workspace`, `Agent`, `Queue`.
 * You ship a **bootstrap installer** that downloads `bootstrap.sh` + checksum and runs it as root (with verification).
-* You’ve already committed to an RPC boundary: you have `proto/swarmd/v1` and `gen/swarmd/v1`, which implies you’re on track for a clean daemon API boundary.
+* You’ve already committed to an RPC boundary: you have `proto/forged/v1` and `gen/forged/v1`, which implies you’re on track for a clean daemon API boundary.
 
 That’s a good base. The next improvements should be about **hardening, standardizing interfaces, and making integration (agents + CASS + mail/locks) “real” rather than heuristic**.
 
@@ -81,7 +81,7 @@ Without this, you’ll keep patching “minor issues” forever because every bu
 Instead of running `claude` / `codex` / `opencode` directly in the tmux pane, run:
 
 ```
-tmux pane command: swarm-agent-runner --workspace W --agent A -- <actual agent cli...>
+tmux pane command: forge-agent-runner --workspace W --agent A -- <actual agent cli...>
 ```
 
 **What the runner does**
@@ -102,7 +102,7 @@ tmux pane command: swarm-agent-runner --workspace W --agent A -- <actual agent c
 
 **Deliverables**
 
-* `internal/agent/runner` package + a `cmd/swarm-agent-runner` binary.
+* `internal/agent/runner` package + a `cmd/forge-agent-runner` binary.
 * A minimal integration test that spins up:
 
   * a fake “agent CLI” (a script that prints prompts + simulates “busy/idle”)
@@ -132,10 +132,10 @@ Right now you likely have a bunch of tmux/ssh operations sprinkled around.
    * “create session” checks existence
    * “create pane” checks target exists
    * “inject message” includes verification step if possible (or at least logs the exact send-keys)
-3. Add `swarm doctor`:
+3. Add `forge doctor`:
 
    * verifies tmux installed, versions ok
-   * verifies `swarmd` reachable if in daemon mode
+   * verifies `forged` reachable if in daemon mode
    * verifies DB migrations applied
 
 **Outcome**
@@ -171,31 +171,31 @@ This pays off later when your “coordinator layer” starts interacting via CLI
 
 ## 4) Rolling your own mail + file locking layer (and how agents can use it)
 
-You’re asking the right question: **“how can agents use it outside the swarm codebase?”**
+You’re asking the right question: **“how can agents use it outside the forge codebase?”**
 
 The answer is: **give agents a stable tool surface**. Agents don’t need to import Go packages; they need something they can call.
 
-### The right shape: “Swarm Mail v2” as a local tool + API
+### The right shape: “Forge Mail v2” as a local tool + API
 
 **Design principle**
 
 * **Agents interact via a CLI tool** available in PATH on the node.
-* The CLI tool talks to local `swarmd` (unix socket) or remote `swarmd` (grpc) depending on workspace config.
+* The CLI tool talks to local `forged` (unix socket) or remote `forged` (grpc) depending on workspace config.
 * The storage is your SQLite (or per-workspace sqlite) so it’s durable and queryable.
 
 ### Minimal primitives you need (don’t overbuild)
 
 #### Messaging
 
-* `swarm mail send --to <agent|workspace|broadcast> --body <...> [--thread <id>]`
-* `swarm mail inbox --agent <id> --json`
-* `swarm mail ack --agent <id> --msg <id>`
+* `forge mail send --to <agent|workspace|broadcast> --body <...> [--thread <id>]`
+* `forge mail inbox --agent <id> --json`
+* `forge mail ack --agent <id> --msg <id>`
 
 #### File reservations (locks)
 
-* `swarm lock acquire --workspace W --agent A --path path --ttl 20m --reason "..."`
-* `swarm lock release --workspace W --agent A --path path`
-* `swarm lock ls --workspace W --json`
+* `forge lock acquire --workspace W --agent A --path path --ttl 20m --reason "..."`
+* `forge lock release --workspace W --agent A --path path`
+* `forge lock ls --workspace W --json`
 
 **Critical behavior**
 
@@ -207,8 +207,8 @@ The answer is: **give agents a stable tool surface**. Agents don’t need to imp
 * In OpenCode: you can implement it as a tool/plugin (best UX).
 * In Claude Code / Codex / Gemini CLIs: you can instruct the agent to run shell commands:
 
-  * `swarm mail inbox --json`
-  * `swarm lock acquire ...`
+  * `forge mail inbox --json`
+  * `forge lock acquire ...`
 
 Even if a CLI is closed, almost all of them allow shell execution in some form. Your orchestration layer can also call this tool on behalf of an agent when needed.
 
@@ -228,7 +228,7 @@ Your instinct is correct: **OpenCode is your best “first-class” integration 
 
 It’s this:
 
-> You can add a structured event stream and tool hooks so Swarm doesn’t have to guess.
+> You can add a structured event stream and tool hooks so Forge doesn’t have to guess.
 
 Concrete recommendation:
 
@@ -259,22 +259,22 @@ You want strict integration here. That means:
 
 ### Two directions of flow
 
-#### A) Swarm → CASS (write/search index)
+#### A) Forge → CASS (write/search index)
 
 * Every agent session should produce:
 
   * a durable transcript/log file location
   * metadata: repo, workspace, node, agent type, start/end, outcome
 * Provide a command:
-  `swarm cass index --workspace W --agent A --session <id>`
+  `forge cass index --workspace W --agent A --session <id>`
 
-#### B) CASS → Swarm (context injection)
+#### B) CASS → Forge (context injection)
 
 * Before dispatching a new task (or even before queueing), your coordinator layer should be able to ask:
 
-  * `swarm cass search --query "..."`
-  * `swarm cass context --task "..."`
-* Swarm can expose these as CLI calls returning JSON, so the upper layer can decide what to feed into agents.
+  * `forge cass search --query "..."`
+  * `forge cass context --task "..."`
+* Forge can expose these as CLI calls returning JSON, so the upper layer can decide what to feed into agents.
 
 ### cass-memory style learning loop (minimal viable)
 
@@ -354,15 +354,15 @@ If you want a tight iteration cycle, do exactly this sequence:
 
    * Start with:
 
-     * `swarm cass search --json`
-     * `swarm cass index session`
+     * `forge cass search --json`
+     * `forge cass index session`
    * Don’t overcomplicate; just make it reliable and scriptable.
 
 ---
 
 ## 9) One naming/packaging suggestion (because it affects UX + CLI)
 
-You noted earlier “Swarm” is generic. I agree. If you rename, do it *before* the CLI becomes widely used, because command names fossilize.
+You noted earlier “Forge” is generic. I agree. If you rename, do it *before* the CLI becomes widely used, because command names fossilize.
 
 My practical naming heuristic:
 

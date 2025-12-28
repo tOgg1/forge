@@ -1,5 +1,5 @@
-// Package main is the entry point for the swarmd daemon.
-// swarmd runs on each node to provide real-time agent orchestration,
+// Package main is the entry point for the forged daemon.
+// forged runs on each node to provide real-time agent orchestration,
 // screen capture, and event streaming to the control plane.
 package main
 
@@ -13,7 +13,7 @@ import (
 
 	"github.com/tOgg1/forge/internal/config"
 	"github.com/tOgg1/forge/internal/logging"
-	"github.com/tOgg1/forge/internal/swarmd"
+	"github.com/tOgg1/forge/internal/forged"
 )
 
 // Version information (set by goreleaser)
@@ -24,12 +24,12 @@ var (
 )
 
 func main() {
-	hostname := flag.String("hostname", swarmd.DefaultHost, "hostname to listen on")
-	port := flag.Int("port", swarmd.DefaultPort, "port to listen on")
-	configFile := flag.String("config", "", "config file (default is $HOME/.config/swarm/config.yaml)")
+	hostname := flag.String("hostname", forged.DefaultHost, "hostname to listen on")
+	port := flag.Int("port", forged.DefaultPort, "port to listen on")
+	configFile := flag.String("config", "", "config file (default is $HOME/.config/forge/config.yaml)")
 	logLevel := flag.String("log-level", "", "override logging level (debug, info, warn, error)")
 	logFormat := flag.String("log-format", "", "override logging format (json, console)")
-	defaultDisk := swarmd.DefaultDiskMonitorConfig()
+	defaultDisk := forged.DefaultDiskMonitorConfig()
 	diskPath := flag.String("disk-path", "", "filesystem path to monitor for disk usage")
 	diskWarn := flag.Float64("disk-warn", defaultDisk.WarnPercent, "disk usage percent to warn at")
 	diskCritical := flag.Float64("disk-critical", defaultDisk.CriticalPercent, "disk usage percent to treat as critical")
@@ -55,7 +55,7 @@ func main() {
 		Format:       cfg.Logging.Format,
 		EnableCaller: cfg.Logging.EnableCaller,
 	})
-	logger := logging.Component("swarmd")
+	logger := logging.Component("forged")
 
 	if err := cfg.EnsureDirectories(); err != nil {
 		logger.Warn().Err(err).Msg("failed to create directories")
@@ -69,12 +69,12 @@ func main() {
 		Str("version", version).
 		Str("commit", commit).
 		Str("built", date).
-		Msg("swarmd starting")
+		Msg("forged starting")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	diskConfig := swarmd.DefaultDiskMonitorConfig()
+	diskConfig := forged.DefaultDiskMonitorConfig()
 	if cfg.Global.DataDir != "" {
 		diskConfig.Path = cfg.Global.DataDir
 	}
@@ -86,18 +86,18 @@ func main() {
 	diskConfig.ResumePercent = *diskResume
 	diskConfig.PauseAgents = *diskPause
 
-	daemon, err := swarmd.New(cfg, logger, swarmd.Options{
+	daemon, err := forged.New(cfg, logger, forged.Options{
 		Hostname:          *hostname,
 		Port:              *port,
 		DiskMonitorConfig: &diskConfig,
 	})
 	if err != nil {
-		logger.Error().Err(err).Msg("failed to initialize swarmd")
+		logger.Error().Err(err).Msg("failed to initialize forged")
 		os.Exit(1)
 	}
 
 	if err := daemon.Run(ctx); err != nil {
-		logger.Error().Err(err).Msg("swarmd exited with error")
+		logger.Error().Err(err).Msg("forged exited with error")
 		os.Exit(1)
 	}
 }

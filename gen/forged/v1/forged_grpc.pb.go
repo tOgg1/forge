@@ -5,9 +5,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             (unknown)
-// source: swarmd/v1/swarmd.proto
+// source: forged/v1/forged.proto
 
-package swarmdv1
+package forgedv1
 
 import (
 	context "context"
@@ -22,24 +22,24 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SwarmdService_SpawnAgent_FullMethodName        = "/swarmd.v1.SwarmdService/SpawnAgent"
-	SwarmdService_KillAgent_FullMethodName         = "/swarmd.v1.SwarmdService/KillAgent"
-	SwarmdService_SendInput_FullMethodName         = "/swarmd.v1.SwarmdService/SendInput"
-	SwarmdService_ListAgents_FullMethodName        = "/swarmd.v1.SwarmdService/ListAgents"
-	SwarmdService_GetAgent_FullMethodName          = "/swarmd.v1.SwarmdService/GetAgent"
-	SwarmdService_CapturePane_FullMethodName       = "/swarmd.v1.SwarmdService/CapturePane"
-	SwarmdService_StreamPaneUpdates_FullMethodName = "/swarmd.v1.SwarmdService/StreamPaneUpdates"
-	SwarmdService_StreamEvents_FullMethodName      = "/swarmd.v1.SwarmdService/StreamEvents"
-	SwarmdService_GetTranscript_FullMethodName     = "/swarmd.v1.SwarmdService/GetTranscript"
-	SwarmdService_StreamTranscript_FullMethodName  = "/swarmd.v1.SwarmdService/StreamTranscript"
-	SwarmdService_GetStatus_FullMethodName         = "/swarmd.v1.SwarmdService/GetStatus"
-	SwarmdService_Ping_FullMethodName              = "/swarmd.v1.SwarmdService/Ping"
+	ForgedService_SpawnAgent_FullMethodName        = "/forged.v1.ForgedService/SpawnAgent"
+	ForgedService_KillAgent_FullMethodName         = "/forged.v1.ForgedService/KillAgent"
+	ForgedService_SendInput_FullMethodName         = "/forged.v1.ForgedService/SendInput"
+	ForgedService_ListAgents_FullMethodName        = "/forged.v1.ForgedService/ListAgents"
+	ForgedService_GetAgent_FullMethodName          = "/forged.v1.ForgedService/GetAgent"
+	ForgedService_CapturePane_FullMethodName       = "/forged.v1.ForgedService/CapturePane"
+	ForgedService_StreamPaneUpdates_FullMethodName = "/forged.v1.ForgedService/StreamPaneUpdates"
+	ForgedService_StreamEvents_FullMethodName      = "/forged.v1.ForgedService/StreamEvents"
+	ForgedService_GetTranscript_FullMethodName     = "/forged.v1.ForgedService/GetTranscript"
+	ForgedService_StreamTranscript_FullMethodName  = "/forged.v1.ForgedService/StreamTranscript"
+	ForgedService_GetStatus_FullMethodName         = "/forged.v1.ForgedService/GetStatus"
+	ForgedService_Ping_FullMethodName              = "/forged.v1.ForgedService/Ping"
 )
 
-// SwarmdServiceClient is the client API for SwarmdService service.
+// ForgedServiceClient is the client API for ForgedService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type SwarmdServiceClient interface {
+type ForgedServiceClient interface {
 	// SpawnAgent creates a new agent in a tmux pane.
 	SpawnAgent(ctx context.Context, in *SpawnAgentRequest, opts ...grpc.CallOption) (*SpawnAgentResponse, error)
 	// KillAgent terminates an agent's process.
@@ -68,77 +68,77 @@ type SwarmdServiceClient interface {
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
 }
 
-type swarmdServiceClient struct {
+type forgedServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewSwarmdServiceClient(cc grpc.ClientConnInterface) SwarmdServiceClient {
-	return &swarmdServiceClient{cc}
+func NewForgedServiceClient(cc grpc.ClientConnInterface) ForgedServiceClient {
+	return &forgedServiceClient{cc}
 }
 
-func (c *swarmdServiceClient) SpawnAgent(ctx context.Context, in *SpawnAgentRequest, opts ...grpc.CallOption) (*SpawnAgentResponse, error) {
+func (c *forgedServiceClient) SpawnAgent(ctx context.Context, in *SpawnAgentRequest, opts ...grpc.CallOption) (*SpawnAgentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SpawnAgentResponse)
-	err := c.cc.Invoke(ctx, SwarmdService_SpawnAgent_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ForgedService_SpawnAgent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *swarmdServiceClient) KillAgent(ctx context.Context, in *KillAgentRequest, opts ...grpc.CallOption) (*KillAgentResponse, error) {
+func (c *forgedServiceClient) KillAgent(ctx context.Context, in *KillAgentRequest, opts ...grpc.CallOption) (*KillAgentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(KillAgentResponse)
-	err := c.cc.Invoke(ctx, SwarmdService_KillAgent_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ForgedService_KillAgent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *swarmdServiceClient) SendInput(ctx context.Context, in *SendInputRequest, opts ...grpc.CallOption) (*SendInputResponse, error) {
+func (c *forgedServiceClient) SendInput(ctx context.Context, in *SendInputRequest, opts ...grpc.CallOption) (*SendInputResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SendInputResponse)
-	err := c.cc.Invoke(ctx, SwarmdService_SendInput_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ForgedService_SendInput_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *swarmdServiceClient) ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error) {
+func (c *forgedServiceClient) ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListAgentsResponse)
-	err := c.cc.Invoke(ctx, SwarmdService_ListAgents_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ForgedService_ListAgents_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *swarmdServiceClient) GetAgent(ctx context.Context, in *GetAgentRequest, opts ...grpc.CallOption) (*GetAgentResponse, error) {
+func (c *forgedServiceClient) GetAgent(ctx context.Context, in *GetAgentRequest, opts ...grpc.CallOption) (*GetAgentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetAgentResponse)
-	err := c.cc.Invoke(ctx, SwarmdService_GetAgent_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ForgedService_GetAgent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *swarmdServiceClient) CapturePane(ctx context.Context, in *CapturePaneRequest, opts ...grpc.CallOption) (*CapturePaneResponse, error) {
+func (c *forgedServiceClient) CapturePane(ctx context.Context, in *CapturePaneRequest, opts ...grpc.CallOption) (*CapturePaneResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CapturePaneResponse)
-	err := c.cc.Invoke(ctx, SwarmdService_CapturePane_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ForgedService_CapturePane_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *swarmdServiceClient) StreamPaneUpdates(ctx context.Context, in *StreamPaneUpdatesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamPaneUpdatesResponse], error) {
+func (c *forgedServiceClient) StreamPaneUpdates(ctx context.Context, in *StreamPaneUpdatesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamPaneUpdatesResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &SwarmdService_ServiceDesc.Streams[0], SwarmdService_StreamPaneUpdates_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ForgedService_ServiceDesc.Streams[0], ForgedService_StreamPaneUpdates_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -153,11 +153,11 @@ func (c *swarmdServiceClient) StreamPaneUpdates(ctx context.Context, in *StreamP
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type SwarmdService_StreamPaneUpdatesClient = grpc.ServerStreamingClient[StreamPaneUpdatesResponse]
+type ForgedService_StreamPaneUpdatesClient = grpc.ServerStreamingClient[StreamPaneUpdatesResponse]
 
-func (c *swarmdServiceClient) StreamEvents(ctx context.Context, in *StreamEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamEventsResponse], error) {
+func (c *forgedServiceClient) StreamEvents(ctx context.Context, in *StreamEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamEventsResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &SwarmdService_ServiceDesc.Streams[1], SwarmdService_StreamEvents_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ForgedService_ServiceDesc.Streams[1], ForgedService_StreamEvents_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -172,21 +172,21 @@ func (c *swarmdServiceClient) StreamEvents(ctx context.Context, in *StreamEvents
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type SwarmdService_StreamEventsClient = grpc.ServerStreamingClient[StreamEventsResponse]
+type ForgedService_StreamEventsClient = grpc.ServerStreamingClient[StreamEventsResponse]
 
-func (c *swarmdServiceClient) GetTranscript(ctx context.Context, in *GetTranscriptRequest, opts ...grpc.CallOption) (*GetTranscriptResponse, error) {
+func (c *forgedServiceClient) GetTranscript(ctx context.Context, in *GetTranscriptRequest, opts ...grpc.CallOption) (*GetTranscriptResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetTranscriptResponse)
-	err := c.cc.Invoke(ctx, SwarmdService_GetTranscript_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ForgedService_GetTranscript_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *swarmdServiceClient) StreamTranscript(ctx context.Context, in *StreamTranscriptRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamTranscriptResponse], error) {
+func (c *forgedServiceClient) StreamTranscript(ctx context.Context, in *StreamTranscriptRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StreamTranscriptResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &SwarmdService_ServiceDesc.Streams[2], SwarmdService_StreamTranscript_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ForgedService_ServiceDesc.Streams[2], ForgedService_StreamTranscript_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -201,32 +201,32 @@ func (c *swarmdServiceClient) StreamTranscript(ctx context.Context, in *StreamTr
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type SwarmdService_StreamTranscriptClient = grpc.ServerStreamingClient[StreamTranscriptResponse]
+type ForgedService_StreamTranscriptClient = grpc.ServerStreamingClient[StreamTranscriptResponse]
 
-func (c *swarmdServiceClient) GetStatus(ctx context.Context, in *GetStatusRequest, opts ...grpc.CallOption) (*GetStatusResponse, error) {
+func (c *forgedServiceClient) GetStatus(ctx context.Context, in *GetStatusRequest, opts ...grpc.CallOption) (*GetStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetStatusResponse)
-	err := c.cc.Invoke(ctx, SwarmdService_GetStatus_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ForgedService_GetStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *swarmdServiceClient) Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error) {
+func (c *forgedServiceClient) Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PingResponse)
-	err := c.cc.Invoke(ctx, SwarmdService_Ping_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ForgedService_Ping_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// SwarmdServiceServer is the server API for SwarmdService service.
-// All implementations must embed UnimplementedSwarmdServiceServer
+// ForgedServiceServer is the server API for ForgedService service.
+// All implementations must embed UnimplementedForgedServiceServer
 // for forward compatibility.
-type SwarmdServiceServer interface {
+type ForgedServiceServer interface {
 	// SpawnAgent creates a new agent in a tmux pane.
 	SpawnAgent(context.Context, *SpawnAgentRequest) (*SpawnAgentResponse, error)
 	// KillAgent terminates an agent's process.
@@ -253,328 +253,328 @@ type SwarmdServiceServer interface {
 	GetStatus(context.Context, *GetStatusRequest) (*GetStatusResponse, error)
 	// Ping is a simple health check.
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
-	mustEmbedUnimplementedSwarmdServiceServer()
+	mustEmbedUnimplementedForgedServiceServer()
 }
 
-// UnimplementedSwarmdServiceServer must be embedded to have
+// UnimplementedForgedServiceServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedSwarmdServiceServer struct{}
+type UnimplementedForgedServiceServer struct{}
 
-func (UnimplementedSwarmdServiceServer) SpawnAgent(context.Context, *SpawnAgentRequest) (*SpawnAgentResponse, error) {
+func (UnimplementedForgedServiceServer) SpawnAgent(context.Context, *SpawnAgentRequest) (*SpawnAgentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SpawnAgent not implemented")
 }
-func (UnimplementedSwarmdServiceServer) KillAgent(context.Context, *KillAgentRequest) (*KillAgentResponse, error) {
+func (UnimplementedForgedServiceServer) KillAgent(context.Context, *KillAgentRequest) (*KillAgentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method KillAgent not implemented")
 }
-func (UnimplementedSwarmdServiceServer) SendInput(context.Context, *SendInputRequest) (*SendInputResponse, error) {
+func (UnimplementedForgedServiceServer) SendInput(context.Context, *SendInputRequest) (*SendInputResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendInput not implemented")
 }
-func (UnimplementedSwarmdServiceServer) ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error) {
+func (UnimplementedForgedServiceServer) ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAgents not implemented")
 }
-func (UnimplementedSwarmdServiceServer) GetAgent(context.Context, *GetAgentRequest) (*GetAgentResponse, error) {
+func (UnimplementedForgedServiceServer) GetAgent(context.Context, *GetAgentRequest) (*GetAgentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAgent not implemented")
 }
-func (UnimplementedSwarmdServiceServer) CapturePane(context.Context, *CapturePaneRequest) (*CapturePaneResponse, error) {
+func (UnimplementedForgedServiceServer) CapturePane(context.Context, *CapturePaneRequest) (*CapturePaneResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CapturePane not implemented")
 }
-func (UnimplementedSwarmdServiceServer) StreamPaneUpdates(*StreamPaneUpdatesRequest, grpc.ServerStreamingServer[StreamPaneUpdatesResponse]) error {
+func (UnimplementedForgedServiceServer) StreamPaneUpdates(*StreamPaneUpdatesRequest, grpc.ServerStreamingServer[StreamPaneUpdatesResponse]) error {
 	return status.Error(codes.Unimplemented, "method StreamPaneUpdates not implemented")
 }
-func (UnimplementedSwarmdServiceServer) StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[StreamEventsResponse]) error {
+func (UnimplementedForgedServiceServer) StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[StreamEventsResponse]) error {
 	return status.Error(codes.Unimplemented, "method StreamEvents not implemented")
 }
-func (UnimplementedSwarmdServiceServer) GetTranscript(context.Context, *GetTranscriptRequest) (*GetTranscriptResponse, error) {
+func (UnimplementedForgedServiceServer) GetTranscript(context.Context, *GetTranscriptRequest) (*GetTranscriptResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTranscript not implemented")
 }
-func (UnimplementedSwarmdServiceServer) StreamTranscript(*StreamTranscriptRequest, grpc.ServerStreamingServer[StreamTranscriptResponse]) error {
+func (UnimplementedForgedServiceServer) StreamTranscript(*StreamTranscriptRequest, grpc.ServerStreamingServer[StreamTranscriptResponse]) error {
 	return status.Error(codes.Unimplemented, "method StreamTranscript not implemented")
 }
-func (UnimplementedSwarmdServiceServer) GetStatus(context.Context, *GetStatusRequest) (*GetStatusResponse, error) {
+func (UnimplementedForgedServiceServer) GetStatus(context.Context, *GetStatusRequest) (*GetStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetStatus not implemented")
 }
-func (UnimplementedSwarmdServiceServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
+func (UnimplementedForgedServiceServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Ping not implemented")
 }
-func (UnimplementedSwarmdServiceServer) mustEmbedUnimplementedSwarmdServiceServer() {}
-func (UnimplementedSwarmdServiceServer) testEmbeddedByValue()                       {}
+func (UnimplementedForgedServiceServer) mustEmbedUnimplementedForgedServiceServer() {}
+func (UnimplementedForgedServiceServer) testEmbeddedByValue()                       {}
 
-// UnsafeSwarmdServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to SwarmdServiceServer will
+// UnsafeForgedServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ForgedServiceServer will
 // result in compilation errors.
-type UnsafeSwarmdServiceServer interface {
-	mustEmbedUnimplementedSwarmdServiceServer()
+type UnsafeForgedServiceServer interface {
+	mustEmbedUnimplementedForgedServiceServer()
 }
 
-func RegisterSwarmdServiceServer(s grpc.ServiceRegistrar, srv SwarmdServiceServer) {
-	// If the following call panics, it indicates UnimplementedSwarmdServiceServer was
+func RegisterForgedServiceServer(s grpc.ServiceRegistrar, srv ForgedServiceServer) {
+	// If the following call panics, it indicates UnimplementedForgedServiceServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&SwarmdService_ServiceDesc, srv)
+	s.RegisterService(&ForgedService_ServiceDesc, srv)
 }
 
-func _SwarmdService_SpawnAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ForgedService_SpawnAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SpawnAgentRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SwarmdServiceServer).SpawnAgent(ctx, in)
+		return srv.(ForgedServiceServer).SpawnAgent(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SwarmdService_SpawnAgent_FullMethodName,
+		FullMethod: ForgedService_SpawnAgent_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwarmdServiceServer).SpawnAgent(ctx, req.(*SpawnAgentRequest))
+		return srv.(ForgedServiceServer).SpawnAgent(ctx, req.(*SpawnAgentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SwarmdService_KillAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ForgedService_KillAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(KillAgentRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SwarmdServiceServer).KillAgent(ctx, in)
+		return srv.(ForgedServiceServer).KillAgent(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SwarmdService_KillAgent_FullMethodName,
+		FullMethod: ForgedService_KillAgent_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwarmdServiceServer).KillAgent(ctx, req.(*KillAgentRequest))
+		return srv.(ForgedServiceServer).KillAgent(ctx, req.(*KillAgentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SwarmdService_SendInput_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ForgedService_SendInput_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SendInputRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SwarmdServiceServer).SendInput(ctx, in)
+		return srv.(ForgedServiceServer).SendInput(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SwarmdService_SendInput_FullMethodName,
+		FullMethod: ForgedService_SendInput_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwarmdServiceServer).SendInput(ctx, req.(*SendInputRequest))
+		return srv.(ForgedServiceServer).SendInput(ctx, req.(*SendInputRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SwarmdService_ListAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ForgedService_ListAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListAgentsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SwarmdServiceServer).ListAgents(ctx, in)
+		return srv.(ForgedServiceServer).ListAgents(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SwarmdService_ListAgents_FullMethodName,
+		FullMethod: ForgedService_ListAgents_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwarmdServiceServer).ListAgents(ctx, req.(*ListAgentsRequest))
+		return srv.(ForgedServiceServer).ListAgents(ctx, req.(*ListAgentsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SwarmdService_GetAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ForgedService_GetAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetAgentRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SwarmdServiceServer).GetAgent(ctx, in)
+		return srv.(ForgedServiceServer).GetAgent(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SwarmdService_GetAgent_FullMethodName,
+		FullMethod: ForgedService_GetAgent_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwarmdServiceServer).GetAgent(ctx, req.(*GetAgentRequest))
+		return srv.(ForgedServiceServer).GetAgent(ctx, req.(*GetAgentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SwarmdService_CapturePane_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ForgedService_CapturePane_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CapturePaneRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SwarmdServiceServer).CapturePane(ctx, in)
+		return srv.(ForgedServiceServer).CapturePane(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SwarmdService_CapturePane_FullMethodName,
+		FullMethod: ForgedService_CapturePane_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwarmdServiceServer).CapturePane(ctx, req.(*CapturePaneRequest))
+		return srv.(ForgedServiceServer).CapturePane(ctx, req.(*CapturePaneRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SwarmdService_StreamPaneUpdates_Handler(srv interface{}, stream grpc.ServerStream) error {
+func _ForgedService_StreamPaneUpdates_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamPaneUpdatesRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(SwarmdServiceServer).StreamPaneUpdates(m, &grpc.GenericServerStream[StreamPaneUpdatesRequest, StreamPaneUpdatesResponse]{ServerStream: stream})
+	return srv.(ForgedServiceServer).StreamPaneUpdates(m, &grpc.GenericServerStream[StreamPaneUpdatesRequest, StreamPaneUpdatesResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type SwarmdService_StreamPaneUpdatesServer = grpc.ServerStreamingServer[StreamPaneUpdatesResponse]
+type ForgedService_StreamPaneUpdatesServer = grpc.ServerStreamingServer[StreamPaneUpdatesResponse]
 
-func _SwarmdService_StreamEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
+func _ForgedService_StreamEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamEventsRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(SwarmdServiceServer).StreamEvents(m, &grpc.GenericServerStream[StreamEventsRequest, StreamEventsResponse]{ServerStream: stream})
+	return srv.(ForgedServiceServer).StreamEvents(m, &grpc.GenericServerStream[StreamEventsRequest, StreamEventsResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type SwarmdService_StreamEventsServer = grpc.ServerStreamingServer[StreamEventsResponse]
+type ForgedService_StreamEventsServer = grpc.ServerStreamingServer[StreamEventsResponse]
 
-func _SwarmdService_GetTranscript_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ForgedService_GetTranscript_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetTranscriptRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SwarmdServiceServer).GetTranscript(ctx, in)
+		return srv.(ForgedServiceServer).GetTranscript(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SwarmdService_GetTranscript_FullMethodName,
+		FullMethod: ForgedService_GetTranscript_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwarmdServiceServer).GetTranscript(ctx, req.(*GetTranscriptRequest))
+		return srv.(ForgedServiceServer).GetTranscript(ctx, req.(*GetTranscriptRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SwarmdService_StreamTranscript_Handler(srv interface{}, stream grpc.ServerStream) error {
+func _ForgedService_StreamTranscript_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(StreamTranscriptRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(SwarmdServiceServer).StreamTranscript(m, &grpc.GenericServerStream[StreamTranscriptRequest, StreamTranscriptResponse]{ServerStream: stream})
+	return srv.(ForgedServiceServer).StreamTranscript(m, &grpc.GenericServerStream[StreamTranscriptRequest, StreamTranscriptResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type SwarmdService_StreamTranscriptServer = grpc.ServerStreamingServer[StreamTranscriptResponse]
+type ForgedService_StreamTranscriptServer = grpc.ServerStreamingServer[StreamTranscriptResponse]
 
-func _SwarmdService_GetStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ForgedService_GetStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetStatusRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SwarmdServiceServer).GetStatus(ctx, in)
+		return srv.(ForgedServiceServer).GetStatus(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SwarmdService_GetStatus_FullMethodName,
+		FullMethod: ForgedService_GetStatus_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwarmdServiceServer).GetStatus(ctx, req.(*GetStatusRequest))
+		return srv.(ForgedServiceServer).GetStatus(ctx, req.(*GetStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SwarmdService_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ForgedService_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PingRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SwarmdServiceServer).Ping(ctx, in)
+		return srv.(ForgedServiceServer).Ping(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SwarmdService_Ping_FullMethodName,
+		FullMethod: ForgedService_Ping_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwarmdServiceServer).Ping(ctx, req.(*PingRequest))
+		return srv.(ForgedServiceServer).Ping(ctx, req.(*PingRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// SwarmdService_ServiceDesc is the grpc.ServiceDesc for SwarmdService service.
+// ForgedService_ServiceDesc is the grpc.ServiceDesc for ForgedService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var SwarmdService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "swarmd.v1.SwarmdService",
-	HandlerType: (*SwarmdServiceServer)(nil),
+var ForgedService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "forged.v1.ForgedService",
+	HandlerType: (*ForgedServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "SpawnAgent",
-			Handler:    _SwarmdService_SpawnAgent_Handler,
+			Handler:    _ForgedService_SpawnAgent_Handler,
 		},
 		{
 			MethodName: "KillAgent",
-			Handler:    _SwarmdService_KillAgent_Handler,
+			Handler:    _ForgedService_KillAgent_Handler,
 		},
 		{
 			MethodName: "SendInput",
-			Handler:    _SwarmdService_SendInput_Handler,
+			Handler:    _ForgedService_SendInput_Handler,
 		},
 		{
 			MethodName: "ListAgents",
-			Handler:    _SwarmdService_ListAgents_Handler,
+			Handler:    _ForgedService_ListAgents_Handler,
 		},
 		{
 			MethodName: "GetAgent",
-			Handler:    _SwarmdService_GetAgent_Handler,
+			Handler:    _ForgedService_GetAgent_Handler,
 		},
 		{
 			MethodName: "CapturePane",
-			Handler:    _SwarmdService_CapturePane_Handler,
+			Handler:    _ForgedService_CapturePane_Handler,
 		},
 		{
 			MethodName: "GetTranscript",
-			Handler:    _SwarmdService_GetTranscript_Handler,
+			Handler:    _ForgedService_GetTranscript_Handler,
 		},
 		{
 			MethodName: "GetStatus",
-			Handler:    _SwarmdService_GetStatus_Handler,
+			Handler:    _ForgedService_GetStatus_Handler,
 		},
 		{
 			MethodName: "Ping",
-			Handler:    _SwarmdService_Ping_Handler,
+			Handler:    _ForgedService_Ping_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "StreamPaneUpdates",
-			Handler:       _SwarmdService_StreamPaneUpdates_Handler,
+			Handler:       _ForgedService_StreamPaneUpdates_Handler,
 			ServerStreams: true,
 		},
 		{
 			StreamName:    "StreamEvents",
-			Handler:       _SwarmdService_StreamEvents_Handler,
+			Handler:       _ForgedService_StreamEvents_Handler,
 			ServerStreams: true,
 		},
 		{
 			StreamName:    "StreamTranscript",
-			Handler:       _SwarmdService_StreamTranscript_Handler,
+			Handler:       _ForgedService_StreamTranscript_Handler,
 			ServerStreams: true,
 		},
 	},
-	Metadata: "swarmd/v1/swarmd.proto",
+	Metadata: "forged/v1/forged.proto",
 }

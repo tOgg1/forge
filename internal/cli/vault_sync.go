@@ -55,8 +55,8 @@ var vaultPushCmd = &cobra.Command{
 	Long: `Sync vault profiles to a node using SSH transfer.
 
 Examples:
-  swarm vault push node-1 --profile claude/work
-  swarm vault push node-1 --all`,
+  forge vault push node-1 --profile claude/work
+  forge vault push node-1 --all`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runVaultSync(args[0], vaultSyncPush)
@@ -69,8 +69,8 @@ var vaultPullCmd = &cobra.Command{
 	Long: `Sync vault profiles from a node using SSH transfer.
 
 Examples:
-  swarm vault pull node-1 --profile claude/work
-  swarm vault pull node-1 --all`,
+  forge vault pull node-1 --profile claude/work
+  forge vault pull node-1 --all`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runVaultSync(args[0], vaultSyncPull)
@@ -158,7 +158,7 @@ func getRemoteVaultPath() string {
 	if vaultPath != "" {
 		return vaultPath
 	}
-	return "~/.config/swarm/vault"
+	return "~/.config/forge/vault"
 }
 
 func vaultSyncExecutor(ctx context.Context, service *node.Service, n *models.Node) (ssh.Executor, func(), error) {
@@ -433,7 +433,7 @@ func createVaultArchive(ctx context.Context, localProfilesPath string, profiles 
 		return "", errors.New("no profiles to archive")
 	}
 
-	tempFile, err := os.CreateTemp("", "swarm-vault-*.tar.gz")
+	tempFile, err := os.CreateTemp("", "forge-vault-*.tar.gz")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp archive: %w", err)
 	}
@@ -461,7 +461,7 @@ func createVaultArchive(ctx context.Context, localProfilesPath string, profiles 
 }
 
 func writeTempArchive(data []byte) (string, error) {
-	tempFile, err := os.CreateTemp("", "swarm-vault-*.tar.gz")
+	tempFile, err := os.CreateTemp("", "forge-vault-*.tar.gz")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp archive: %w", err)
 	}

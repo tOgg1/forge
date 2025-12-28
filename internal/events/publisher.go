@@ -1,4 +1,4 @@
-// Package events provides event publishing and subscription for Swarm.
+// Package events provides event publishing and subscription for Forge.
 package events
 
 import (

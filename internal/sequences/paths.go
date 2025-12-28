@@ -9,14 +9,14 @@ import (
 func SequenceSearchPaths(projectDir string) []string {
 	paths := make([]string, 0, 3)
 	if projectDir != "" {
-		paths = append(paths, filepath.Join(projectDir, ".swarm", "sequences"))
+		paths = append(paths, filepath.Join(projectDir, ".forge", "sequences"))
 	}
 
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		paths = append(paths, filepath.Join(home, ".config", "swarm", "sequences"))
+		paths = append(paths, filepath.Join(home, ".config", "forge", "sequences"))
 	}
 
-	paths = append(paths, filepath.Join(string(filepath.Separator), "usr", "share", "swarm", "sequences"))
+	paths = append(paths, filepath.Join(string(filepath.Separator), "usr", "share", "forge", "sequences"))
 	return paths
 }
 

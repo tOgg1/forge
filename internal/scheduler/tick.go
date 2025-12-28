@@ -1,4 +1,4 @@
-// Package scheduler provides deterministic scheduling for Swarm agents.
+// Package scheduler provides deterministic scheduling for Forge agents.
 package scheduler
 
 import (

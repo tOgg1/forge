@@ -58,7 +58,7 @@ func WithPublisher(publisher events.Publisher) ServiceOption {
 }
 
 // WithVaultPath configures the path to the native credential vault.
-// If not set, the default vault path (~/.config/swarm/vault) is used.
+// If not set, the default vault path (~/.config/forge/vault) is used.
 func WithVaultPath(path string) ServiceOption {
 	return func(s *Service) {
 		s.vaultPath = path
@@ -538,7 +538,7 @@ func ProviderEnvVar(provider models.Provider) string {
 //   - env:VAR_NAME - reads from environment variable VAR_NAME
 //   - $VAR_NAME or ${VAR_NAME} - reads from environment variable VAR_NAME
 //   - file:/path/to/file - reads from file
-//   - vault:adapter/profile - reads from native Swarm vault (recommended)
+//   - vault:adapter/profile - reads from native Forge vault (recommended)
 //   - caam:provider/email - reads from legacy caam vault (deprecated)
 //   - literal value - used as-is (not recommended for production)
 func ResolveCredential(credentialRef string) (string, error) {
@@ -584,7 +584,7 @@ func ResolveCredential(credentialRef string) (string, error) {
 		return strings.TrimSpace(string(data)), nil
 	}
 
-	// Check for vault: prefix (native Swarm vault - recommended)
+	// Check for vault: prefix (native Forge vault - recommended)
 	if strings.HasPrefix(credentialRef, "vault:") {
 		return resolveVaultCredential(strings.TrimPrefix(credentialRef, "vault:"))
 	}
@@ -598,7 +598,7 @@ func ResolveCredential(credentialRef string) (string, error) {
 	return credentialRef, nil
 }
 
-// resolveVaultCredential resolves a credential from the native Swarm vault.
+// resolveVaultCredential resolves a credential from the native Forge vault.
 // The ref format is "adapter/profile", e.g., "claude/work" or "anthropic/personal".
 func resolveVaultCredential(ref string) (string, error) {
 	parts := strings.SplitN(ref, "/", 2)
@@ -613,7 +613,7 @@ func resolveVaultCredential(ref string) (string, error) {
 	if err != nil {
 		return "", errors.New("failed to determine home directory: " + err.Error())
 	}
-	vaultPath := filepath.Join(home, ".config", "swarm", "vault")
+	vaultPath := filepath.Join(home, ".config", "forge", "vault")
 
 	// Map adapter name to provider directory
 	var providerDir string
@@ -636,7 +636,7 @@ func resolveVaultCredential(ref string) (string, error) {
 	info, err := os.Stat(profilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", errors.New("vault profile not found: " + ref + " (run 'swarm vault backup " + adapterName + " " + profileName + "' first)")
+			return "", errors.New("vault profile not found: " + ref + " (run 'forge vault backup " + adapterName + " " + profileName + "' first)")
 		}
 		return "", errors.New("failed to access vault profile: " + err.Error())
 	}

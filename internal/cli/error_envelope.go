@@ -170,11 +170,11 @@ func extractQuotedValue(message string) string {
 func listHintForResource(resource string) string {
 	switch resource {
 	case "node":
-		return "Run `swarm node list` to see valid IDs."
+		return "Run `forge node list` to see valid IDs."
 	case "workspace":
-		return "Run `swarm ws list` to see valid IDs."
+		return "Run `forge ws list` to see valid IDs."
 	case "agent":
-		return "Run `swarm agent list` to see valid IDs."
+		return "Run `forge agent list` to see valid IDs."
 	default:
 		return ""
 	}

@@ -237,7 +237,7 @@ func TestNodeExecutorClose(t *testing.T) {
 	}
 }
 
-func TestNodeExecutorSwarmdOperationsWithoutSwarmd(t *testing.T) {
+func TestNodeExecutorForgedOperationsWithoutForged(t *testing.T) {
 	node := &models.Node{
 		ID:        "test-1",
 		Name:      "test",
@@ -255,29 +255,29 @@ func TestNodeExecutorSwarmdOperationsWithoutSwarmd(t *testing.T) {
 	}
 	defer exec.Close()
 
-	// swarmd operations should fail when in SSH mode
-	if exec.IsSwarmdAvailable() {
-		t.Error("IsSwarmdAvailable() should be false in SSH-only mode")
+	// forged operations should fail when in SSH mode
+	if exec.IsForgedAvailable() {
+		t.Error("IsForgedAvailable() should be false in SSH-only mode")
 	}
 
 	_, err = exec.SpawnAgent(context.Background(), nil)
-	if !errors.Is(err, ErrSwarmdUnavailable) {
-		t.Errorf("SpawnAgent() error = %v, want %v", err, ErrSwarmdUnavailable)
+	if !errors.Is(err, ErrForgedUnavailable) {
+		t.Errorf("SpawnAgent() error = %v, want %v", err, ErrForgedUnavailable)
 	}
 
 	_, err = exec.KillAgent(context.Background(), nil)
-	if !errors.Is(err, ErrSwarmdUnavailable) {
-		t.Errorf("KillAgent() error = %v, want %v", err, ErrSwarmdUnavailable)
+	if !errors.Is(err, ErrForgedUnavailable) {
+		t.Errorf("KillAgent() error = %v, want %v", err, ErrForgedUnavailable)
 	}
 
 	_, err = exec.CapturePane(context.Background(), nil)
-	if !errors.Is(err, ErrSwarmdUnavailable) {
-		t.Errorf("CapturePane() error = %v, want %v", err, ErrSwarmdUnavailable)
+	if !errors.Is(err, ErrForgedUnavailable) {
+		t.Errorf("CapturePane() error = %v, want %v", err, ErrForgedUnavailable)
 	}
 
 	_, err = exec.ListAgents(context.Background(), nil)
-	if !errors.Is(err, ErrSwarmdUnavailable) {
-		t.Errorf("ListAgents() error = %v, want %v", err, ErrSwarmdUnavailable)
+	if !errors.Is(err, ErrForgedUnavailable) {
+		t.Errorf("ListAgents() error = %v, want %v", err, ErrForgedUnavailable)
 	}
 }
 
@@ -287,7 +287,7 @@ func TestFallbackPolicy(t *testing.T) {
 		policy FallbackPolicy
 	}{
 		{name: "auto", policy: FallbackPolicyAuto},
-		{name: "swarmd_only", policy: FallbackPolicySwarmdOnly},
+		{name: "forged_only", policy: FallbackPolicyForgedOnly},
 		{name: "ssh_only", policy: FallbackPolicySSHOnly},
 	}
 
@@ -299,14 +299,14 @@ func TestFallbackPolicy(t *testing.T) {
 				IsLocal: true,
 			}
 
-			// For swarmd_only, it will fail if swarmd is not available
-			if tt.policy == FallbackPolicySwarmdOnly {
+			// For forged_only, it will fail if forged is not available
+			if tt.policy == FallbackPolicyForgedOnly {
 				_, err := NewNodeExecutor(context.Background(), node, nil,
 					WithFallbackPolicy(tt.policy),
 					WithPingTimeout(100*time.Millisecond),
 				)
 				if err == nil {
-					t.Error("Expected error for swarmd_only policy when swarmd unavailable")
+					t.Error("Expected error for forged_only policy when forged unavailable")
 				}
 				return
 			}
@@ -323,8 +323,8 @@ func TestFallbackPolicy(t *testing.T) {
 }
 
 func TestExecutionModeConstants(t *testing.T) {
-	if ModeSwarmd != "swarmd" {
-		t.Errorf("ModeSwarmd = %q, want %q", ModeSwarmd, "swarmd")
+	if ModeForged != "forged" {
+		t.Errorf("ModeForged = %q, want %q", ModeForged, "forged")
 	}
 	if ModeSSH != "ssh" {
 		t.Errorf("ModeSSH = %q, want %q", ModeSSH, "ssh")
@@ -338,8 +338,8 @@ func TestFallbackPolicyConstants(t *testing.T) {
 	if FallbackPolicyAuto != "auto" {
 		t.Errorf("FallbackPolicyAuto = %q, want %q", FallbackPolicyAuto, "auto")
 	}
-	if FallbackPolicySwarmdOnly != "swarmd_only" {
-		t.Errorf("FallbackPolicySwarmdOnly = %q, want %q", FallbackPolicySwarmdOnly, "swarmd_only")
+	if FallbackPolicyForgedOnly != "forged_only" {
+		t.Errorf("FallbackPolicyForgedOnly = %q, want %q", FallbackPolicyForgedOnly, "forged_only")
 	}
 	if FallbackPolicySSHOnly != "ssh_only" {
 		t.Errorf("FallbackPolicySSHOnly = %q, want %q", FallbackPolicySSHOnly, "ssh_only")
@@ -357,7 +357,7 @@ func TestWithOptions(t *testing.T) {
 
 	exec, err := NewNodeExecutor(context.Background(), node, nil,
 		WithFallbackPolicy(FallbackPolicySSHOnly),
-		WithSwarmdPort(9999),
+		WithForgedPort(9999),
 		WithPingTimeout(10*time.Second),
 		WithNodeLogger(logger),
 	)
@@ -370,8 +370,8 @@ func TestWithOptions(t *testing.T) {
 	if exec.policy != FallbackPolicySSHOnly {
 		t.Errorf("policy = %v, want %v", exec.policy, FallbackPolicySSHOnly)
 	}
-	if exec.swarmdPort != 9999 {
-		t.Errorf("swarmdPort = %v, want %v", exec.swarmdPort, 9999)
+	if exec.forgedPort != 9999 {
+		t.Errorf("forgedPort = %v, want %v", exec.forgedPort, 9999)
 	}
 	if exec.pingTimeout != 10*time.Second {
 		t.Errorf("pingTimeout = %v, want %v", exec.pingTimeout, 10*time.Second)

@@ -1,7 +1,7 @@
-# Swarm Orchestrator Product Specification (v0.1)
+# Forge Orchestrator Product Specification (v0.1)
 
-Working name: **Swarm**
-Components: **TUI dashboard**, **CLI**, optional per-node **daemon (`swarmd`)**
+Working name: **Forge**
+Components: **TUI dashboard**, **CLI**, optional per-node **daemon (`forged`)**
 Core substrate: **tmux + ssh**
 Core abstraction: **Workspace = (node, repo path) + tmux session + agents**
 
@@ -11,7 +11,7 @@ This document consolidates everything we’ve discussed so far into a single coh
 
 ## 1) Product overview
 
-Swarm is a control plane for running and supervising many AI coding agents across many repositories and servers—locally and remotely—with:
+Forge is a control plane for running and supervising many AI coding agents across many repositories and servers—locally and remotely—with:
 
 * A **“sexy,” fast TUI** that makes it obvious what’s progressing vs blocked.
 * A fully interoperable **CLI** (machine-readable output) for external automation (e.g., Empire Cockpit).
@@ -20,7 +20,7 @@ Swarm is a control plane for running and supervising many AI coding agents acros
 * Easy **node bootstrapping** (root login → ready node) and adding nodes into a mesh.
 
 **Key strategic direction:**
-Swarm will support multiple agent CLIs, but will be **OpenCode-first** as the “native integration tier” because it’s hackable and exposes a structured control surface. Other CLIs will be supported via adapters with best-effort telemetry/state detection.
+Forge will support multiple agent CLIs, but will be **OpenCode-first** as the “native integration tier” because it’s hackable and exposes a structured control surface. Other CLIs will be supported via adapters with best-effort telemetry/state detection.
 
 ---
 
@@ -70,7 +70,7 @@ Swarm will support multiple agent CLIs, but will be **OpenCode-first** as the �
 
 ### 3.1 Node
 
-A machine Swarm can control (local or remote) via ssh and tmux.
+A machine Forge can control (local or remote) via ssh and tmux.
 
 ### 3.2 Workspace
 
@@ -93,7 +93,7 @@ A single running agent process tied to:
 
 ### 3.4 Control plane state
 
-Swarm’s authoritative record:
+Forge’s authoritative record:
 
 * nodes, workspaces, agents
 * queues and schedules
@@ -181,51 +181,51 @@ Everything in the TUI must be doable from the CLI.
 
 **Nodes**
 
-* `swarm node list`
-* `swarm node add --ssh user@host --name <node>`
-* `swarm node bootstrap --ssh root@host [--install-extras]`
-* `swarm node doctor <node>`
-* `swarm node exec <node> -- <cmd>`
+* `forge node list`
+* `forge node add --ssh user@host --name <node>`
+* `forge node bootstrap --ssh root@host [--install-extras]`
+* `forge node doctor <node>`
+* `forge node exec <node> -- <cmd>`
 
 **Workspaces**
 
-* `swarm ws create --node <node> --path <repo>`
-* `swarm ws import --node <node> --tmux-session <name>`
-* `swarm ws list`
-* `swarm ws status <ws> [--json]`
-* `swarm ws attach <ws>`
-* `swarm ws unmanage <ws>` (leave tmux session intact)
-* `swarm ws kill <ws>` (kill session, archive logs)
+* `forge ws create --node <node> --path <repo>`
+* `forge ws import --node <node> --tmux-session <name>`
+* `forge ws list`
+* `forge ws status <ws> [--json]`
+* `forge ws attach <ws>`
+* `forge ws unmanage <ws>` (leave tmux session intact)
+* `forge ws kill <ws>` (kill session, archive logs)
 
 **Agents**
 
-* `swarm agent spawn --ws <ws> --type opencode --count 3 [--profile <acct>]`
-* `swarm agent list [--ws <ws>]`
-* `swarm agent send <agent_id> "…" `
-* `swarm agent queue <agent_id> --file prompts.txt`
-* `swarm agent pause <agent_id> --minutes 20`
-* `swarm agent interrupt <agent_id>`
-* `swarm agent restart <agent_id> [--profile <acct>]`
-* `swarm agent approve <agent_id> [--all]` (when adapter supports approvals)
+* `forge agent spawn --ws <ws> --type opencode --count 3 [--profile <acct>]`
+* `forge agent list [--ws <ws>]`
+* `forge agent send <agent_id> "…" `
+* `forge agent queue <agent_id> --file prompts.txt`
+* `forge agent pause <agent_id> --minutes 20`
+* `forge agent interrupt <agent_id>`
+* `forge agent restart <agent_id> [--profile <acct>]`
+* `forge agent approve <agent_id> [--all]` (when adapter supports approvals)
 
 **Accounts**
 
-* `swarm accounts import-caam`
-* `swarm accounts list [--provider X]`
-* `swarm accounts rotate --provider X --mode auto`
-* `swarm accounts cooldown list|set|clear …`
+* `forge accounts import-caam`
+* `forge accounts list [--provider X]`
+* `forge accounts rotate --provider X --mode auto`
+* `forge accounts cooldown list|set|clear …`
 
 **Export/integration**
 
-* `swarm export status --json`
-* `swarm export events --since 1h --jsonl`
-* `swarm hook on-event --cmd <script>`
+* `forge export status --json`
+* `forge export events --since 1h --jsonl`
+* `forge hook on-event --cmd <script>`
 
 ---
 
 ## 6) Runtime architecture
 
-Swarm must work both locally and against remote nodes.
+Forge must work both locally and against remote nodes.
 
 ### 6.1 Mode A: SSH-only (minimal install)
 
@@ -237,7 +237,7 @@ Control plane runs locally:
 Pros: simplest, minimal footprint
 Cons: less scalable for many panes, less real-time
 
-### 6.2 Mode B: Node daemon (`swarmd`) (recommended)
+### 6.2 Mode B: Node daemon (`forged`) (recommended)
 
 A lightweight agent runs on each node:
 
@@ -271,11 +271,11 @@ Mechanism:
 
 * Inspect panes for working directory info.
 * If repo root ambiguous, prompt in TUI/CLI.
-* Bind the session into Swarm’s model without disrupting panes.
+* Bind the session into Forge’s model without disrupting panes.
 
 ### 7.3 Destroy/unmanage
 
-* **Unmanage:** remove from Swarm but keep tmux session alive.
+* **Unmanage:** remove from Forge but keep tmux session alive.
 * **Destroy:** kill tmux session; archive transcripts and event log.
 
 ---
@@ -316,9 +316,9 @@ Continuously:
 
 ---
 
-## 9) Agent capability tiers (how Swarm stays consistent)
+## 9) Agent capability tiers (how Forge stays consistent)
 
-Swarm should normalize agents into a common interface, but not pretend all backends are equal.
+Forge should normalize agents into a common interface, but not pretend all backends are equal.
 
 ### 9.1 Capability matrix (initial)
 
@@ -343,7 +343,7 @@ TUI stays consistent, but shows “confidence” and “reason” per state. Use
 * Provides a structured session model and event stream (so we avoid brittle UI scraping).
 * Allows routing to arbitrary models through one CLI/runtime.
 
-### 10.2 How Swarm uses OpenCode
+### 10.2 How Forge uses OpenCode
 
 Two viable deployment patterns:
 
@@ -351,7 +351,7 @@ Two viable deployment patterns:
 
 * Each agent instance has its own OpenCode server process (loopback bound).
 * Credentials are isolated per agent/profile.
-* Swarm talks to each agent’s server via ssh tunnel or local swarmd proxy.
+* Forge talks to each agent’s server via ssh tunnel or local forged proxy.
 * This cleanly supports many accounts and avoids “global auth store” issues.
 
 **Pattern B: one OpenCode server per workspace**
@@ -359,13 +359,13 @@ Two viable deployment patterns:
 * Many sessions per workspace.
 * More efficient, but multi-account routing becomes harder (may require upstream work).
 
-### 10.3 Swarm-specific OpenCode plugin pack (optional)
+### 10.3 Forge-specific OpenCode plugin pack (optional)
 
 Provide a plugin that:
 
 * emits “heartbeat” + enriched events (agent_id, ws_id)
 * implements policy hooks (deny risky commands by default)
-* helps integrate with Swarm’s approvals inbox
+* helps integrate with Forge’s approvals inbox
 
 Forking OpenCode is not required for MVP; treat upstream contributions/fork as phase 2 if gaps appear.
 
@@ -407,7 +407,7 @@ We still want Claude Code, Codex CLI, Gemini CLI, etc. for user choice and redun
 
   * store multiple provider profiles
   * expose “rotate” and “cooldown” controls
-* Swarm scheduler uses this information to:
+* Forge scheduler uses this information to:
 
   * pause agents
   * restart/rehydrate under different profile when required
@@ -415,7 +415,7 @@ We still want Claude Code, Codex CLI, Gemini CLI, etc. for user choice and redun
 
 ### 12.3 Reality check
 
-“Perfect quota remaining” is not guaranteed across vendors. Swarm aims for:
+“Perfect quota remaining” is not guaranteed across vendors. Forge aims for:
 
 * best-effort usage metering where available
 * robust cooldown + failover driven by observed rate-limit signals
@@ -426,20 +426,20 @@ We still want Claude Code, Codex CLI, Gemini CLI, etc. for user choice and redun
 
 ### 13.1 Bootstrap requirement
 
-Given root login, it should be dead simple to turn a new server into a Swarm node.
+Given root login, it should be dead simple to turn a new server into a Forge node.
 
 **Bootstrap tasks**
 
 * create non-root user with sudo
 * install core deps (tmux, git, etc.)
 * install selected agent runtimes (OpenCode, etc.)
-* install swarmd (if using daemon mode)
+* install forged (if using daemon mode)
 * configure ssh keys, sane defaults
-* verify with `swarm node doctor`
+* verify with `forge node doctor`
 
 ### 13.2 Adding nodes
 
-* `swarm node add` + `swarm node bootstrap`
+* `forge node add` + `forge node bootstrap`
 * Nodes appear in Fleet Dashboard
 * Create workspaces on any node with one command
 
@@ -498,7 +498,7 @@ State always includes:
 
 * Nodes accessed via ssh keys.
 * Prefer loopback-bound local services on nodes.
-* Any remote API access via ssh port forwarding or swarmd proxy.
+* Any remote API access via ssh port forwarding or forged proxy.
 * Audit log is always available.
 * Later: optional multi-user mode and RBAC.
 
@@ -519,7 +519,7 @@ State always includes:
 
 ### v0.2–v1.0
 
-* swarmd for real-time scaling and better performance
+* forged for real-time scaling and better performance
 * approvals inbox (especially strong for OpenCode)
 * usage + cooldown scheduling integrated with account manager
 * recipes/roles (planner/implementer/reviewer)
@@ -543,7 +543,7 @@ These are the decisions worth locking down early:
    * per-agent server (best for multi-account) vs per-workspace server (simpler topology)
 2. **Control plane topology**
 
-   * SSH-only MVP vs swarmd-from-day-one (I lean: SSH-only MVP with swarmd-ready interfaces)
+   * SSH-only MVP vs forged-from-day-one (I lean: SSH-only MVP with forged-ready interfaces)
 3. **Standard agent “roles”**
 
    * do we ship recipes in MVP or after?
@@ -556,13 +556,13 @@ These are the decisions worth locking down early:
 
 ## 19) Tech stack
 
-Swarm will be implemented primarily in **Go (Golang)**, with a focus on shipping a fast, reliable single-binary CLI/TUI and an optional lightweight per-node daemon.
+Forge will be implemented primarily in **Go (Golang)**, with a focus on shipping a fast, reliable single-binary CLI/TUI and an optional lightweight per-node daemon.
 
 ### 19.1 Language and build
 
 * **Language:** Go
 * **Build/Dependency mgmt:** Go modules
-* **Release packaging:** **GoReleaser** (cross-compile CLI + swarmd, create checksums, GitHub releases, etc.)
+* **Release packaging:** **GoReleaser** (cross-compile CLI + forged, create checksums, GitHub releases, etc.)
 * **Target OS:** Linux-first (because tmux + ssh + servers), but keep the **control plane CLI/TUI** portable where practical (macOS/Linux).
 
 ### 19.2 TUI framework
@@ -600,7 +600,7 @@ CLI output standards:
 
 ### 19.4 Process execution, tmux control, and terminal plumbing
 
-Swarm will integrate deeply with tmux; the most robust approach is to **treat tmux as an external dependency** and control it via commands:
+Forge will integrate deeply with tmux; the most robust approach is to **treat tmux as an external dependency** and control it via commands:
 
 * `tmux new-session`, `split-window`, `select-pane`, `send-keys`, `capture-pane`, etc.
 * Parse outputs deterministically (prefer stable formats and explicit tmux format strings)
@@ -612,7 +612,7 @@ Go components:
 
 ### 19.5 SSH and remote execution
 
-Swarm must work across local and remote nodes.
+Forge must work across local and remote nodes.
 
 We’ll support **two SSH execution backends**:
 
@@ -632,23 +632,23 @@ We’ll support **two SSH execution backends**:
   * ControlMaster multiplexing
 * This is extremely pragmatic for power users
 
-Swarm can choose the backend per node (configurable).
+Forge can choose the backend per node (configurable).
 
-### 19.6 Daemon and control plane communications (optional swarmd)
+### 19.6 Daemon and control plane communications (optional forged)
 
-For real-time scale and responsiveness, we’ll optionally run **swarmd** on nodes.
+For real-time scale and responsiveness, we’ll optionally run **forged** on nodes.
 
 * **Transport:** gRPC over an SSH tunnel (clean, secure, no public ports required)
 * Alternative: WebSocket over SSH tunnel (fine, but gRPC gives stronger typing and tooling)
 
 Serialization:
 
-* **Protocol Buffers** for swarmd ↔ control plane messages
+* **Protocol Buffers** for forged ↔ control plane messages
 * Event stream: server push (subscribe) + replay (since cursor)
 
 ### 19.7 Storage and state
 
-Swarm needs a durable local state store for:
+Forge needs a durable local state store for:
 
 * nodes/workspaces/agents
 * queues and schedules
@@ -675,7 +675,7 @@ DB access:
 * **Secrets / credentials:**
 
   * Prefer OS keychains where feasible (optional)
-  * Otherwise: encrypted local vault file (Swarm-managed) + support importing from existing account managers (e.g., caam philosophy)
+  * Otherwise: encrypted local vault file (Forge-managed) + support importing from existing account managers (e.g., caam philosophy)
   * Never log secrets; strict redaction
 
 ### 19.9 Logging and observability
@@ -683,8 +683,8 @@ DB access:
 * Structured logging: **zerolog** or **zap**
 * Optional observability:
 
-  * **OpenTelemetry Go SDK** for swarmd/control plane metrics + traces (especially useful if we later ingest telemetry from certain agent tools)
-* Always keep an append-only **event log** in the Swarm DB for auditability and UI replay.
+  * **OpenTelemetry Go SDK** for forged/control plane metrics + traces (especially useful if we later ingest telemetry from certain agent tools)
+* Always keep an append-only **event log** in the Forge DB for auditability and UI replay.
 
 ### 19.10 Testing strategy
 

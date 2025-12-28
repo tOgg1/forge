@@ -1,14 +1,14 @@
-project_name: swarm
+project_name: forge
 
 release:
   github:
     owner: tOgg1
-    name: swarm
+    name: forge
 
 builds:
-  - id: swarm
-    main: ./cmd/swarm
-    binary: swarm
+  - id: forge
+    main: ./cmd/forge
+    binary: forge
     env:
       - CGO_ENABLED=0
     goos:
@@ -22,9 +22,9 @@ builds:
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
-  - id: swarmd
-    main: ./cmd/swarmd
-    binary: swarmd
+  - id: forged
+    main: ./cmd/forged
+    binary: forged
     env:
       - CGO_ENABLED=0
     goos:
@@ -40,10 +40,10 @@ builds:
       - -X main.date={{.Date}}
 
 archives:
-  - id: swarm
+  - id: forge
     builds:
-      - swarm
-      - swarmd
+      - forge
+      - forged
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format: tar.gz
 

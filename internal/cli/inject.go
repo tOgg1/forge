@@ -38,7 +38,7 @@ var injectCmd = &cobra.Command{
 	Long: `Inject text directly into an agent's tmux pane via send-keys.
 
 WARNING: This bypasses the scheduler queue and sends immediately.
-Use 'swarm send' for safe, queue-based message dispatch.
+Use 'forge send' for safe, queue-based message dispatch.
 
 Direct injection is useful for:
 - Emergency interventions
@@ -48,19 +48,19 @@ Direct injection is useful for:
 But it can cause issues if the agent is not ready to receive input.
 Non-idle agents require confirmation (use --force to skip).`,
 	Example: `  # Inject a message (will prompt for confirmation if agent is busy)
-  swarm inject abc123 "Stop and commit"
+  forge inject abc123 "Stop and commit"
 
   # Force inject without confirmation
-  swarm inject --force abc123 "Emergency stop"
+  forge inject --force abc123 "Emergency stop"
 
   # Inject from file
-  swarm inject abc123 --file prompt.txt
+  forge inject abc123 --file prompt.txt
 
   # Inject from stdin
-  echo "Continue" | swarm inject abc123 --stdin
+  echo "Continue" | forge inject abc123 --stdin
 
   # Compose in editor
-  swarm inject abc123 --editor`,
+  forge inject abc123 --editor`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
@@ -151,16 +151,16 @@ func confirmInject(a *models.Agent) bool {
 		fmt.Println("  Injecting now may corrupt or confuse the agent's context.")
 	case models.AgentStateAwaitingApproval:
 		fmt.Println("  The agent is waiting for approval.")
-		fmt.Println("  Consider using 'swarm agent approve' instead.")
+		fmt.Println("  Consider using 'forge agent approve' instead.")
 	case models.AgentStatePaused:
 		fmt.Println("  The agent is paused.")
-		fmt.Println("  Consider using 'swarm agent resume' first.")
+		fmt.Println("  Consider using 'forge agent resume' first.")
 	case models.AgentStateRateLimited:
 		fmt.Println("  The agent is rate-limited.")
 		fmt.Println("  The message may not be processed immediately.")
 	case models.AgentStateError:
 		fmt.Println("  The agent is in an error state.")
-		fmt.Println("  Consider using 'swarm agent restart' first.")
+		fmt.Println("  Consider using 'forge agent restart' first.")
 	}
 
 	fmt.Println()

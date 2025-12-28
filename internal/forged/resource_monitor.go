@@ -1,5 +1,5 @@
-// Package swarmd provides the daemon scaffolding for the Swarm node service.
-package swarmd
+// Package forged provides the daemon scaffolding for the Forge node service.
+package forged
 
 import (
 	"bufio"
@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tOgg1/forge/gen/swarmd/v1"
+	"github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/rs/zerolog"
 )
 
@@ -841,18 +841,18 @@ func (rm *ResourceMonitor) CheckWarnThreshold(agentID string) (warnings []string
 // =============================================================================
 
 // ToProtoLimits converts ResourceLimits to proto format.
-func (l *ResourceLimits) ToProtoLimits() *swarmdv1.ResourceLimits {
+func (l *ResourceLimits) ToProtoLimits() *forgedv1.ResourceLimits {
 	if l == nil {
 		return nil
 	}
 
-	action := swarmdv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_KILL
+	action := forgedv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_KILL
 	if l.GracePeriodSeconds > 0 {
 		// If there's a grace period, we warn first
-		action = swarmdv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_WARN
+		action = forgedv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_WARN
 	}
 
-	return &swarmdv1.ResourceLimits{
+	return &forgedv1.ResourceLimits{
 		MaxCpuPercent:      l.MaxCPUPercent,
 		MaxMemoryBytes:     l.MaxMemoryBytes,
 		Action:             action,
@@ -861,7 +861,7 @@ func (l *ResourceLimits) ToProtoLimits() *swarmdv1.ResourceLimits {
 }
 
 // FromProtoLimits converts proto ResourceLimits to internal format.
-func FromProtoLimits(pl *swarmdv1.ResourceLimits) *ResourceLimits {
+func FromProtoLimits(pl *forgedv1.ResourceLimits) *ResourceLimits {
 	if pl == nil {
 		return nil
 	}
@@ -880,12 +880,12 @@ func FromProtoLimits(pl *swarmdv1.ResourceLimits) *ResourceLimits {
 }
 
 // ToProtoUsage converts ResourceUsage to proto format.
-func (u *ResourceUsage) ToProtoUsage() *swarmdv1.AgentResourceUsage {
+func (u *ResourceUsage) ToProtoUsage() *forgedv1.AgentResourceUsage {
 	if u == nil {
 		return nil
 	}
 
-	return &swarmdv1.AgentResourceUsage{
+	return &forgedv1.AgentResourceUsage{
 		CpuPercent:      u.CPUPercent,
 		MemoryBytes:     u.MemoryBytes,
 		PeakMemoryBytes: u.MemoryBytes, // We don't track peak separately yet
@@ -894,22 +894,22 @@ func (u *ResourceUsage) ToProtoUsage() *swarmdv1.AgentResourceUsage {
 }
 
 // ToProtoViolationEvent converts ResourceViolation to proto event format.
-func (v *ResourceViolation) ToProtoViolationEvent() *swarmdv1.ResourceViolationEvent {
+func (v *ResourceViolation) ToProtoViolationEvent() *forgedv1.ResourceViolationEvent {
 	if v == nil {
 		return nil
 	}
 
-	resourceType := swarmdv1.ResourceType_RESOURCE_TYPE_MEMORY
+	resourceType := forgedv1.ResourceType_RESOURCE_TYPE_MEMORY
 	if v.ViolationType == "cpu" {
-		resourceType = swarmdv1.ResourceType_RESOURCE_TYPE_CPU
+		resourceType = forgedv1.ResourceType_RESOURCE_TYPE_CPU
 	}
 
-	action := swarmdv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_WARN
+	action := forgedv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_WARN
 	if v.Severity == "critical" {
-		action = swarmdv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_KILL
+		action = forgedv1.ResourceLimitAction_RESOURCE_LIMIT_ACTION_KILL
 	}
 
-	return &swarmdv1.ResourceViolationEvent{
+	return &forgedv1.ResourceViolationEvent{
 		ResourceType:   resourceType,
 		CurrentValue:   v.CurrentValue,
 		LimitValue:     v.LimitValue,

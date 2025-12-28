@@ -1,4 +1,4 @@
-// Package node provides the NodeService for managing Swarm nodes.
+// Package node provides the NodeService for managing Forge nodes.
 package node
 
 import (
@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	swarmdv1 "github.com/tOgg1/forge/gen/swarmd/v1"
+	forgedv1 "github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/tOgg1/forge/internal/models"
 	"github.com/tOgg1/forge/internal/ssh"
-	"github.com/tOgg1/forge/internal/swarmd"
+	"github.com/tOgg1/forge/internal/forged"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/rs/zerolog"
 )
@@ -19,7 +19,7 @@ import (
 // Common client errors
 var (
 	ErrNoConnection    = errors.New("no connection to node")
-	ErrDaemonNotFound  = errors.New("swarmd daemon not available")
+	ErrDaemonNotFound  = errors.New("forged daemon not available")
 	ErrAgentNotFound   = errors.New("agent not found")
 	ErrOperationFailed = errors.New("operation failed")
 )
@@ -30,21 +30,21 @@ type ClientMode string
 const (
 	// ClientModeAuto automatically selects the best mode.
 	ClientModeAuto ClientMode = "auto"
-	// ClientModeDaemon always uses the swarmd daemon (fails if unavailable).
+	// ClientModeDaemon always uses the forged daemon (fails if unavailable).
 	ClientModeDaemon ClientMode = "daemon"
 	// ClientModeSSH always uses SSH commands (no daemon).
 	ClientModeSSH ClientMode = "ssh"
 )
 
 // Client provides a unified interface for interacting with a node,
-// abstracting the difference between swarmd daemon mode and SSH-only mode.
+// abstracting the difference between forged daemon mode and SSH-only mode.
 type Client struct {
 	node   *models.Node
 	logger zerolog.Logger
 	mode   ClientMode
 
 	// Daemon connection (nil if using SSH mode)
-	daemonClient *swarmd.Client
+	daemonClient *forged.Client
 
 	// SSH executor (for SSH mode or daemon unavailable)
 	sshExecutor ssh.Executor
@@ -81,7 +81,7 @@ func WithClientMode(mode ClientMode) ClientOption {
 	}
 }
 
-// WithDaemonPort sets the swarmd daemon port.
+// WithDaemonPort sets the forged daemon port.
 func WithDaemonPort(port int) ClientOption {
 	return func(o *clientOpts) {
 		o.daemonPort = port
@@ -110,8 +110,8 @@ func WithSSHExecutorFunc(fn func(*models.Node) (ssh.Executor, error)) ClientOpti
 }
 
 // NewClient creates a new unified client for a node.
-// It automatically detects whether to use swarmd daemon or SSH mode.
-// The node's ExecutionMode and SwarmdPort settings are used as defaults,
+// It automatically detects whether to use forged daemon or SSH mode.
+// The node's ExecutionMode and ForgedPort settings are used as defaults,
 // but can be overridden via ClientOptions.
 func NewClient(ctx context.Context, node *models.Node, opts ...ClientOption) (*Client, error) {
 	if node == nil {
@@ -121,7 +121,7 @@ func NewClient(ctx context.Context, node *models.Node, opts ...ClientOption) (*C
 	// Apply defaults from node configuration
 	defaultMode := ClientModeAuto
 	switch node.ExecutionMode {
-	case models.ExecutionModeSwarmd:
+	case models.ExecutionModeForged:
 		defaultMode = ClientModeDaemon
 	case models.ExecutionModeSSH:
 		defaultMode = ClientModeSSH
@@ -129,13 +129,13 @@ func NewClient(ctx context.Context, node *models.Node, opts ...ClientOption) (*C
 		defaultMode = ClientModeAuto
 	}
 
-	defaultPort := swarmd.DefaultPort
-	if node.SwarmdPort > 0 {
-		defaultPort = node.SwarmdPort
+	defaultPort := forged.DefaultPort
+	if node.ForgedPort > 0 {
+		defaultPort = node.ForgedPort
 	}
 
-	// Default preferDaemon based on node's SwarmdEnabled setting
-	preferDaemon := node.SwarmdEnabled
+	// Default preferDaemon based on node's ForgedEnabled setting
+	preferDaemon := node.ForgedEnabled
 
 	cfg := &clientOpts{
 		logger:        zerolog.Nop(),
@@ -199,18 +199,18 @@ func (c *Client) connectDaemon(ctx context.Context, cfg *clientOpts) error {
 	dialCtx, cancel := context.WithTimeout(ctx, cfg.daemonTimeout)
 	defer cancel()
 
-	var daemonClient *swarmd.Client
+	var daemonClient *forged.Client
 	var err error
 
 	if c.node.IsLocal {
 		// Direct connection for local node
 		target := fmt.Sprintf("127.0.0.1:%d", cfg.daemonPort)
-		daemonClient, err = swarmd.Dial(dialCtx, target, swarmd.WithLogger(c.logger))
+		daemonClient, err = forged.Dial(dialCtx, target, forged.WithLogger(c.logger))
 	} else {
 		// SSH tunnel for remote node
 		user, host, port := ParseSSHTarget(c.node.SSHTarget)
 		_ = user // SSH executor handles user
-		daemonClient, err = swarmd.DialSSH(dialCtx, host, port, cfg.daemonPort, swarmd.WithLogger(c.logger))
+		daemonClient, err = forged.DialSSH(dialCtx, host, port, cfg.daemonPort, forged.WithLogger(c.logger))
 	}
 
 	if err != nil {
@@ -223,12 +223,12 @@ func (c *Client) connectDaemon(ctx context.Context, cfg *clientOpts) error {
 
 	if _, err := daemonClient.Ping(pingCtx); err != nil {
 		_ = daemonClient.Close()
-		c.node.SwarmdAvailable = false
+		c.node.ForgedAvailable = false
 		return fmt.Errorf("daemon ping failed: %w", err)
 	}
 
 	c.daemonClient = daemonClient
-	c.node.SwarmdAvailable = true
+	c.node.ForgedAvailable = true
 	return nil
 }
 
@@ -276,7 +276,7 @@ func (c *Client) connectSSH(ctx context.Context, node *models.Node, cfg *clientO
 	return nil
 }
 
-// IsDaemonMode returns true if the client is using the swarmd daemon.
+// IsDaemonMode returns true if the client is using the forged daemon.
 func (c *Client) IsDaemonMode() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -303,8 +303,8 @@ func (c *Client) Node() *models.Node {
 	return c.node
 }
 
-// DaemonClient returns the underlying swarmd client, or nil if not in daemon mode.
-func (c *Client) DaemonClient() *swarmd.Client {
+// DaemonClient returns the underlying forged client, or nil if not in daemon mode.
+func (c *Client) DaemonClient() *forged.Client {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.daemonClient
@@ -339,7 +339,7 @@ func (c *Client) SpawnAgent(ctx context.Context, req *SpawnAgentRequest) (*Spawn
 
 	if c.daemonClient != nil {
 		// Use daemon
-		resp, err := c.daemonClient.SpawnAgent(ctx, &swarmdv1.SpawnAgentRequest{
+		resp, err := c.daemonClient.SpawnAgent(ctx, &forgedv1.SpawnAgentRequest{
 			AgentId:     req.AgentID,
 			WorkspaceId: req.WorkspaceID,
 			Command:     req.Command,
@@ -365,7 +365,7 @@ func (c *Client) SpawnAgent(ctx context.Context, req *SpawnAgentRequest) (*Spawn
 func (c *Client) spawnAgentSSH(ctx context.Context, req *SpawnAgentRequest) (*SpawnAgentResponse, error) {
 	sessionName := req.SessionName
 	if sessionName == "" {
-		sessionName = fmt.Sprintf("swarm-%s", req.WorkspaceID)
+		sessionName = fmt.Sprintf("forge-%s", req.WorkspaceID)
 	}
 
 	workDir := req.WorkingDir
@@ -421,7 +421,7 @@ func (c *Client) KillAgent(ctx context.Context, agentID string, paneID string, f
 	defer c.mu.RUnlock()
 
 	if c.daemonClient != nil {
-		_, err := c.daemonClient.KillAgent(ctx, &swarmdv1.KillAgentRequest{
+		_, err := c.daemonClient.KillAgent(ctx, &forgedv1.KillAgentRequest{
 			AgentId: agentID,
 			Force:   force,
 		})
@@ -446,7 +446,7 @@ func (c *Client) SendInput(ctx context.Context, agentID string, paneID string, t
 	defer c.mu.RUnlock()
 
 	if c.daemonClient != nil {
-		_, err := c.daemonClient.SendInput(ctx, &swarmdv1.SendInputRequest{
+		_, err := c.daemonClient.SendInput(ctx, &forgedv1.SendInputRequest{
 			AgentId:   agentID,
 			Text:      text,
 			SendEnter: sendEnter,
@@ -482,7 +482,7 @@ func (c *Client) CapturePane(ctx context.Context, agentID string, paneID string,
 		if includeHistory {
 			lines = -1
 		}
-		resp, err := c.daemonClient.CapturePane(ctx, &swarmdv1.CapturePaneRequest{
+		resp, err := c.daemonClient.CapturePane(ctx, &forgedv1.CapturePaneRequest{
 			AgentId: agentID,
 			Lines:   lines,
 		})
@@ -554,8 +554,8 @@ func (c *Client) Ping(ctx context.Context) error {
 	return err
 }
 
-// GetDaemonStatus returns the swarmd daemon status, or nil if not in daemon mode.
-func (c *Client) GetDaemonStatus(ctx context.Context) (*swarmdv1.DaemonStatus, error) {
+// GetDaemonStatus returns the forged daemon status, or nil if not in daemon mode.
+func (c *Client) GetDaemonStatus(ctx context.Context) (*forgedv1.DaemonStatus, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 

@@ -1,4 +1,4 @@
-// Package node provides the NodeService for managing Swarm nodes.
+// Package node provides the NodeService for managing Forge nodes.
 package node
 
 import (
@@ -26,7 +26,7 @@ var (
 	ErrConnectionFailed  = errors.New("connection test failed")
 )
 
-// Service manages Swarm nodes.
+// Service manages Forge nodes.
 type Service struct {
 	repo      *db.NodeRepository
 	publisher events.Publisher
@@ -422,18 +422,18 @@ func (s *Service) gatherNodeMetadata(ctx context.Context, executor ssh.Executor)
 	}
 	metadata.AvailableAdapters = adapters
 
-	// Check for swarmd daemon
-	if stdout, _, err := executor.Exec(ctx, "swarmd --version 2>/dev/null"); err == nil && len(stdout) > 0 {
-		metadata.SwarmdVersion = strings.TrimSpace(string(stdout))
+	// Check for forged daemon
+	if stdout, _, err := executor.Exec(ctx, "forged --version 2>/dev/null"); err == nil && len(stdout) > 0 {
+		metadata.ForgedVersion = strings.TrimSpace(string(stdout))
 	}
 
-	// Check if swarmd is running
-	if _, _, err := executor.Exec(ctx, "pgrep -x swarmd >/dev/null 2>&1"); err == nil {
-		metadata.SwarmdStatus = "running"
-	} else if metadata.SwarmdVersion != "" {
-		metadata.SwarmdStatus = "installed"
+	// Check if forged is running
+	if _, _, err := executor.Exec(ctx, "pgrep -x forged >/dev/null 2>&1"); err == nil {
+		metadata.ForgedStatus = "running"
+	} else if metadata.ForgedVersion != "" {
+		metadata.ForgedStatus = "installed"
 	} else {
-		metadata.SwarmdStatus = "not_installed"
+		metadata.ForgedStatus = "not_installed"
 	}
 
 	return metadata

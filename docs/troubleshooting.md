@@ -1,4 +1,4 @@
-# Swarm Troubleshooting
+# Forge Troubleshooting
 
 This guide covers common setup and runtime issues with copy-paste fixes.
 If you are in JSON mode, add `--no-color` to keep output plain.
@@ -6,10 +6,10 @@ If you are in JSON mode, add `--no-color` to keep output plain.
 ## Quick triage
 
 ```bash
-./build/swarm --version
-./build/swarm node list
-./build/swarm ws list
-./build/swarm agent list
+./build/forge --version
+./build/forge node list
+./build/forge ws list
+./build/forge agent list
 ```
 
 If any command fails, see the matching section below.
@@ -43,13 +43,13 @@ Symptoms:
 
 Fix (manual setup):
 ```bash
-mkdir -p ~/.config/swarm
-cp docs/config.example.yaml ~/.config/swarm/config.yaml
+mkdir -p ~/.config/forge
+cp docs/config.example.yaml ~/.config/forge/config.yaml
 ```
 
-If your build supports `swarm init`, you can run:
+If your build supports `forge init`, you can run:
 ```bash
-./build/swarm init
+./build/forge init
 ```
 
 ## Database not migrated
@@ -60,12 +60,12 @@ Symptoms:
 
 Fix:
 ```bash
-./build/swarm migrate up
+./build/forge migrate up
 ```
 
 If you customized the data directory, confirm the config:
 ```bash
-rg -n "data_dir|database.path" ~/.config/swarm/config.yaml
+rg -n "data_dir|database.path" ~/.config/forge/config.yaml
 ```
 
 ## SSH issues (remote nodes)
@@ -89,7 +89,7 @@ node_defaults:
 
 If you use a custom key:
 ```bash
-./build/swarm node add --name mynode --ssh user@host --key ~/.ssh/id_rsa
+./build/forge node add --name mynode --ssh user@host --key ~/.ssh/id_rsa
 ```
 
 ## Workspace path not found
@@ -99,7 +99,7 @@ Symptoms:
 
 Fix:
 ```bash
-./build/swarm ws create --path /absolute/path/to/repo --node <node>
+./build/forge ws create --path /absolute/path/to/repo --node <node>
 ```
 
 Use absolute paths for remote nodes.
@@ -117,12 +117,12 @@ tmux ls
 
 If the workspace session is missing, recreate it:
 ```bash
-./build/swarm ws create --path /path/to/repo --node <node>
+./build/forge ws create --path /path/to/repo --node <node>
 ```
 
 If the session exists but a pane is missing, restart the agent:
 ```bash
-./build/swarm agent restart <agent-id>
+./build/forge agent restart <agent-id>
 ```
 
 ## Agent stuck or not idle
@@ -132,23 +132,23 @@ Symptoms:
 
 Fix:
 ```bash
-./build/swarm agent interrupt <agent-id>
-./build/swarm agent send <agent-id> "Retry the last step"
+./build/forge agent interrupt <agent-id>
+./build/forge agent send <agent-id> "Retry the last step"
 ```
 
 If you need to send anyway:
 ```bash
-./build/swarm agent send <agent-id> --skip-idle-check "Force this message"
+./build/forge agent send <agent-id> --skip-idle-check "Force this message"
 ```
 
 ## Need more detail
 
 Run with verbose logs:
 ```bash
-./build/swarm --verbose <command>
+./build/forge --verbose <command>
 ```
 
 If you are still stuck, collect:
-- `swarm --version`
+- `forge --version`
 - the exact command you ran
 - the error output

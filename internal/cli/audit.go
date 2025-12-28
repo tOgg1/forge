@@ -1,4 +1,4 @@
-// Package cli provides the Swarm command-line interface.
+// Package cli provides the Forge command-line interface.
 package cli
 
 import (
@@ -37,13 +37,13 @@ var (
 
 var auditCmd = &cobra.Command{
 	Use:   "audit",
-	Short: "View the Swarm audit log",
+	Short: "View the Forge audit log",
 	Long: `View the audit log with filters for time range, entity, and action.
 
 Examples:
-  swarm audit --since 1h
-  swarm audit --type agent.state_changed --entity-type agent
-  swarm audit --action message.dispatched --limit 200`,
+  forge audit --since 1h
+  forge audit --type agent.state_changed --entity-type agent
+  forge audit --action message.dispatched --limit 200`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 

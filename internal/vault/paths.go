@@ -165,7 +165,7 @@ func homeDir() string {
 // DefaultVaultPath returns the default vault directory path.
 func DefaultVaultPath() string {
 	home := homeDir()
-	return filepath.Join(home, ".config", "swarm", "vault")
+	return filepath.Join(home, ".config", "forge", "vault")
 }
 
 // ProfilesPath returns the profiles subdirectory within a vault.

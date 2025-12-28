@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/agent"
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/models"
@@ -21,7 +22,6 @@ import (
 	"github.com/tOgg1/forge/internal/queue"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/tOgg1/forge/internal/workspace"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -95,7 +95,7 @@ func init() {
 	agentSendCmd.Flags().StringVarP(&agentSendFile, "file", "f", "", "read message from file")
 	agentSendCmd.Flags().BoolVar(&agentSendStdin, "stdin", false, "read message from stdin")
 	agentSendCmd.Flags().BoolVar(&agentSendEditor, "editor", false, "compose message in $EDITOR")
-	_ = agentSendCmd.Flags().MarkDeprecated("skip-idle-check", "this command now queues messages; use 'swarm inject --force' for immediate dispatch")
+	_ = agentSendCmd.Flags().MarkDeprecated("skip-idle-check", "this command now queues messages; use 'forge inject --force' for immediate dispatch")
 
 	// Queue flags
 	agentQueueCmd.Flags().StringVarP(&agentQueueFile, "file", "f", "", "file containing prompts (one per line)")
@@ -124,18 +124,18 @@ The agent will be started in a new tmux pane in the workspace's session.
 
 If --workspace is not specified, the workspace is resolved from:
 1. Current directory (if in a workspace's git repo)
-2. Stored context (set with 'swarm use <workspace>')`,
+2. Stored context (set with 'forge use <workspace>')`,
 	Example: `  # Spawn in current workspace (from directory or context)
-  swarm agent spawn
+  forge agent spawn
 
   # Spawn a single opencode agent
-  swarm agent spawn --workspace my-project
+  forge agent spawn --workspace my-project
 
   # Spawn 3 claude-code agents with a specific profile
-  swarm agent spawn -w my-project -t claude-code -n 3 -p work-account
+  forge agent spawn -w my-project -t claude-code -n 3 -p work-account
 
   # Spawn with an initial prompt
-  swarm agent spawn -w my-project --prompt "Fix all linting errors"`,
+  forge agent spawn -w my-project --prompt "Fix all linting errors"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -268,7 +268,7 @@ If --workspace is not specified, the workspace is resolved from:
 var agentListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List agents",
-	Long: `List all agents managed by Swarm.
+	Long: `List all agents managed by Forge.
 
 If --workspace is not specified, filters by workspace from context (if set).
 Use --workspace="" to list all agents across workspaces.`,
@@ -661,22 +661,22 @@ var agentResumeCmd = &cobra.Command{
 
 var agentSendCmd = &cobra.Command{
 	Use:        "send <agent-id> [message]",
-	Short:      "Queue a message for an agent (DEPRECATED: use 'swarm send')",
-	Deprecated: "Use 'swarm send' for queue-based dispatch. This command is an alias.",
-	Long: `DEPRECATED: Use 'swarm send' for queue-based dispatch.
+	Short:      "Queue a message for an agent (DEPRECATED: use 'forge send')",
+	Deprecated: "Use 'forge send' for queue-based dispatch. This command is an alias.",
+	Long: `DEPRECATED: Use 'forge send' for queue-based dispatch.
 
 This command now queues messages instead of immediate injection.
-For immediate dispatch, use 'swarm send --immediate' or 'swarm inject'.
+For immediate dispatch, use 'forge send --immediate' or 'forge inject'.
 
 Provide the message inline, or use --file, --stdin, or --editor to send multi-line input.`,
-	Example: `  # Recommended: use 'swarm send' directly
-  swarm send abc123 "Fix the lint errors"
+	Example: `  # Recommended: use 'forge send' directly
+  forge send abc123 "Fix the lint errors"
 
   # Legacy alias (now queued)
-  swarm agent send abc123 "Fix the lint errors"
+  forge agent send abc123 "Fix the lint errors"
 
   # Send a multi-line message from a file
-  swarm agent send abc123 --file prompt.txt`,
+  forge agent send abc123 --file prompt.txt`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
@@ -688,7 +688,7 @@ Provide the message inline, or use --file, --stdin, or --editor to send multi-li
 		}
 
 		if agentSendSkipIdle && !IsJSONOutput() && !IsJSONLOutput() {
-			fmt.Fprintln(os.Stderr, "Warning: --skip-idle-check is ignored; 'swarm agent send' now queues messages.")
+			fmt.Fprintln(os.Stderr, "Warning: --skip-idle-check is ignored; 'forge agent send' now queues messages.")
 		}
 
 		database, err := openDatabase()
@@ -791,16 +791,16 @@ Special markers in the file:
   #                - Comment line (ignored)
   (blank lines)   - Ignored`,
 	Example: `  # Queue a single message
-  swarm agent queue abc123 "Fix the bug"
+  forge agent queue abc123 "Fix the bug"
 
   # Queue multiple messages
-  swarm agent queue abc123 "First task" "Second task" "Third task"
+  forge agent queue abc123 "First task" "Second task" "Third task"
 
   # Queue from a file
-  swarm agent queue abc123 --file prompts.txt
+  forge agent queue abc123 --file prompts.txt
 
   # Auto-insert pauses every 5 messages
-  swarm agent queue abc123 --file prompts.txt --pause-after 5`,
+  forge agent queue abc123 --file prompts.txt --pause-after 5`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
@@ -1042,11 +1042,13 @@ func formatApprovalDetails(details json.RawMessage) string {
 }
 
 func resolveSendMessage(args []string) (string, error) {
-	return resolveMessage(args, agentSendFile, agentSendStdin, agentSendEditor)
+	// args[0] is the agent ID, so pass args[1:] as the message args
+	messageArgs := args[1:]
+	return resolveMessage(messageArgs, agentSendFile, agentSendStdin, agentSendEditor)
 }
 
 func resolveMessage(args []string, file string, stdin bool, editor bool) (string, error) {
-	hasInline := len(args) > 1
+	hasInline := len(args) > 0
 	sourceCount := 0
 	if hasInline {
 		sourceCount++
@@ -1079,7 +1081,7 @@ func resolveMessage(args []string, file string, stdin bool, editor bool) (string
 	case editor:
 		message, err = readMessageFromEditor()
 	default:
-		message = strings.Join(args[1:], " ")
+		message = strings.Join(args, " ")
 	}
 
 	if err != nil {
@@ -1128,7 +1130,7 @@ func readMessageFromEditor() (string, error) {
 		return "", errors.New("EDITOR is empty")
 	}
 
-	tmpFile, err := os.CreateTemp("", "swarm-agent-send-*.txt")
+	tmpFile, err := os.CreateTemp("", "forge-agent-send-*.txt")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}

@@ -1,6 +1,6 @@
-# Swarm TUI Theme System
+# Forge TUI Theme System
 
-This document defines the baseline visual system for Swarm's TUI: color roles,
+This document defines the baseline visual system for Forge's TUI: color roles,
 state semantics, spacing rules, and palette variants. It is intended to keep
 TUI components visually consistent and premium.
 

@@ -1,10 +1,10 @@
-# Swarm
+# Forge
 
 A control plane for running and supervising AI coding agents across multiple repositories and servers.
 
 ## Overview
 
-Swarm provides a unified interface for managing AI coding agents (OpenCode, Claude Code, Codex, Gemini, etc.) running in tmux sessions across local and remote machines. It features:
+Forge provides a unified interface for managing AI coding agents (OpenCode, Claude Code, Codex, Gemini, etc.) running in tmux sessions across local and remote machines. It features:
 
 - **TUI Dashboard** - Real-time monitoring of agent status, queues, and progress
 - **CLI** - Full automation support with JSON output for scripting
@@ -16,7 +16,7 @@ Swarm provides a unified interface for managing AI coding agents (OpenCode, Clau
 
 | Concept | Description |
 |---------|-------------|
-| **Node** | A machine (local or remote) that Swarm controls via SSH and tmux |
+| **Node** | A machine (local or remote) that Forge controls via SSH and tmux |
 | **Workspace** | A managed unit binding a node + repo path + tmux session + agents |
 | **Agent** | A running AI coding CLI (OpenCode, Claude Code, etc.) in a tmux pane |
 | **Queue** | Per-agent message queue with conditional dispatch |
@@ -43,7 +43,7 @@ Swarm provides a unified interface for managing AI coding agents (OpenCode, Clau
         │  (local)  │            │  (remote) │            │  (remote) │
         │           │            │           │            │           │
         │ ┌───────┐ │            │ ┌───────┐ │            │ ┌───────┐ │
-        │ │swarmd │ │    SSH     │ │swarmd │ │    SSH     │ │swarmd │ │
+        │ │forged │ │    SSH     │ │forged │ │    SSH     │ │forged │ │
         │ └───┬───┘ │◄──────────►│ └───┬───┘ │◄──────────►│ └───┬───┘ │
         │     │     │            │     │     │            │     │     │
         │ ┌───┴───┐ │            │ ┌───┴───┐ │            │ ┌───┴───┐ │
@@ -56,7 +56,7 @@ Swarm provides a unified interface for managing AI coding agents (OpenCode, Clau
 ### Runtime Modes
 
 - **SSH-only (Mode A)**: Control plane uses SSH for tmux operations. Simple, minimal footprint.
-- **Daemon (Mode B)**: `swarmd` runs on nodes for real-time operations, better performance.
+- **Daemon (Mode B)**: `forged` runs on nodes for real-time operations, better performance.
 
 ## Installation
 
@@ -70,12 +70,12 @@ Swarm provides a unified interface for managing AI coding agents (OpenCode, Clau
 ### Build from Source
 
 ```bash
-git clone https://github.com/tOgg1/swarm.git
-cd swarm
+git clone https://github.com/tOgg1/forge.git
+cd forge
 make build
 ```
 
-Binaries are written to `./build/swarm` and `./build/swarmd`.
+Binaries are written to `./build/forge` and `./build/forged`.
 
 ### Bootstrap a Node
 
@@ -83,10 +83,10 @@ For fresh servers, use the bootstrap script:
 
 ```bash
 # One-liner (downloads and verifies before running)
-curl -fsSL https://raw.githubusercontent.com/tOgg1/swarm/main/scripts/install.sh | bash -s -- --install-extras
+curl -fsSL https://raw.githubusercontent.com/tOgg1/forge/main/scripts/install.sh | bash -s -- --install-extras
 
 # With Claude Code
-curl -fsSL https://raw.githubusercontent.com/tOgg1/swarm/main/scripts/install.sh | bash -s -- --install-extras --install-claude
+curl -fsSL https://raw.githubusercontent.com/tOgg1/forge/main/scripts/install.sh | bash -s -- --install-extras --install-claude
 ```
 
 ## Quick Start
@@ -94,50 +94,50 @@ curl -fsSL https://raw.githubusercontent.com/tOgg1/swarm/main/scripts/install.sh
 ### 1. Initialize Database
 
 ```bash
-swarm migrate up
+forge migrate up
 ```
 
 ### 2. Add a Node
 
 ```bash
 # Local node
-swarm node add --name local --local
+forge node add --name local --local
 
 # Remote node
-swarm node add --name server1 --ssh user@hostname
+forge node add --name server1 --ssh user@hostname
 ```
 
 ### 3. Create a Workspace
 
 ```bash
-swarm ws create --node local --path /path/to/your/repo
+forge ws create --node local --path /path/to/your/repo
 ```
 
 ### 4. Spawn an Agent
 
 ```bash
-swarm agent spawn --workspace <workspace-id> --type opencode --count 1
+forge agent spawn --workspace <workspace-id> --type opencode --count 1
 ```
 
 ### 5. Send Instructions
 
 ```bash
-swarm agent send <agent-id> "Implement the login feature"
+forge agent send <agent-id> "Implement the login feature"
 ```
 
 ### 6. Launch the TUI
 
 ```bash
-swarm
+forge
 ```
 
 ## Configuration
 
-Create a config file at `~/.config/swarm/config.yaml`:
+Create a config file at `~/.config/forge/config.yaml`:
 
 ```yaml
 global:
-  data_dir: ~/.local/share/swarm
+  data_dir: ~/.local/share/forge
   auto_register_local_node: true
 
 database:
@@ -172,61 +172,61 @@ See [docs/config.md](docs/config.md) for the full configuration reference.
 ### Nodes
 
 ```bash
-swarm node list                    # List all nodes
-swarm node add --name <n> --local  # Add local node
-swarm node add --name <n> --ssh user@host  # Add remote node
-swarm node remove <node>           # Remove a node
-swarm node doctor <node>           # Diagnose node issues
-swarm node exec <node> -- <cmd>    # Execute command on node
+forge node list                    # List all nodes
+forge node add --name <n> --local  # Add local node
+forge node add --name <n> --ssh user@host  # Add remote node
+forge node remove <node>           # Remove a node
+forge node doctor <node>           # Diagnose node issues
+forge node exec <node> -- <cmd>    # Execute command on node
 ```
 
 ### Workspaces
 
 ```bash
-swarm ws create --node <n> --path <repo>  # Create workspace
-swarm ws import --node <n> --tmux <sess>  # Import existing tmux session
-swarm ws list                             # List workspaces
-swarm ws status <ws>                      # Show workspace status
-swarm ws attach <ws>                      # Attach to tmux session
-swarm ws remove <ws>                      # Remove workspace
+forge ws create --node <n> --path <repo>  # Create workspace
+forge ws import --node <n> --tmux <sess>  # Import existing tmux session
+forge ws list                             # List workspaces
+forge ws status <ws>                      # Show workspace status
+forge ws attach <ws>                      # Attach to tmux session
+forge ws remove <ws>                      # Remove workspace
 ```
 
 ### Agents
 
 ```bash
-swarm agent spawn --ws <ws> --type opencode --count 3  # Spawn agents
-swarm agent list [--workspace <ws>]                    # List agents
-swarm agent status <agent>                             # Show agent status
-swarm agent send <agent> "message"                     # Send instruction
-swarm agent queue <agent> --file prompts.txt           # Queue messages
-swarm agent pause <agent> --minutes 20                 # Pause agent
-swarm agent resume <agent>                             # Resume agent
-swarm agent interrupt <agent>                          # Send Ctrl+C
-swarm agent restart <agent>                            # Restart agent
-swarm agent terminate <agent>                          # Kill agent
-swarm agent approve <agent> [--all]                    # Handle approvals
+forge agent spawn --ws <ws> --type opencode --count 3  # Spawn agents
+forge agent list [--workspace <ws>]                    # List agents
+forge agent status <agent>                             # Show agent status
+forge agent send <agent> "message"                     # Send instruction
+forge agent queue <agent> --file prompts.txt           # Queue messages
+forge agent pause <agent> --minutes 20                 # Pause agent
+forge agent resume <agent>                             # Resume agent
+forge agent interrupt <agent>                          # Send Ctrl+C
+forge agent restart <agent>                            # Restart agent
+forge agent terminate <agent>                          # Kill agent
+forge agent approve <agent> [--all]                    # Handle approvals
 ```
 
 ### Accounts
 
 ```bash
-swarm accounts list                    # List accounts
-swarm accounts add --provider openai   # Add account
-swarm accounts cooldown list           # Show cooldowns
-swarm accounts rotate --provider X     # Rotate account
+forge accounts list                    # List accounts
+forge accounts add --provider openai   # Add account
+forge accounts cooldown list           # Show cooldowns
+forge accounts rotate --provider X     # Rotate account
 ```
 
 ### Export & Audit
 
 ```bash
-swarm export status --json             # Export status as JSON
-swarm export events --since 1h --jsonl # Export events
-swarm audit                            # View audit log
+forge export status --json             # Export status as JSON
+forge export events --since 1h --jsonl # Export events
+forge audit                            # View audit log
 ```
 
 ## Agent Adapters
 
-Swarm supports multiple AI coding CLIs through adapters:
+Forge supports multiple AI coding CLIs through adapters:
 
 | Tier | Adapter | Integration Level | Features |
 |------|---------|-------------------|----------|
@@ -262,19 +262,19 @@ Swarm supports multiple AI coding CLIs through adapters:
 | `a` | Approve action |
 | `p` | Pause agent |
 
-## swarmd (Node Daemon)
+## forged (Node Daemon)
 
-The optional `swarmd` daemon provides enhanced features:
+The optional `forged` daemon provides enhanced features:
 
 - **Real-time screen capture** with content hashing
 - **Resource monitoring** with CPU/memory limits
 - **Rate limiting** for API protection
 - **gRPC API** for control plane communication
 
-### Running swarmd
+### Running forged
 
 ```bash
-swarmd --port 50051 --log-level info
+forged --port 50051 --log-level info
 ```
 
 ### Resource Limits
@@ -282,7 +282,7 @@ swarmd --port 50051 --log-level info
 Configure per-agent resource caps:
 
 ```bash
-swarm agent spawn --ws <ws> --type opencode \
+forge agent spawn --ws <ws> --type opencode \
   --max-memory 2G \
   --max-cpu 200  # 200% = 2 cores
 ```
@@ -290,14 +290,14 @@ swarm agent spawn --ws <ws> --type opencode \
 ## Project Structure
 
 ```
-swarm/
+forge/
 ├── cmd/
-│   ├── swarm/      # Main CLI/TUI binary
-│   └── swarmd/     # Node daemon binary
+│   ├── forge/      # Main CLI/TUI binary
+│   └── forged/     # Node daemon binary
 ├── internal/
 │   ├── cli/        # CLI commands (Cobra)
 │   ├── tui/        # TUI components (Bubble Tea)
-│   ├── swarmd/     # Daemon implementation
+│   ├── forged/     # Daemon implementation
 │   ├── agent/      # Agent service
 │   ├── adapters/   # Agent CLI adapters
 │   ├── state/      # State engine
@@ -313,9 +313,9 @@ swarm/
 │   ├── events/     # Event logging
 │   └── models/     # Domain models
 ├── proto/
-│   └── swarmd/v1/  # gRPC protocol definitions
+│   └── forged/v1/  # gRPC protocol definitions
 ├── gen/
-│   └── swarmd/v1/  # Generated protobuf code
+│   └── forged/v1/  # Generated protobuf code
 ├── docs/           # Documentation
 └── scripts/        # Bootstrap and install scripts
 ```
@@ -350,7 +350,7 @@ make release
 
 ### beads/bv Issue Tracking
 
-Swarm integrates with [beads](https://github.com/Dicklesworthstone/beads_viewer) for issue tracking. When a workspace contains a `.beads/` directory, Swarm displays task status in the TUI.
+Forge integrates with [beads](https://github.com/Dicklesworthstone/beads_viewer) for issue tracking. When a workspace contains a `.beads/` directory, Forge displays task status in the TUI.
 
 ### Agent Mail (MCP)
 
@@ -366,16 +366,16 @@ Optional integration with Agent Mail for:
 **Agent not detecting state correctly**
 - Check adapter tier - Tier 1 (generic) uses heuristics
 - Increase `state_polling_interval` for more frequent checks
-- Use `swarm agent status <id>` to see detection confidence
+- Use `forge agent status <id>` to see detection confidence
 
 **SSH connection failures**
-- Run `swarm node doctor <node>` to diagnose
+- Run `forge node doctor <node>` to diagnose
 - Check `~/.ssh/config` is correct
 - Try `ssh_backend: system` in config
 
 **Database locked errors**
 - Increase `busy_timeout_ms` in config
-- Ensure only one Swarm instance is running
+- Ensure only one Forge instance is running
 
 See [docs/troubleshooting.md](docs/troubleshooting.md) for more solutions.
 
@@ -389,7 +389,7 @@ See [docs/troubleshooting.md](docs/troubleshooting.md) for more solutions.
 - [x] OpenCode adapter
 
 ### v0.2
-- [x] swarmd daemon
+- [x] forged daemon
 - [x] Resource caps enforcement
 - [x] Approvals inbox (TUI integration)
 - [x] Account rotation

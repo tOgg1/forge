@@ -10,7 +10,7 @@ import (
 //go:embed builtin/*.yaml
 var builtinFS embed.FS
 
-// LoadBuiltinTemplates returns the built-in templates bundled with Swarm.
+// LoadBuiltinTemplates returns the built-in templates bundled with Forge.
 func LoadBuiltinTemplates() ([]*Template, error) {
 	entries, err := fs.ReadDir(builtinFS, "builtin")
 	if err != nil {

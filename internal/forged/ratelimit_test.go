@@ -1,4 +1,4 @@
-package swarmd
+package forged
 
 import (
 	"context"
@@ -110,7 +110,7 @@ func TestRateLimiterDisabled(t *testing.T) {
 
 	// All requests should be allowed when disabled
 	for i := 0; i < 1000; i++ {
-		if !rl.Allow("/swarmd.v1.SwarmdService/SpawnAgent") {
+		if !rl.Allow("/forged.v1.ForgedService/SpawnAgent") {
 			t.Errorf("Request %d should be allowed when rate limiting is disabled", i)
 		}
 	}
@@ -177,9 +177,9 @@ func TestRateLimiterStats(t *testing.T) {
 	rl := NewRateLimiter()
 
 	// Make some requests
-	rl.Allow("/swarmd.v1.SwarmdService/SpawnAgent")
-	rl.Allow("/swarmd.v1.SwarmdService/SpawnAgent")
-	rl.Allow("/swarmd.v1.SwarmdService/KillAgent")
+	rl.Allow("/forged.v1.ForgedService/SpawnAgent")
+	rl.Allow("/forged.v1.ForgedService/SpawnAgent")
+	rl.Allow("/forged.v1.ForgedService/KillAgent")
 
 	stats := rl.Stats()
 	if len(stats) == 0 {
@@ -189,7 +189,7 @@ func TestRateLimiterStats(t *testing.T) {
 	// Find SpawnAgent stats
 	var spawnStats *MethodStats
 	for i := range stats {
-		if stats[i].Method == "/swarmd.v1.SwarmdService/SpawnAgent" {
+		if stats[i].Method == "/forged.v1.ForgedService/SpawnAgent" {
 			spawnStats = &stats[i]
 			break
 		}
@@ -369,18 +369,18 @@ func TestStreamServerInterceptor(t *testing.T) {
 
 func TestDefaultRateLimitsExist(t *testing.T) {
 	expectedMethods := []string{
-		"/swarmd.v1.SwarmdService/SpawnAgent",
-		"/swarmd.v1.SwarmdService/KillAgent",
-		"/swarmd.v1.SwarmdService/SendInput",
-		"/swarmd.v1.SwarmdService/ListAgents",
-		"/swarmd.v1.SwarmdService/GetAgent",
-		"/swarmd.v1.SwarmdService/CapturePane",
-		"/swarmd.v1.SwarmdService/GetTranscript",
-		"/swarmd.v1.SwarmdService/GetStatus",
-		"/swarmd.v1.SwarmdService/Ping",
-		"/swarmd.v1.SwarmdService/StreamPaneUpdates",
-		"/swarmd.v1.SwarmdService/StreamEvents",
-		"/swarmd.v1.SwarmdService/StreamTranscript",
+		"/forged.v1.ForgedService/SpawnAgent",
+		"/forged.v1.ForgedService/KillAgent",
+		"/forged.v1.ForgedService/SendInput",
+		"/forged.v1.ForgedService/ListAgents",
+		"/forged.v1.ForgedService/GetAgent",
+		"/forged.v1.ForgedService/CapturePane",
+		"/forged.v1.ForgedService/GetTranscript",
+		"/forged.v1.ForgedService/GetStatus",
+		"/forged.v1.ForgedService/Ping",
+		"/forged.v1.ForgedService/StreamPaneUpdates",
+		"/forged.v1.ForgedService/StreamEvents",
+		"/forged.v1.ForgedService/StreamTranscript",
 	}
 
 	for _, method := range expectedMethods {

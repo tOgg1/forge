@@ -1,4 +1,4 @@
-# Swarm Terminology and Naming
+# Forge Terminology and Naming
 
 This document defines canonical terms, acceptable abbreviations, and naming
 rules used across the CLI, TUI, docs, and configuration.
@@ -12,8 +12,8 @@ rules used across the CLI, TUI, docs, and configuration.
 
 ## Canonical terms
 
-- **Node**: A machine Swarm can control (local or remote).
-- **Workspace**: A repo + node + tmux session managed by Swarm.
+- **Node**: A machine Forge can control (local or remote).
+- **Workspace**: A repo + node + tmux session managed by Forge.
 - **Agent**: A running CLI instance in a tmux pane.
 - **Queue item**: A queued message/pause/conditional for an agent.
 - **Account profile**: Provider credentials or account context for an agent.

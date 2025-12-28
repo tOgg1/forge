@@ -128,10 +128,10 @@ func TestSequenceSourceLabel(t *testing.T) {
 		projectDir string
 		want       string
 	}{
-		{"builtin", "builtin", "/home/user/.config/swarm/sequences", "/project/.swarm/sequences", "builtin"},
-		{"user sequence", "/home/user/.config/swarm/sequences/foo.yaml", "/home/user/.config/swarm/sequences", "", "user"},
-		{"project sequence", "/project/.swarm/sequences/bar.yaml", "", "/project/.swarm/sequences", "project"},
-		{"other file", "/some/other/path.yaml", "/home/user/.config/swarm/sequences", "/project/.swarm/sequences", "file"},
+		{"builtin", "builtin", "/home/user/.config/forge/sequences", "/project/.forge/sequences", "builtin"},
+		{"user sequence", "/home/user/.config/forge/sequences/foo.yaml", "/home/user/.config/forge/sequences", "", "user"},
+		{"project sequence", "/project/.forge/sequences/bar.yaml", "", "/project/.forge/sequences", "project"},
+		{"other file", "/some/other/path.yaml", "/home/user/.config/forge/sequences", "/project/.forge/sequences", "file"},
 	}
 
 	for _, tt := range tests {

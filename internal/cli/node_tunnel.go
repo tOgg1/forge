@@ -10,7 +10,7 @@ import (
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/node"
 	"github.com/tOgg1/forge/internal/ssh"
-	"github.com/tOgg1/forge/internal/swarmd"
+	"github.com/tOgg1/forge/internal/forged"
 	"github.com/spf13/cobra"
 )
 
@@ -23,26 +23,26 @@ var (
 func init() {
 	nodeCmd.AddCommand(nodeTunnelCmd)
 
-	defaultRemote := fmt.Sprintf("%s:%d", swarmd.DefaultHost, swarmd.DefaultPort)
-	nodeTunnelCmd.Flags().StringVar(&nodeTunnelRemote, "remote", defaultRemote, "remote swarmd host:port")
+	defaultRemote := fmt.Sprintf("%s:%d", forged.DefaultHost, forged.DefaultPort)
+	nodeTunnelCmd.Flags().StringVar(&nodeTunnelRemote, "remote", defaultRemote, "remote forged host:port")
 	nodeTunnelCmd.Flags().IntVar(&nodeTunnelLocalPort, "local-port", 0, "local port to bind (defaults to remote port)")
 	nodeTunnelCmd.Flags().StringVar(&nodeTunnelLocalHost, "local-host", "127.0.0.1", "local host to bind")
 }
 
 var nodeTunnelCmd = &cobra.Command{
 	Use:   "tunnel <name-or-id>",
-	Short: "Create an SSH tunnel to swarmd",
-	Long: `Create an SSH tunnel to a node's swarmd service.
+	Short: "Create an SSH tunnel to forged",
+	Long: `Create an SSH tunnel to a node's forged service.
 
-This is a convenience wrapper around port forwarding using the swarmd defaults.`,
-	Example: `  # Forward local 50051 to swarmd on a remote node
-  swarm node tunnel prod-server
+This is a convenience wrapper around port forwarding using the forged defaults.`,
+	Example: `  # Forward local 50051 to forged on a remote node
+  forge node tunnel prod-server
 
   # Bind a custom local port
-  swarm node tunnel prod-server --local-port 55051
+  forge node tunnel prod-server --local-port 55051
 
-  # Override the remote swarmd bind address
-  swarm node tunnel prod-server --remote 127.0.0.1:60000`,
+  # Override the remote forged bind address
+  forge node tunnel prod-server --remote 127.0.0.1:60000`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -99,7 +99,7 @@ This is a convenience wrapper around port forwarding using the swarmd defaults.`
 				return err
 			}
 		} else {
-			fmt.Printf("Swarmd tunnel %s -> %s via %s. Press Ctrl+C to stop.\n", forward.LocalAddr(), forward.RemoteAddr(), n.Name)
+			fmt.Printf("Forged tunnel %s -> %s via %s. Press Ctrl+C to stop.\n", forward.LocalAddr(), forward.RemoteAddr(), n.Name)
 		}
 
 		err = forward.Wait()

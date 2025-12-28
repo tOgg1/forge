@@ -29,7 +29,7 @@ func createTestAgentForPort(t *testing.T, db *DB, ws *models.Workspace) *models.
 	agent := &models.Agent{
 		WorkspaceID: ws.ID,
 		Type:        models.AgentTypeOpenCode,
-		TmuxPane:    "swarm-test:0.1",
+		TmuxPane:    "forge-test:0.1",
 		State:       models.AgentStateIdle,
 	}
 	if err := repo.Create(context.Background(), agent); err != nil {

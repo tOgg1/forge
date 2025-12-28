@@ -1,5 +1,5 @@
--- Swarm Database Schema
--- SQLite database for the Swarm control plane
+-- Forge Database Schema
+-- SQLite database for the Forge control plane
 -- Version: 1.0.0
 
 -- Enable foreign keys
@@ -7,7 +7,7 @@ PRAGMA foreign_keys = ON;
 
 -- ============================================================================
 -- NODES TABLE
--- Machines that Swarm can control via SSH and tmux
+-- Machines that Forge can control via SSH and tmux
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS nodes (
     id TEXT PRIMARY KEY,

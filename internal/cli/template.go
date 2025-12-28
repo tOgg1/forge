@@ -82,7 +82,7 @@ var templateListCmd = &cobra.Command{
 		userDir := userTemplateDir()
 		projectTemplatesDir := ""
 		if projectDir != "" {
-			projectTemplatesDir = filepath.Join(projectDir, ".swarm", "templates")
+			projectTemplatesDir = filepath.Join(projectDir, ".forge", "templates")
 		}
 
 		rows := make([][]string, 0, len(filtered))

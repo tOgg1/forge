@@ -35,16 +35,16 @@ var useCmd = &cobra.Command{
 	Short: "Set the current workspace or agent context",
 	Long: `Set the current context to avoid repeating --workspace and --agent flags.
 
-Context is persisted to ~/.config/swarm/context.yaml and used by other commands
+Context is persisted to ~/.config/forge/context.yaml and used by other commands
 when explicit flags are not provided.
 
 Examples:
-  swarm use my-project           # Set workspace context by name
-  swarm use ws_abc123            # Set workspace context by ID
-  swarm use --agent agent_xyz    # Set agent context (keeps workspace)
-  swarm use --clear              # Clear all context
-  swarm use --show               # Show current context
-  swarm use                      # Show current context (same as --show)`,
+  forge use my-project           # Set workspace context by name
+  forge use ws_abc123            # Set workspace context by ID
+  forge use --agent agent_xyz    # Set agent context (keeps workspace)
+  forge use --clear              # Clear all context
+  forge use --show               # Show current context
+  forge use                      # Show current context (same as --show)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		store := config.DefaultContextStore()
 
@@ -67,8 +67,8 @@ Examples:
 				fmt.Println("No context set.")
 				fmt.Println("")
 				fmt.Println("Set context with:")
-				fmt.Println("  swarm use <workspace>       # Set workspace")
-				fmt.Println("  swarm use --agent <agent>   # Set agent")
+				fmt.Println("  forge use <workspace>       # Set workspace")
+				fmt.Println("  forge use --agent <agent>   # Set agent")
 			} else {
 				fmt.Printf("Current context: %s\n", ctx.String())
 				if ctx.HasWorkspace() {
@@ -195,7 +195,7 @@ Examples:
 var contextCmd = &cobra.Command{
 	Use:   "context",
 	Short: "Show current context",
-	Long:  `Show the current workspace and agent context. Alias for 'swarm use --show'.`,
+	Long:  `Show the current workspace and agent context. Alias for 'forge use --show'.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		store := config.DefaultContextStore()
 		ctx, err := store.Load()

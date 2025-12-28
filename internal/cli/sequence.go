@@ -80,7 +80,7 @@ var sequenceListCmd = &cobra.Command{
 		userDir := userSequenceDir()
 		projectSequencesDir := ""
 		if projectDir != "" {
-			projectSequencesDir = filepath.Join(projectDir, ".swarm", "sequences")
+			projectSequencesDir = filepath.Join(projectDir, ".forge", "sequences")
 		}
 
 		rows := make([][]string, 0, len(filtered))

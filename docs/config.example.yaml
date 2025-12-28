@@ -1,21 +1,21 @@
-# Swarm Configuration File
-# Place this file at ~/.config/swarm/config.yaml
+# Forge Configuration File
+# Place this file at ~/.config/forge/config.yaml
 
 # Global settings
 global:
-  # Directory for Swarm data (database, logs, transcripts)
-  data_dir: ~/.local/share/swarm
+  # Directory for Forge data (database, logs, transcripts)
+  data_dir: ~/.local/share/forge
   
   # Directory for configuration files
-  config_dir: ~/.config/swarm
+  config_dir: ~/.config/forge
   
   # Automatically register the local machine as a node
   auto_register_local_node: true
 
 # Database settings
 database:
-  # SQLite database path (default: {data_dir}/swarm.db)
-  # path: ~/.local/share/swarm/swarm.db
+  # SQLite database path (default: {data_dir}/forge.db)
+  # path: ~/.local/share/forge/forge.db
   
   # Maximum database connections
   max_connections: 10
@@ -32,7 +32,7 @@ logging:
   format: console
   
   # Optional log file path
-  # file: ~/.local/share/swarm/swarm.log
+  # file: ~/.local/share/forge/forge.log
   
   # Include caller information in logs
   enable_caller: false
@@ -63,7 +63,7 @@ node_defaults:
 # Default settings for workspaces
 workspace_defaults:
   # Prefix for generated tmux session names
-  tmux_prefix: swarm
+  tmux_prefix: forge
   
   # Default agent type to spawn
   default_agent_type: opencode

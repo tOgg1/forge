@@ -1,6 +1,6 @@
-# Swarm - Epics and Task Breakdown
+# Forge - Epics and Task Breakdown
 
-This document breaks down the Swarm product specification into actionable epics and tasks. Tasks are organized by dependency order and MVP priority.
+This document breaks down the Forge product specification into actionable epics and tasks. Tasks are organized by dependency order and MVP priority.
 
 ---
 
@@ -14,13 +14,13 @@ This document breaks down the Swarm product specification into actionable epics 
 ### Tasks
 
 #### 1.1 Project Scaffolding
-- [ ] **1.1.1** Initialize Go module (`go mod init github.com/your-org/swarm`)
+- [ ] **1.1.1** Initialize Go module (`go mod init github.com/your-org/forge`)
 - [ ] **1.1.2** Create directory structure:
   ```
-  swarm/
+  forge/
   ├── cmd/
-  │   ├── swarm/          # CLI/TUI binary
-  │   └── swarmd/         # Daemon binary (stub for now)
+  │   ├── forge/          # CLI/TUI binary
+  │   └── forged/         # Daemon binary (stub for now)
   ├── internal/
   │   ├── config/         # Configuration management
   │   ├── db/             # SQLite storage layer
@@ -44,14 +44,14 @@ This document breaks down the Swarm product specification into actionable epics 
 
 #### 1.2 Configuration System
 - [ ] **1.2.1** Define configuration file schema (YAML)
-  - Global config: `~/.config/swarm/config.yaml`
+  - Global config: `~/.config/forge/config.yaml`
   - Per-workspace overrides
 - [ ] **1.2.2** Implement config loader with Viper
   - XDG base directory support
   - Environment variable overrides
   - CLI flag precedence
 - [ ] **1.2.3** Define configuration structures:
-  - `SwarmConfig` (global settings)
+  - `ForgeConfig` (global settings)
   - `NodeConfig` (per-node settings)
   - `AccountConfig` (provider credentials reference)
 - [ ] **1.2.4** Implement config validation and defaults
@@ -157,7 +157,7 @@ This document breaks down the Swarm product specification into actionable epics 
   - tmux availability check
   - Agent runtime checks (is OpenCode installed?)
 - [ ] **2.4.3** Store node connection preferences (which SSH backend to use)
-- [ ] **2.4.4** Implement `swarm node doctor` diagnostics:
+- [ ] **2.4.4** Implement `forge node doctor` diagnostics:
   - Check SSH connectivity
   - Verify tmux version
   - Check agent CLI availability
@@ -201,7 +201,7 @@ This document breaks down the Swarm product specification into actionable epics 
 - [ ] **3.3.2** Inspect panes for working directory info (`tmux display -p -t pane '#{pane_current_path}'`)
 - [ ] **3.3.3** Detect repo root from pane paths
 - [ ] **3.3.4** Handle ambiguous repo detection (prompt user)
-- [ ] **3.3.5** Bind existing session into Swarm model
+- [ ] **3.3.5** Bind existing session into Forge model
 - [ ] **3.3.6** Discover existing agents in panes (heuristic detection)
 
 #### 3.4 Workspace Status
@@ -599,49 +599,49 @@ This document breaks down the Swarm product specification into actionable epics 
 - [ ] **9.1.4** Implement command completion (bash, zsh, fish)
 
 #### 9.2 Node Commands
-- [ ] **9.2.1** `swarm node list` - list all nodes with status
-- [ ] **9.2.2** `swarm node add --ssh user@host --name <node>` - register node
-- [ ] **9.2.3** `swarm node remove <node>` - unregister node
-- [ ] **9.2.4** `swarm node bootstrap --ssh root@host` - full bootstrap
-- [ ] **9.2.5** `swarm node doctor <node>` - run diagnostics
-- [ ] **9.2.6** `swarm node exec <node> -- <cmd>` - remote command execution
+- [ ] **9.2.1** `forge node list` - list all nodes with status
+- [ ] **9.2.2** `forge node add --ssh user@host --name <node>` - register node
+- [ ] **9.2.3** `forge node remove <node>` - unregister node
+- [ ] **9.2.4** `forge node bootstrap --ssh root@host` - full bootstrap
+- [ ] **9.2.5** `forge node doctor <node>` - run diagnostics
+- [ ] **9.2.6** `forge node exec <node> -- <cmd>` - remote command execution
 
 #### 9.3 Workspace Commands
-- [ ] **9.3.1** `swarm ws create --node <node> --path <repo>` - create workspace
-- [ ] **9.3.2** `swarm ws import --node <node> --tmux-session <name>` - import existing
-- [ ] **9.3.3** `swarm ws list` - list workspaces
-- [ ] **9.3.4** `swarm ws status <ws>` - detailed status
-- [ ] **9.3.5** `swarm ws attach <ws>` - attach to tmux session
-- [ ] **9.3.6** `swarm ws unmanage <ws>` - remove from Swarm, keep tmux
-- [ ] **9.3.7** `swarm ws kill <ws>` - destroy workspace
+- [ ] **9.3.1** `forge ws create --node <node> --path <repo>` - create workspace
+- [ ] **9.3.2** `forge ws import --node <node> --tmux-session <name>` - import existing
+- [ ] **9.3.3** `forge ws list` - list workspaces
+- [ ] **9.3.4** `forge ws status <ws>` - detailed status
+- [ ] **9.3.5** `forge ws attach <ws>` - attach to tmux session
+- [ ] **9.3.6** `forge ws unmanage <ws>` - remove from Forge, keep tmux
+- [ ] **9.3.7** `forge ws kill <ws>` - destroy workspace
 
 #### 9.4 Agent Commands
-- [ ] **9.4.1** `swarm agent spawn --ws <ws> --type opencode --count N` - spawn agents
-- [ ] **9.4.2** `swarm agent list [--ws <ws>]` - list agents
-- [ ] **9.4.3** `swarm agent status <agent>` - agent detail
-- [ ] **9.4.4** `swarm agent send <agent> "message"` - send message
-- [ ] **9.4.5** `swarm agent queue <agent> --file prompts.txt` - bulk queue
-- [ ] **9.4.6** `swarm agent pause <agent> --minutes N` - pause agent
-- [ ] **9.4.7** `swarm agent resume <agent>` - resume paused agent
-- [ ] **9.4.8** `swarm agent interrupt <agent>` - send interrupt
-- [ ] **9.4.9** `swarm agent restart <agent>` - restart agent
-- [ ] **9.4.10** `swarm agent approve <agent> [--all]` - handle approvals
+- [ ] **9.4.1** `forge agent spawn --ws <ws> --type opencode --count N` - spawn agents
+- [ ] **9.4.2** `forge agent list [--ws <ws>]` - list agents
+- [ ] **9.4.3** `forge agent status <agent>` - agent detail
+- [ ] **9.4.4** `forge agent send <agent> "message"` - send message
+- [ ] **9.4.5** `forge agent queue <agent> --file prompts.txt` - bulk queue
+- [ ] **9.4.6** `forge agent pause <agent> --minutes N` - pause agent
+- [ ] **9.4.7** `forge agent resume <agent>` - resume paused agent
+- [ ] **9.4.8** `forge agent interrupt <agent>` - send interrupt
+- [ ] **9.4.9** `forge agent restart <agent>` - restart agent
+- [ ] **9.4.10** `forge agent approve <agent> [--all]` - handle approvals
 
 #### 9.5 Account Commands
-- [ ] **9.5.1** `swarm accounts list` - list configured accounts
-- [ ] **9.5.2** `swarm accounts add` - add new account (interactive)
-- [ ] **9.5.3** `swarm accounts import-caam` - import from caam
-- [ ] **9.5.4** `swarm accounts rotate` - rotate account for agent
-- [ ] **9.5.5** `swarm accounts cooldown list|set|clear` - manage cooldowns
+- [ ] **9.5.1** `forge accounts list` - list configured accounts
+- [ ] **9.5.2** `forge accounts add` - add new account (interactive)
+- [ ] **9.5.3** `forge accounts import-caam` - import from caam
+- [ ] **9.5.4** `forge accounts rotate` - rotate account for agent
+- [ ] **9.5.5** `forge accounts cooldown list|set|clear` - manage cooldowns
 
 #### 9.6 Export/Integration Commands
-- [ ] **9.6.1** `swarm export status --json` - export full status
-- [ ] **9.6.2** `swarm export events --since 1h --jsonl` - export events
-- [ ] **9.6.3** `swarm hook on-event --cmd <script>` - register webhooks
+- [ ] **9.6.1** `forge export status --json` - export full status
+- [ ] **9.6.2** `forge export events --since 1h --jsonl` - export events
+- [ ] **9.6.3** `forge hook on-event --cmd <script>` - register webhooks
 
 #### 9.7 TUI Launch
-- [ ] **9.7.1** `swarm` (no subcommand) - launch TUI
-- [ ] **9.7.2** `swarm ui` - explicit TUI launch
+- [ ] **9.7.1** `forge` (no subcommand) - launch TUI
+- [ ] **9.7.2** `forge ui` - explicit TUI launch
 - [ ] **9.7.3** Handle TTY detection for auto-mode selection
 
 ---
@@ -897,7 +897,7 @@ This document breaks down the Swarm product specification into actionable epics 
 
 ## EPIC 14: Node Bootstrap System
 
-**Goal:** Implement automated server provisioning from root login to ready Swarm node.
+**Goal:** Implement automated server provisioning from root login to ready Forge node.
 
 **Priority:** MEDIUM  
 **MVP:** Basic bootstrap required
@@ -921,7 +921,7 @@ This document breaks down the Swarm product specification into actionable epics 
 - [ ] **14.2.4** Verify installations
 
 #### 14.3 Bootstrap CLI Command
-- [ ] **14.3.1** Implement `swarm node bootstrap --ssh root@host`:
+- [ ] **14.3.1** Implement `forge node bootstrap --ssh root@host`:
   - Copy bootstrap script
   - Execute with sudo
   - Run node doctor
@@ -930,8 +930,8 @@ This document breaks down the Swarm product specification into actionable epics 
 - [ ] **14.3.3** Interactive mode for configuration questions
 - [ ] **14.3.4** Non-interactive mode with defaults
 
-#### 14.4 swarmd Installation (Future)
-- [ ] **14.4.1** Install swarmd binary
+#### 14.4 forged Installation (Future)
+- [ ] **14.4.1** Install forged binary
 - [ ] **14.4.2** Configure systemd service
 - [ ] **14.4.3** Set up SSH tunnel for communication
 
@@ -960,7 +960,7 @@ This document breaks down the Swarm product specification into actionable epics 
 
 ---
 
-## EPIC 16: swarmd Daemon (Post-MVP)
+## EPIC 16: forged Daemon (Post-MVP)
 
 **Goal:** Implement the optional per-node daemon for real-time performance and scalability.
 
@@ -970,7 +970,7 @@ This document breaks down the Swarm product specification into actionable epics 
 ### Tasks
 
 #### 16.1 Daemon Core
-- [ ] **16.1.1** Create `swarmd` binary structure
+- [ ] **16.1.1** Create `forged` binary structure
 - [ ] **16.1.2** Implement gRPC service definitions (Protocol Buffers)
 - [ ] **16.1.3** Local tmux orchestration (fast path)
 - [ ] **16.1.4** Screen snapshotting and hashing
@@ -1022,7 +1022,7 @@ Phase 5 - Polish (Week 7-8)
 
 Phase 6 - Future
 ├── Epic 15: Integrations
-└── Epic 16: swarmd
+└── Epic 16: forged
 ```
 
 ---
@@ -1047,6 +1047,6 @@ The minimum viable product includes:
 ## Notes
 
 - **OpenCode-first**: The OpenCode adapter is the primary integration target. Other adapters are secondary.
-- **SSH-only MVP**: Use SSH-based remote execution for MVP. swarmd daemon is post-MVP.
+- **SSH-only MVP**: Use SSH-based remote execution for MVP. forged daemon is post-MVP.
 - **State confidence**: Always show confidence and reason for state determinations.
 - **Keyboard-first**: TUI must be fully keyboard navigable with command palette.

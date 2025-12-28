@@ -8,7 +8,7 @@ Below is (1) my read of what you have today, (2) the **highest-impact fixes**, a
 
 ### Control plane (CLI)
 
-* `cmd/swarm/main.go` runs a Cobra CLI.
+* `cmd/forge/main.go` runs a Cobra CLI.
 * Command families exist and are fairly extensive:
 
   * `init`, `migrate`, `node`, `ws` (workspace), `agent`, `queue`, `watch`, `status`, `export`, `vault`, `accounts`, plus output formatting (`--json`, `--jsonl`, etc).
@@ -34,7 +34,7 @@ Below is (1) my read of what you have today, (2) the **highest-impact fixes**, a
 
 ### Node + daemon layer exists (but underused)
 
-* `cmd/swarmd/main.go` + `internal/swarmd/` implements a per-node gRPC daemon that can spawn agents, stream panes, etc.
+* `cmd/forged/main.go` + `internal/forged/` implements a per-node gRPC daemon that can spawn agents, stream panes, etc.
 * `internal/node/client.go` is actually quite good: it supports **daemon mode** (SSH-tunneled gRPC) and **SSH fallback mode**.
 
 **Key problem:** your *workspace* and *agent* services currently use a **local tmux client**, so they don’t leverage the node/daemon abstraction you’ve already built. Remote is “designed,” but not truly “end-to-end.”
@@ -61,7 +61,7 @@ This alone will make onboarding and CI drastically less painful.
 
 ### B) Remote execution architecture exists, but your “core services” don’t use it
 
-You have `internal/node/client.go` and `internal/swarmd`, but:
+You have `internal/node/client.go` and `internal/forged`, but:
 
 * `workspace.Service` creates tmux sessions using a `func() *tmux.Client` factory that can’t vary per node.
 * `agent.Service` is instantiated with `tmux.NewLocalClient()` in CLI commands.
@@ -96,12 +96,12 @@ This is your competitive advantage: you can build *reliable orchestration* on a 
 
 ---
 
-## 4) Rename plan: “Swarm” → “Forge” (do it immediately, but safely)
+## 4) Rename plan: finalize Forge naming (do it immediately, but safely)
 
 ### 4.1 Naming conventions
 
 * CLI binary: `forge`
-* Node daemon: `forged` (keeps the “d” convention you already used with `swarmd`)
+* Node daemon: `forged` (keeps the “d” convention)
 * Config dir: `~/.config/forge/`
 * Data dir: `~/.local/share/forge/`
 * Env vars: `FORGE_*` (but keep `SWARM_*` as deprecated aliases for one release to avoid breaking yourself mid-iteration)
@@ -110,9 +110,9 @@ This is your competitive advantage: you can build *reliable orchestration* on a 
 
 * Rename commands/binaries:
 
-  * `cmd/swarm` → `cmd/forge`
-  * `cmd/swarmd` → `cmd/forged`
-  * Update `Makefile`, `scripts/*`, `swarmd.service` → `forged.service`
+  * Ensure CLI binary is `forge`
+  * Ensure daemon binary is `forged`
+  * Update `Makefile`, `scripts/*`, and service unit names accordingly
 * Update module path:
 
   * Change `go.mod` module name to your real repo module path.
@@ -130,9 +130,9 @@ This is your competitive advantage: you can build *reliable orchestration* on a 
 
 On startup:
 
-* If `~/.config/forge/` missing but `~/.config/swarm/` exists → auto-copy and print:
+* If `~/.config/forge/` missing but `~/.config/forge/` exists → auto-copy and print:
 
-  * “Migrated Swarm config to Forge. Set FORGE_* env vars going forward.”
+  * “Migrated Forge config to Forge. Set FORGE_* env vars going forward.”
 
 This avoids a “rename broke everything” week.
 
@@ -417,4 +417,3 @@ This will make Forge feel like a product instead of a toolkit.
 7. Add Forge Mail + locks (CLI first), then OpenCode plugin tools
 8. Add `.claude/skills/forge-mail/SKILL.md` (works for Claude Code, and OpenCode can load it too)
 9. Only then: wire the TUI to live state and make it “sexy.”
-

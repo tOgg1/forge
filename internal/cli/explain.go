@@ -23,12 +23,12 @@ var explainCmd = &cobra.Command{
 	Short: "Explain agent or queue item status",
 	Long: `Show a human-readable explanation of why an agent or queue item is in its current state.
 
-If no argument is given, explains the agent from the current context (set with 'swarm use').
+If no argument is given, explains the agent from the current context (set with 'forge use').
 
 Examples:
-  swarm explain abc123        # Explain agent status
-  swarm explain qi_789        # Explain queue item status
-  swarm explain               # Explain context agent`,
+  forge explain abc123        # Explain agent status
+  forge explain qi_789        # Explain queue item status
+  forge explain               # Explain context agent`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
@@ -72,7 +72,7 @@ Examples:
 					}
 				}
 				if target == "" {
-					return fmt.Errorf("no agent specified and no context set (use 'swarm use <agent>' or provide agent ID)")
+					return fmt.Errorf("no agent specified and no context set (use 'forge use <agent>' or provide agent ID)")
 				}
 			} else {
 				target = resolved.AgentID
@@ -195,13 +195,13 @@ func buildAgentExplanation(agent *models.Agent, queueItems []*models.QueueItem) 
 	case models.AgentStateAwaitingApproval:
 		explanation.BlockReasons = append(explanation.BlockReasons, "waiting for user approval")
 		explanation.Suggestions = append(explanation.Suggestions,
-			fmt.Sprintf("Approve pending request: swarm agent approve %s", shortID(agent.ID)))
+			fmt.Sprintf("Approve pending request: forge agent approve %s", shortID(agent.ID)))
 
 	case models.AgentStateRateLimited:
 		explanation.BlockReasons = append(explanation.BlockReasons, "rate limited by provider")
 		explanation.Suggestions = append(explanation.Suggestions,
 			"Wait for rate limit to expire",
-			fmt.Sprintf("Switch to different account: swarm agent rotate %s", shortID(agent.ID)))
+			fmt.Sprintf("Switch to different account: forge agent rotate %s", shortID(agent.ID)))
 
 	case models.AgentStateError:
 		explanation.BlockReasons = append(explanation.BlockReasons, "agent encountered an error")
@@ -209,8 +209,8 @@ func buildAgentExplanation(agent *models.Agent, queueItems []*models.QueueItem) 
 			explanation.BlockReasons = append(explanation.BlockReasons, agent.StateInfo.Reason)
 		}
 		explanation.Suggestions = append(explanation.Suggestions,
-			fmt.Sprintf("Check agent status: swarm agent status %s", shortID(agent.ID)),
-			fmt.Sprintf("Restart agent: swarm agent restart %s", shortID(agent.ID)))
+			fmt.Sprintf("Check agent status: forge agent status %s", shortID(agent.ID)),
+			fmt.Sprintf("Restart agent: forge agent restart %s", shortID(agent.ID)))
 
 	case models.AgentStatePaused:
 		explanation.BlockReasons = append(explanation.BlockReasons, "agent is paused")
@@ -220,12 +220,12 @@ func buildAgentExplanation(agent *models.Agent, queueItems []*models.QueueItem) 
 				fmt.Sprintf("will resume in %s", remaining.Round(time.Second)))
 		}
 		explanation.Suggestions = append(explanation.Suggestions,
-			fmt.Sprintf("Resume agent: swarm agent resume %s", shortID(agent.ID)))
+			fmt.Sprintf("Resume agent: forge agent resume %s", shortID(agent.ID)))
 
 	case models.AgentStateWorking:
 		explanation.Suggestions = append(explanation.Suggestions,
-			fmt.Sprintf("Wait for completion: swarm wait --agent %s --until idle", shortID(agent.ID)),
-			fmt.Sprintf("Queue a message: swarm send %s \"your message\"", shortID(agent.ID)))
+			fmt.Sprintf("Wait for completion: forge wait --agent %s --until idle", shortID(agent.ID)),
+			fmt.Sprintf("Queue a message: forge send %s \"your message\"", shortID(agent.ID)))
 
 	case models.AgentStateIdle:
 		if explanation.QueueStatus.PendingItems > 0 {
@@ -233,7 +233,7 @@ func buildAgentExplanation(agent *models.Agent, queueItems []*models.QueueItem) 
 				"Queue items are pending - scheduler will dispatch next item")
 		} else {
 			explanation.Suggestions = append(explanation.Suggestions,
-				fmt.Sprintf("Send a message: swarm send %s \"your prompt\"", shortID(agent.ID)))
+				fmt.Sprintf("Send a message: forge send %s \"your prompt\"", shortID(agent.ID)))
 		}
 	}
 
@@ -364,13 +364,13 @@ func buildQueueItemExplanation(item *models.QueueItem, agent *models.Agent) *Que
 			explanation.BlockReasons = append(explanation.BlockReasons, "agent is currently working")
 			explanation.Suggestions = append(explanation.Suggestions,
 				"Wait for agent to become idle",
-				fmt.Sprintf("swarm wait --agent %s --until idle", shortID(agent.ID)))
+				fmt.Sprintf("forge wait --agent %s --until idle", shortID(agent.ID)))
 
 		case models.AgentStateAwaitingApproval:
 			explanation.IsBlocked = true
 			explanation.BlockReasons = append(explanation.BlockReasons, "agent is waiting for approval")
 			explanation.Suggestions = append(explanation.Suggestions,
-				fmt.Sprintf("Approve pending request: swarm agent approve %s", shortID(agent.ID)))
+				fmt.Sprintf("Approve pending request: forge agent approve %s", shortID(agent.ID)))
 
 		case models.AgentStatePaused:
 			explanation.IsBlocked = true
@@ -381,22 +381,22 @@ func buildQueueItemExplanation(item *models.QueueItem, agent *models.Agent) *Que
 					fmt.Sprintf("will resume in %s", remaining.Round(time.Second)))
 			}
 			explanation.Suggestions = append(explanation.Suggestions,
-				fmt.Sprintf("Resume agent: swarm agent resume %s", shortID(agent.ID)))
+				fmt.Sprintf("Resume agent: forge agent resume %s", shortID(agent.ID)))
 
 		case models.AgentStateError, models.AgentStateStopped:
 			explanation.IsBlocked = true
 			explanation.BlockReasons = append(explanation.BlockReasons,
 				fmt.Sprintf("agent is in %s state", agent.State))
 			explanation.Suggestions = append(explanation.Suggestions,
-				fmt.Sprintf("Check agent status: swarm agent status %s", shortID(agent.ID)),
-				fmt.Sprintf("Restart agent: swarm agent restart %s", shortID(agent.ID)))
+				fmt.Sprintf("Check agent status: forge agent status %s", shortID(agent.ID)),
+				fmt.Sprintf("Restart agent: forge agent restart %s", shortID(agent.ID)))
 
 		case models.AgentStateRateLimited:
 			explanation.IsBlocked = true
 			explanation.BlockReasons = append(explanation.BlockReasons, "agent is rate limited")
 			explanation.Suggestions = append(explanation.Suggestions,
 				"Wait for rate limit to expire",
-				fmt.Sprintf("Rotate account: swarm agent rotate %s", shortID(agent.ID)))
+				fmt.Sprintf("Rotate account: forge agent rotate %s", shortID(agent.ID)))
 		}
 
 		// Check conditional gates

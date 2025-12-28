@@ -59,15 +59,15 @@ func init() {
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Run environment diagnostics",
-	Long: `Run comprehensive diagnostics on your Swarm environment.
+	Long: `Run comprehensive diagnostics on your Forge environment.
 
 Checks include:
 - Dependencies: tmux, opencode, ssh, git
 - Configuration: config file, database, migrations
 - Nodes: connectivity and health
 - Accounts: vault access and profiles`,
-	Example: `  swarm doctor
-  swarm doctor --json`,
+	Example: `  forge doctor
+  forge doctor --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -206,7 +206,7 @@ func checkConfiguration() []DoctorCheck {
 		return checks
 	}
 
-	configPath := filepath.Join(home, ".config", "swarm", "config.yaml")
+	configPath := filepath.Join(home, ".config", "forge", "config.yaml")
 	if _, err := os.Stat(configPath); err == nil {
 		checks = append(checks, DoctorCheck{
 			Category: "config",
@@ -231,7 +231,7 @@ func checkConfiguration() []DoctorCheck {
 	}
 
 	// Data directory
-	dataDir := filepath.Join(home, ".local", "share", "swarm")
+	dataDir := filepath.Join(home, ".local", "share", "forge")
 	if info, err := os.Stat(dataDir); err == nil && info.IsDir() {
 		checks = append(checks, DoctorCheck{
 			Category: "config",
@@ -283,13 +283,13 @@ func checkDatabaseHealth() ([]DoctorCheck, *db.DB) {
 		})
 		// Fall back to default path
 		home, _ := os.UserHomeDir()
-		dbPath = filepath.Join(home, ".local", "share", "swarm", "swarm.db")
+		dbPath = filepath.Join(home, ".local", "share", "forge", "forge.db")
 	} else {
 		dbPath = cfg.Database.Path
 	}
 	if dbPath == "" {
 		home, _ := os.UserHomeDir()
-		dbPath = filepath.Join(home, ".local", "share", "swarm", "swarm.db")
+		dbPath = filepath.Join(home, ".local", "share", "forge", "forge.db")
 	}
 
 	database, err := db.Open(db.Config{Path: dbPath})
@@ -336,7 +336,7 @@ func checkDatabaseHealth() ([]DoctorCheck, *db.DB) {
 				Category: "database",
 				Name:     "migrations",
 				Status:   DoctorWarn,
-				Details:  fmt.Sprintf("%d pending (run 'swarm migrate up')", pending),
+				Details:  fmt.Sprintf("%d pending (run 'forge migrate up')", pending),
 			})
 		} else {
 			checks = append(checks, DoctorCheck{
@@ -455,7 +455,7 @@ func buildSummary(checks []DoctorCheck) DoctorSummary {
 }
 
 func printDoctorReport(report *DoctorReport) {
-	fmt.Println("Swarm Doctor")
+	fmt.Println("Forge Doctor")
 	fmt.Println("============")
 	fmt.Println()
 

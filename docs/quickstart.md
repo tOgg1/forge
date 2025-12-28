@@ -1,6 +1,6 @@
-# Swarm Quickstart
+# Forge Quickstart
 
-This guide walks through building Swarm, configuring it, and the first steps to
+This guide walks through building Forge, configuring it, and the first steps to
 create a workspace and spawn agents. The CLI is still early-stage; commands that
 are not implemented yet are marked as planned.
 
@@ -17,11 +17,11 @@ Use the bootstrap script to install dependencies on a fresh node.
 
 ```bash
 # One-liner (downloads + verifies bootstrap.sh before running)
-curl -fsSL https://raw.githubusercontent.com/tOgg1/swarm/main/scripts/install.sh | bash -s -- --install-extras --install-claude
+curl -fsSL https://raw.githubusercontent.com/tOgg1/forge/main/scripts/install.sh | bash -s -- --install-extras --install-claude
 
 # Manual download + verify
-curl -fsSL https://raw.githubusercontent.com/tOgg1/swarm/main/scripts/bootstrap.sh -o bootstrap.sh
-curl -fsSL https://raw.githubusercontent.com/tOgg1/swarm/main/scripts/bootstrap.sh.sha256 -o bootstrap.sh.sha256
+curl -fsSL https://raw.githubusercontent.com/tOgg1/forge/main/scripts/bootstrap.sh -o bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/tOgg1/forge/main/scripts/bootstrap.sh.sha256 -o bootstrap.sh.sha256
 sha256sum -c bootstrap.sh.sha256
 sudo bash bootstrap.sh --install-extras --install-claude
 ```
@@ -37,15 +37,15 @@ Notes:
 make build
 ```
 
-Binaries are written to `./build/swarm` and `./build/swarmd`.
+Binaries are written to `./build/forge` and `./build/forged`.
 
 ## Configure
 
 Copy the example config and adjust values as needed:
 
 ```bash
-mkdir -p ~/.config/swarm
-cp docs/config.example.yaml ~/.config/swarm/config.yaml
+mkdir -p ~/.config/forge
+cp docs/config.example.yaml ~/.config/forge/config.yaml
 ```
 
 For a full reference, see `docs/config.md`.
@@ -53,15 +53,15 @@ For a full reference, see `docs/config.md`.
 ## Initialize the database
 
 ```bash
-./build/swarm migrate up
+./build/forge migrate up
 ```
 
-This creates `~/.local/share/swarm/swarm.db` by default.
+This creates `~/.local/share/forge/forge.db` by default.
 
 ## Launch the TUI (preview)
 
 ```bash
-./build/swarm
+./build/forge
 ```
 
 The TUI is currently a stub that prints a placeholder message.
@@ -70,21 +70,21 @@ The TUI is currently a stub that prints a placeholder message.
 
 ```bash
 # Add a local node
-./build/swarm node add --name local --local
+./build/forge node add --name local --local
 
 # Create a workspace
-./build/swarm ws create --node local --path /path/to/repo
+./build/forge ws create --node local --path /path/to/repo
 
 # Spawn an agent
-./build/swarm agent spawn --workspace <workspace-id> --type opencode --count 1
+./build/forge agent spawn --workspace <workspace-id> --type opencode --count 1
 ```
 
 ## Basic commands
 
 ```bash
-./build/swarm node list
-./build/swarm ws list
-./build/swarm agent list
+./build/forge node list
+./build/forge ws list
+./build/forge agent list
 ```
 
 ## Troubleshooting

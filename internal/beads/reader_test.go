@@ -10,9 +10,9 @@ import (
 
 func TestParseIssues(t *testing.T) {
 	data := strings.Join([]string{
-		`{"id":"swarm-1","title":"First","description":"desc","status":"open","priority":2,"issue_type":"task","created_at":"2025-12-22T10:17:12.905606892+01:00","updated_at":"2025-12-22T10:18:12.905606892+01:00"}`,
+		`{"id":"forge-1","title":"First","description":"desc","status":"open","priority":2,"issue_type":"task","created_at":"2025-12-22T10:17:12.905606892+01:00","updated_at":"2025-12-22T10:18:12.905606892+01:00"}`,
 		"",
-		`{"id":"swarm-2","title":"Second","description":"desc","status":"closed","priority":0,"issue_type":"bug","created_at":"2025-12-22T09:17:12.905606892+01:00","updated_at":"2025-12-22T09:18:12.905606892+01:00","closed_at":"2025-12-22T09:19:12.905606892+01:00","close_reason":"Done"}`,
+		`{"id":"forge-2","title":"Second","description":"desc","status":"closed","priority":0,"issue_type":"bug","created_at":"2025-12-22T09:17:12.905606892+01:00","updated_at":"2025-12-22T09:18:12.905606892+01:00","closed_at":"2025-12-22T09:19:12.905606892+01:00","close_reason":"Done"}`,
 	}, "\n")
 
 	issues, err := ParseIssues(strings.NewReader(data))
@@ -22,8 +22,8 @@ func TestParseIssues(t *testing.T) {
 	if len(issues) != 2 {
 		t.Fatalf("expected 2 issues, got %d", len(issues))
 	}
-	if issues[0].ID != "swarm-1" {
-		t.Fatalf("expected first id swarm-1, got %q", issues[0].ID)
+	if issues[0].ID != "forge-1" {
+		t.Fatalf("expected first id forge-1, got %q", issues[0].ID)
 	}
 	if issues[0].Priority != 2 {
 		t.Fatalf("expected priority 2, got %d", issues[0].Priority)

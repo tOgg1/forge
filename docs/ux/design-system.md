@@ -1,6 +1,6 @@
-# Swarm UX Audit and Design System Foundation
+# Forge UX Audit and Design System Foundation
 
-This document ties together Swarm's UX audits and the shared design system
+This document ties together Forge's UX audits and the shared design system
 artifacts. It is the single starting point for UX consistency work.
 
 ## Purpose

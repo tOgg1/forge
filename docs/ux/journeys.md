@@ -1,13 +1,13 @@
-# Swarm UX Journeys and Pain Points
+# Forge UX Journeys and Pain Points
 
 This document captures the core user journeys, friction points, and UX
-opportunities for Swarm. It is grounded in the product spec and the current
+opportunities for Forge. It is grounded in the product spec and the current
 codebase. It is intended to guide implementation sequencing and UX polish.
 
 ## Snapshot: Current Reality
 
 - The CLI surface is partially implemented in code, but the shipped binary may
-  not expose all commands unless rebuilt. `swarm --help` currently lists only
+  not expose all commands unless rebuilt. `forge --help` currently lists only
   `migrate` plus base helpers.
 - The TUI is a placeholder; there is no visible dashboard workflow yet.
 - Many commands are spec-defined but still marked "planned" in docs.
@@ -18,10 +18,10 @@ find it in the product. The UX plan below prioritizes reconciling this.
 ## Journey 1: First run and initialization
 
 ### Steps
-1. Build Swarm.
+1. Build Forge.
 2. Create config file.
 3. Run database migrations.
-4. Launch `swarm` for TUI or run CLI commands.
+4. Launch `forge` for TUI or run CLI commands.
 
 ### Pain points
 - No guided first-run flow; users must know the sequence.
@@ -30,21 +30,21 @@ find it in the product. The UX plan below prioritizes reconciling this.
 - TUI is a stub and does not provide immediate value.
 
 ### Opportunities
-- Introduce `swarm init` to create config, run migrations, and verify
+- Introduce `forge init` to create config, run migrations, and verify
   prerequisites.
 - Add preflight checks to all high-impact commands.
 - Show a successful "next steps" summary after init.
 
 ### Dependencies
-- `swarm-eli6.2.1` `swarm init`
-- `swarm-eli6.2.2` preflight errors
+- `forge-eli6.2.1` `forge init`
+- `forge-eli6.2.2` preflight errors
 
 ## Journey 2: Add or bootstrap a node
 
 ### Steps
-1. `swarm node add --name <name> --ssh <target>` or `--local`.
-2. `swarm node doctor <node>` to verify dependencies.
-3. Optional `swarm node bootstrap --ssh root@host`.
+1. `forge node add --name <name> --ssh <target>` or `--local`.
+2. `forge node doctor <node>` to verify dependencies.
+3. Optional `forge node bootstrap --ssh root@host`.
 
 ### Pain points
 - No progress feedback for long operations.
@@ -57,15 +57,15 @@ find it in the product. The UX plan below prioritizes reconciling this.
 - Explicitly show local vs remote nodes in output.
 
 ### Dependencies
-- `swarm-eli6.3.6` progress indicators
-- `swarm-eli6.2.4` short-ID resolution
+- `forge-eli6.3.6` progress indicators
+- `forge-eli6.2.4` short-ID resolution
 
 ## Journey 3: Create or import a workspace
 
 ### Steps
-1. `swarm ws create --path <repo> [--node <node>]`.
-2. Optional: `swarm ws import --session <tmux> --node <node>`.
-3. `swarm ws status <ws>` or `swarm ws attach`.
+1. `forge ws create --path <repo> [--node <node>]`.
+2. Optional: `forge ws import --session <tmux> --node <node>`.
+3. `forge ws status <ws>` or `forge ws attach`.
 
 ### Pain points
 - Path validation errors lack clear hints.
@@ -78,15 +78,15 @@ find it in the product. The UX plan below prioritizes reconciling this.
 - Standardize confirmations for destructive actions.
 
 ### Dependencies
-- `swarm-eli6.2.2` preflight
-- `swarm-eli6.2.3` confirmations
+- `forge-eli6.2.2` preflight
+- `forge-eli6.2.3` confirmations
 
 ## Journey 4: Spawn and manage agents
 
 ### Steps
-1. `swarm agent spawn --workspace <ws> --type opencode`.
-2. `swarm agent list`, `swarm agent status`.
-3. `swarm agent send`, `pause`, `resume`, `interrupt`, `restart`.
+1. `forge agent spawn --workspace <ws> --type opencode`.
+2. `forge agent list`, `forge agent status`.
+3. `forge agent send`, `pause`, `resume`, `interrupt`, `restart`.
 
 ### Pain points
 - Message input is single-line and clumsy for long prompts.
@@ -99,16 +99,16 @@ find it in the product. The UX plan below prioritizes reconciling this.
 - Add a fleet-level summary for quick health checks.
 
 ### Dependencies
-- `swarm-eli6.3.1` structured tables
-- `swarm-eli6.3.2` icons/colors
-- `swarm-eli6.3.4` multi-line send
-- `swarm-eli6.3.5` fleet summary
+- `forge-eli6.3.1` structured tables
+- `forge-eli6.3.2` icons/colors
+- `forge-eli6.3.4` multi-line send
+- `forge-eli6.3.5` fleet summary
 
 ## Journey 5: Monitor progress and state
 
 ### Steps
-1. `swarm agent list` or `swarm agent status`.
-2. `swarm export status` (planned) or TUI view (planned).
+1. `forge agent list` or `forge agent status`.
+2. `forge export status` (planned) or TUI view (planned).
 
 ### Pain points
 - No consolidated "overview" command.
@@ -116,13 +116,13 @@ find it in the product. The UX plan below prioritizes reconciling this.
 - State confidence and reasons are not visually emphasized.
 
 ### Opportunities
-- Add `swarm status` for fleet summary (reuse export status).
+- Add `forge status` for fleet summary (reuse export status).
 - Implement `--watch` JSONL for automated dashboards.
 - Make state reason/confidence visible and consistent.
 
 ### Dependencies
-- `swarm-eli6.3.5` summary
-- `swarm-h4jd` watch mode
+- `forge-eli6.3.5` summary
+- `forge-h4jd` watch mode
 
 ## Journey 6: Approvals and safety prompts
 
@@ -139,7 +139,7 @@ find it in the product. The UX plan below prioritizes reconciling this.
 - Highlight blocking approvals in summaries.
 
 ### Dependencies
-- Existing approvals tasks (`swarm-0bnp`, `swarm-3q4s`, `swarm-646g`).
+- Existing approvals tasks (`forge-0bnp`, `forge-3q4s`, `forge-646g`).
 
 ## Journey 7: Error recovery and resilience
 
@@ -156,8 +156,8 @@ find it in the product. The UX plan below prioritizes reconciling this.
 - Add a troubleshooting guide with copy-paste fixes.
 
 ### Dependencies
-- `swarm-eli6.3.3` JSON error envelope
-- `swarm-eli6.5.2` troubleshooting guide
+- `forge-eli6.3.3` JSON error envelope
+- `forge-eli6.5.2` troubleshooting guide
 
 ## Journey 8: Offboarding and cleanup
 
@@ -174,7 +174,7 @@ find it in the product. The UX plan below prioritizes reconciling this.
 - Explicit impact summary (agents/panes/workspaces).
 
 ### Dependencies
-- `swarm-eli6.2.3` confirmations
+- `forge-eli6.2.3` confirmations
 
 ## Cross-cutting UX opportunities (priority order)
 
@@ -187,6 +187,6 @@ find it in the product. The UX plan below prioritizes reconciling this.
 
 ## Key blockers to resolve early
 
-- CLI style guide (`swarm-eli6.1.2`)
-- Terminology alignment (`swarm-eli6.1.4`)
-- Non-interactive mode (`swarm-j39n`)
+- CLI style guide (`forge-eli6.1.2`)
+- Terminology alignment (`forge-eli6.1.4`)
+- Non-interactive mode (`forge-j39n`)

@@ -1,4 +1,4 @@
-// Package events provides helper functions for logging Swarm events.
+// Package events provides helper functions for logging Forge events.
 package events
 
 import (

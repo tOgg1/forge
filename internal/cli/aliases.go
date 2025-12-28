@@ -8,13 +8,14 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/agent"
+	"github.com/tOgg1/forge/internal/config"
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/models"
 	"github.com/tOgg1/forge/internal/node"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/tOgg1/forge/internal/workspace"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -57,19 +58,19 @@ var upCmd = &cobra.Command{
 Creates a workspace for the current directory (or specified path) and
 spawns one or more agents. This is the fastest way to get started.`,
 	Example: `  # Quick start in current directory
-  swarm up
+  forge up
 
   # Spawn 3 agents
-  swarm up --agents 3
+  forge up --agents 3
 
   # Use a specific path
-  swarm up --path /path/to/repo
+  forge up --path /path/to/repo
 
   # Use a specific agent type
-  swarm up --type claude-code
+  forge up --type claude-code
 
   # Use a specific profile
-  swarm up --profile work`,
+  forge up --profile work`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -166,6 +167,16 @@ spawns one or more agents. This is the fastest way to get started.`,
 			spawnedAgents = append(spawnedAgents, a)
 		}
 
+		// Auto-set context so subsequent commands can use it
+		// Set workspace context, and if only one agent, set agent context too
+		ctxStore := config.DefaultContextStore()
+		storedCtx, _ := ctxStore.Load()
+		storedCtx.SetWorkspace(ws.ID, ws.Name)
+		if len(spawnedAgents) == 1 {
+			storedCtx.SetAgent(spawnedAgents[0].ID, shortID(spawnedAgents[0].ID))
+		}
+		_ = ctxStore.Save(storedCtx)
+
 		if IsJSONOutput() || IsJSONLOutput() {
 			return WriteOutput(os.Stdout, map[string]any{
 				"workspace": ws,
@@ -212,9 +223,9 @@ var lsCmd = &cobra.Command{
 	Use:     "ls",
 	Short:   "List workspaces (alias: ws list)",
 	Aliases: []string{"workspaces"},
-	Long:    `List all workspaces. This is an alias for 'swarm ws list'.`,
-	Example: `  swarm ls
-  swarm ls --node prod`,
+	Long:    `List all workspaces. This is an alias for 'forge ws list'.`,
+	Example: `  forge ls
+  forge ls --node prod`,
 	RunE: wsListCmd.RunE,
 }
 
@@ -222,9 +233,9 @@ var psCmd = &cobra.Command{
 	Use:     "ps",
 	Short:   "List agents (alias: agent list)",
 	Aliases: []string{"agents"},
-	Long:    `List all agents. This is an alias for 'swarm agent list'.`,
-	Example: `  swarm ps
-  swarm ps --state idle
-  swarm ps -w my-project`,
+	Long:    `List all agents. This is an alias for 'forge agent list'.`,
+	Example: `  forge ps
+  forge ps --state idle
+  forge ps -w my-project`,
 	RunE: agentListCmd.RunE,
 }

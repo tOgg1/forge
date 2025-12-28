@@ -10,7 +10,7 @@ import (
 //go:embed builtin/*.yaml
 var builtinFS embed.FS
 
-// LoadBuiltinSequences returns the built-in sequences bundled with Swarm.
+// LoadBuiltinSequences returns the built-in sequences bundled with Forge.
 func LoadBuiltinSequences() ([]*Sequence, error) {
 	entries, err := fs.ReadDir(builtinFS, "builtin")
 	if err != nil {

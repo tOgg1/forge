@@ -1,4 +1,4 @@
-// Package tui implements the Swarm terminal user interface.
+// Package tui implements the Forge terminal user interface.
 package tui
 
 import (

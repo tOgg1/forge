@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Swarm bootstrap installer. Downloads and verifies bootstrap.sh before running.
+# Forge bootstrap installer. Downloads and verifies bootstrap.sh before running.
 set -euo pipefail
 IFS=$'\n\t'
 
-SWARM_BOOTSTRAP_BASE_URL="${SWARM_BOOTSTRAP_BASE_URL:-https://raw.githubusercontent.com/tOgg1/swarm/main/scripts}"
-SWARM_BOOTSTRAP_URL="${SWARM_BOOTSTRAP_URL:-${SWARM_BOOTSTRAP_BASE_URL}/bootstrap.sh}"
-SWARM_BOOTSTRAP_SHA_URL="${SWARM_BOOTSTRAP_SHA_URL:-${SWARM_BOOTSTRAP_BASE_URL}/bootstrap.sh.sha256}"
+FORGE_BOOTSTRAP_BASE_URL="${FORGE_BOOTSTRAP_BASE_URL:-${SWARM_BOOTSTRAP_BASE_URL:-https://raw.githubusercontent.com/tOgg1/forge/main/scripts}}"
+FORGE_BOOTSTRAP_URL="${FORGE_BOOTSTRAP_URL:-${SWARM_BOOTSTRAP_URL:-${FORGE_BOOTSTRAP_BASE_URL}/bootstrap.sh}}"
+FORGE_BOOTSTRAP_SHA_URL="${FORGE_BOOTSTRAP_SHA_URL:-${SWARM_BOOTSTRAP_SHA_URL:-${FORGE_BOOTSTRAP_BASE_URL}/bootstrap.sh.sha256}}"
 
 log() {
-  printf '%s\n' "[swarm-install] $*"
+  printf '%s\n' "[forge-install] $*"
 }
 
 fail() {
-  printf '%s\n' "[swarm-install] ERROR: $*" >&2
+  printf '%s\n' "[forge-install] ERROR: $*" >&2
   exit 1
 }
 
@@ -68,8 +68,8 @@ main() {
   trap 'rm -rf "$tmpdir"' EXIT
 
   log "downloading bootstrap script"
-  download "$SWARM_BOOTSTRAP_URL" "$tmpdir/bootstrap.sh"
-  download "$SWARM_BOOTSTRAP_SHA_URL" "$tmpdir/bootstrap.sh.sha256"
+  download "$FORGE_BOOTSTRAP_URL" "$tmpdir/bootstrap.sh"
+  download "$FORGE_BOOTSTRAP_SHA_URL" "$tmpdir/bootstrap.sh.sha256"
 
   log "verifying checksum"
   verify_checksum "$tmpdir"

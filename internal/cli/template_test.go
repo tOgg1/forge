@@ -129,10 +129,10 @@ func TestTemplateSourceLabel(t *testing.T) {
 		projectDir string
 		want       string
 	}{
-		{"builtin", "builtin", "/home/user/.config/swarm/templates", "/project/.swarm/templates", "builtin"},
-		{"user template", "/home/user/.config/swarm/templates/foo.yaml", "/home/user/.config/swarm/templates", "", "user"},
-		{"project template", "/project/.swarm/templates/bar.yaml", "", "/project/.swarm/templates", "project"},
-		{"other file", "/some/other/path.yaml", "/home/user/.config/swarm/templates", "/project/.swarm/templates", "file"},
+		{"builtin", "builtin", "/home/user/.config/forge/templates", "/project/.forge/templates", "builtin"},
+		{"user template", "/home/user/.config/forge/templates/foo.yaml", "/home/user/.config/forge/templates", "", "user"},
+		{"project template", "/project/.forge/templates/bar.yaml", "", "/project/.forge/templates", "project"},
+		{"other file", "/some/other/path.yaml", "/home/user/.config/forge/templates", "/project/.forge/templates", "file"},
 	}
 
 	for _, tt := range tests {

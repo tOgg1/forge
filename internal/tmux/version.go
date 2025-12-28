@@ -7,7 +7,7 @@ import (
 	"unicode"
 )
 
-// MinVersion is the minimum tmux version required for Swarm.
+// MinVersion is the minimum tmux version required for Forge.
 var MinVersion = Version{Major: 2, Minor: 4}
 
 // Version represents a tmux version (major.minor).

@@ -28,8 +28,8 @@ func createTestWorkspace(t *testing.T, db *DB) *models.Workspace {
 
 	ws := &models.Workspace{
 		NodeID:      node.ID,
-		RepoPath:    "/tmp/swarm-test",
-		TmuxSession: "swarm-test",
+		RepoPath:    "/tmp/forge-test",
+		TmuxSession: "forge-test",
 	}
 	if err := wsRepo.Create(context.Background(), ws); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -85,7 +85,7 @@ func TestAgentRepository_CreateAndGet(t *testing.T) {
 	agent := &models.Agent{
 		WorkspaceID: ws.ID,
 		Type:        models.AgentTypeOpenCode,
-		TmuxPane:    "swarm-test:0.1",
+		TmuxPane:    "forge-test:0.1",
 		State:       models.AgentStateIdle,
 		StateInfo: models.StateInfo{
 			Confidence: models.StateConfidenceMedium,
@@ -127,13 +127,13 @@ func TestAgentRepository_ListByWorkspaceAndState(t *testing.T) {
 	agent1 := &models.Agent{
 		WorkspaceID: ws.ID,
 		Type:        models.AgentTypeOpenCode,
-		TmuxPane:    "swarm-test:0.1",
+		TmuxPane:    "forge-test:0.1",
 		State:       models.AgentStateWorking,
 	}
 	agent2 := &models.Agent{
 		WorkspaceID: ws.ID,
 		Type:        models.AgentTypeCodex,
-		TmuxPane:    "swarm-test:0.2",
+		TmuxPane:    "forge-test:0.2",
 		State:       models.AgentStateIdle,
 	}
 
@@ -171,7 +171,7 @@ func TestAgentRepository_ListWithQueueLength(t *testing.T) {
 	agent := &models.Agent{
 		WorkspaceID: ws.ID,
 		Type:        models.AgentTypeOpenCode,
-		TmuxPane:    "swarm-test:0.1",
+		TmuxPane:    "forge-test:0.1",
 		State:       models.AgentStateIdle,
 	}
 	if err := repo.Create(context.Background(), agent); err != nil {
@@ -214,7 +214,7 @@ func TestAgentRepository_UpdateWithEventAtomic(t *testing.T) {
 	agent := &models.Agent{
 		WorkspaceID: ws.ID,
 		Type:        models.AgentTypeOpenCode,
-		TmuxPane:    "swarm:0.1",
+		TmuxPane:    "forge:0.1",
 		State:       models.AgentStateIdle,
 		StateInfo: models.StateInfo{
 			State:      models.AgentStateIdle,

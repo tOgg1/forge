@@ -1,4 +1,4 @@
-package swarmd
+package forged
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	swarmdv1 "github.com/tOgg1/forge/gen/swarmd/v1"
+	forgedv1 "github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/tOgg1/forge/internal/config"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
@@ -86,7 +86,7 @@ func TestClientClose(t *testing.T) {
 	}
 
 	server := grpc.NewServer()
-	swarmdv1.RegisterSwarmdServiceServer(server, NewServer(zerolog.Nop()))
+	forgedv1.RegisterForgedServiceServer(server, NewServer(zerolog.Nop()))
 
 	go func() {
 		_ = server.Serve(listener)
@@ -118,7 +118,7 @@ func TestClientMethods(t *testing.T) {
 	}
 
 	server := grpc.NewServer()
-	swarmdv1.RegisterSwarmdServiceServer(server, NewServer(zerolog.Nop(), WithVersion("test-1.0")))
+	forgedv1.RegisterForgedServiceServer(server, NewServer(zerolog.Nop(), WithVersion("test-1.0")))
 
 	go func() {
 		_ = server.Serve(listener)
@@ -151,7 +151,7 @@ func TestClientMethods(t *testing.T) {
 	}
 
 	// Test ListAgents (empty)
-	listResp, err := client.ListAgents(context.Background(), &swarmdv1.ListAgentsRequest{})
+	listResp, err := client.ListAgents(context.Background(), &forgedv1.ListAgentsRequest{})
 	if err != nil {
 		t.Fatalf("list agents error: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestClientMethods(t *testing.T) {
 	}
 
 	// Test GetAgent (not found)
-	_, err = client.GetAgent(context.Background(), &swarmdv1.GetAgentRequest{AgentId: "nonexistent"})
+	_, err = client.GetAgent(context.Background(), &forgedv1.GetAgentRequest{AgentId: "nonexistent"})
 	if err == nil {
 		t.Error("expected error for nonexistent agent")
 	}
