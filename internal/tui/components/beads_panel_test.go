@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opencode-ai/swarm/internal/beads"
-	"github.com/opencode-ai/swarm/internal/tui/styles"
+	"github.com/tOgg1/forge/internal/beads"
+	"github.com/tOgg1/forge/internal/tui/styles"
 )
 
 func TestRenderBeadsPanel_Empty(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/opencode-ai/swarm/internal/models"
-	"github.com/opencode-ai/swarm/internal/tui/styles"
+	"github.com/tOgg1/forge/internal/models"
+	"github.com/tOgg1/forge/internal/tui/styles"
 )
 
 const (
@@ -35,17 +35,25 @@ type AgentCard struct {
 }
 
 // RenderAgentCard renders a compact agent summary card.
-func RenderAgentCard(styleSet styles.Styles, card AgentCard, selected bool) string {
-	headerStyle := styleSet.Accent
-	textStyle := styleSet.Text
+func RenderAgentCard(styleSet styles.Styles, card AgentCard, focused bool, selected bool, selectionMode bool) string {
+	highlighted := focused || selected
+	headerStyle := styleSet.Muted
+	textStyle := styleSet.Muted
 	mutedStyle := styleSet.Muted
-	if !selected {
-		headerStyle = styleSet.Muted
-		textStyle = styleSet.Muted
-		mutedStyle = styleSet.Muted
+	if highlighted {
+		headerStyle = styleSet.Accent
+		textStyle = styleSet.Text
 	}
 
-	header := headerStyle.Render(defaultIfEmpty(card.Name, "Agent"))
+	headerText := defaultIfEmpty(card.Name, "Agent")
+	if selectionMode {
+		box := "[ ]"
+		if selected {
+			box = "[x]"
+		}
+		headerText = fmt.Sprintf("%s %s", box, headerText)
+	}
+	header := headerStyle.Render(headerText)
 	typeLine := textStyle.Render(fmt.Sprintf("Type: %s  Model: %s", formatAgentType(card.Type), defaultIfEmpty(card.Model, "--")))
 	profileLine := mutedStyle.Render(fmt.Sprintf("Profile: %s", defaultIfEmpty(card.Profile, "--")))
 
@@ -56,7 +64,7 @@ func RenderAgentCard(styleSet styles.Styles, card AgentCard, selected bool) stri
 	reason = truncate(reason, maxReasonLength)
 	stateBadge := RenderAgentStateBadge(styleSet, card.State)
 	stateLabel := "State:"
-	if !selected {
+	if !highlighted {
 		stateLabel = styleSet.Muted.Render("State:")
 	}
 	stateLine := fmt.Sprintf("%s %s", stateLabel, stateBadge)
@@ -65,7 +73,7 @@ func RenderAgentCard(styleSet styles.Styles, card AgentCard, selected bool) stri
 	confidenceLine := renderConfidenceLine(styleSet, card.Confidence)
 
 	actionsLine := ""
-	if selected {
+	if focused && !selectionMode {
 		actionsLine = styleSet.Info.Render("Actions: P pause | R restart | V view")
 	}
 
@@ -118,6 +126,9 @@ func RenderAgentCard(styleSet styles.Styles, card AgentCard, selected bool) stri
 		cardStyle = cardStyle.
 			BorderForeground(lipgloss.Color(styleSet.Theme.Tokens.Focus)).
 			Background(lipgloss.Color(styleSet.Theme.Tokens.Panel))
+	} else if focused {
+		cardStyle = cardStyle.
+			BorderForeground(lipgloss.Color(styleSet.Theme.Tokens.Focus))
 	} else {
 		cardStyle = cardStyle.
 			BorderForeground(lipgloss.Color(styleSet.Theme.Tokens.Border)).

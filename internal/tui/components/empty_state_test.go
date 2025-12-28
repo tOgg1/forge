@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opencode-ai/swarm/internal/tui/styles"
+	"github.com/tOgg1/forge/internal/tui/styles"
 )
 
 func TestEmptyStateRender(t *testing.T) {

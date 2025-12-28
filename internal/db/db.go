@@ -11,7 +11,7 @@ import (
 
 	_ "modernc.org/sqlite" // Pure Go SQLite driver
 
-	"github.com/opencode-ai/swarm/internal/logging"
+	"github.com/tOgg1/forge/internal/logging"
 	"github.com/rs/zerolog"
 )
 

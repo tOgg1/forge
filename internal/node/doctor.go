@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencode-ai/swarm/internal/models"
-	"github.com/opencode-ai/swarm/internal/ssh"
-	"github.com/opencode-ai/swarm/internal/tmux"
+	"github.com/tOgg1/forge/internal/models"
+	"github.com/tOgg1/forge/internal/ssh"
+	"github.com/tOgg1/forge/internal/tmux"
 )
 
 // CheckStatus indicates the result of a diagnostic check.

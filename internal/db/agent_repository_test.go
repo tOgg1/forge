@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/tOgg1/forge/internal/models"
 )
 
 func createTestWorkspace(t *testing.T, db *DB) *models.Workspace {

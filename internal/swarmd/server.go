@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/opencode-ai/swarm/gen/swarmd/v1"
-	"github.com/opencode-ai/swarm/internal/tmux"
+	"github.com/tOgg1/forge/gen/swarmd/v1"
+	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

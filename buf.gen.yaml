@@ -4,7 +4,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/opencode-ai/swarm
+      value: github.com/tOgg1/forge
 plugins:
   - remote: buf.build/protocolbuffers/go
     out: gen

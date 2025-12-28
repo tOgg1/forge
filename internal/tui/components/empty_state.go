@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/opencode-ai/swarm/internal/tui/styles"
+	"github.com/tOgg1/forge/internal/tui/styles"
 )
 
 // EmptyState represents an empty state message with optional suggestions.

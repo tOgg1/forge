@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opencode-ai/swarm/internal/logging"
-	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/tOgg1/forge/internal/logging"
+	"github.com/tOgg1/forge/internal/models"
 )
 
 func TestArchiveAgentLogs_CompressesOldArchives(t *testing.T) {

@@ -1,7 +1,7 @@
 // Package adapters defines the adapter interface for supported agent CLIs.
 package adapters
 
-import "github.com/opencode-ai/swarm/internal/models"
+import "github.com/tOgg1/forge/internal/models"
 
 // TmuxClient describes the subset of tmux functionality adapters rely on.
 type TmuxClient interface {

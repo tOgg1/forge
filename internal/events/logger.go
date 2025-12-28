@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/tOgg1/forge/internal/models"
 )
 
 // Repository is the minimal interface needed to write events.

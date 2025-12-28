@@ -4,7 +4,7 @@ package components
 import (
 	"strings"
 
-	"github.com/opencode-ai/swarm/internal/tui/styles"
+	"github.com/tOgg1/forge/internal/tui/styles"
 )
 
 // RenderInspectorPanel renders a titled inspector panel.

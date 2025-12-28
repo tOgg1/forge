@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencode-ai/swarm/internal/db"
-	"github.com/opencode-ai/swarm/internal/models"
-	"github.com/opencode-ai/swarm/internal/scheduler"
+	"github.com/tOgg1/forge/internal/db"
+	"github.com/tOgg1/forge/internal/models"
+	"github.com/tOgg1/forge/internal/scheduler"
 	"github.com/spf13/cobra"
 )
 

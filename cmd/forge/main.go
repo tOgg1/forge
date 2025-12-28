@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/opencode-ai/swarm/internal/cli"
+	"github.com/tOgg1/forge/internal/cli"
 )
 
 // Version information (set by goreleaser)

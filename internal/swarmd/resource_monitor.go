@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/opencode-ai/swarm/gen/swarmd/v1"
+	"github.com/tOgg1/forge/gen/swarmd/v1"
 	"github.com/rs/zerolog"
 )
 

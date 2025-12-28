@@ -1,6 +1,6 @@
 package adapters
 
-import "github.com/opencode-ai/swarm/internal/models"
+import "github.com/tOgg1/forge/internal/models"
 
 type openCodeAdapter struct {
 	*GenericAdapter

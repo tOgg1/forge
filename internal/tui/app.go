@@ -15,12 +15,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/opencode-ai/swarm/internal/models"
-	"github.com/opencode-ai/swarm/internal/sequences"
-	"github.com/opencode-ai/swarm/internal/state"
-	"github.com/opencode-ai/swarm/internal/templates"
-	"github.com/opencode-ai/swarm/internal/tui/components"
-	"github.com/opencode-ai/swarm/internal/tui/styles"
+	"github.com/tOgg1/forge/internal/models"
+	"github.com/tOgg1/forge/internal/sequences"
+	"github.com/tOgg1/forge/internal/state"
+	"github.com/tOgg1/forge/internal/templates"
+	"github.com/tOgg1/forge/internal/tui/components"
+	"github.com/tOgg1/forge/internal/tui/styles"
 )
 
 const tuiSubscriberID = "tui-main"

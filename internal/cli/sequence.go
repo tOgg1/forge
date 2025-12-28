@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/opencode-ai/swarm/internal/db"
-	"github.com/opencode-ai/swarm/internal/models"
-	"github.com/opencode-ai/swarm/internal/queue"
-	"github.com/opencode-ai/swarm/internal/sequences"
+	"github.com/tOgg1/forge/internal/db"
+	"github.com/tOgg1/forge/internal/models"
+	"github.com/tOgg1/forge/internal/queue"
+	"github.com/tOgg1/forge/internal/sequences"
 	"github.com/spf13/cobra"
 )
 

@@ -4,8 +4,8 @@ package cli
 import (
 	"path/filepath"
 
-	"github.com/opencode-ai/swarm/internal/agent"
-	"github.com/opencode-ai/swarm/internal/db"
+	"github.com/tOgg1/forge/internal/agent"
+	"github.com/tOgg1/forge/internal/db"
 )
 
 func agentServiceOptions(database *db.DB) []agent.ServiceOption {

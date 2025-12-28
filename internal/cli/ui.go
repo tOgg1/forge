@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencode-ai/swarm/internal/adapters"
-	"github.com/opencode-ai/swarm/internal/db"
-	"github.com/opencode-ai/swarm/internal/state"
-	"github.com/opencode-ai/swarm/internal/tmux"
-	"github.com/opencode-ai/swarm/internal/tui"
+	"github.com/tOgg1/forge/internal/adapters"
+	"github.com/tOgg1/forge/internal/db"
+	"github.com/tOgg1/forge/internal/state"
+	"github.com/tOgg1/forge/internal/tmux"
+	"github.com/tOgg1/forge/internal/tui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

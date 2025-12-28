@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/opencode-ai/swarm/internal/logging"
+	"github.com/tOgg1/forge/internal/logging"
 )
 
 var (

@@ -3425,8 +3425,8 @@ const file_swarmd_v1_swarmd_proto_rawDesc = "" +
 	"\rGetTranscript\x12\x1f.swarmd.v1.GetTranscriptRequest\x1a .swarmd.v1.GetTranscriptResponse\x12]\n" +
 	"\x10StreamTranscript\x12\".swarmd.v1.StreamTranscriptRequest\x1a#.swarmd.v1.StreamTranscriptResponse0\x01\x12F\n" +
 	"\tGetStatus\x12\x1b.swarmd.v1.GetStatusRequest\x1a\x1c.swarmd.v1.GetStatusResponse\x127\n" +
-	"\x04Ping\x12\x16.swarmd.v1.PingRequest\x1a\x17.swarmd.v1.PingResponseB\x92\x01\n" +
-	"\rcom.swarmd.v1B\vSwarmdProtoP\x01Z/github.com/opencode-ai/swarm/swarmd/v1;swarmdv1\xa2\x02\x03SXX\xaa\x02\tSwarmd.V1\xca\x02\tSwarmd\\V1\xe2\x02\x15Swarmd\\V1\\GPBMetadata\xea\x02\n" +
+	"\x04Ping\x12\x16.swarmd.v1.PingRequest\x1a\x17.swarmd.v1.PingResponseB\x8c\x01\n" +
+	"\rcom.swarmd.v1B\vSwarmdProtoP\x01Z)github.com/tOgg1/forge/swarmd/v1;swarmdv1\xa2\x02\x03SXX\xaa\x02\tSwarmd.V1\xca\x02\tSwarmd\\V1\xe2\x02\x15Swarmd\\V1\\GPBMetadata\xea\x02\n" +
 	"Swarmd::V1b\x06proto3"
 
 var (

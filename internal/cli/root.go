@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/opencode-ai/swarm/internal/config"
-	"github.com/opencode-ai/swarm/internal/logging"
+	"github.com/tOgg1/forge/internal/config"
+	"github.com/tOgg1/forge/internal/logging"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 )

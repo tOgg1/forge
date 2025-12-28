@@ -4,7 +4,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/opencode-ai/swarm/internal/sequences"
+	"github.com/tOgg1/forge/internal/sequences"
 )
 
 func TestFilterSequences(t *testing.T) {

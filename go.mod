@@ -1,4 +1,4 @@
-module github.com/opencode-ai/swarm
+module github.com/tOgg1/forge
 
 go 1.25.5
 

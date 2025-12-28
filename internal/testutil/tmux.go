@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opencode-ai/swarm/internal/tmux"
+	"github.com/tOgg1/forge/internal/tmux"
 )
 
 // RequireTmux skips the test if tmux is not installed and returns a local client.

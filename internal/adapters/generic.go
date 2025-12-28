@@ -3,7 +3,7 @@ package adapters
 import (
 	"strings"
 
-	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/tOgg1/forge/internal/models"
 )
 
 // GenericAdapter provides basic tmux-only integration for any agent CLI.

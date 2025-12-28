@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	swarmdv1 "github.com/opencode-ai/swarm/gen/swarmd/v1"
-	"github.com/opencode-ai/swarm/internal/models"
-	"github.com/opencode-ai/swarm/internal/ssh"
-	"github.com/opencode-ai/swarm/internal/swarmd"
+	swarmdv1 "github.com/tOgg1/forge/gen/swarmd/v1"
+	"github.com/tOgg1/forge/internal/models"
+	"github.com/tOgg1/forge/internal/ssh"
+	"github.com/tOgg1/forge/internal/swarmd"
 	"github.com/rs/zerolog"
 )
 

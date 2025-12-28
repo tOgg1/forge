@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opencode-ai/swarm/internal/config"
-	"github.com/opencode-ai/swarm/internal/db"
-	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/tOgg1/forge/internal/config"
+	"github.com/tOgg1/forge/internal/db"
+	"github.com/tOgg1/forge/internal/models"
 )
 
 func setupTestDB(t *testing.T) (*db.DB, *db.EventRepository) {

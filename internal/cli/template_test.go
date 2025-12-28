@@ -4,7 +4,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/opencode-ai/swarm/internal/templates"
+	"github.com/tOgg1/forge/internal/templates"
 )
 
 func TestFilterTemplates(t *testing.T) {

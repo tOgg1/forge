@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencode-ai/swarm/internal/beads"
-	"github.com/opencode-ai/swarm/internal/tui/styles"
+	"github.com/tOgg1/forge/internal/beads"
+	"github.com/tOgg1/forge/internal/tui/styles"
 )
 
 // BeadsPanelData contains data for rendering the beads task panel.

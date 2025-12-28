@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/opencode-ai/swarm/internal/models"
-	"github.com/opencode-ai/swarm/internal/tui/styles"
+	"github.com/tOgg1/forge/internal/models"
+	"github.com/tOgg1/forge/internal/tui/styles"
 )
 
 func TestRenderFileClaimsLine_NilSummary(t *testing.T) {
@@ -140,7 +140,7 @@ func TestRenderAgentCard_WithClaimSummary(t *testing.T) {
 		ClaimSummary: summary,
 	}
 
-	result := RenderAgentCard(styleSet, card, true)
+	result := RenderAgentCard(styleSet, card, true, true, false)
 
 	if !strings.Contains(result, "Claims:") {
 		t.Error("Agent card should contain 'Claims:' when claim summary is present")
@@ -161,7 +161,7 @@ func TestRenderAgentCard_WithoutClaimSummary(t *testing.T) {
 		ClaimSummary: nil,
 	}
 
-	result := RenderAgentCard(styleSet, card, true)
+	result := RenderAgentCard(styleSet, card, true, true, false)
 
 	// Should not contain claims line when summary is nil
 	if strings.Contains(result, "Claims:") {

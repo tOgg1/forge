@@ -5,7 +5,7 @@ syntax = "proto3";
 
 package swarmd.v1;
 
-option go_package = "github.com/opencode-ai/swarm/internal/swarmd/proto/swarmdv1";
+option go_package = "github.com/tOgg1/forge/internal/swarmd/proto/swarmdv1";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";

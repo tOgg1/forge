@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/tOgg1/forge/internal/models"
 )
 
 // ParseTranscript inspects transcript text and returns a detected state if a pattern matches.

@@ -7,7 +7,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/tOgg1/forge/internal/models"
 )
 
 // RenderSequence renders a sequence into queue items with variables applied.

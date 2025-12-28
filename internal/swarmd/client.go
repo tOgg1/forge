@@ -7,8 +7,8 @@ import (
 	"net"
 	"sync"
 
-	swarmdv1 "github.com/opencode-ai/swarm/gen/swarmd/v1"
-	"github.com/opencode-ai/swarm/internal/ssh"
+	swarmdv1 "github.com/tOgg1/forge/gen/swarmd/v1"
+	"github.com/tOgg1/forge/internal/ssh"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

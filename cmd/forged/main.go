@@ -11,9 +11,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/opencode-ai/swarm/internal/config"
-	"github.com/opencode-ai/swarm/internal/logging"
-	"github.com/opencode-ai/swarm/internal/swarmd"
+	"github.com/tOgg1/forge/internal/config"
+	"github.com/tOgg1/forge/internal/logging"
+	"github.com/tOgg1/forge/internal/swarmd"
 )
 
 // Version information (set by goreleaser)

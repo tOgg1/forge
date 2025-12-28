@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	swarmdv1 "github.com/opencode-ai/swarm/gen/swarmd/v1"
-	"github.com/opencode-ai/swarm/internal/config"
+	swarmdv1 "github.com/tOgg1/forge/gen/swarmd/v1"
+	"github.com/tOgg1/forge/internal/config"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 )

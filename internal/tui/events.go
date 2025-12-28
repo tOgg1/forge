@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/opencode-ai/swarm/internal/models"
-	"github.com/opencode-ai/swarm/internal/state"
+	"github.com/tOgg1/forge/internal/models"
+	"github.com/tOgg1/forge/internal/state"
 )
 
 // StateChangeMsg wraps a state engine StateChange for the TUI.

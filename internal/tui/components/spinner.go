@@ -2,7 +2,7 @@
 package components
 
 import (
-	"github.com/opencode-ai/swarm/internal/tui/styles"
+	"github.com/tOgg1/forge/internal/tui/styles"
 )
 
 // SpinnerFrames contains the braille spinner animation frames.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/tOgg1/forge/internal/models"
 )
 
 // Registry manages registered agent adapters.

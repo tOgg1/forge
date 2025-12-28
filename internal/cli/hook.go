@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencode-ai/swarm/internal/hooks"
-	"github.com/opencode-ai/swarm/internal/models"
+	"github.com/tOgg1/forge/internal/hooks"
+	"github.com/tOgg1/forge/internal/models"
 	"github.com/spf13/cobra"
 )
 

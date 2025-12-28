@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/opencode-ai/swarm/internal/tui/styles"
+	"github.com/tOgg1/forge/internal/tui/styles"
 )
 
 // MessagePaletteKind identifies palette entry type.

@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/opencode-ai/swarm/internal/models"
-	"github.com/opencode-ai/swarm/internal/tui/styles"
+	"github.com/tOgg1/forge/internal/models"
+	"github.com/tOgg1/forge/internal/tui/styles"
 )
 
 // WorkspaceHeaderData contains data for the workspace header.
