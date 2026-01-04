@@ -9,11 +9,16 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
+	"github.com/tOgg1/forge/internal/agent"
 	"github.com/tOgg1/forge/internal/config"
-	"github.com/tOgg1/forge/internal/logging"
 	"github.com/tOgg1/forge/internal/forged"
+	"github.com/tOgg1/forge/internal/logging"
+	"github.com/tOgg1/forge/internal/node"
+	"github.com/tOgg1/forge/internal/scheduler"
+	"github.com/tOgg1/forge/internal/workspace"
 )
 
 // Version information (set by goreleaser)
@@ -94,6 +99,64 @@ func main() {
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to initialize forged")
 		os.Exit(1)
+	}
+
+	// Create and register scheduler if database is available
+	if daemon.Database() != nil {
+		// Create node service
+		nodeService := node.NewService(daemon.NodeRepository())
+
+		// Create workspace service
+		wsService := workspace.NewService(
+			daemon.WorkspaceRepository(),
+			nodeService,
+			daemon.AgentRepository(),
+			workspace.WithEventRepository(daemon.EventRepository()),
+		)
+
+		// Create agent service
+		agentServiceOpts := []agent.ServiceOption{
+			agent.WithEventRepository(daemon.EventRepository()),
+			agent.WithPortRepository(daemon.PortRepository()),
+		}
+		if cfg.Global.DataDir != "" {
+			archiveDir := filepath.Join(cfg.Global.DataDir, "archives", "agents")
+			agentServiceOpts = append(agentServiceOpts, agent.WithArchiveDir(archiveDir))
+		}
+		agentService := agent.NewService(
+			daemon.AgentRepository(),
+			daemon.QueueRepository(),
+			wsService,
+			nil, // accountService - can be nil for now
+			daemon.TmuxClient(),
+			agentServiceOpts...,
+		)
+
+		// Create scheduler with config
+		schedConfig := scheduler.DefaultConfig()
+		if cfg.Scheduler.DispatchInterval > 0 {
+			schedConfig.TickInterval = cfg.Scheduler.DispatchInterval
+		}
+		if cfg.Scheduler.MaxRetries > 0 {
+			schedConfig.MaxRetries = cfg.Scheduler.MaxRetries
+		}
+		if cfg.Scheduler.RetryBackoff > 0 {
+			schedConfig.RetryBackoff = cfg.Scheduler.RetryBackoff
+		}
+		if cfg.Scheduler.DefaultCooldownDuration > 0 {
+			schedConfig.DefaultCooldownDuration = cfg.Scheduler.DefaultCooldownDuration
+		}
+
+		sched := scheduler.New(
+			schedConfig,
+			agentService,
+			daemon.QueueService(),
+			daemon.StateEngine(),
+			nil, // accountService
+		)
+
+		daemon.SetScheduler(sched)
+		logger.Info().Msg("scheduler configured")
 	}
 
 	if err := daemon.Run(ctx); err != nil {

@@ -151,22 +151,23 @@ func (a *GenericAdapter) DetectState(screen string, meta any) (models.AgentState
 		}
 	}
 
-	// Check for busy indicators
-	for _, indicator := range a.busyIndicators {
+	// Check for idle indicators FIRST - if we see an idle prompt, the agent is ready
+	// This takes priority over busy indicators which may appear in old output still visible on screen
+	for _, indicator := range a.idleIndicators {
 		if strings.Contains(lower, strings.ToLower(indicator)) {
-			return models.AgentStateWorking, StateReason{
-				Reason:     "activity indicator detected",
+			return models.AgentStateIdle, StateReason{
+				Reason:     "idle indicator detected",
 				Confidence: models.StateConfidenceLow,
 				Evidence:   []string{indicator},
 			}, nil
 		}
 	}
 
-	// Check for idle indicators
-	for _, indicator := range a.idleIndicators {
+	// Check for busy indicators
+	for _, indicator := range a.busyIndicators {
 		if strings.Contains(lower, strings.ToLower(indicator)) {
-			return models.AgentStateIdle, StateReason{
-				Reason:     "idle indicator detected",
+			return models.AgentStateWorking, StateReason{
+				Reason:     "activity indicator detected",
 				Confidence: models.StateConfidenceLow,
 				Evidence:   []string{indicator},
 			}, nil
