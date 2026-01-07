@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/db"
@@ -279,7 +280,7 @@ func filterHarnessAliases(entries []aliasEntry) []aliasEntry {
 		if aliasCmd == "" {
 			continue
 		}
-		if isHarnessAlias(entry.Name, aliasCmd) {
+		if isHarnessAlias(aliasCmd) {
 			filtered = append(filtered, entry)
 		}
 	}
@@ -386,36 +387,116 @@ func parseAliasCommand(aliasOutput, aliasName string) string {
 	return strings.TrimSpace(line)
 }
 
-func isHarnessAlias(aliasName, aliasCmd string) bool {
-	candidate := strings.ToLower(aliasName + " " + aliasCmd)
-	if strings.Contains(candidate, "opencode") {
-		return true
+func isHarnessAlias(aliasCmd string) bool {
+	token := firstCommandToken(aliasCmd)
+	if token == "" {
+		return false
 	}
-	if strings.Contains(candidate, "codex") {
-		return true
-	}
-	if strings.Contains(candidate, "claude") {
-		return true
-	}
-	return containsToken(candidate, "pi")
+	token = strings.ToLower(filepath.Base(token))
+	return isHarnessToken(token)
 }
 
-func containsToken(candidate, token string) bool {
-	for _, field := range strings.FieldsFunc(candidate, func(r rune) bool {
-		switch {
-		case r >= 'a' && r <= 'z':
-			return false
-		case r >= '0' && r <= '9':
-			return false
-		default:
-			return true
+func isHarnessToken(token string) bool {
+	switch token {
+	case "opencode", "codex", "claude", "claude-code", "pi":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstCommandToken(command string) string {
+	fields := shellFields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	for _, field := range fields {
+		if field == "" {
+			continue
 		}
-	}) {
-		if field == token {
-			return true
+		lower := strings.ToLower(field)
+		if isCommandWrapper(lower) {
+			continue
+		}
+		if isEnvAssignment(field) {
+			continue
+		}
+		return field
+	}
+	return ""
+}
+
+func isCommandWrapper(field string) bool {
+	switch field {
+	case "env", "command", "sudo", "exec", "time":
+		return true
+	default:
+		return false
+	}
+}
+
+func isEnvAssignment(field string) bool {
+	idx := strings.Index(field, "=")
+	if idx <= 0 {
+		return false
+	}
+	key := field[:idx]
+	for i, r := range key {
+		if i == 0 {
+			if !(r == '_' || unicode.IsLetter(r)) {
+				return false
+			}
+			continue
+		}
+		if !(r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+func shellFields(command string) []string {
+	fields := make([]string, 0, 8)
+	var buf strings.Builder
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	flush := func() {
+		if buf.Len() == 0 {
+			return
+		}
+		fields = append(fields, buf.String())
+		buf.Reset()
+	}
+
+	for _, r := range command {
+		if escaped {
+			buf.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' && !inSingle {
+			escaped = true
+			continue
+		}
+		if r == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if r == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if !inSingle && !inDouble && unicode.IsSpace(r) {
+			flush()
+			continue
+		}
+		buf.WriteRune(r)
+	}
+	flush()
+
+	return fields
 }
 
 func buildAliasProfile(aliasName, aliasCmd string) (*models.Profile, error) {
