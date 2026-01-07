@@ -28,7 +28,7 @@ This creates `.forge/` scaffolding and a `PROMPT.md` if missing.
 
 ## Configure profiles
 
-Import aliases from `~/.zsh_aliases` (or `FORGE_ALIAS_FILE`):
+Import aliases from common shell alias files (or `FORGE_ALIAS_FILE`, which can be a path list):
 
 ```bash
 ./build/forge profile import-aliases

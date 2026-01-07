@@ -22,12 +22,19 @@ var profileImportAliasesCmd = &cobra.Command{
 	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aliasNames := args
-		if len(aliasNames) == 0 {
-			aliasNames = defaultAliasNames
+		aliasFiles := resolveAliasFiles()
+		shellPath := resolveAliasShell()
+		aliasEntries := collectAliasEntries(aliasFiles)
+		aliasOutputs := make(map[string]string, len(aliasEntries))
+		for _, entry := range aliasEntries {
+			aliasOutputs[entry.Name] = entry.Output
 		}
 
-		aliasFile := resolveAliasFile()
-		shellPath := resolveAliasShell()
+		if len(aliasNames) == 0 {
+			for _, entry := range filterHarnessAliases(aliasEntries) {
+				aliasNames = append(aliasNames, entry.Name)
+			}
+		}
 
 		database, err := openDatabase()
 		if err != nil {
@@ -45,10 +52,14 @@ var profileImportAliasesCmd = &cobra.Command{
 				continue
 			}
 
-			aliasOutput, err := getAliasOutput(aliasName, aliasFile, shellPath)
-			if err != nil {
-				result.Missing = append(result.Missing, aliasName)
-				continue
+			aliasOutput := aliasOutputs[aliasName]
+			if aliasOutput == "" {
+				var err error
+				aliasOutput, err = getAliasOutput(aliasName, aliasFiles, shellPath)
+				if err != nil {
+					result.Missing = append(result.Missing, aliasName)
+					continue
+				}
 			}
 
 			aliasCmd := parseAliasCommand(aliasOutput, aliasName)
@@ -95,18 +106,6 @@ type importAliasResult struct {
 	Missing []string `json:"missing"`
 }
 
-var defaultAliasNames = []string{
-	"oc1",
-	"oc2",
-	"oc3",
-	"codex1",
-	"codex2",
-	"cc1",
-	"cc2",
-	"cc3",
-	"pi",
-}
-
 func printAliasResult(result importAliasResult) {
 	if len(result.Created) == 0 && len(result.Skipped) == 0 && len(result.Missing) == 0 {
 		fmt.Fprintln(os.Stdout, "No aliases processed")
@@ -124,16 +123,71 @@ func printAliasResult(result importAliasResult) {
 	}
 }
 
-func resolveAliasFile() string {
-	aliasFile := strings.TrimSpace(os.Getenv("FORGE_ALIAS_FILE"))
-	if aliasFile == "" {
+type aliasEntry struct {
+	Name   string
+	Output string
+}
+
+func resolveAliasFiles() []string {
+	aliasFiles := splitAliasFiles(strings.TrimSpace(os.Getenv("FORGE_ALIAS_FILE")))
+	if len(aliasFiles) == 0 {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return ""
+			return nil
 		}
-		aliasFile = filepath.Join(home, ".zsh_aliases")
+		aliasFiles = []string{
+			filepath.Join(home, ".zsh_aliases"),
+			filepath.Join(home, ".bash_aliases"),
+			filepath.Join(home, ".bashrc"),
+			filepath.Join(home, ".zshrc"),
+			filepath.Join(home, ".config", "fish", "config.fish"),
+		}
 	}
-	return expandHome(aliasFile)
+
+	return uniqueExistingPaths(expandHomePaths(aliasFiles))
+}
+
+func splitAliasFiles(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := filepath.SplitList(value)
+	files := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		files = append(files, part)
+	}
+	return files
+}
+
+func expandHomePaths(paths []string) []string {
+	expanded := make([]string, 0, len(paths))
+	for _, path := range paths {
+		expanded = append(expanded, expandHome(path))
+	}
+	return expanded
+}
+
+func uniqueExistingPaths(paths []string) []string {
+	seen := make(map[string]struct{}, len(paths))
+	unique := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		unique = append(unique, path)
+	}
+	return unique
 }
 
 func resolveAliasShell() string {
@@ -149,14 +203,23 @@ func resolveAliasShell() string {
 
 var errAliasNotFound = errors.New("alias not found")
 
-func getAliasOutput(aliasName, aliasFile, shellPath string) (string, error) {
+func getAliasOutput(aliasName string, aliasFiles []string, shellPath string) (string, error) {
 	aliasName = strings.TrimSpace(aliasName)
 	if aliasName == "" {
 		return "", errAliasNotFound
 	}
 
 	if shellPath != "" {
-		cmd := exec.Command(shellPath, "-lc", fmt.Sprintf("source %q >/dev/null 2>&1; alias %s", aliasFile, aliasName))
+		sourceCmd := strings.Builder{}
+		for _, aliasFile := range aliasFiles {
+			if aliasFile == "" {
+				continue
+			}
+			fmt.Fprintf(&sourceCmd, "source %q >/dev/null 2>&1; ", aliasFile)
+		}
+		sourceCmd.WriteString("alias ")
+		sourceCmd.WriteString(aliasName)
+		cmd := exec.Command(shellPath, "-lc", sourceCmd.String())
 		if output, err := cmd.Output(); err == nil {
 			text := strings.TrimSpace(string(output))
 			if text != "" {
@@ -165,20 +228,138 @@ func getAliasOutput(aliasName, aliasFile, shellPath string) (string, error) {
 		}
 	}
 
-	if aliasFile != "" {
-		data, err := os.ReadFile(aliasFile)
-		if err == nil {
-			re := regexp.MustCompile("^alias\\s+" + regexp.QuoteMeta(aliasName) + "=")
-			for _, line := range strings.Split(string(data), "\n") {
-				trimmed := strings.TrimSpace(line)
-				if re.MatchString(trimmed) {
-					return trimmed, nil
-				}
-			}
+	for _, aliasFile := range aliasFiles {
+		if aliasFile == "" {
+			continue
+		}
+		if output := findAliasInFile(aliasFile, aliasName); output != "" {
+			return output, nil
 		}
 	}
 
 	return "", errAliasNotFound
+}
+
+func collectAliasEntries(aliasFiles []string) []aliasEntry {
+	if len(aliasFiles) == 0 {
+		return nil
+	}
+	entries := make([]aliasEntry, 0, 16)
+	seen := make(map[string]struct{}, 16)
+	for _, aliasFile := range aliasFiles {
+		data, err := os.ReadFile(aliasFile)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			name, output := parseAliasLine(line)
+			if name == "" || output == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			entries = append(entries, aliasEntry{
+				Name:   name,
+				Output: output,
+			})
+		}
+	}
+	return entries
+}
+
+func filterHarnessAliases(entries []aliasEntry) []aliasEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	filtered := make([]aliasEntry, 0, len(entries))
+	for _, entry := range entries {
+		aliasCmd := parseAliasCommand(entry.Output, entry.Name)
+		if aliasCmd == "" {
+			continue
+		}
+		if isHarnessAlias(entry.Name, aliasCmd) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+func findAliasInFile(aliasFile, aliasName string) string {
+	data, err := os.ReadFile(aliasFile)
+	if err != nil {
+		return ""
+	}
+	re := regexp.MustCompile("^alias\\s+" + regexp.QuoteMeta(aliasName) + "(\\s+|=)")
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := stripInlineComment(strings.TrimSpace(line))
+		if trimmed == "" {
+			continue
+		}
+		if re.MatchString(trimmed) {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func parseAliasLine(line string) (string, string) {
+	trimmed := stripInlineComment(strings.TrimSpace(line))
+	if trimmed == "" || !strings.HasPrefix(trimmed, "alias ") {
+		return "", ""
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "alias "))
+	if rest == "" {
+		return "", ""
+	}
+
+	name, command, eqStyle := splitAliasDefinition(rest)
+	if name == "" || command == "" {
+		return "", ""
+	}
+	if eqStyle {
+		return name, "alias " + name + "=" + command
+	}
+	return name, "alias " + name + " " + command
+}
+
+func splitAliasDefinition(rest string) (string, string, bool) {
+	for i, r := range rest {
+		switch r {
+		case '=':
+			name := strings.TrimSpace(rest[:i])
+			command := strings.TrimSpace(rest[i+1:])
+			return name, command, true
+		case ' ', '\t':
+			name := strings.TrimSpace(rest[:i])
+			command := strings.TrimSpace(rest[i:])
+			return name, command, false
+		}
+	}
+	return strings.TrimSpace(rest), "", false
+}
+
+func stripInlineComment(line string) string {
+	inSingle := false
+	inDouble := false
+	for i, r := range line {
+		if r == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if r == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if r == '#' && !inSingle && !inDouble {
+			if i == 0 {
+				return ""
+			}
+			return strings.TrimSpace(line[:i])
+		}
+	}
+	return strings.TrimSpace(line)
 }
 
 func parseAliasCommand(aliasOutput, aliasName string) string {
@@ -192,6 +373,8 @@ func parseAliasCommand(aliasOutput, aliasName string) string {
 	line = strings.TrimPrefix(line, "alias ")
 	if strings.HasPrefix(line, aliasName+"=") {
 		line = strings.TrimPrefix(line, aliasName+"=")
+	} else if strings.HasPrefix(line, aliasName+" ") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, aliasName))
 	} else if idx := strings.Index(line, "="); idx != -1 {
 		line = line[idx+1:]
 	}
@@ -201,6 +384,38 @@ func parseAliasCommand(aliasOutput, aliasName string) string {
 	line = strings.TrimPrefix(line, "'")
 	line = strings.TrimSuffix(line, "'")
 	return strings.TrimSpace(line)
+}
+
+func isHarnessAlias(aliasName, aliasCmd string) bool {
+	candidate := strings.ToLower(aliasName + " " + aliasCmd)
+	if strings.Contains(candidate, "opencode") {
+		return true
+	}
+	if strings.Contains(candidate, "codex") {
+		return true
+	}
+	if strings.Contains(candidate, "claude") {
+		return true
+	}
+	return containsToken(candidate, "pi")
+}
+
+func containsToken(candidate, token string) bool {
+	for _, field := range strings.FieldsFunc(candidate, func(r rune) bool {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return false
+		case r >= '0' && r <= '9':
+			return false
+		default:
+			return true
+		}
+	}) {
+		if field == token {
+			return true
+		}
+	}
+	return false
 }
 
 func buildAliasProfile(aliasName, aliasCmd string) (*models.Profile, error) {

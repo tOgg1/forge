@@ -38,6 +38,7 @@ Key features:
 forge init
 
 # 2) Import aliases (or add a profile manually)
+# Scans common shell alias files for claude/codex/opencode/pi aliases.
 forge profile import-aliases
 # forge profile add pi --name local
 
