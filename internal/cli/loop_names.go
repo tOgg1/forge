@@ -34,13 +34,11 @@ func generateLoopName(existing map[string]struct{}) string {
 		if _, ok := existing[candidate]; ok {
 			continue
 		}
-		existing[candidate] = struct{}{}
 		return candidate
 	}
 
 	fallback := "Loop " + time.Now().Format("150405")
 	if _, ok := existing[fallback]; !ok {
-		existing[fallback] = struct{}{}
 		return fallback
 	}
 
@@ -48,7 +46,6 @@ func generateLoopName(existing map[string]struct{}) string {
 	for {
 		candidate := fmt.Sprintf("%s-%d", fallback, counter)
 		if _, ok := existing[candidate]; !ok {
-			existing[candidate] = struct{}{}
 			return candidate
 		}
 		counter++
