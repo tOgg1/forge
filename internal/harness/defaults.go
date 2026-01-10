@@ -8,7 +8,8 @@ func DefaultCommandTemplate(harness models.Harness, model string) string {
 	case models.HarnessPi:
 		return "pi -p \"$FORGE_PROMPT_CONTENT\""
 	case models.HarnessClaude:
-		return "claude -p \"$FORGE_PROMPT_CONTENT\" --dangerously-skip-permissions"
+		// Use script to create a PTY so Claude streams output in real-time
+		return "script -q -c 'claude -p \"$FORGE_PROMPT_CONTENT\" --dangerously-skip-permissions' /dev/null"
 	case models.HarnessCodex:
 		return "codex exec --full-auto -"
 	case models.HarnessOpenCode:
@@ -16,6 +17,9 @@ func DefaultCommandTemplate(harness models.Harness, model string) string {
 			model = "anthropic/claude-opus-4-5"
 		}
 		return "opencode run --model " + model + " \"$FORGE_PROMPT_CONTENT\""
+	case models.HarnessDroid:
+		// Droid reads from stdin when no prompt argument is provided
+		return "droid exec --skip-permissions-unsafe"
 	default:
 		return ""
 	}
@@ -26,7 +30,7 @@ func DefaultPromptMode(harness models.Harness) models.PromptMode {
 	switch harness {
 	case models.HarnessPi:
 		return models.PromptModeEnv
-	case models.HarnessCodex:
+	case models.HarnessCodex, models.HarnessDroid:
 		return models.PromptModeStdin
 	case models.HarnessClaude, models.HarnessOpenCode:
 		return models.PromptModeEnv

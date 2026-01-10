@@ -13,6 +13,7 @@ const (
 	HarnessOpenCode Harness = "opencode"
 	HarnessCodex    Harness = "codex"
 	HarnessClaude   Harness = "claude"
+	HarnessDroid    Harness = "droid"
 )
 
 // PromptMode controls how prompts are delivered to a harness.
@@ -59,7 +60,7 @@ func (p *Profile) Validate() error {
 	}
 
 	switch p.Harness {
-	case "", HarnessPi, HarnessOpenCode, HarnessCodex, HarnessClaude:
+	case "", HarnessPi, HarnessOpenCode, HarnessCodex, HarnessClaude, HarnessDroid:
 		// ok
 	default:
 		return ErrInvalidProfileHarness

@@ -445,6 +445,8 @@ func parseHarness(value string) (models.Harness, error) {
 		return models.HarnessCodex, nil
 	case "claude", "claude-code":
 		return models.HarnessClaude, nil
+	case "droid", "factory":
+		return models.HarnessDroid, nil
 	default:
 		return "", fmt.Errorf("unknown harness %q", value)
 	}

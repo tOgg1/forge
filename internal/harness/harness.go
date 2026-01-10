@@ -64,9 +64,17 @@ func baseEnv(profile models.Profile, mode models.PromptMode, promptContent strin
 	env := append([]string{}, defaultEnv()...)
 
 	if profile.AuthHome != "" {
-		env = append(env, "HOME="+profile.AuthHome)
+		// Don't set HOME for Claude, Codex, or OpenCode - it breaks tilde expansion in command templates.
+		// Each tool uses its own config directory environment variable.
+		if profile.Harness != models.HarnessClaude && profile.Harness != models.HarnessCodex && profile.Harness != models.HarnessOpenCode {
+			env = append(env, "HOME="+profile.AuthHome)
+		}
 		if profile.Harness == models.HarnessCodex {
 			env = append(env, "CODEX_HOME="+profile.AuthHome)
+		}
+		if profile.Harness == models.HarnessOpenCode {
+			env = append(env, "OPENCODE_CONFIG_DIR="+profile.AuthHome)
+			env = append(env, "XDG_DATA_HOME="+profile.AuthHome)
 		}
 	}
 
@@ -76,6 +84,10 @@ func baseEnv(profile models.Profile, mode models.PromptMode, promptContent strin
 
 	if profile.Harness == models.HarnessPi && profile.AuthHome != "" {
 		env = append(env, "PI_CODING_AGENT_DIR="+profile.AuthHome)
+	}
+
+	if profile.Harness == models.HarnessClaude && profile.AuthHome != "" {
+		env = append(env, "CLAUDE_CONFIG_DIR="+profile.AuthHome)
 	}
 
 	for key, value := range profile.Env {
