@@ -135,6 +135,20 @@ func (r *LoopRunRepository) CountRunningByProfile(ctx context.Context, profileID
 	return count, nil
 }
 
+// CountByLoop returns the number of runs for a loop.
+func (r *LoopRunRepository) CountByLoop(ctx context.Context, loopID string) (int, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM loop_runs
+		WHERE loop_id = ?
+	`, loopID)
+
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count loop runs: %w", err)
+	}
+	return count, nil
+}
+
 // Finish updates a loop run with completion details.
 func (r *LoopRunRepository) Finish(ctx context.Context, run *models.LoopRun) error {
 	finishedAt := time.Now().UTC()

@@ -57,3 +57,58 @@ func TestLoopRunRepository_CreateFinish(t *testing.T) {
 		t.Fatalf("expected exit code 0")
 	}
 }
+
+func TestLoopRunRepository_CountByLoop(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repo := NewLoopRunRepository(db)
+	loopA := createTestLoop(t, db)
+	loopRepo := NewLoopRepository(db)
+	loopB := &models.Loop{
+		Name:            "Beefy Flanders 2",
+		RepoPath:        "/repo",
+		IntervalSeconds: 10,
+		State:           models.LoopStateStopped,
+	}
+	if err := loopRepo.Create(ctx, loopB); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		run := &models.LoopRun{
+			LoopID:       loopA.ID,
+			PromptSource: "base",
+			Status:       models.LoopRunStatusRunning,
+		}
+		if err := repo.Create(ctx, run); err != nil {
+			t.Fatalf("Create run failed: %v", err)
+		}
+	}
+
+	run := &models.LoopRun{
+		LoopID:       loopB.ID,
+		PromptSource: "base",
+		Status:       models.LoopRunStatusRunning,
+	}
+	if err := repo.Create(ctx, run); err != nil {
+		t.Fatalf("Create run failed: %v", err)
+	}
+
+	countA, err := repo.CountByLoop(ctx, loopA.ID)
+	if err != nil {
+		t.Fatalf("CountByLoop failed: %v", err)
+	}
+	if countA != 3 {
+		t.Fatalf("expected 3 runs, got %d", countA)
+	}
+
+	countB, err := repo.CountByLoop(ctx, loopB.ID)
+	if err != nil {
+		t.Fatalf("CountByLoop failed: %v", err)
+	}
+	if countB != 1 {
+		t.Fatalf("expected 1 run, got %d", countB)
+	}
+}

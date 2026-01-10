@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -31,9 +32,10 @@ func init() {
 }
 
 var loopPsCmd = &cobra.Command{
-	Use:   "ps",
-	Short: "List loops",
-	Args:  cobra.NoArgs,
+	Use:     "ps",
+	Aliases: []string{"ls"},
+	Short:   "List loops",
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		database, err := openDatabase()
 		if err != nil {
@@ -45,6 +47,7 @@ var loopPsCmd = &cobra.Command{
 		poolRepo := db.NewPoolRepository(database)
 		profileRepo := db.NewProfileRepository(database)
 		queueRepo := db.NewLoopQueueRepository(database)
+		runRepo := db.NewLoopRunRepository(database)
 
 		repoPath := loopPsRepo
 		if repoPath == "" && chdirPath != "" {
@@ -81,6 +84,12 @@ var loopPsCmd = &cobra.Command{
 
 		sort.Slice(loops, func(i, j int) bool { return loops[i].CreatedAt.Before(loops[j].CreatedAt) })
 
+		loopIDs := make([]string, 0, len(loops))
+		for _, loopEntry := range loops {
+			loopIDs = append(loopIDs, loopShortID(loopEntry))
+		}
+		uniquePrefixes := loopUniquePrefixLengths(loopIDs)
+
 		rows := make([][]string, 0, len(loops))
 		for _, loopEntry := range loops {
 			queueItems, _ := queueRepo.List(context.Background(), loopEntry.ID)
@@ -89,6 +98,10 @@ var loopPsCmd = &cobra.Command{
 				if item.Status == models.LoopQueueStatusPending {
 					pending++
 				}
+			}
+			runCount, err := runRepo.CountByLoop(context.Background(), loopEntry.ID)
+			if err != nil {
+				return err
 			}
 
 			lastRun := ""
@@ -103,8 +116,16 @@ var loopPsCmd = &cobra.Command{
 				}
 			}
 
+			displayID := loopShortID(loopEntry)
+			uniqueLen := uniquePrefixes[displayID]
+			if uniqueLen == 0 {
+				uniqueLen = len(displayID)
+			}
+
 			rows = append(rows, []string{
+				formatLoopShortID(displayID, uniqueLen),
 				loopEntry.Name,
+				fmt.Sprintf("%d", runCount),
 				string(loopEntry.State),
 				waitUntil,
 				loopEntry.ProfileID,
@@ -115,6 +136,57 @@ var loopPsCmd = &cobra.Command{
 			})
 		}
 
-		return writeTable(os.Stdout, []string{"NAME", "STATE", "WAIT_UNTIL", "PROFILE", "POOL", "QUEUE", "LAST_RUN", "REPO"}, rows)
+		return writeTable(os.Stdout, []string{"ID", "NAME", "RUNS", "STATE", "WAIT_UNTIL", "PROFILE", "POOL", "QUEUE", "LAST_RUN", "REPO"}, rows)
 	},
+}
+
+func loopUniquePrefixLengths(ids []string) map[string]int {
+	result := make(map[string]int, len(ids))
+	for idx, id := range ids {
+		if id == "" {
+			continue
+		}
+		maxLen := len(id)
+		if maxLen == 0 {
+			continue
+		}
+		for length := 1; length <= maxLen; length++ {
+			prefix := id[:length]
+			unique := true
+			for otherIdx, other := range ids {
+				if otherIdx == idx {
+					continue
+				}
+				if strings.HasPrefix(other, prefix) {
+					unique = false
+					break
+				}
+			}
+			if unique {
+				result[id] = length
+				break
+			}
+		}
+		if result[id] == 0 {
+			result[id] = maxLen
+		}
+	}
+	return result
+}
+
+func formatLoopShortID(id string, uniqueLen int) string {
+	if id == "" {
+		return ""
+	}
+	if uniqueLen <= 0 || uniqueLen > len(id) {
+		uniqueLen = len(id)
+	}
+	if !colorEnabled() {
+		return id
+	}
+	prefix := colorize(id[:uniqueLen], colorYellow)
+	if uniqueLen == len(id) {
+		return prefix
+	}
+	return prefix + colorize(id[uniqueLen:], colorCyan)
 }
