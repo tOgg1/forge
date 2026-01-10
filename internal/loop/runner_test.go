@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -99,6 +101,77 @@ func TestRunnerRunOnceConsumesQueue(t *testing.T) {
 	}
 }
 
+func TestRunnerClaudeHarnessRunsLoop(t *testing.T) {
+	database, cleanup := testutil.NewTestDB(t)
+	defer cleanup()
+
+	repoDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = t.TempDir()
+	cfg.Global.ConfigDir = t.TempDir()
+
+	profileRepo := db.NewProfileRepository(database)
+	loopRepo := db.NewLoopRepository(database)
+	runRepo := db.NewLoopRunRepository(database)
+
+	profile := &models.Profile{
+		Name:            "claude-test",
+		Harness:         models.HarnessClaude,
+		PromptMode:      models.PromptModeEnv,
+		CommandTemplate: "script -q -c 'claude -p \"$FORGE_PROMPT_CONTENT\" --dangerously-skip-permissions' /dev/null",
+		MaxConcurrency:  1,
+	}
+	if err := profileRepo.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	loopEntry := &models.Loop{
+		Name:            "claude-loop",
+		RepoPath:        repoDir,
+		BasePromptMsg:   "test prompt for claude",
+		IntervalSeconds: 1,
+		ProfileID:       profile.ID,
+		State:           models.LoopStateStopped,
+	}
+	if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	var capturedProfile models.Profile
+	var capturedPrompt string
+	runner := NewRunner(database, cfg)
+	runner.Exec = func(ctx context.Context, p models.Profile, promptPath, promptContent, workDir string, output io.Writer) (int, string, error) {
+		capturedProfile = p
+		capturedPrompt = promptContent
+		return 0, "claude output", nil
+	}
+
+	if err := runner.RunOnce(context.Background(), loopEntry.ID); err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+
+	if capturedProfile.Harness != models.HarnessClaude {
+		t.Fatalf("expected claude harness, got %s", capturedProfile.Harness)
+	}
+	if capturedProfile.PromptMode != models.PromptModeEnv {
+		t.Fatalf("expected env prompt mode, got %s", capturedProfile.PromptMode)
+	}
+	if !strings.Contains(capturedPrompt, "test prompt for claude") {
+		t.Fatalf("expected prompt content, got %s", capturedPrompt)
+	}
+
+	runs, err := runRepo.ListByLoop(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	if runs[0].ProfileID != profile.ID {
+		t.Fatalf("expected profile id %s, got %s", profile.ID, runs[0].ProfileID)
+	}
+}
+
 func TestRunnerStopQueueStopsLoop(t *testing.T) {
 	database, cleanup := testutil.NewTestDB(t)
 	defer cleanup()
@@ -162,6 +235,48 @@ func TestRunnerStopQueueStopsLoop(t *testing.T) {
 	}
 	if updated.State != models.LoopStateStopped {
 		t.Fatalf("expected loop stopped, got %s", updated.State)
+	}
+}
+
+func TestEnsureLoopPathsCreatesLogDirWhenLogPathSet(t *testing.T) {
+	database, cleanup := testutil.NewTestDB(t)
+	defer cleanup()
+
+	repoDir := t.TempDir()
+	dataDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = dataDir
+	cfg.Global.ConfigDir = t.TempDir()
+
+	logPath := filepath.Join(dataDir, "logs", "loops", "custom.log")
+	if _, err := os.Stat(filepath.Dir(logPath)); !os.IsNotExist(err) {
+		t.Fatalf("expected log directory to not exist")
+	}
+
+	loopRepo := db.NewLoopRepository(database)
+	loopEntry := &models.Loop{
+		Name:            "loop-logdir",
+		RepoPath:        repoDir,
+		IntervalSeconds: 1,
+		State:           models.LoopStateStopped,
+		LogPath:         logPath,
+	}
+	if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	stored, err := loopRepo.Get(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("get loop: %v", err)
+	}
+
+	runner := NewRunner(database, cfg)
+	if err := runner.ensureLoopPaths(context.Background(), stored, loopRepo); err != nil {
+		t.Fatalf("ensure loop paths: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Dir(logPath)); err != nil {
+		t.Fatalf("expected log directory to exist: %v", err)
 	}
 }
 

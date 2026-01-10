@@ -383,6 +383,10 @@ func (r *Runner) ensureLoopPaths(ctx context.Context, loop *models.Loop, repo *d
 		}
 		loop.LogPath = path
 		updated = true
+	} else {
+		if err := os.MkdirAll(filepath.Dir(loop.LogPath), 0o755); err != nil {
+			return err
+		}
 	}
 	if loop.LedgerPath == "" {
 		path := LedgerPath(loop.RepoPath, loop.Name, loop.ID)
