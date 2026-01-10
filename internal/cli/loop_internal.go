@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/loop"
 )
 
@@ -32,12 +33,18 @@ var loopRunCmd = &cobra.Command{
 		}
 		defer database.Close()
 
+		loopRepo := db.NewLoopRepository(database)
+		loopEntry, err := resolveLoopByRef(context.Background(), loopRepo, args[0])
+		if err != nil {
+			return err
+		}
+
 		runner := loop.NewRunner(database, GetConfig())
 
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 
-		if err := runner.RunLoop(ctx, args[0]); err != nil {
+		if err := runner.RunLoop(ctx, loopEntry.ID); err != nil {
 			return fmt.Errorf("loop run failed: %w", err)
 		}
 

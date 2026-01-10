@@ -182,7 +182,7 @@ var loopUpCmd = &cobra.Command{
 		}
 
 		for _, loopEntry := range created {
-			fmt.Fprintf(os.Stdout, "Loop %q started (%s)\n", loopEntry.Name, loopEntry.ID)
+			fmt.Fprintf(os.Stdout, "Loop %q started (%s)\n", loopEntry.Name, loopShortID(loopEntry))
 		}
 
 		return nil

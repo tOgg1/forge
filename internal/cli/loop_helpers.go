@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -125,11 +126,6 @@ func selectLoops(ctx context.Context, loopRepo *db.LoopRepository, poolRepo *db.
 
 	filtered := make([]*models.Loop, 0)
 	for _, loop := range loops {
-		if selector.LoopRef != "" {
-			if loop.Name != selector.LoopRef && loop.ID != selector.LoopRef {
-				continue
-			}
-		}
 		if repoFilter != "" && loop.RepoPath != repoFilter {
 			continue
 		}
@@ -148,19 +144,60 @@ func selectLoops(ctx context.Context, loopRepo *db.LoopRepository, poolRepo *db.
 		filtered = append(filtered, loop)
 	}
 
-	if len(filtered) == 0 && selector.LoopRef != "" {
+	if selector.LoopRef == "" {
+		return filtered, nil
+	}
+	if len(filtered) == 0 {
 		return nil, fmt.Errorf("loop %q not found", selector.LoopRef)
 	}
 
-	return filtered, nil
+	matches, err := matchLoopRef(filtered, selector.LoopRef)
+	if err != nil {
+		return nil, err
+	}
+
+	return matches, nil
 }
 
 func resolveLoopByRef(ctx context.Context, repo *db.LoopRepository, ref string) (*models.Loop, error) {
-	loopEntry, err := repo.GetByName(ctx, ref)
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, errors.New("loop name or ID required")
+	}
+
+	loopEntry, err := repo.GetByShortID(ctx, strings.ToLower(ref))
 	if err == nil {
 		return loopEntry, nil
 	}
-	return repo.Get(ctx, ref)
+	if !errors.Is(err, db.ErrLoopNotFound) {
+		return nil, fmt.Errorf("failed to get loop by short ID: %w", err)
+	}
+
+	loopEntry, err = repo.Get(ctx, ref)
+	if err == nil {
+		return loopEntry, nil
+	}
+	if !errors.Is(err, db.ErrLoopNotFound) {
+		return nil, fmt.Errorf("failed to get loop: %w", err)
+	}
+
+	loopEntry, err = repo.GetByName(ctx, ref)
+	if err == nil {
+		return loopEntry, nil
+	}
+	if !errors.Is(err, db.ErrLoopNotFound) {
+		return nil, fmt.Errorf("failed to get loop by name: %w", err)
+	}
+
+	loops, err := repo.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list loops: %w", err)
+	}
+	matches, err := matchLoopRef(loops, ref)
+	if err != nil {
+		return nil, err
+	}
+	return matches[0], nil
 }
 
 func loopHasTag(loop *models.Loop, tag string) bool {
@@ -177,4 +214,107 @@ func exists(path string) bool {
 		return true
 	}
 	return false
+}
+
+func matchLoopRef(loops []*models.Loop, ref string) ([]*models.Loop, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, errors.New("loop name or ID required")
+	}
+	normalized := strings.ToLower(ref)
+
+	for _, loop := range loops {
+		if loop == nil {
+			continue
+		}
+		if strings.EqualFold(loop.ShortID, ref) {
+			return []*models.Loop{loop}, nil
+		}
+	}
+
+	for _, loop := range loops {
+		if loop == nil {
+			continue
+		}
+		if loop.ID == ref {
+			return []*models.Loop{loop}, nil
+		}
+	}
+
+	for _, loop := range loops {
+		if loop == nil {
+			continue
+		}
+		if loop.Name == ref {
+			return []*models.Loop{loop}, nil
+		}
+	}
+
+	matches := make([]*models.Loop, 0)
+	seen := make(map[string]struct{})
+	for _, loop := range loops {
+		if loop == nil {
+			continue
+		}
+		shortID := strings.ToLower(loop.ShortID)
+		if shortID != "" && strings.HasPrefix(shortID, normalized) {
+			if _, ok := seen[loop.ID]; !ok {
+				matches = append(matches, loop)
+				seen[loop.ID] = struct{}{}
+			}
+			continue
+		}
+		if loop.ID != "" && strings.HasPrefix(loop.ID, ref) {
+			if _, ok := seen[loop.ID]; !ok {
+				matches = append(matches, loop)
+				seen[loop.ID] = struct{}{}
+			}
+		}
+	}
+
+	if len(matches) == 1 {
+		return matches, nil
+	}
+	if len(matches) > 1 {
+		sort.Slice(matches, func(i, j int) bool {
+			left := strings.ToLower(matches[i].Name)
+			right := strings.ToLower(matches[j].Name)
+			if left == right {
+				return loopShortID(matches[i]) < loopShortID(matches[j])
+			}
+			return left < right
+		})
+		return nil, fmt.Errorf("loop '%s' is ambiguous; matches: %s (use a longer prefix or full ID)", ref, formatLoopMatches(matches))
+	}
+	if len(loops) == 0 {
+		return nil, fmt.Errorf("loop '%s' not found (no loops registered yet)", ref)
+	}
+
+	example := fmt.Sprintf("Example input: '%s' or '%s'", loops[0].Name, loopShortID(loops[0]))
+	return nil, fmt.Errorf("loop '%s' not found. %s", ref, example)
+}
+
+func loopShortID(loopEntry *models.Loop) string {
+	if loopEntry == nil {
+		return ""
+	}
+	if loopEntry.ShortID != "" {
+		return loopEntry.ShortID
+	}
+	return shortID(loopEntry.ID)
+}
+
+func formatLoopMatches(loops []*models.Loop) string {
+	parts := make([]string, 0, len(loops))
+	for _, loopEntry := range loops {
+		if loopEntry == nil {
+			continue
+		}
+		label := loopShortID(loopEntry)
+		if loopEntry.Name != "" {
+			label = fmt.Sprintf("%s (%s)", loopEntry.Name, label)
+		}
+		parts = append(parts, label)
+	}
+	return strings.Join(parts, ", ")
 }
