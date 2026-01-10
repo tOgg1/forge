@@ -93,6 +93,26 @@ forge kill review-loop
 forge stop --pool default
 ```
 
+### `forge rm`
+
+Remove loop records (DB only). Logs and ledgers remain on disk. Use `--force` for selectors or running loops.
+
+```bash
+forge rm review-loop
+forge rm --state stopped --force
+forge rm --all --force
+```
+
+### `forge prune`
+
+Remove inactive loop records (stopped or errored). Logs and ledgers remain on disk.
+
+```bash
+forge prune
+forge prune --repo .
+forge prune --pool default
+```
+
 ### `forge scale`
 
 Scale loops to a target count.
