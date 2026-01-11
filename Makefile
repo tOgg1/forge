@@ -95,10 +95,14 @@ dev:
 install: build
 	@echo "Installing to $(GOBIN)..."
 	@mkdir -p $(GOBIN)
-	@cp $(BUILD_DIR)/$(BINARY_CLI) $(GOBIN)/$(BINARY_CLI)
-	@cp $(BUILD_DIR)/$(BINARY_DAEMON) $(GOBIN)/$(BINARY_DAEMON)
-	@cp $(BUILD_DIR)/$(BINARY_RUNNER) $(GOBIN)/$(BINARY_RUNNER)
-	@cp $(BUILD_DIR)/$(BINARY_FMAIL) $(GOBIN)/$(BINARY_FMAIL)
+	@install -m 755 $(BUILD_DIR)/$(BINARY_CLI) $(GOBIN)/.$(BINARY_CLI).tmp
+	@mv $(GOBIN)/.$(BINARY_CLI).tmp $(GOBIN)/$(BINARY_CLI)
+	@install -m 755 $(BUILD_DIR)/$(BINARY_DAEMON) $(GOBIN)/.$(BINARY_DAEMON).tmp
+	@mv $(GOBIN)/.$(BINARY_DAEMON).tmp $(GOBIN)/$(BINARY_DAEMON)
+	@install -m 755 $(BUILD_DIR)/$(BINARY_RUNNER) $(GOBIN)/.$(BINARY_RUNNER).tmp
+	@mv $(GOBIN)/.$(BINARY_RUNNER).tmp $(GOBIN)/$(BINARY_RUNNER)
+	@install -m 755 $(BUILD_DIR)/$(BINARY_FMAIL) $(GOBIN)/.$(BINARY_FMAIL).tmp
+	@mv $(GOBIN)/.$(BINARY_FMAIL).tmp $(GOBIN)/$(BINARY_FMAIL)
 	@echo "Installed $(BINARY_CLI), $(BINARY_DAEMON), $(BINARY_RUNNER), and $(BINARY_FMAIL) to $(GOBIN)"
 	@echo ""
 	@echo "Make sure $(GOBIN) is in your PATH:"
