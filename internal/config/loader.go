@@ -49,6 +49,9 @@ func (l *Loader) Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// Apply env var overrides (Viper's Unmarshal doesn't properly merge env vars for nested structs)
+	l.applyEnvOverrides(cfg)
+
 	// Expand ~ in paths
 	expandPaths(cfg)
 
@@ -113,16 +116,18 @@ func (l *Loader) setupViper(cfg *Config) {
 	// Current directory
 	v.AddConfigPath(".")
 
-	// Environment variables - FORGE_ prefix, with SWARM_ as fallback
+	// Environment variables - FORGE_ prefix, with SWARM_ as legacy fallback
 	v.SetEnvPrefix("FORGE")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	v.AutomaticEnv()
-
-	// Bind legacy SWARM_* env vars as fallbacks
-	bindLegacyEnvVars(v)
 
 	// Set defaults from config struct
 	l.setDefaults(cfg)
+
+	// Explicitly bind environment variables (Viper's Unmarshal has issues without this)
+	bindEnvVars(v)
+
+	// AutomaticEnv for any keys not explicitly bound
+	v.AutomaticEnv()
 }
 
 // setDefaults sets all default values in Viper.
@@ -249,25 +254,131 @@ func MustLoad() *Config {
 	return cfg
 }
 
-// bindLegacyEnvVars binds SWARM_* environment variables as deprecated fallbacks.
-// This allows users to migrate from swarm to forge gradually.
-func bindLegacyEnvVars(v *viper.Viper) {
-	legacyBindings := map[string]string{
-		"global.data_dir":                       "SWARM_GLOBAL_DATA_DIR",
-		"global.config_dir":                     "SWARM_GLOBAL_CONFIG_DIR",
-		"database.path":                         "SWARM_DATABASE_PATH",
-		"logging.level":                         "SWARM_LOGGING_LEVEL",
-		"logging.format":                        "SWARM_LOGGING_FORMAT",
-		"scheduler.dispatch_interval":           "SWARM_SCHEDULER_DISPATCH_INTERVAL",
-		"scheduler.default_cooldown_duration":   "SWARM_SCHEDULER_DEFAULT_COOLDOWN_DURATION",
-		"agent_defaults.state_polling_interval": "SWARM_AGENT_DEFAULTS_STATE_POLLING_INTERVAL",
+// bindEnvVars binds environment variables for config keys.
+// Viper's Unmarshal has issues with env vars on nested structs unless explicitly bound.
+// This ensures FORGE_* env vars work correctly, with SWARM_* as legacy fallbacks for migration.
+func bindEnvVars(v *viper.Viper) {
+	// All configurable keys that support environment variable overrides
+	envBindings := []string{
+		// Global
+		"global.data_dir",
+		"global.config_dir",
+		"global.auto_register_local_node",
+		// Database
+		"database.path",
+		"database.max_connections",
+		"database.busy_timeout_ms",
+		// Logging
+		"logging.level",
+		"logging.format",
+		"logging.file",
+		"logging.enable_caller",
+		// Node defaults
+		"node_defaults.ssh_backend",
+		"node_defaults.ssh_timeout",
+		"node_defaults.ssh_key_path",
+		"node_defaults.health_check_interval",
+		// Workspace defaults
+		"workspace_defaults.tmux_prefix",
+		"workspace_defaults.default_agent_type",
+		"workspace_defaults.auto_import_existing",
+		// Agent defaults
+		"agent_defaults.default_type",
+		"agent_defaults.state_polling_interval",
+		"agent_defaults.idle_timeout",
+		"agent_defaults.transcript_buffer_size",
+		"agent_defaults.approval_policy",
+		// Scheduler
+		"scheduler.dispatch_interval",
+		"scheduler.max_retries",
+		"scheduler.retry_backoff",
+		"scheduler.default_cooldown_duration",
+		"scheduler.auto_rotate_on_rate_limit",
+		// Loop defaults
+		"loop_defaults.interval",
+		"loop_defaults.prompt",
+		"loop_defaults.prompt_msg",
+		// Pools
+		"default_pool",
+		// TUI
+		"tui.refresh_interval",
+		"tui.theme",
+		"tui.show_timestamps",
+		"tui.compact_mode",
+		// Event retention
+		"event_retention.enabled",
+		"event_retention.max_age",
+		"event_retention.max_count",
+		"event_retention.cleanup_interval",
+		"event_retention.archive_before_delete",
+		"event_retention.archive_dir",
+		"event_retention.batch_size",
 	}
 
-	for key, envVar := range legacyBindings {
-		// Only bind if the FORGE_ equivalent is not set
-		forgeEnvVar := strings.Replace(envVar, "SWARM_", "FORGE_", 1)
-		if os.Getenv(forgeEnvVar) == "" && os.Getenv(envVar) != "" {
-			_ = v.BindEnv(key, envVar)
+	// Keys that support SWARM_* legacy fallback for migration
+	legacyKeys := map[string]bool{
+		"global.data_dir":                       true,
+		"global.config_dir":                     true,
+		"database.path":                         true,
+		"logging.level":                         true,
+		"logging.format":                        true,
+		"scheduler.dispatch_interval":           true,
+		"scheduler.default_cooldown_duration":   true,
+		"agent_defaults.state_polling_interval": true,
+	}
+
+	for _, key := range envBindings {
+		// Convert key to env var format: database.path -> DATABASE_PATH
+		envSuffix := strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+		forgeEnvVar := "FORGE_" + envSuffix
+
+		if legacyKeys[key] {
+			// Bind both FORGE_* (primary) and SWARM_* (legacy fallback)
+			swarmEnvVar := "SWARM_" + envSuffix
+			_ = v.BindEnv(key, forgeEnvVar, swarmEnvVar)
+		} else {
+			// Bind only FORGE_*
+			_ = v.BindEnv(key, forgeEnvVar)
 		}
+	}
+}
+
+// applyEnvOverrides manually applies env var overrides to the config struct.
+// This is needed because Viper's Unmarshal doesn't properly merge env vars
+// for nested struct fields when a config file is present.
+func (l *Loader) applyEnvOverrides(cfg *Config) {
+	v := l.v
+
+	// Apply overrides for fields that Unmarshal may have missed
+	// Only apply if Viper's Get returns a non-default value
+
+	// Database
+	if path := v.GetString("database.path"); path != "" {
+		cfg.Database.Path = path
+	}
+	if maxConn := v.GetInt("database.max_connections"); maxConn != 0 && maxConn != 10 { // 10 is default
+		cfg.Database.MaxConnections = maxConn
+	}
+	if busyTimeout := v.GetInt("database.busy_timeout_ms"); busyTimeout != 0 && busyTimeout != 5000 { // 5000 is default
+		cfg.Database.BusyTimeoutMs = busyTimeout
+	}
+
+	// Global
+	if dataDir := v.GetString("global.data_dir"); dataDir != "" {
+		cfg.Global.DataDir = dataDir
+	}
+	if configDir := v.GetString("global.config_dir"); configDir != "" {
+		cfg.Global.ConfigDir = configDir
+	}
+
+	// Logging
+	if level := v.GetString("logging.level"); level != "" && level != "info" { // "info" is default
+		cfg.Logging.Level = level
+	}
+	if format := v.GetString("logging.format"); format != "" && format != "console" { // "console" is default
+		cfg.Logging.Format = format
+	}
+	if file := v.GetString("logging.file"); file != "" {
+		cfg.Logging.File = file
 	}
 }

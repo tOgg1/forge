@@ -95,6 +95,23 @@ func TestEnvironmentOverride(t *testing.T) {
 	}
 }
 
+func TestDatabasePathEnvOverride(t *testing.T) {
+	t.Setenv("FORGE_DATABASE_PATH", "/custom/path/forge.db")
+
+	loader := NewLoader()
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Database.Path != "/custom/path/forge.db" {
+		t.Errorf("Expected cfg.Database.Path = '/custom/path/forge.db', got %q", cfg.Database.Path)
+	}
+	if cfg.DatabasePath() != "/custom/path/forge.db" {
+		t.Errorf("Expected cfg.DatabasePath() = '/custom/path/forge.db', got %q", cfg.DatabasePath())
+	}
+}
+
 func TestValidation(t *testing.T) {
 	cfg := DefaultConfig()
 
