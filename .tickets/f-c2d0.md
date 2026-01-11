@@ -1,6 +1,6 @@
 ---
 id: f-c2d0
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-01-10T20:04:00Z
