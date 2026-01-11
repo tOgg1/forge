@@ -12,6 +12,8 @@ import (
 // Version information (set by goreleaser)
 var (
 	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 func main() {

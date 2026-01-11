@@ -19,12 +19,14 @@ GOMOD := $(GOCMD) mod
 BINARY_CLI := forge
 BINARY_DAEMON := forged
 BINARY_RUNNER := forge-agent-runner
+BINARY_FMAIL := fmail
 
 # Directories
 BUILD_DIR := ./build
 CMD_CLI := ./cmd/forge
 CMD_DAEMON := ./cmd/forged
 CMD_RUNNER := ./cmd/forge-agent-runner
+CMD_FMAIL := ./cmd/fmail
 
 # Installation directories
 PREFIX ?= /usr/local
@@ -34,7 +36,7 @@ GOBIN ?= $(shell go env GOPATH)/bin
 # Platforms for cross-compilation
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: all build build-cli build-daemon build-runner clean test lint fmt vet tidy install install-local install-system uninstall dev help proto proto-lint
+.PHONY: all build build-cli build-daemon build-runner build-fmail clean test lint fmt vet tidy install install-local install-system uninstall dev help proto proto-lint
 
 # Default target
 all: build
@@ -42,7 +44,7 @@ all: build
 ## Build targets
 
 # Build both binaries
-build: build-cli build-daemon build-runner
+build: build-cli build-daemon build-runner build-fmail
 
 # Build the CLI/TUI binary
 build-cli:
@@ -62,6 +64,12 @@ build-runner:
 	@mkdir -p $(BUILD_DIR)
 	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_RUNNER) $(CMD_RUNNER)
 
+# Build the fmail binary
+build-fmail:
+	@echo "Building $(BINARY_FMAIL)..."
+	@mkdir -p $(BUILD_DIR)
+	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_FMAIL) $(CMD_FMAIL)
+
 # Build for all platforms
 build-all:
 	@for platform in $(PLATFORMS); do \
@@ -71,6 +79,8 @@ build-all:
 		$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_DAEMON)-$${platform%/*}-$${platform#*/} $(CMD_DAEMON); \
 		GOOS=$${platform%/*} GOARCH=$${platform#*/} \
 		$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_RUNNER)-$${platform%/*}-$${platform#*/} $(CMD_RUNNER); \
+		GOOS=$${platform%/*} GOARCH=$${platform#*/} \
+		$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_FMAIL)-$${platform%/*}-$${platform#*/} $(CMD_FMAIL); \
 	done
 
 ## Development targets
@@ -88,7 +98,8 @@ install: build
 	@cp $(BUILD_DIR)/$(BINARY_CLI) $(GOBIN)/$(BINARY_CLI)
 	@cp $(BUILD_DIR)/$(BINARY_DAEMON) $(GOBIN)/$(BINARY_DAEMON)
 	@cp $(BUILD_DIR)/$(BINARY_RUNNER) $(GOBIN)/$(BINARY_RUNNER)
-	@echo "Installed $(BINARY_CLI), $(BINARY_DAEMON), and $(BINARY_RUNNER) to $(GOBIN)"
+	@cp $(BUILD_DIR)/$(BINARY_FMAIL) $(GOBIN)/$(BINARY_FMAIL)
+	@echo "Installed $(BINARY_CLI), $(BINARY_DAEMON), $(BINARY_RUNNER), and $(BINARY_FMAIL) to $(GOBIN)"
 	@echo ""
 	@echo "Make sure $(GOBIN) is in your PATH:"
 	@echo "  export PATH=\"\$$PATH:$(GOBIN)\""
@@ -103,7 +114,8 @@ install-system: build
 	@install -m 755 $(BUILD_DIR)/$(BINARY_CLI) $(BINDIR)/$(BINARY_CLI)
 	@install -m 755 $(BUILD_DIR)/$(BINARY_DAEMON) $(BINDIR)/$(BINARY_DAEMON)
 	@install -m 755 $(BUILD_DIR)/$(BINARY_RUNNER) $(BINDIR)/$(BINARY_RUNNER)
-	@echo "Installed $(BINARY_CLI), $(BINARY_DAEMON), and $(BINARY_RUNNER) to $(BINDIR)"
+	@install -m 755 $(BUILD_DIR)/$(BINARY_FMAIL) $(BINDIR)/$(BINARY_FMAIL)
+	@echo "Installed $(BINARY_CLI), $(BINARY_DAEMON), $(BINARY_RUNNER), and $(BINARY_FMAIL) to $(BINDIR)"
 
 # Uninstall from GOPATH/bin
 uninstall:
@@ -111,7 +123,8 @@ uninstall:
 	@rm -f $(GOBIN)/$(BINARY_CLI)
 	@rm -f $(GOBIN)/$(BINARY_DAEMON)
 	@rm -f $(GOBIN)/$(BINARY_RUNNER)
-	@echo "Removed $(BINARY_CLI), $(BINARY_DAEMON), and $(BINARY_RUNNER) from $(GOBIN)"
+	@rm -f $(GOBIN)/$(BINARY_FMAIL)
+	@echo "Removed $(BINARY_CLI), $(BINARY_DAEMON), $(BINARY_RUNNER), and $(BINARY_FMAIL) from $(GOBIN)"
 
 # Uninstall from system
 uninstall-system:
@@ -119,7 +132,8 @@ uninstall-system:
 	@rm -f $(BINDIR)/$(BINARY_CLI)
 	@rm -f $(BINDIR)/$(BINARY_DAEMON)
 	@rm -f $(BINDIR)/$(BINARY_RUNNER)
-	@echo "Removed $(BINARY_CLI), $(BINARY_DAEMON), and $(BINARY_RUNNER) from $(BINDIR)"
+	@rm -f $(BINDIR)/$(BINARY_FMAIL)
+	@echo "Removed $(BINARY_CLI), $(BINARY_DAEMON), $(BINARY_RUNNER), and $(BINARY_FMAIL) from $(BINDIR)"
 
 # Install using go install (builds and installs in one step)
 go-install:
@@ -129,6 +143,8 @@ go-install:
 	$(GOCMD) install $(LDFLAGS) $(CMD_DAEMON)
 	@echo "Installing $(BINARY_RUNNER) via go install..."
 	$(GOCMD) install $(LDFLAGS) $(CMD_RUNNER)
+	@echo "Installing $(BINARY_FMAIL) via go install..."
+	$(GOCMD) install $(LDFLAGS) $(CMD_FMAIL)
 	@echo "Installed to $(GOBIN)"
 
 ## Test targets
