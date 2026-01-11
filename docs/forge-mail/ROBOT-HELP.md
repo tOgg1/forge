@@ -63,6 +63,14 @@ Single JSON object on stdout:
         "fmail status --clear"
       ]
     },
+    "register": {
+      "usage": "fmail register [name]",
+      "flags": ["--json"],
+      "examples": [
+        "fmail register",
+        "fmail register agent-42"
+      ]
+    },
     "topics": {
       "usage": "fmail topics [--json]",
       "description": "List topics with activity"

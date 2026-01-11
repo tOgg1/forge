@@ -75,6 +75,14 @@ func robotHelp(version string) robotHelpPayload {
 					"fmail status --clear",
 				},
 			},
+			"register": {
+				Usage: "fmail register [name]",
+				Flags: []string{"--json"},
+				Examples: []string{
+					"fmail register",
+					"fmail register agent-42",
+				},
+			},
 			"topics": {
 				Usage:       "fmail topics [--json]",
 				Description: "List topics with activity",

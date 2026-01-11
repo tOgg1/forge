@@ -17,4 +17,5 @@ var (
 	ErrMessageTooLarge = errors.New("message exceeds 1MB limit")
 	ErrEmptyMessage    = errors.New("message is nil")
 	ErrIDCollision     = errors.New("message id collision")
+	ErrAgentExists     = errors.New("agent already exists")
 )

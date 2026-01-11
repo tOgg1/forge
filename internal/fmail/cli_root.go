@@ -30,6 +30,7 @@ func newRootCmd(version string) *cobra.Command {
 		newWatchCmd(),
 		newWhoCmd(),
 		newStatusCmd(),
+		newRegisterCmd(),
 		newTopicsCmd(),
 		newGCCmd(),
 		newInitCmd(),

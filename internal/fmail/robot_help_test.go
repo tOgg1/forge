@@ -28,7 +28,7 @@ func TestRobotHelpPayloadShape(t *testing.T) {
 
 	commands, ok := root["commands"].(map[string]any)
 	require.True(t, ok)
-	for _, key := range []string{"send", "log", "watch", "who", "status", "topics", "gc"} {
+	for _, key := range []string{"send", "log", "watch", "who", "status", "register", "topics", "gc"} {
 		_, ok := commands[key]
 		require.Truef(t, ok, "missing command %q", key)
 	}

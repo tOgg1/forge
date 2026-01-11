@@ -60,7 +60,7 @@ export FMAIL_AGENT=architect    # Your identity
 
 Without `FMAIL_AGENT`, commands will prompt or auto-generate: `anon-<pid>`.
 
-Agents are tracked when they send messages. No explicit registration needed.
+Agents are tracked when they send messages or when they claim a name with `fmail register`.
 
 ### Topics
 
@@ -242,6 +242,20 @@ NAME         LAST SEEN    STATUS
 architect    2m ago       idle
 coder-1      active       working on auth
 reviewer     1h ago       offline
+```
+
+Options:
+```
+--json          JSON output
+```
+
+### fmail register
+
+Request a unique agent name. With no arguments, generates a new name.
+
+```bash
+fmail register
+fmail register agent-42
 ```
 
 Options:

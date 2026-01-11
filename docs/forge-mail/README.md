@@ -44,6 +44,7 @@ fmail log [topic]                     View message history
 fmail watch [topic]                   Stream new messages
 fmail who                             List agents
 fmail status [message]                Set your status
+fmail register [name]                 Request a unique agent name
 fmail topics                          List topics
 fmail gc                              Clean up old messages
 ```

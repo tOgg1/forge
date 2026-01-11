@@ -62,6 +62,47 @@ func (s *Store) UpdateAgentRecord(name, host string) (*AgentRecord, error) {
 	return record, nil
 }
 
+// RegisterAgentRecord creates a new agent record only if the name is unused.
+func (s *Store) RegisterAgentRecord(name, host string) (*AgentRecord, error) {
+	if s == nil {
+		return nil, fmt.Errorf("store is nil")
+	}
+	path, normalized, err := s.agentRecordPath(name)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.EnsureRoot(); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(s.AgentsDir(), 0o755); err != nil {
+		return nil, err
+	}
+
+	now := s.now()
+	record := &AgentRecord{
+		Name:      normalized,
+		FirstSeen: now,
+		LastSeen:  now,
+	}
+
+	host = strings.TrimSpace(host)
+	if host != "" {
+		record.Host = host
+	}
+
+	data, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := writeFileExclusivePerm(path, data, agentFilePerm); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil, ErrAgentExists
+		}
+		return nil, err
+	}
+	return record, nil
+}
+
 // ReadAgentRecord loads an agent record by name.
 func (s *Store) ReadAgentRecord(name string) (*AgentRecord, error) {
 	if s == nil {
