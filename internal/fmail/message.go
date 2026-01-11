@@ -22,6 +22,7 @@ type Message struct {
 	ReplyTo  string    `json:"reply_to,omitempty"`
 	Priority string    `json:"priority,omitempty"`
 	Host     string    `json:"host,omitempty"`
+	Tags     []string  `json:"tags,omitempty"`
 }
 
 var idCounter uint32
@@ -59,6 +60,11 @@ func (m *Message) Validate() error {
 	}
 	if m.Priority != "" {
 		if err := ValidatePriority(m.Priority); err != nil {
+			return err
+		}
+	}
+	if len(m.Tags) > 0 {
+		if err := ValidateTags(m.Tags); err != nil {
 			return err
 		}
 	}

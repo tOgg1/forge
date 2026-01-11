@@ -165,6 +165,7 @@ Options:
 -f, --file        Read message from file
 --reply-to, -r    Reference a previous message ID
 --priority, -p    Set priority: low, normal (default), high
+--tag, -t         Add tags (repeatable or comma-separated)
 --json            Output sent message as JSON
 ```
 
@@ -355,7 +356,8 @@ Benefits:
   "body": "please check PR #42",
   "reply_to": "20260110-152500-0003",
   "priority": "high",
-  "host": "build-server"
+  "host": "build-server",
+  "tags": ["urgent", "auth"]
 }
 ```
 
@@ -364,6 +366,7 @@ Benefits:
 | `reply_to` | ID of message being replied to |
 | `priority` | `low`, `normal` (default), `high` |
 | `host` | Originating hostname (in connected mode) |
+| `tags` | Array of lowercase alphanumeric tags (max 10, each max 50 chars) |
 
 ### Body Content
 

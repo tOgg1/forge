@@ -48,6 +48,7 @@ type mailSendRequest struct {
 	Body     json.RawMessage `json:"body"`
 	ReplyTo  string          `json:"reply_to,omitempty"`
 	Priority string          `json:"priority,omitempty"`
+	Tags     []string        `json:"tags,omitempty"`
 }
 
 type mailWatchRequest struct {

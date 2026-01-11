@@ -14,6 +14,7 @@ var (
 	ErrInvalidTopic    = errors.New("invalid topic name")
 	ErrInvalidAgent    = errors.New("invalid agent name")
 	ErrInvalidTarget   = errors.New("invalid target")
+	ErrInvalidTag      = errors.New("invalid tag")
 	ErrMessageTooLarge = errors.New("message exceeds 1MB limit")
 	ErrEmptyMessage    = errors.New("message is nil")
 	ErrIDCollision     = errors.New("message id collision")

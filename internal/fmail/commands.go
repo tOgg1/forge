@@ -17,6 +17,7 @@ func newSendCmd() *cobra.Command {
 	cmd.Flags().StringP("file", "f", "", "Read message from file")
 	cmd.Flags().StringP("reply-to", "r", "", "Reference a previous message ID")
 	cmd.Flags().StringP("priority", "p", "normal", "Set priority: low, normal, high")
+	cmd.Flags().StringSliceP("tag", "t", nil, "Add tags (repeatable or comma-separated)")
 	cmd.Flags().Bool("json", false, "Output message as JSON")
 	return cmd
 }

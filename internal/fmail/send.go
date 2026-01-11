@@ -32,6 +32,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 	filePath, _ := cmd.Flags().GetString("file")
 	replyTo, _ := cmd.Flags().GetString("reply-to")
 	priority, _ := cmd.Flags().GetString("priority")
+	tags, _ := cmd.Flags().GetStringSlice("tag")
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 
 	normalizedTarget, _, err := NormalizeTarget(target)
@@ -52,10 +53,16 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return Exitf(ExitCodeFailure, "invalid priority: %s", priority)
 	}
 
+	normalizedTags, err := NormalizeTags(tags)
+	if err != nil {
+		return Exitf(ExitCodeFailure, "invalid tags: %v", err)
+	}
+
 	message := &Message{
 		From: runtime.Agent,
 		To:   normalizedTarget,
 		Body: body,
+		Tags: normalizedTags,
 	}
 
 	if strings.TrimSpace(replyTo) != "" {
@@ -190,6 +197,7 @@ func sendViaForged(runtime *Runtime, message *Message) (sendResult, error) {
 		Body:     body,
 		ReplyTo:  message.ReplyTo,
 		Priority: message.Priority,
+		Tags:     message.Tags,
 	}
 
 	if err := conn.writeJSON(req); err != nil {

@@ -75,11 +75,12 @@ Messages delivered over the socket match the on-disk JSON format:
   "body": "implement user auth",
   "reply_to": "20260110-152500-0003",
   "priority": "high",
-  "host": "build-server"
+  "host": "build-server",
+  "tags": ["urgent", "auth"]
 }
 ```
 
-`reply_to`, `priority`, and `host` are optional.
+`reply_to`, `priority`, `host`, and `tags` are optional.
 
 ---
 
@@ -99,6 +100,7 @@ Send a message to a topic or direct message target.
   "body": "implement auth",
   "reply_to": "20260110-152500-0003",
   "priority": "normal",
+  "tags": ["urgent", "auth"],
   "req_id": "c1"
 }
 ```
@@ -107,6 +109,7 @@ Notes:
 - `to` accepts topic names or `@agent` for DMs.
 - `body` can be a JSON string, object, array, or number.
 - `priority` is `low`, `normal`, or `high` (default: `normal`).
+- `tags` is an optional array of lowercase alphanumeric tags (max 10, each max 50 chars).
 
 ### Response (success)
 

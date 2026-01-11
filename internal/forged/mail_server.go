@@ -160,11 +160,18 @@ func (s *mailServer) handleSend(conn net.Conn, line []byte, base mailBaseRequest
 		}
 	}
 
+	tags, err := fmail.NormalizeTags(req.Tags)
+	if err != nil {
+		_ = writeMailError(conn, base.ReqID, "invalid_request", err.Error())
+		return
+	}
+
 	message := &fmail.Message{
 		From: base.Agent,
 		To:   req.To,
 		Body: body,
 		Host: base.Host,
+		Tags: tags,
 	}
 	if strings.TrimSpace(req.ReplyTo) != "" {
 		message.ReplyTo = strings.TrimSpace(req.ReplyTo)
@@ -695,6 +702,7 @@ type mailSendRequest struct {
 	Body     json.RawMessage `json:"body"`
 	ReplyTo  string          `json:"reply_to,omitempty"`
 	Priority string          `json:"priority,omitempty"`
+	Tags     []string        `json:"tags,omitempty"`
 }
 
 type mailWatchRequest struct {
