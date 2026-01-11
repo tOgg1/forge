@@ -9,8 +9,13 @@ import (
 	"github.com/tOgg1/forge/internal/fmail"
 )
 
+// Version information (set by goreleaser)
+var (
+	version = "dev"
+)
+
 func main() {
-	if err := fmail.Execute(); err != nil {
+	if err := fmail.Execute(version); err != nil {
 		var exitErr *fmail.ExitError
 		if errors.As(err, &exitErr) {
 			if !exitErr.Printed {
