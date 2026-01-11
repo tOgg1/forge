@@ -49,6 +49,7 @@ Start loop(s) in the current repo.
 forge up --count 1
 forge up --name review-loop --prompt review
 forge up --pool default --interval 30s --tags review
+forge up --max-iterations 10 --max-runtime 2h
 ```
 
 ### `forge ps`
@@ -120,6 +121,7 @@ Scale loops to a target count.
 ```bash
 forge scale --count 3 --pool default
 forge scale --count 0 --kill
+forge scale --count 2 --max-iterations 5 --max-runtime 1h
 ```
 
 ### `forge queue`

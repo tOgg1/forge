@@ -15,15 +15,17 @@ import (
 )
 
 var (
-	loopUpCount      int
-	loopUpName       string
-	loopUpNamePrefix string
-	loopUpPool       string
-	loopUpProfile    string
-	loopUpPrompt     string
-	loopUpPromptMsg  string
-	loopUpInterval   string
-	loopUpTags       string
+	loopUpCount         int
+	loopUpName          string
+	loopUpNamePrefix    string
+	loopUpPool          string
+	loopUpProfile       string
+	loopUpPrompt        string
+	loopUpPromptMsg     string
+	loopUpInterval      string
+	loopUpMaxRuntime    string
+	loopUpMaxIterations int
+	loopUpTags          string
 
 	startLoopProcessFunc = startLoopProcess
 )
@@ -39,6 +41,8 @@ func init() {
 	loopUpCmd.Flags().StringVar(&loopUpPrompt, "prompt", "", "base prompt path or prompt name")
 	loopUpCmd.Flags().StringVar(&loopUpPromptMsg, "prompt-msg", "", "base prompt content for each iteration")
 	loopUpCmd.Flags().StringVar(&loopUpInterval, "interval", "", "sleep interval (e.g., 30s, 2m)")
+	loopUpCmd.Flags().StringVarP(&loopUpMaxRuntime, "max-runtime", "r", "", "max runtime before stopping (e.g., 30m, 2h)")
+	loopUpCmd.Flags().IntVarP(&loopUpMaxIterations, "max-iterations", "i", 0, "max iterations before stopping (0 = unlimited)")
 	loopUpCmd.Flags().StringVar(&loopUpTags, "tags", "", "comma-separated tags")
 }
 
@@ -69,6 +73,16 @@ var loopUpCmd = &cobra.Command{
 		}
 		if interval < 0 {
 			return fmt.Errorf("interval must be >= 0")
+		}
+		if loopUpMaxIterations < 0 {
+			return fmt.Errorf("max iterations must be >= 0")
+		}
+		maxRuntime, err := parseDuration(loopUpMaxRuntime, 0)
+		if err != nil {
+			return err
+		}
+		if maxRuntime < 0 {
+			return fmt.Errorf("max runtime must be >= 0")
 		}
 
 		basePromptMsg := strings.TrimSpace(loopUpPromptMsg)
@@ -146,15 +160,17 @@ var loopUpCmd = &cobra.Command{
 			existingNames[name] = struct{}{}
 
 			loopEntry := &models.Loop{
-				Name:            name,
-				RepoPath:        repoPath,
-				BasePromptPath:  basePromptPath,
-				BasePromptMsg:   basePromptMsg,
-				IntervalSeconds: int(interval.Round(time.Second).Seconds()),
-				PoolID:          poolID,
-				ProfileID:       profileID,
-				Tags:            tags,
-				State:           models.LoopStateStopped,
+				Name:              name,
+				RepoPath:          repoPath,
+				BasePromptPath:    basePromptPath,
+				BasePromptMsg:     basePromptMsg,
+				IntervalSeconds:   int(interval.Round(time.Second).Seconds()),
+				MaxIterations:     loopUpMaxIterations,
+				MaxRuntimeSeconds: int(maxRuntime.Round(time.Second).Seconds()),
+				PoolID:            poolID,
+				ProfileID:         profileID,
+				Tags:              tags,
+				State:             models.LoopStateStopped,
 			}
 			if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
 				return err

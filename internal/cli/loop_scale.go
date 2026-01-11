@@ -14,15 +14,17 @@ import (
 )
 
 var (
-	loopScaleCount      int
-	loopScalePool       string
-	loopScaleProfile    string
-	loopScalePrompt     string
-	loopScalePromptMsg  string
-	loopScaleInterval   string
-	loopScaleTags       string
-	loopScaleNamePrefix string
-	loopScaleKill       bool
+	loopScaleCount         int
+	loopScalePool          string
+	loopScaleProfile       string
+	loopScalePrompt        string
+	loopScalePromptMsg     string
+	loopScaleInterval      string
+	loopScaleMaxRuntime    string
+	loopScaleMaxIterations int
+	loopScaleTags          string
+	loopScaleNamePrefix    string
+	loopScaleKill          bool
 )
 
 func init() {
@@ -34,6 +36,8 @@ func init() {
 	loopScaleCmd.Flags().StringVar(&loopScalePrompt, "prompt", "", "base prompt path or name")
 	loopScaleCmd.Flags().StringVar(&loopScalePromptMsg, "prompt-msg", "", "base prompt content for each iteration")
 	loopScaleCmd.Flags().StringVar(&loopScaleInterval, "interval", "", "sleep interval")
+	loopScaleCmd.Flags().StringVarP(&loopScaleMaxRuntime, "max-runtime", "r", "", "max runtime before stopping (e.g., 30m, 2h)")
+	loopScaleCmd.Flags().IntVarP(&loopScaleMaxIterations, "max-iterations", "i", 0, "max iterations before stopping (0 = unlimited)")
 	loopScaleCmd.Flags().StringVar(&loopScaleTags, "tags", "", "comma-separated tags")
 	loopScaleCmd.Flags().StringVar(&loopScaleNamePrefix, "name-prefix", "", "name prefix for new loops")
 	loopScaleCmd.Flags().BoolVar(&loopScaleKill, "kill", false, "kill extra loops instead of stopping")
@@ -60,6 +64,16 @@ var loopScaleCmd = &cobra.Command{
 		interval, err := parseDuration(loopScaleInterval, cfg.LoopDefaults.Interval)
 		if err != nil {
 			return err
+		}
+		if loopScaleMaxIterations < 0 {
+			return fmt.Errorf("max iterations must be >= 0")
+		}
+		maxRuntime, err := parseDuration(loopScaleMaxRuntime, 0)
+		if err != nil {
+			return err
+		}
+		if maxRuntime < 0 {
+			return fmt.Errorf("max runtime must be >= 0")
 		}
 
 		basePromptMsg := loopScalePromptMsg
@@ -153,15 +167,17 @@ var loopScaleCmd = &cobra.Command{
 				existingNames[name] = struct{}{}
 
 				loopEntry := &models.Loop{
-					Name:            name,
-					RepoPath:        repoPath,
-					BasePromptPath:  basePromptPath,
-					BasePromptMsg:   basePromptMsg,
-					IntervalSeconds: int(interval.Round(time.Second).Seconds()),
-					PoolID:          poolID,
-					ProfileID:       profileID,
-					Tags:            tags,
-					State:           models.LoopStateStopped,
+					Name:              name,
+					RepoPath:          repoPath,
+					BasePromptPath:    basePromptPath,
+					BasePromptMsg:     basePromptMsg,
+					IntervalSeconds:   int(interval.Round(time.Second).Seconds()),
+					MaxIterations:     loopScaleMaxIterations,
+					MaxRuntimeSeconds: int(maxRuntime.Round(time.Second).Seconds()),
+					PoolID:            poolID,
+					ProfileID:         profileID,
+					Tags:              tags,
+					State:             models.LoopStateStopped,
 				}
 				if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
 					return err
