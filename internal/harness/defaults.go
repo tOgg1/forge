@@ -11,7 +11,7 @@ func DefaultCommandTemplate(harness models.Harness, model string) string {
 		// Use script to create a PTY so Claude streams output in real-time
 		return "script -q -c 'claude -p \"$FORGE_PROMPT_CONTENT\" --dangerously-skip-permissions' /dev/null"
 	case models.HarnessCodex:
-		return "codex exec --full-auto -"
+		return "codex exec --dangerously-bypass-approvals-and-sandbox -"
 	case models.HarnessOpenCode:
 		if model == "" {
 			model = "anthropic/claude-opus-4-5"
