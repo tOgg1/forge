@@ -1,6 +1,8 @@
 package fmail
 
 import (
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +57,31 @@ func TestStoreDMRoundTrip(t *testing.T) {
 	require.Len(t, list, 1)
 	require.Equal(t, id, list[0].ID)
 	require.Equal(t, "@bob", list[0].To)
+}
+
+func TestStoreDMPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod is not supported on windows")
+	}
+	root := t.TempDir()
+	store, err := NewStore(root)
+	require.NoError(t, err)
+
+	msg := &Message{
+		From: "alice",
+		To:   "@bob",
+		Body: "hi",
+	}
+	id, err := store.SaveMessage(msg)
+	require.NoError(t, err)
+
+	dirInfo, err := os.Stat(store.DMDir("bob"))
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0), dirInfo.Mode().Perm()&0o077)
+
+	fileInfo, err := os.Stat(store.DMMessagePath("bob", id))
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0), fileInfo.Mode().Perm()&0o077)
 }
 
 func TestStoreMessageSizeLimit(t *testing.T) {

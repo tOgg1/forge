@@ -12,7 +12,12 @@ import (
 )
 
 const (
-	maxIDRetries = 10
+	maxIDRetries  = 10
+	rootDirPerm   = 0o755
+	topicDirPerm  = 0o755
+	dmDirPerm     = 0o700
+	topicFilePerm = 0o644
+	dmFilePerm    = 0o600
 )
 
 type Store struct {
@@ -60,7 +65,7 @@ func NewStore(projectRoot string, opts ...StoreOption) (*Store, error) {
 }
 
 func (s *Store) EnsureRoot() error {
-	return os.MkdirAll(s.Root, 0o755)
+	return os.MkdirAll(s.Root, rootDirPerm)
 }
 
 func (s *Store) TopicDir(topic string) string {
@@ -121,13 +126,21 @@ func (s *Store) SaveMessage(message *Message) (string, error) {
 	}
 
 	var dir string
+	var filePerm os.FileMode
 	if isDM {
-		dir = s.DMDir(strings.TrimPrefix(normalizedTarget, "@"))
+		agent := strings.TrimPrefix(normalizedTarget, "@")
+		var err error
+		dir, err = s.ensureDMDir(agent)
+		if err != nil {
+			return "", err
+		}
+		filePerm = dmFilePerm
 	} else {
 		dir = s.TopicDir(normalizedTarget)
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
+		if err := ensureDirPerm(dir, topicDirPerm); err != nil {
+			return "", err
+		}
+		filePerm = topicFilePerm
 	}
 
 	for attempt := 0; attempt < maxIDRetries; attempt++ {
@@ -140,7 +153,7 @@ func (s *Store) SaveMessage(message *Message) (string, error) {
 		}
 
 		path := filepath.Join(dir, message.ID+".json")
-		err = writeFileExclusive(path, data)
+		err = writeFileExclusivePerm(path, data, filePerm)
 		if err == nil {
 			return message.ID, nil
 		}
@@ -248,7 +261,11 @@ func (s *Store) listMessages(dir string) ([]Message, error) {
 }
 
 func writeFileExclusive(path string, data []byte) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	return writeFileExclusivePerm(path, data, topicFilePerm)
+}
+
+func writeFileExclusivePerm(path string, data []byte, perm os.FileMode) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 	if err != nil {
 		return err
 	}
@@ -258,4 +275,26 @@ func writeFileExclusive(path string, data []byte) error {
 		return err
 	}
 	return file.Close()
+}
+
+func ensureDirPerm(path string, perm os.FileMode) error {
+	if err := os.MkdirAll(path, perm); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, perm); err != nil && !errors.Is(err, os.ErrPermission) {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) ensureDMDir(agent string) (string, error) {
+	dmRoot := filepath.Join(s.Root, "dm")
+	if err := ensureDirPerm(dmRoot, dmDirPerm); err != nil {
+		return "", err
+	}
+	dir := filepath.Join(dmRoot, agent)
+	if err := ensureDirPerm(dir, dmDirPerm); err != nil {
+		return "", err
+	}
+	return dir, nil
 }

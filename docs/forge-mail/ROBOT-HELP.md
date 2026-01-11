@@ -38,7 +38,7 @@ Single JSON object on stdout:
     },
     "log": {
       "usage": "fmail log [topic|@agent] [-n N] [--since TIME]",
-      "flags": ["-n LIMIT", "--since TIME", "--from AGENT", "--json", "-f/--follow"],
+      "flags": ["-n LIMIT", "--since TIME", "--from AGENT", "--json", "-f/--follow", "--allow-other-dm"],
       "examples": [
         "fmail log task -n 5",
         "fmail log @$FMAIL_AGENT --since 1h"
@@ -46,7 +46,7 @@ Single JSON object on stdout:
     },
     "watch": {
       "usage": "fmail watch [topic|@agent] [--timeout T] [--count N]",
-      "flags": ["--timeout DURATION", "--count N", "--json"],
+      "flags": ["--timeout DURATION", "--count N", "--json", "--allow-other-dm"],
       "examples": [
         "fmail watch task",
         "fmail watch @$FMAIL_AGENT --count 1 --timeout 2m"

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -91,11 +92,36 @@ func TestStandaloneDMInbox(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	messages := runLogJSON(t, runtime, []string{"@bob"}, nil)
+	_, err = runLogCmd(t, runtime, []string{"@bob"}, map[string]string{"json": "true"})
+	require.Error(t, err)
+
+	var exitErr *ExitError
+	require.True(t, errors.As(err, &exitErr))
+	require.Equal(t, ExitCodeFailure, exitErr.Code)
+
+	messages := runLogJSON(t, runtime, []string{"@bob"}, map[string]string{"allow-other-dm": "true"})
 	require.Len(t, messages, 1)
 	require.Equal(t, "alice", messages[0].From)
 	require.Equal(t, "@bob", messages[0].To)
 	require.Equal(t, "hi bob", messages[0].Body)
+}
+
+func TestWatchDMInboxRequiresOverride(t *testing.T) {
+	t.Setenv(EnvProject, "proj-test")
+	root := t.TempDir()
+	runtime := &Runtime{Root: root, Agent: "alice"}
+
+	watchCmd := newWatchCmd()
+	watchCmd.SetOut(io.Discard)
+	watchCmd.SetErr(io.Discard)
+	watchCmd.SetContext(context.WithValue(context.Background(), runtimeKey{}, runtime))
+
+	err := runWatch(watchCmd, []string{"@bob"})
+	require.Error(t, err)
+
+	var exitErr *ExitError
+	require.True(t, errors.As(err, &exitErr))
+	require.Equal(t, ExitCodeFailure, exitErr.Code)
 }
 
 func TestStandaloneLogSince(t *testing.T) {
@@ -235,17 +261,26 @@ func TestConnectedSendWatch(t *testing.T) {
 
 func runLogJSON(t *testing.T, runtime *Runtime, args []string, flags map[string]string) []*Message {
 	t.Helper()
+	if flags == nil {
+		flags = map[string]string{}
+	}
+	flags["json"] = "true"
+	out, err := runLogCmd(t, runtime, args, flags)
+	require.NoError(t, err)
+	return parseJSONMessages(t, out)
+}
+
+func runLogCmd(t *testing.T, runtime *Runtime, args []string, flags map[string]string) (string, error) {
+	t.Helper()
 	cmd := newLogCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(io.Discard)
 	cmd.SetContext(context.WithValue(context.Background(), runtimeKey{}, runtime))
-	require.NoError(t, cmd.Flags().Set("json", "true"))
 	for name, value := range flags {
 		require.NoError(t, cmd.Flags().Set(name, value))
 	}
-	require.NoError(t, runLog(cmd, args))
-	return parseJSONMessages(t, out.String())
+	return out.String(), runLog(cmd, args)
 }
 
 func parseJSONMessages(t *testing.T, data string) []*Message {

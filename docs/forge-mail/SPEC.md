@@ -87,6 +87,11 @@ fmail watch @myname
 
 Direct messages are stored separately and only visible to the recipient.
 
+By default, `fmail` refuses to read or watch another agent's DM inbox. Use
+`--allow-other-dm` to override when needed (for admin/debug use). DM
+directories and DM message files are created with restrictive permissions
+(0700 for directories, 0600 for files) as a best-effort guard.
+
 ---
 
 ## Architecture
@@ -186,6 +191,7 @@ Options:
 --since         Time filter (1h, 30m, 2024-01-10)
 --from          Filter by sender
 --follow, -f    Stream new messages (like tail -f)
+--allow-other-dm  Allow reading another agent's DM inbox
 --json          JSON output
 ```
 
@@ -213,6 +219,7 @@ Options:
 ```
 --timeout       Max wait time (default: forever)
 --count, -c     Exit after N messages
+--allow-other-dm  Allow watching another agent's DM inbox
 --json          JSON output
 ```
 

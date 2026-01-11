@@ -30,6 +30,10 @@ func runLog(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return Exitf(ExitCodeFailure, "invalid target %q: %v", targetArg, err)
 	}
+	allowOtherDM, _ := cmd.Flags().GetBool("allow-other-dm")
+	if err := ensureDMReadAccess(runtime, target, allowOtherDM, "read"); err != nil {
+		return err
+	}
 
 	limit, _ := cmd.Flags().GetInt("limit")
 	if limit < 0 {

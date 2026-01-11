@@ -72,6 +72,10 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return Exitf(ExitCodeFailure, "invalid target %q: %v", targetArg, err)
 	}
+	allowOtherDM, _ := cmd.Flags().GetBool("allow-other-dm")
+	if err := ensureDMReadAccess(runtime, target, allowOtherDM, "watch"); err != nil {
+		return err
+	}
 
 	count, _ := cmd.Flags().GetInt("count")
 	if count < 0 {
