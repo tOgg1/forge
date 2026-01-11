@@ -77,11 +77,11 @@ func (r *LoopRepository) Create(ctx context.Context, loop *models.Loop) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO loops (
 			id, short_id, name, repo_path, base_prompt_path, base_prompt_msg,
-			interval_seconds, pool_id, profile_id, state,
+			interval_seconds, max_iterations, max_runtime_seconds, pool_id, profile_id, state,
 			last_run_at, last_exit_code, last_error,
 			log_path, ledger_path, tags_json, metadata_json,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		loop.ID,
 		loop.ShortID,
@@ -90,6 +90,8 @@ func (r *LoopRepository) Create(ctx context.Context, loop *models.Loop) error {
 		nullableString(loop.BasePromptPath),
 		nullableString(loop.BasePromptMsg),
 		loop.IntervalSeconds,
+		loop.MaxIterations,
+		loop.MaxRuntimeSeconds,
 		nullableString(loop.PoolID),
 		nullableString(loop.ProfileID),
 		string(loop.State),
@@ -118,7 +120,7 @@ func (r *LoopRepository) Get(ctx context.Context, id string) (*models.Loop, erro
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			id, short_id, name, repo_path, base_prompt_path, base_prompt_msg,
-			interval_seconds, pool_id, profile_id, state,
+			interval_seconds, max_iterations, max_runtime_seconds, pool_id, profile_id, state,
 			last_run_at, last_exit_code, last_error,
 			log_path, ledger_path, tags_json, metadata_json,
 			created_at, updated_at
@@ -133,7 +135,7 @@ func (r *LoopRepository) GetByName(ctx context.Context, name string) (*models.Lo
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			id, short_id, name, repo_path, base_prompt_path, base_prompt_msg,
-			interval_seconds, pool_id, profile_id, state,
+			interval_seconds, max_iterations, max_runtime_seconds, pool_id, profile_id, state,
 			last_run_at, last_exit_code, last_error,
 			log_path, ledger_path, tags_json, metadata_json,
 			created_at, updated_at
@@ -148,7 +150,7 @@ func (r *LoopRepository) GetByShortID(ctx context.Context, shortID string) (*mod
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
 			id, short_id, name, repo_path, base_prompt_path, base_prompt_msg,
-			interval_seconds, pool_id, profile_id, state,
+			interval_seconds, max_iterations, max_runtime_seconds, pool_id, profile_id, state,
 			last_run_at, last_exit_code, last_error,
 			log_path, ledger_path, tags_json, metadata_json,
 			created_at, updated_at
@@ -163,7 +165,7 @@ func (r *LoopRepository) List(ctx context.Context) ([]*models.Loop, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			id, short_id, name, repo_path, base_prompt_path, base_prompt_msg,
-			interval_seconds, pool_id, profile_id, state,
+			interval_seconds, max_iterations, max_runtime_seconds, pool_id, profile_id, state,
 			last_run_at, last_exit_code, last_error,
 			log_path, ledger_path, tags_json, metadata_json,
 			created_at, updated_at
@@ -223,7 +225,7 @@ func (r *LoopRepository) Update(ctx context.Context, loop *models.Loop) error {
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE loops
 		SET short_id = ?, name = ?, repo_path = ?, base_prompt_path = ?, base_prompt_msg = ?,
-			interval_seconds = ?, pool_id = ?, profile_id = ?, state = ?,
+			interval_seconds = ?, max_iterations = ?, max_runtime_seconds = ?, pool_id = ?, profile_id = ?, state = ?,
 			last_run_at = ?, last_exit_code = ?, last_error = ?,
 			log_path = ?, ledger_path = ?, tags_json = ?, metadata_json = ?,
 			updated_at = ?
@@ -235,6 +237,8 @@ func (r *LoopRepository) Update(ctx context.Context, loop *models.Loop) error {
 		nullableString(loop.BasePromptPath),
 		nullableString(loop.BasePromptMsg),
 		loop.IntervalSeconds,
+		loop.MaxIterations,
+		loop.MaxRuntimeSeconds,
 		nullableString(loop.PoolID),
 		nullableString(loop.ProfileID),
 		string(loop.State),
@@ -281,6 +285,8 @@ func (r *LoopRepository) scanLoop(scanner interface{ Scan(...any) error }) (*mod
 		basePromptPath  sql.NullString
 		basePromptMsg   sql.NullString
 		intervalSeconds int
+		maxIterations   int
+		maxRuntimeSecs  int
 		poolID          sql.NullString
 		profileID       sql.NullString
 		state           string
@@ -303,6 +309,8 @@ func (r *LoopRepository) scanLoop(scanner interface{ Scan(...any) error }) (*mod
 		&basePromptPath,
 		&basePromptMsg,
 		&intervalSeconds,
+		&maxIterations,
+		&maxRuntimeSecs,
 		&poolID,
 		&profileID,
 		&state,
@@ -323,19 +331,21 @@ func (r *LoopRepository) scanLoop(scanner interface{ Scan(...any) error }) (*mod
 	}
 
 	loop := &models.Loop{
-		ID:              id,
-		ShortID:         shortID.String,
-		Name:            name,
-		RepoPath:        repoPath,
-		BasePromptPath:  basePromptPath.String,
-		BasePromptMsg:   basePromptMsg.String,
-		IntervalSeconds: intervalSeconds,
-		PoolID:          poolID.String,
-		ProfileID:       profileID.String,
-		State:           models.LoopState(state),
-		LastError:       lastError.String,
-		LogPath:         logPath.String,
-		LedgerPath:      ledgerPath.String,
+		ID:                id,
+		ShortID:           shortID.String,
+		Name:              name,
+		RepoPath:          repoPath,
+		BasePromptPath:    basePromptPath.String,
+		BasePromptMsg:     basePromptMsg.String,
+		IntervalSeconds:   intervalSeconds,
+		MaxIterations:     maxIterations,
+		MaxRuntimeSeconds: maxRuntimeSecs,
+		PoolID:            poolID.String,
+		ProfileID:         profileID.String,
+		State:             models.LoopState(state),
+		LastError:         lastError.String,
+		LogPath:           logPath.String,
+		LedgerPath:        ledgerPath.String,
 	}
 
 	if lastRunAt.Valid && lastRunAt.String != "" {

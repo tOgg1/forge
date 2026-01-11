@@ -262,6 +262,8 @@ CREATE TABLE IF NOT EXISTS loops (
     base_prompt_path TEXT,
     base_prompt_msg TEXT,
     interval_seconds INTEGER NOT NULL DEFAULT 30,
+    max_iterations INTEGER NOT NULL DEFAULT 0,
+    max_runtime_seconds INTEGER NOT NULL DEFAULT 0,
     pool_id TEXT REFERENCES pools(id) ON DELETE SET NULL,
     profile_id TEXT REFERENCES profiles(id) ON DELETE SET NULL,
     state TEXT NOT NULL DEFAULT 'stopped' CHECK (state IN ('running', 'sleeping', 'waiting', 'stopped', 'error')),
