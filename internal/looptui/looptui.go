@@ -131,7 +131,7 @@ func (m model) View() string {
 	}
 
 	if len(m.loops) == 0 {
-		return header + "\n\nNo active loops."
+		return header + "\n\n" + renderEmptyState(m.width, m.height)
 	}
 
 	grid := renderGrid(m.loops, m.page, m.width, m.height)
@@ -218,17 +218,7 @@ func loadLoopViews(ctx context.Context, database *db.DB, dataDir string, logLine
 }
 
 func renderGrid(loops []loopView, page, width, height int) string {
-	width = maxInt(width, minCardWidth*2+2)
-	height = maxInt(height, minCardHeight*2+3)
-
-	gap := 2
-	headerLines := 3
-	gridHeight := height - headerLines
-	if gridHeight < minCardHeight*2 {
-		gridHeight = minCardHeight * 2
-	}
-	cellHeight := maxInt(minCardHeight, (gridHeight-gap)/2)
-	cellWidth := maxInt(minCardWidth, (width-gap)/2)
+	_, _, cellWidth, cellHeight := gridDimensions(width, height)
 
 	start := page * 4
 	end := minInt(len(loops), start+4)
@@ -243,9 +233,31 @@ func renderGrid(loops []loopView, page, width, height int) string {
 		}
 	}
 
+	gap := 2
 	row1 := cards[0] + strings.Repeat(" ", gap) + cards[1]
 	row2 := cards[2] + strings.Repeat(" ", gap) + cards[3]
 	return row1 + "\n" + strings.Repeat("\n", gap-1) + row2
+}
+
+func renderEmptyState(width, height int) string {
+	gridWidth, gridHeight, _, _ := gridDimensions(width, height)
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(1, 2).
+		Width(gridWidth).
+		Height(gridHeight)
+
+	lines := []string{
+		"No active loops.",
+		"",
+		"Start one: forge up --count 1",
+		"Send a message: forge msg <loop> \"...\"",
+	}
+	for i, line := range lines {
+		lines[i] = truncateLine(line, maxInt(1, gridWidth-4))
+	}
+
+	return style.Render(strings.Join(lines, "\n"))
 }
 
 func renderLoopCard(view loopView, width, height int) string {
@@ -355,6 +367,22 @@ func computeLogLines(height int) int {
 		lines = 6
 	}
 	return lines
+}
+
+func gridDimensions(width, height int) (int, int, int, int) {
+	width = maxInt(width, minCardWidth*2+2)
+	height = maxInt(height, minCardHeight*2+3)
+
+	gap := 2
+	headerLines := 3
+	gridHeight := height - headerLines
+	if gridHeight < minCardHeight*2 {
+		gridHeight = minCardHeight * 2
+	}
+	cellHeight := maxInt(minCardHeight, (gridHeight-gap)/2)
+	cellWidth := maxInt(minCardWidth, (width-gap)/2)
+
+	return width, gridHeight, cellWidth, cellHeight
 }
 
 func tailFile(path string, maxLines int) (string, error) {
