@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/fmail"
 )
 
@@ -92,6 +93,30 @@ func (d *Daemon) startMailServers(errCh chan<- error) error {
 	return nil
 }
 
+func (d *Daemon) startMailRelay(ctx context.Context) error {
+	if d.mailRelay == nil {
+		return nil
+	}
+	if d.wsRepo == nil {
+		d.logger.Warn().Msg("mail relay disabled: workspace repository unavailable")
+		return nil
+	}
+
+	projects, err := listMailProjects(ctx, d.wsRepo)
+	if err != nil {
+		return err
+	}
+	if len(projects) == 0 {
+		return nil
+	}
+
+	if err := d.mailRelay.Start(ctx, projects); err != nil {
+		return err
+	}
+	d.logger.Info().Int("projects", len(projects)).Msg("mail relay started")
+	return nil
+}
+
 func (d *Daemon) shutdownMailServers() {
 	for _, entry := range d.mailListeners {
 		if entry.listener != nil {
@@ -102,6 +127,39 @@ func (d *Daemon) shutdownMailServers() {
 		}
 	}
 	d.mailListeners = nil
+}
+
+func listMailProjects(ctx context.Context, repo *db.WorkspaceRepository) ([]mailProject, error) {
+	if repo == nil {
+		return nil, nil
+	}
+
+	workspaces, err := repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	projects := make([]mailProject, 0, len(workspaces))
+	for _, workspace := range workspaces {
+		root := strings.TrimSpace(workspace.RepoPath)
+		if root == "" {
+			continue
+		}
+		if info, err := os.Stat(root); err != nil || !info.IsDir() {
+			continue
+		}
+
+		if err := ensureMailRoot(root); err != nil {
+			continue
+		}
+
+		id, err := projectIDFromRoot(root)
+		if err != nil {
+			continue
+		}
+		projects = append(projects, mailProject{ID: id, Root: root})
+	}
+	return projects, nil
 }
 
 func ensureMailRoot(root string) error {

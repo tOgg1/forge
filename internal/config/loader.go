@@ -188,6 +188,12 @@ func (l *Loader) setDefaults(cfg *Config) {
 	v.SetDefault("tui.theme", cfg.TUI.Theme)
 	v.SetDefault("tui.show_timestamps", cfg.TUI.ShowTimestamps)
 	v.SetDefault("tui.compact_mode", cfg.TUI.CompactMode)
+
+	// Mail relay
+	v.SetDefault("mail.relay.enabled", cfg.Mail.Relay.Enabled)
+	v.SetDefault("mail.relay.peers", cfg.Mail.Relay.Peers)
+	v.SetDefault("mail.relay.dial_timeout", cfg.Mail.Relay.DialTimeout)
+	v.SetDefault("mail.relay.reconnect_interval", cfg.Mail.Relay.ReconnectInterval)
 }
 
 // loadConfigFile attempts to load the configuration file.

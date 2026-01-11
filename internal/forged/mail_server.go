@@ -132,6 +132,8 @@ func (s *mailServer) handleConn(conn net.Conn, resolver mailProjectResolver, req
 		s.handleSend(conn, line, base, hub)
 	case "watch":
 		s.handleWatch(conn, line, base, hub)
+	case "relay":
+		s.handleRelay(conn, line, base, hub)
 	default:
 		_ = writeMailError(conn, base.ReqID, "invalid_request", "unknown cmd")
 	}
@@ -222,6 +224,71 @@ func (s *mailServer) handleWatch(conn net.Conn, line []byte, base mailBaseReques
 		return
 	}
 
+	subscriber := hub.subscribe(target, since)
+	defer hub.unsubscribe(subscriber)
+
+	if err := writeMailResponse(conn, mailResponse{OK: true, ReqID: base.ReqID}); err != nil {
+		return
+	}
+
+	backlog, err := loadMailBacklog(hub.store, target, since)
+	if err != nil {
+		_ = writeMailError(conn, base.ReqID, "internal", err.Error())
+		return
+	}
+
+	sentIDs := make(map[string]struct{}, len(backlog))
+	for _, message := range backlog {
+		if err := writeMailMessage(conn, message); err != nil {
+			return
+		}
+		sentIDs[message.ID] = struct{}{}
+	}
+
+	pending := subscriber.resume()
+	if len(pending) > 0 {
+		pending = filterMessages(pending, since)
+		sortMailMessages(pending)
+		for _, message := range pending {
+			if _, ok := sentIDs[message.ID]; ok {
+				continue
+			}
+			if err := writeMailMessage(conn, message); err != nil {
+				return
+			}
+		}
+	}
+
+	for message := range subscriber.ch {
+		if err := writeMailMessage(conn, message); err != nil {
+			return
+		}
+	}
+
+	if err := subscriber.error(); err != nil {
+		_ = writeMailError(conn, base.ReqID, "backpressure", err.Error())
+	}
+}
+
+func (s *mailServer) handleRelay(conn net.Conn, line []byte, base mailBaseRequest, hub *mailHub) {
+	var req mailRelayRequest
+	if err := json.Unmarshal(line, &req); err != nil {
+		_ = writeMailError(conn, base.ReqID, "invalid_request", "invalid relay request")
+		return
+	}
+
+	if _, err := hub.store.UpdateAgentRecord(base.Agent, base.Host); err != nil {
+		_ = writeMailError(conn, base.ReqID, "internal", "update agent registry failed")
+		return
+	}
+
+	since, err := parseMailSince(req.Since)
+	if err != nil {
+		_ = writeMailError(conn, base.ReqID, "invalid_request", "invalid since")
+		return
+	}
+
+	target := mailWatchTarget{mode: watchRelay}
 	subscriber := hub.subscribe(target, since)
 	defer hub.unsubscribe(subscriber)
 
@@ -464,6 +531,23 @@ func (h *mailHub) broadcast(message *fmail.Message) {
 	}
 }
 
+func (h *mailHub) ingestMessage(message *fmail.Message) (bool, error) {
+	if message == nil {
+		return false, errors.New("message is nil")
+	}
+	saved, err := h.store.SaveMessageExact(message)
+	if err != nil {
+		return false, err
+	}
+	if _, err := h.store.UpdateAgentRecord(message.From, message.Host); err != nil {
+		h.logger.Warn().Err(err).Str("agent", message.From).Msg("mail relay agent registry update failed")
+	}
+	if saved {
+		h.broadcast(message)
+	}
+	return saved, nil
+}
+
 type mailSubscriber struct {
 	id     string
 	target mailWatchTarget
@@ -548,6 +632,7 @@ const (
 	watchAll mailWatchMode = iota
 	watchTopic
 	watchDM
+	watchRelay
 )
 
 type mailWatchTarget struct {
@@ -570,6 +655,8 @@ func (t mailWatchTarget) matches(message *fmail.Message) bool {
 		if strings.HasPrefix(to, "@") {
 			return to == "@"+t.agent
 		}
+		return true
+	case watchRelay:
 		return true
 	default:
 		return false
@@ -613,6 +700,11 @@ type mailSendRequest struct {
 type mailWatchRequest struct {
 	mailBaseRequest
 	Topic string `json:"topic,omitempty"`
+	Since string `json:"since,omitempty"`
+}
+
+type mailRelayRequest struct {
+	mailBaseRequest
 	Since string `json:"since,omitempty"`
 }
 
@@ -720,11 +812,62 @@ func loadMailBacklog(store *fmail.Store, target mailWatchTarget, since sinceFilt
 			}
 			messages = appendMessages(messages, list, since)
 		}
+	case watchRelay:
+		topics, err := store.ListTopics()
+		if err != nil {
+			return nil, err
+		}
+		for _, topic := range topics {
+			list, err := store.ListTopicMessages(topic.Name)
+			if err != nil {
+				return nil, err
+			}
+			messages = appendMessages(messages, list, since)
+		}
+
+		agents, err := listDMMailboxes(store)
+		if err != nil {
+			return nil, err
+		}
+		for _, agent := range agents {
+			list, err := store.ListDMMessages(agent)
+			if err != nil {
+				return nil, err
+			}
+			messages = appendMessages(messages, list, since)
+		}
 	default:
 		return nil, errors.New("unknown watch target")
 	}
 	sortMailMessages(messages)
 	return messages, nil
+}
+
+func listDMMailboxes(store *fmail.Store) ([]string, error) {
+	if store == nil {
+		return nil, errors.New("store is nil")
+	}
+	root := filepath.Join(store.Root, "dm")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if err := fmail.ValidateAgentName(name); err != nil {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func appendMessages(messages []*fmail.Message, list []fmail.Message, since sinceFilter) []*fmail.Message {

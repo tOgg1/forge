@@ -72,6 +72,7 @@ type Daemon struct {
 	resourceMonitor *ResourceMonitor
 	mailServer      *mailServer
 	mailListeners   []mailListener
+	mailRelay       *mailRelayManager
 
 	// Database and repositories
 	database  *db.DB
@@ -210,6 +211,17 @@ func New(cfg *config.Config, logger zerolog.Logger, opts Options) (*Daemon, erro
 	// Create the gRPC service implementation
 	server := NewServer(logger, WithVersion(opts.Version))
 	mailServer := newMailServer(logger)
+	var mailRelay *mailRelayManager
+	if cfg.Mail.Relay.Enabled && len(cfg.Mail.Relay.Peers) > 0 {
+		mailRelay = newMailRelayManager(
+			logger,
+			mailServer,
+			mailServer.host,
+			cfg.Mail.Relay.Peers,
+			cfg.Mail.Relay.DialTimeout,
+			cfg.Mail.Relay.ReconnectInterval,
+		)
+	}
 
 	// Create rate limiter with options
 	var rlOpts []RateLimiterOption
@@ -288,6 +300,7 @@ func New(cfg *config.Config, logger zerolog.Logger, opts Options) (*Daemon, erro
 		resourceMonitor: resourceMonitor,
 		mailServer:      mailServer,
 		database:        database,
+		mailRelay:       mailRelay,
 		agentRepo:       agentRepo,
 		queueRepo:       queueRepo,
 		wsRepo:          wsRepo,
@@ -359,6 +372,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.shutdown()
 		return err
 	}
+	if err := d.startMailRelay(ctx); err != nil {
+		d.shutdown()
+		return err
+	}
 
 	// Wait for shutdown signal or error
 	select {
@@ -411,6 +428,11 @@ func (d *Daemon) shutdown() {
 
 	// 5. Stop mail servers
 	d.logger.Debug().Msg("stopping mail servers...")
+	if d.mailRelay != nil {
+		d.logger.Debug().Msg("stopping mail relay...")
+		d.mailRelay.Stop()
+		d.logger.Debug().Msg("mail relay stopped")
+	}
 	d.shutdownMailServers()
 	d.logger.Debug().Msg("mail servers stopped")
 

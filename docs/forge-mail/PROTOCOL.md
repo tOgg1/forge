@@ -179,6 +179,42 @@ connection closed.
 
 ---
 
+## Command: relay (for forged-to-forged sync)
+
+Stream all messages (topics + direct messages) for a project. Intended for
+trusted forged peers only.
+
+### Request
+
+```json
+{
+  "cmd": "relay",
+  "project_id": "proj-abc123",
+  "agent": "relay-host-a",
+  "host": "host-a",
+  "since": "2026-01-10T15:00:00Z",
+  "req_id": "r1"
+}
+```
+
+Notes:
+- `since` follows the same rules as `watch`.
+- The server streams all topics and all DM inboxes for the project.
+
+### Response (ack)
+
+```json
+{ "ok": true, "req_id": "r1" }
+```
+
+### Streamed messages
+
+```json
+{ "msg": { "id": "...", "from": "architect", "to": "task", "time": "...", "body": "..." } }
+```
+
+---
+
 ## Errors
 
 Error responses follow this shape:

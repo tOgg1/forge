@@ -18,6 +18,7 @@ const (
 	dmDirPerm     = 0o700
 	topicFilePerm = 0o644
 	dmFilePerm    = 0o600
+	agentFilePerm = 0o644
 )
 
 type Store struct {
@@ -164,6 +165,74 @@ func (s *Store) SaveMessage(message *Message) (string, error) {
 		return "", err
 	}
 	return "", ErrIDCollision
+}
+
+// SaveMessageExact writes a message using its existing ID, returning true if persisted.
+func (s *Store) SaveMessageExact(message *Message) (bool, error) {
+	if message == nil {
+		return false, ErrEmptyMessage
+	}
+	if strings.TrimSpace(message.ID) == "" {
+		return false, fmt.Errorf("missing id")
+	}
+
+	normalizedFrom, err := NormalizeAgentName(message.From)
+	if err != nil {
+		return false, err
+	}
+	message.From = normalizedFrom
+
+	normalizedTarget, isDM, err := NormalizeTarget(message.To)
+	if err != nil {
+		return false, err
+	}
+	message.To = normalizedTarget
+
+	if message.Time.IsZero() {
+		return false, fmt.Errorf("missing time")
+	}
+
+	if err := message.Validate(); err != nil {
+		return false, err
+	}
+
+	if err := s.EnsureRoot(); err != nil {
+		return false, err
+	}
+
+	var dir string
+	var filePerm os.FileMode
+	if isDM {
+		agent := strings.TrimPrefix(normalizedTarget, "@")
+		dir, err = s.ensureDMDir(agent)
+		if err != nil {
+			return false, err
+		}
+		filePerm = dmFilePerm
+	} else {
+		dir = s.TopicDir(normalizedTarget)
+		if err := ensureDirPerm(dir, topicDirPerm); err != nil {
+			return false, err
+		}
+		filePerm = topicFilePerm
+	}
+
+	data, err := marshalMessage(message)
+	if err != nil {
+		return false, err
+	}
+	if len(data) > MaxMessageSize {
+		return false, ErrMessageTooLarge
+	}
+
+	path := filepath.Join(dir, message.ID+".json")
+	if err := writeFileExclusivePerm(path, data, filePerm); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Store) ReadMessage(path string) (*Message, error) {

@@ -468,6 +468,25 @@ Messages include `host` field to identify origin.
 
 Note: Cross-host sync requires explicit relay configuration. Single-host is the default.
 
+### Relay Configuration (forged)
+
+Cross-host sync is opt-in and configured in `config.yaml` for forged:
+
+```yaml
+mail:
+  relay:
+    enabled: true
+    peers:
+      - "host-a:7463"
+      - "host-b:7463"
+    dial_timeout: 2s
+    reconnect_interval: 2s
+```
+
+Relay peers are trusted (no auth in v1). Each host connects to the listed peers
+and streams all messages for matching project IDs. Use a full mesh or a hub
+depending on your topology.
+
 ---
 
 ## Robot Help

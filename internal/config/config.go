@@ -55,6 +55,9 @@ type Config struct {
 	// TUI settings
 	TUI TUIConfig `yaml:"tui" mapstructure:"tui"`
 
+	// Mail settings
+	Mail MailConfig `yaml:"mail" mapstructure:"mail"`
+
 	// EventRetention settings
 	EventRetention EventRetentionConfig `yaml:"event_retention" mapstructure:"event_retention"`
 }
@@ -256,6 +259,27 @@ type TUIConfig struct {
 	CompactMode bool `yaml:"compact_mode" mapstructure:"compact_mode"`
 }
 
+// MailConfig contains mail subsystem settings.
+type MailConfig struct {
+	// Relay controls cross-host mail synchronization.
+	Relay MailRelayConfig `yaml:"relay" mapstructure:"relay"`
+}
+
+// MailRelayConfig contains peer relay settings.
+type MailRelayConfig struct {
+	// Enabled toggles relay connections.
+	Enabled bool `yaml:"enabled" mapstructure:"enabled"`
+
+	// Peers lists remote forged mail addresses (host:port or tcp://host:port).
+	Peers []string `yaml:"peers" mapstructure:"peers"`
+
+	// DialTimeout is the timeout for connecting to a peer.
+	DialTimeout time.Duration `yaml:"dial_timeout" mapstructure:"dial_timeout"`
+
+	// ReconnectInterval is the delay between reconnect attempts.
+	ReconnectInterval time.Duration `yaml:"reconnect_interval" mapstructure:"reconnect_interval"`
+}
+
 // EventRetentionConfig contains event retention policy settings.
 type EventRetentionConfig struct {
 	// Enabled controls whether retention cleanup runs.
@@ -339,6 +363,14 @@ func DefaultConfig() *Config {
 			ShowTimestamps:  true,
 			CompactMode:     false,
 		},
+		Mail: MailConfig{
+			Relay: MailRelayConfig{
+				Enabled:           false,
+				Peers:             []string{},
+				DialTimeout:       2 * time.Second,
+				ReconnectInterval: 2 * time.Second,
+			},
+		},
 		EventRetention: EventRetentionConfig{
 			Enabled:             true,
 			MaxAge:              30 * 24 * time.Hour, // 30 days
@@ -411,6 +443,13 @@ func (c *Config) Validate() error {
 	}
 	if err := validateApprovalPolicy("agent_defaults", c.AgentDefaults.ApprovalPolicy, c.AgentDefaults.ApprovalRules); err != nil {
 		return err
+	}
+
+	if c.Mail.Relay.DialTimeout < 0 {
+		return fmt.Errorf("mail.relay.dial_timeout must be zero or greater")
+	}
+	if c.Mail.Relay.ReconnectInterval < 0 {
+		return fmt.Errorf("mail.relay.reconnect_interval must be zero or greater")
 	}
 
 	for i, override := range c.WorkspaceOverrides {

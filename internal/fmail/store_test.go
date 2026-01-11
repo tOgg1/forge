@@ -98,3 +98,31 @@ func TestStoreMessageSizeLimit(t *testing.T) {
 	_, err = store.SaveMessage(msg)
 	require.ErrorIs(t, err, ErrMessageTooLarge)
 }
+
+func TestStoreSaveMessageExactDedup(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewStore(root)
+	require.NoError(t, err)
+
+	fixed := time.Date(2026, 1, 10, 16, 0, 0, 0, time.UTC)
+	msg := &Message{
+		ID:   "20260110-160000-0001",
+		From: "alice",
+		To:   "task",
+		Time: fixed,
+		Body: "hello",
+	}
+
+	saved, err := store.SaveMessageExact(msg)
+	require.NoError(t, err)
+	require.True(t, saved)
+
+	saved, err = store.SaveMessageExact(msg)
+	require.NoError(t, err)
+	require.False(t, saved)
+
+	list, err := store.ListTopicMessages("task")
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, msg.ID, list[0].ID)
+}
