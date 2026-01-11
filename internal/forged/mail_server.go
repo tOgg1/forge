@@ -225,9 +225,9 @@ func (s *mailServer) handleWatch(conn net.Conn, line []byte, base mailBaseReques
 		return
 	}
 
-	since, err := parseMailSince(req.Since)
+	since, err := parseMailCursor(req.After, req.Since)
 	if err != nil {
-		_ = writeMailError(conn, base.ReqID, "invalid_request", "invalid since")
+		_ = writeMailError(conn, base.ReqID, "invalid_request", err.Error())
 		return
 	}
 
@@ -707,6 +707,7 @@ type mailSendRequest struct {
 
 type mailWatchRequest struct {
 	mailBaseRequest
+	After string `json:"after,omitempty"`
 	Topic string `json:"topic,omitempty"`
 	Since string `json:"since,omitempty"`
 }
@@ -770,6 +771,17 @@ func parseMailSince(raw string) (sinceFilter, error) {
 		return sinceFilter{time: &utc}, nil
 	}
 	return sinceFilter{}, fmt.Errorf("invalid since")
+}
+
+func parseMailCursor(after, since string) (sinceFilter, error) {
+	trimmedAfter := strings.TrimSpace(after)
+	if trimmedAfter != "" {
+		if !mailIDPattern.MatchString(trimmedAfter) {
+			return sinceFilter{}, fmt.Errorf("invalid after")
+		}
+		return sinceFilter{id: trimmedAfter}, nil
+	}
+	return parseMailSince(since)
 }
 
 func parseMailBody(raw json.RawMessage) (any, error) {

@@ -86,6 +86,20 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		return usageError(cmd, "timeout must be >= 0")
 	}
 	jsonOutput, _ := cmd.Flags().GetBool("json")
+	start := time.Now().UTC()
+	afterFlag, _ := cmd.Flags().GetString("after")
+	afterID, err := parseAfter(afterFlag)
+	if err != nil {
+		return usageError(cmd, "invalid --after value: %v", err)
+	}
+	var since *time.Time
+	if afterID == "" {
+		sinceFlag, _ := cmd.Flags().GetString("since")
+		since, err = parseSince(sinceFlag, start)
+		if err != nil {
+			return usageError(cmd, "invalid --since value: %v", err)
+		}
+	}
 
 	store, err := NewStore(runtime.Root)
 	if err != nil {
@@ -95,7 +109,6 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 	defer stop()
 
-	start := time.Now().UTC()
 	var deadline time.Time
 	if timeout > 0 {
 		deadline = start.Add(timeout)
@@ -106,7 +119,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		deadline:   deadline,
 	}
 
-	fallback, err := watchConnected(ctx, runtime, target, opts, start, cmd.OutOrStdout())
+	fallback, err := watchConnected(ctx, runtime, target, opts, start, afterID, since, cmd.OutOrStdout())
 	if err != nil {
 		return err
 	}
@@ -116,7 +129,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func watchConnected(ctx context.Context, runtime *Runtime, target watchTarget, opts watchOptions, start time.Time, out io.Writer) (*watchFallback, error) {
+func watchConnected(ctx context.Context, runtime *Runtime, target watchTarget, opts watchOptions, start time.Time, afterID string, since *time.Time, out io.Writer) (*watchFallback, error) {
 	if runtime == nil {
 		return nil, Exitf(ExitCodeFailure, "runtime unavailable")
 	}
@@ -129,8 +142,15 @@ func watchConnected(ctx context.Context, runtime *Runtime, target watchTarget, o
 	allowDM := target.mode != watchAllTopics
 
 	remaining := opts.count
-	lastSeenID := ""
+	lastSeenID := strings.TrimSpace(afterID)
 	sinceStart := start
+	if lastSeenID == "" && since != nil {
+		sinceStart = *since
+	}
+	initialFallback := watchFallback{
+		scanStart: watchScanStart(lastSeenID, since, start),
+		since:     watchInitialSince(lastSeenID, since),
+	}
 	everConnected := false
 
 	backoff := []time.Duration{0, 200 * time.Millisecond, 400 * time.Millisecond, 800 * time.Millisecond}
@@ -147,7 +167,7 @@ func watchConnected(ctx context.Context, runtime *Runtime, target watchTarget, o
 
 		if !reconnectUntil.IsZero() {
 			if time.Now().After(reconnectUntil) {
-				return &watchFallback{scanStart: time.Time{}, since: fallbackSince(lastSeenID, start)}, nil
+				return &watchFallback{scanStart: time.Time{}, since: fallbackSince(lastSeenID, sinceStart)}, nil
 			}
 			delay := backoff[len(backoff)-1]
 			if reconnectAttempts < len(backoff) {
@@ -183,7 +203,7 @@ func watchConnected(ctx context.Context, runtime *Runtime, target watchTarget, o
 				}
 				continue
 			}
-			return &watchFallback{scanStart: start}, nil
+			return &initialFallback, nil
 		}
 		reconnectUntil = time.Time{}
 		reconnectAttempts = 0
@@ -201,6 +221,7 @@ func watchConnected(ctx context.Context, runtime *Runtime, target watchTarget, o
 				Host:      host,
 				ReqID:     nextReqID(),
 			},
+			After: lastSeenID,
 			Topic: topic,
 			Since: watchSinceValue(lastSeenID, sinceStart),
 		}
@@ -212,7 +233,7 @@ func watchConnected(ctx context.Context, runtime *Runtime, target watchTarget, o
 				reconnectAttempts = 0
 				continue
 			}
-			return &watchFallback{scanStart: start}, nil
+			return &initialFallback, nil
 		}
 
 		line, err := conn.readLine()
@@ -223,7 +244,7 @@ func watchConnected(ctx context.Context, runtime *Runtime, target watchTarget, o
 				reconnectAttempts = 0
 				continue
 			}
-			return &watchFallback{scanStart: start}, nil
+			return &initialFallback, nil
 		}
 
 		var ack mailResponse
@@ -441,6 +462,26 @@ func watchTopicRequest(target watchTarget) string {
 	default:
 		return ""
 	}
+}
+
+func watchScanStart(afterID string, since *time.Time, start time.Time) time.Time {
+	if strings.TrimSpace(afterID) != "" {
+		return time.Time{}
+	}
+	if since != nil {
+		return *since
+	}
+	return start
+}
+
+func watchInitialSince(afterID string, since *time.Time) messageSince {
+	if strings.TrimSpace(afterID) != "" {
+		return messageSince{id: strings.TrimSpace(afterID)}
+	}
+	if since != nil {
+		return messageSince{time: since}
+	}
+	return messageSince{}
 }
 
 func watchSinceValue(lastSeenID string, start time.Time) string {
