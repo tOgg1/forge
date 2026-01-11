@@ -87,7 +87,7 @@ func newGCCmd() *cobra.Command {
 		Use:   "gc",
 		Short: "Remove old messages",
 		Args:  argsMax(0),
-		RunE:  runNotImplemented,
+		RunE:  runGC,
 	}
 	cmd.Flags().Int("days", 7, "Remove messages older than N days")
 	cmd.Flags().Bool("dry-run", false, "Show what would be removed")
@@ -99,7 +99,7 @@ func newInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Initialize a project mailbox",
 		Args:  argsMax(0),
-		RunE:  runNotImplemented,
+		RunE:  runInit,
 	}
 	cmd.Flags().String("project", "", "Explicit project ID")
 	return cmd
