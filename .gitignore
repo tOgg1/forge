@@ -7,3 +7,6 @@ build/
 # Go temporary files
 *.test
 *.out
+.sv/
+
+.fmail

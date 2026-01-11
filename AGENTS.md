@@ -18,6 +18,22 @@ This project uses `tk` for issue tracking.
 Tickets live in `.tickets/` and should be committed with related code changes.
 Run `tk help` when you need more commands.
 
+## Agent Communication (fmail)
+
+We use `fmail` for agent-to-agent messaging (not MCP agent mail).
+
+```bash
+export FMAIL_AGENT=<your-name>   # Prefer a stable name for the session
+fmail register                   # Request a unique name (auto-generated)
+fmail send @agent "message"      # Direct message
+fmail send topic "message"       # Topic message (e.g., status, editing)
+fmail log @agent -n 20           # Read DMs
+fmail watch topic --count 1      # Wait for a reply
+```
+
+Notes:
+- Use kebab-case agent names (auto-generated names already follow this).
+- `fmail who` shows known agents and their status.
 
 ### Workflow Pattern
 
