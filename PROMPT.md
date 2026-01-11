@@ -43,3 +43,37 @@ Your job is to implement Forge Mail per the spec in `docs/forge-mail/`, using th
 - Commit with a ticket reference (example): `fmail: scaffold CLI (f-0fd1)`.
 - Do not push unless explicitly requested.
 
+## Testing
+
+### Running tests
+
+```bash
+go test ./...
+```
+
+### Skipping network tests
+
+Some tests require TCP/network connectivity which may not be available in sandboxed agent environments (Claude Code, Codex, etc.). To skip these tests:
+
+```bash
+FORGE_TEST_SKIP_NETWORK=1 go test ./...
+```
+
+If you're adding a new test that uses `net.Listen`, `net.Dial`, or similar network operations, add a skip helper to skip when running in sandboxed environments:
+
+```go
+func skipIfNoNetwork(t *testing.T) {
+    t.Helper()
+    if os.Getenv("FORGE_TEST_SKIP_NETWORK") != "" {
+        t.Skip("skipping network test: FORGE_TEST_SKIP_NETWORK is set")
+    }
+}
+
+func TestMyNetworkFeature(t *testing.T) {
+    skipIfNoNetwork(t)
+    // ... rest of test
+}
+```
+
+For packages without import cycles, you can use `testutil.SkipIfNoNetwork(t)` instead.
+

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -11,7 +12,16 @@ import (
 	"github.com/tOgg1/forge/internal/fmail"
 )
 
+func skipNetworkTest(t *testing.T) {
+	t.Helper()
+	if os.Getenv("FORGE_TEST_SKIP_NETWORK") != "" {
+		t.Skip("skipping network test: FORGE_TEST_SKIP_NETWORK is set")
+	}
+}
+
 func TestMailServerSendWatch(t *testing.T) {
+	skipNetworkTest(t)
+
 	root := t.TempDir()
 	projectID, err := fmail.DeriveProjectID(root)
 	if err != nil {

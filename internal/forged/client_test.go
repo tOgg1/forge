@@ -3,6 +3,7 @@ package forged
 import (
 	"context"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -12,7 +13,16 @@ import (
 	"google.golang.org/grpc"
 )
 
+func skipIfNoNetwork(t *testing.T) {
+	t.Helper()
+	if os.Getenv("FORGE_TEST_SKIP_NETWORK") != "" {
+		t.Skip("skipping network test: FORGE_TEST_SKIP_NETWORK is set")
+	}
+}
+
 func TestDialDirect(t *testing.T) {
+	skipIfNoNetwork(t)
+
 	// Start a test daemon
 	cfg := config.DefaultConfig()
 	daemon, err := New(cfg, zerolog.Nop(), Options{Port: 50100})
@@ -79,6 +89,8 @@ func TestDialDirect(t *testing.T) {
 }
 
 func TestClientClose(t *testing.T) {
+	skipIfNoNetwork(t)
+
 	// Create a mock server
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -111,6 +123,8 @@ func TestClientClose(t *testing.T) {
 }
 
 func TestClientMethods(t *testing.T) {
+	skipIfNoNetwork(t)
+
 	// Create a mock server
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
