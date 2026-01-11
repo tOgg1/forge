@@ -16,4 +16,4 @@ require_flag_for_strong_overlap = true
 
 [protect]
 mode = "guard"
-paths = []
+paths = [".tickets/"]
