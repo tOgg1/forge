@@ -18,8 +18,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tOgg1/forge/internal/testutil"
 )
+
+func skipIfNoNetwork(t *testing.T) {
+	t.Helper()
+	if os.Getenv("FORGE_TEST_SKIP_NETWORK") != "" {
+		t.Skip("skipping network test: FORGE_TEST_SKIP_NETWORK is set")
+	}
+}
 
 func TestStandaloneSendLog(t *testing.T) {
 	t.Setenv(EnvProject, "proj-test")
@@ -205,7 +211,7 @@ func TestStoreConcurrentSaveUniqueIDs(t *testing.T) {
 }
 
 func TestConnectedSendWatch(t *testing.T) {
-	testutil.SkipIfNoNetwork(t)
+	skipIfNoNetwork(t)
 
 	t.Setenv(EnvProject, "proj-test")
 	root := t.TempDir()
@@ -280,7 +286,8 @@ func runLogCmd(t *testing.T, runtime *Runtime, args []string, flags map[string]s
 	for name, value := range flags {
 		require.NoError(t, cmd.Flags().Set(name, value))
 	}
-	return out.String(), runLog(cmd, args)
+	err := runLog(cmd, args)
+	return out.String(), err
 }
 
 func parseJSONMessages(t *testing.T, data string) []*Message {
