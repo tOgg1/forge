@@ -12,7 +12,7 @@ func newSendCmd() *cobra.Command {
 		Use:   "send <topic|@agent> [message]",
 		Short: "Send a message to a topic or agent",
 		Args:  argsRange(1, 2),
-		RunE:  runNotImplemented,
+		RunE:  runSend,
 	}
 	cmd.Flags().StringP("file", "f", "", "Read message from file")
 	cmd.Flags().StringP("reply-to", "r", "", "Reference a previous message ID")

@@ -1,6 +1,6 @@
 ---
 id: f-cd1f
-status: open
+status: closed
 deps: [f-0fd1, f-c44a]
 links: []
 created: 2026-01-10T20:06:51Z
@@ -40,3 +40,13 @@ Implementation notes:
 - Message IDs follow YYYYMMDD-HHMMSS-NNNN and are monotonically sortable
 - Errors are clear for invalid topic names, invalid @agent names, missing message body, and oversized payloads
 
+
+## Notes
+
+**2026-01-11T07:01:20Z**
+
+Implemented standalone fmail send with JSON body detection and agent registry update.
+
+**2026-01-11T07:02:16Z**
+
+go test ./... failed: permission denied writing to /root/.cache/go-build (sandbox).
