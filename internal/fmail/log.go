@@ -102,7 +102,7 @@ func followLog(cmd *cobra.Command, store *Store, target watchTarget, seen map[st
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			messages, err := scanNewMessages(store, target, seen, start)
+			messages, err := scanNewMessages(store, target, seen, start, messageSince{})
 			if err != nil {
 				return Exitf(ExitCodeFailure, "follow: %v", err)
 			}

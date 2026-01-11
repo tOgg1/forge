@@ -7,9 +7,15 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
+
+type sendResult struct {
+	ID      string
+	Message *Message
+}
 
 func runSend(cmd *cobra.Command, args []string) error {
 	runtime, err := EnsureRuntime(cmd)
@@ -46,24 +52,6 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return Exitf(ExitCodeFailure, "invalid priority: %s", priority)
 	}
 
-	store, err := NewStore(runtime.Root)
-	if err != nil {
-		return Exitf(ExitCodeFailure, "init store: %v", err)
-	}
-
-	projectID, err := DeriveProjectID(runtime.Root)
-	if err != nil {
-		return Exitf(ExitCodeFailure, "derive project id: %v", err)
-	}
-	if _, err := store.EnsureProject(projectID); err != nil {
-		return Exitf(ExitCodeFailure, "ensure project: %v", err)
-	}
-
-	host, _ := os.Hostname()
-	if _, err := store.UpdateAgentRecord(runtime.Agent, host); err != nil {
-		return Exitf(ExitCodeFailure, "update agent registry: %v", err)
-	}
-
 	message := &Message{
 		From: runtime.Agent,
 		To:   normalizedTarget,
@@ -77,24 +65,31 @@ func runSend(cmd *cobra.Command, args []string) error {
 		message.Priority = priority
 	}
 
-	if _, err := store.SaveMessage(message); err != nil {
-		if errors.Is(err, ErrMessageTooLarge) {
-			return Exitf(ExitCodeFailure, "message exceeds 1MB limit")
-		}
-		return Exitf(ExitCodeFailure, "save message: %v", err)
+	result, err := sendViaForged(runtime, message)
+	if err == nil {
+		return writeSendResult(cmd, result, jsonOutput)
 	}
 
-	if jsonOutput {
-		payload, err := json.MarshalIndent(message, "", "  ")
+	if errors.Is(err, errForgedUnavailable) || errors.Is(err, errForgedDisconnected) {
+		if errors.Is(err, errForgedDisconnected) {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Warning: forged connection dropped, falling back to standalone (message may be duplicated)")
+		}
+		result, err = sendStandalone(runtime, message)
 		if err != nil {
-			return Exitf(ExitCodeFailure, "encode message: %v", err)
+			return err
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), string(payload))
-		return nil
+		return writeSendResult(cmd, result, jsonOutput)
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), message.ID)
-	return nil
+	var exitErr *ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr
+	}
+	var serverErr *forgedServerError
+	if errors.As(err, &serverErr) {
+		return Exitf(ExitCodeFailure, "forged: %s", serverErr.Error())
+	}
+	return Exitf(ExitCodeFailure, "forged: %v", err)
 }
 
 func resolveSendBody(cmd *cobra.Command, bodyArg, filePath string) (any, error) {
@@ -157,4 +152,158 @@ func parseMessageBody(raw string) (any, error) {
 		return value, nil
 	}
 	return raw, nil
+}
+
+func sendViaForged(runtime *Runtime, message *Message) (sendResult, error) {
+	if runtime == nil {
+		return sendResult{}, Exitf(ExitCodeFailure, "runtime unavailable")
+	}
+	if message == nil {
+		return sendResult{}, Exitf(ExitCodeFailure, "message is required")
+	}
+
+	projectID, err := resolveProjectID(runtime.Root)
+	if err != nil {
+		return sendResult{}, Exitf(ExitCodeFailure, "resolve project id: %v", err)
+	}
+	body, err := encodeMailBody(message.Body)
+	if err != nil {
+		return sendResult{}, Exitf(ExitCodeFailure, "encode message: %v", err)
+	}
+
+	conn, err := dialForged(runtime.Root)
+	if err != nil {
+		return sendResult{}, err
+	}
+	defer conn.Close()
+
+	host, _ := os.Hostname()
+	req := mailSendRequest{
+		mailBaseRequest: mailBaseRequest{
+			Cmd:       "send",
+			ProjectID: projectID,
+			Agent:     runtime.Agent,
+			Host:      host,
+			ReqID:     nextReqID(),
+		},
+		To:       message.To,
+		Body:     body,
+		ReplyTo:  message.ReplyTo,
+		Priority: message.Priority,
+	}
+
+	if err := conn.writeJSON(req); err != nil {
+		return sendResult{}, errForgedDisconnected
+	}
+
+	line, err := conn.readLine()
+	if err != nil {
+		return sendResult{}, errForgedDisconnected
+	}
+
+	var resp mailResponse
+	if err := json.Unmarshal(line, &resp); err != nil {
+		return sendResult{}, fmt.Errorf("invalid forged response: %w", err)
+	}
+	if !resp.OK {
+		if resp.Error == nil {
+			return sendResult{}, &forgedServerError{Message: "unknown error"}
+		}
+		return sendResult{}, &forgedServerError{
+			Code:      resp.Error.Code,
+			Message:   resp.Error.Message,
+			Retryable: resp.Error.Retryable,
+		}
+	}
+	if strings.TrimSpace(resp.ID) == "" {
+		return sendResult{}, fmt.Errorf("forged response missing id")
+	}
+
+	result := sendResult{ID: resp.ID}
+	result.Message = loadSentMessage(runtime.Root, message.To, resp.ID)
+	if result.Message == nil {
+		result.Message = copySendMessage(message, resp.ID)
+	}
+	return result, nil
+}
+
+func sendStandalone(runtime *Runtime, message *Message) (sendResult, error) {
+	if runtime == nil {
+		return sendResult{}, Exitf(ExitCodeFailure, "runtime unavailable")
+	}
+	if message == nil {
+		return sendResult{}, Exitf(ExitCodeFailure, "message is required")
+	}
+
+	store, err := NewStore(runtime.Root)
+	if err != nil {
+		return sendResult{}, Exitf(ExitCodeFailure, "init store: %v", err)
+	}
+
+	projectID, err := DeriveProjectID(runtime.Root)
+	if err != nil {
+		return sendResult{}, Exitf(ExitCodeFailure, "derive project id: %v", err)
+	}
+	if _, err := store.EnsureProject(projectID); err != nil {
+		return sendResult{}, Exitf(ExitCodeFailure, "ensure project: %v", err)
+	}
+
+	host, _ := os.Hostname()
+	if _, err := store.UpdateAgentRecord(runtime.Agent, host); err != nil {
+		return sendResult{}, Exitf(ExitCodeFailure, "update agent registry: %v", err)
+	}
+
+	if _, err := store.SaveMessage(message); err != nil {
+		if errors.Is(err, ErrMessageTooLarge) {
+			return sendResult{}, Exitf(ExitCodeFailure, "message exceeds 1MB limit")
+		}
+		return sendResult{}, Exitf(ExitCodeFailure, "save message: %v", err)
+	}
+
+	return sendResult{ID: message.ID, Message: message}, nil
+}
+
+func writeSendResult(cmd *cobra.Command, result sendResult, jsonOutput bool) error {
+	if jsonOutput {
+		payload := result.Message
+		if payload == nil {
+			payload = &Message{ID: result.ID, Time: time.Now().UTC()}
+		}
+		data, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			return Exitf(ExitCodeFailure, "encode message: %v", err)
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), string(data))
+		return nil
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), result.ID)
+	return nil
+}
+
+func loadSentMessage(root, target, id string) *Message {
+	store, err := NewStore(root)
+	if err != nil {
+		return nil
+	}
+	path := store.TopicMessagePath(target, id)
+	if strings.HasPrefix(target, "@") {
+		path = store.DMMessagePath(strings.TrimPrefix(target, "@"), id)
+	}
+	message, err := store.ReadMessage(path)
+	if err != nil {
+		return nil
+	}
+	return message
+}
+
+func copySendMessage(message *Message, id string) *Message {
+	if message == nil {
+		return &Message{ID: id, Time: time.Now().UTC()}
+	}
+	clone := *message
+	clone.ID = id
+	if clone.Time.IsZero() {
+		clone.Time = time.Now().UTC()
+	}
+	return &clone
 }
