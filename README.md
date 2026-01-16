@@ -95,6 +95,17 @@ Runtime data (sqlite, logs, pids) stays in the machine-local data dir.
 Global config lives at `~/.config/forge/config.yaml`. Repo config lives at `.forge/forge.yaml`.
 See `docs/config.md` for details.
 
+## Agent Skills
+
+Repo skills live in `.agent-skills/` and can be installed into the harness-specific
+locations with:
+
+```bash
+scripts/install-skills.sh
+```
+
+See `docs/skills.md` for details.
+
 ## CLI Reference
 
 See `docs/cli.md` for the full CLI surface.
