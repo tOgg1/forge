@@ -35,6 +35,7 @@ This creates:
   - .forge/prompts/
   - .forge/templates/
   - .forge/sequences/
+  - .forge/workflows/
   - .forge/ledgers/
 
 Also ensures .fmail/ is in .gitignore (runtime messaging state).
@@ -65,6 +66,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		filepath.Join(forgeDir, "prompts"),
 		filepath.Join(forgeDir, "templates"),
 		filepath.Join(forgeDir, "sequences"),
+		filepath.Join(forgeDir, "workflows"),
 		filepath.Join(forgeDir, "ledgers"),
 	}
 

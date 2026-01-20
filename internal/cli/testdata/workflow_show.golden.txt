@@ -1,0 +1,9 @@
+Workflow: basic
+Source: .forge/workflows/basic.toml
+Version: 0.1
+Description: Basic workflow
+Inputs: repo=.
+
+Steps:
+  1. plan [agent]
+  2. build [bash] (depends_on: plan)
