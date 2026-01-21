@@ -32,6 +32,9 @@ Notes:
   - Alias names oc1/oc2/oc3, codex1/codex2, cc1/cc2/cc3 auto-map to headless mode.
     Use RALPH_OPENCODE_MODEL to override the default OpenCode model.
   - If --cmd is set to a known alias name, it will be resolved the same way as --alias.
+  - RALPH_CODEX_CONFIG can force a specific Codex config.toml path.
+  - RALPH_CODEX_SANDBOX can override CODEX_SANDBOX for the loop process.
+  - If no sandbox flag is in the codex command, Ralph appends --sandbox from config.toml.
 
 Examples:
   RALPH_CMD='codex' scripts/ralph.sh start
@@ -106,6 +109,56 @@ parse_alias_command() {
   echo "$alias_output"
 }
 
+is_codex_cmd() {
+  local cmd=$1
+  local first=${cmd%% *}
+  [[ "$first" == "codex" || "$first" == */codex ]]
+}
+
+detect_codex_home() {
+  if [[ -n "${CODEX_HOME:-}" && -d "${CODEX_HOME}" ]]; then
+    printf '%s\n' "$CODEX_HOME"
+    return 0
+  fi
+
+  if [[ -d "$HOME/.codex" ]]; then
+    printf '%s\n' "$HOME/.codex"
+    return 0
+  fi
+
+  if [[ -d "$HOME/codex" ]]; then
+    printf '%s\n' "$HOME/codex"
+    return 0
+  fi
+
+  if [[ -d "$HOME/Codex" ]]; then
+    printf '%s\n' "$HOME/Codex"
+    return 0
+  fi
+
+  find "$HOME" -maxdepth 2 -type d \( -name ".codex" -o -name "codex" -o -name "Codex" \) 2>/dev/null \
+    | head -n 1
+}
+
+detect_codex_sandbox() {
+  local cfg_path=$1
+  if [[ -z "$cfg_path" || ! -f "$cfg_path" ]]; then
+    return 1
+  fi
+
+  awk -F= '
+    /^[[:space:]]*sandbox_mode[[:space:]]*=/ {
+      val=$2
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
+      gsub(/"/, "", val)
+      if (val != "") {
+        print val
+        exit 0
+      }
+    }
+  ' "$cfg_path"
+}
+
 headless_alias_cmd() {
   local alias_name=$1
   local alias_cmd=$2
@@ -142,6 +195,9 @@ start_loop() {
   local cmd=${RALPH_CMD:-}
   local alias_name=""
   local prompt_mode="stdin"
+  local codex_home=""
+  local codex_config=""
+  local codex_sandbox=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -193,6 +249,49 @@ start_loop() {
     exit 2
   fi
 
+  if is_codex_cmd "$cmd"; then
+    local first=${cmd%% *}
+    if [[ "$cmd" == "$first" ]]; then
+      cmd="$first exec -"
+      prompt_mode="stdin"
+    fi
+    codex_home=$(detect_codex_home || true)
+    if [[ -z "$codex_home" ]]; then
+      echo "Codex home not found under $HOME. Set CODEX_HOME and try again." >&2
+      exit 2
+    fi
+    if [[ -n "${RALPH_CODEX_CONFIG:-}" ]]; then
+      codex_config="$RALPH_CODEX_CONFIG"
+    elif [[ -n "${CODEX_CONFIG:-}" ]]; then
+      codex_config="$CODEX_CONFIG"
+    else
+      local cfg_path="$codex_home/config.toml"
+      if [[ -f "$cfg_path" ]]; then
+        codex_config="$cfg_path"
+      fi
+    fi
+    if [[ -n "${RALPH_CODEX_SANDBOX:-}" ]]; then
+      codex_sandbox="$RALPH_CODEX_SANDBOX"
+    elif [[ -n "$codex_config" ]]; then
+      codex_sandbox=$(detect_codex_sandbox "$codex_config" || true)
+    elif [[ -n "${CODEX_SANDBOX:-}" ]]; then
+      codex_sandbox="$CODEX_SANDBOX"
+    fi
+    if [[ -n "$codex_sandbox" && "$codex_sandbox" != "workspace-write" && "$cmd" == *"--full-auto"* ]]; then
+      cmd=${cmd/--full-auto/}
+      cmd=$(printf '%s\n' "$cmd" | awk '{$1=$1;print}')
+    fi
+    if [[ "$cmd" != *"--dangerously-bypass-approvals-and-sandbox"* && "$cmd" != *"--sandbox "* ]]; then
+      if [[ -n "$codex_sandbox" ]]; then
+        if [[ "$cmd" == *" -" ]]; then
+          cmd="${cmd% -} --sandbox $codex_sandbox -"
+        else
+          cmd="$cmd --sandbox $codex_sandbox"
+        fi
+      fi
+    fi
+  fi
+
   if [[ "$prompt" != /* ]]; then
     prompt="$REPO_ROOT/$prompt"
   fi
@@ -213,6 +312,19 @@ start_loop() {
   (
     cd "$REPO_ROOT"
     export RALPH_PROMPT_FILE="$prompt"
+    if [[ -n "$codex_home" ]]; then
+      export CODEX_HOME="$codex_home"
+    fi
+    if [[ -n "$codex_config" ]]; then
+      export CODEX_CONFIG="$codex_config"
+    fi
+    if is_codex_cmd "$cmd"; then
+      if [[ -n "${RALPH_CODEX_SANDBOX:-}" ]]; then
+        export CODEX_SANDBOX="$RALPH_CODEX_SANDBOX"
+      else
+        unset CODEX_SANDBOX
+      fi
+    fi
     printf -- "Ralph loop started at %s\n" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "$LOG_FILE"
     local loop_count=0
     while :; do
