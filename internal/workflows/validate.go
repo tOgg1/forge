@@ -110,13 +110,9 @@ func ValidateWorkflow(wf *Workflow) (*Workflow, error) {
 func validateStepSpecificFields(step *WorkflowStep, index int, path string, list *ErrorList) {
 	switch step.Type {
 	case StepTypeAgent:
-		if step.Prompt == "" {
-			list.Add(missingFieldError(path, step.ID, index, "prompt"))
-		}
+		validatePromptFields(step, index, path, list)
 	case StepTypeLoop:
-		if step.Prompt == "" {
-			list.Add(missingFieldError(path, step.ID, index, "prompt"))
-		}
+		validatePromptFields(step, index, path, list)
 	case StepTypeBash:
 		if step.Cmd == "" {
 			list.Add(missingFieldError(path, step.ID, index, "cmd"))
@@ -144,9 +140,20 @@ func validateStepSpecificFields(step *WorkflowStep, index int, path string, list
 			list.Add(missingFieldError(path, step.ID, index, "workflow_name"))
 		}
 	case StepTypeHuman:
-		if step.Prompt == "" {
-			list.Add(missingFieldError(path, step.ID, index, "prompt"))
-		}
+		validatePromptFields(step, index, path, list)
+	}
+}
+
+func validatePromptFields(step *WorkflowStep, index int, path string, list *ErrorList) {
+	if step.Prompt == "" && step.PromptPath == "" && step.PromptName == "" {
+		list.Add(WorkflowError{
+			Code:    ErrCodeMissingField,
+			Message: "prompt, prompt_path, or prompt_name is required",
+			Path:    path,
+			StepID:  step.ID,
+			Field:   "prompt",
+			Index:   index,
+		})
 	}
 }
 

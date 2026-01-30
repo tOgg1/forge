@@ -267,6 +267,10 @@ func printWorkflow(wf *workflows.Workflow, projectDir string) {
 	fmt.Println("\nSteps:")
 	for i, step := range wf.Steps {
 		fmt.Printf("  %d. %s\n", i+1, formatWorkflowStep(step))
+		details := formatWorkflowStepDetails(wf, step)
+		for _, line := range details {
+			fmt.Printf("     %s\n", line)
+		}
 	}
 
 	lines := workflowFlowchartLines(wf)
@@ -308,6 +312,26 @@ func formatWorkflowStep(step workflows.WorkflowStep) string {
 		label = fmt.Sprintf("%s (depends_on: %s)", label, strings.Join(step.DependsOn, ", "))
 	}
 	return label
+}
+
+func formatWorkflowStepDetails(wf *workflows.Workflow, step workflows.WorkflowStep) []string {
+	lines := make([]string, 0, 2)
+
+	switch step.Type {
+	case workflows.StepTypeAgent, workflows.StepTypeLoop, workflows.StepTypeHuman:
+		prompt := workflows.ResolveStepPrompt(wf, step)
+		if prompt.Inline != "" {
+			lines = append(lines, "prompt: [inline]")
+		} else if prompt.Path != "" {
+			lines = append(lines, fmt.Sprintf("prompt: %s", prompt.Path))
+		}
+	case workflows.StepTypeBash:
+		if step.Cmd != "" {
+			lines = append(lines, fmt.Sprintf("cmd: %s", step.Cmd))
+		}
+	}
+
+	return lines
 }
 
 func workflowFlowchartLines(wf *workflows.Workflow) []string {

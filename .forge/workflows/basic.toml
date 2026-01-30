@@ -9,7 +9,7 @@ repo = "."
 [[steps]]
 id = "plan"
 type = "agent"
-prompt = "prompts/plan.md"
+prompt_name = "plan"
 
 [[steps]]
 id = "build"

@@ -23,6 +23,8 @@ func NormalizeWorkflow(wf *Workflow) *Workflow {
 		step.Else = normalizeStringSlice(step.Else)
 		step.When = strings.TrimSpace(step.When)
 		step.Prompt = strings.TrimSpace(step.Prompt)
+		step.PromptPath = strings.TrimSpace(step.PromptPath)
+		step.PromptName = strings.TrimSpace(step.PromptName)
 		step.Profile = strings.TrimSpace(step.Profile)
 		step.Pool = strings.TrimSpace(step.Pool)
 		step.MaxRuntime = strings.TrimSpace(step.MaxRuntime)

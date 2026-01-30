@@ -40,6 +40,8 @@ type WorkflowStep struct {
 	AliveWith []string       `toml:"alive_with"`
 
 	Prompt        string         `toml:"prompt"`
+	PromptPath    string         `toml:"prompt_path"`
+	PromptName    string         `toml:"prompt_name"`
 	Profile       string         `toml:"profile"`
 	Pool          string         `toml:"pool"`
 	MaxRuntime    string         `toml:"max_runtime"`

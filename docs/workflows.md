@@ -24,14 +24,24 @@ Workflows are TOML files stored in `.forge/workflows/<name>.toml` (committed). F
 - `stop` (table, optional)
 - `hooks` (table, optional)
 
+## Prompts (agent/loop/human)
+
+Use one of the following (exactly one recommended):
+
+- `prompt` (inline text)
+- `prompt_path` (file path, absolute or repo-relative)
+- `prompt_name` (name under `.forge/prompts/`, optional `.md`)
+
+Resolver order: inline `prompt` -> `prompt_path` -> `prompt_name`.
+
 ## Step types
 
 - `agent`
-  - `prompt` (string, required)
+  - `prompt` | `prompt_path` | `prompt_name` (required)
   - `profile` or `pool` (optional)
   - `max_runtime` (duration, optional)
 - `loop`
-  - `prompt` (string, required)
+  - `prompt` | `prompt_path` | `prompt_name` (required)
   - `profile` or `pool` (optional)
   - `interval` (duration, optional)
   - `max_iterations` (int, optional)
@@ -49,7 +59,7 @@ Workflows are TOML files stored in `.forge/workflows/<name>.toml` (committed). F
   - `workflow_name` (string, required)
   - `params` (table, optional)
 - `human`
-  - `prompt` (string, required)
+  - `prompt` | `prompt_path` | `prompt_name` (required)
   - `timeout` (duration, optional)
 
 ## Stop conditions
@@ -80,7 +90,7 @@ repo = "."
 [[steps]]
 id = "plan"
 type = "agent"
-prompt = "prompts/plan.md"
+prompt_name = "plan"
 
 [[steps]]
 id = "build"

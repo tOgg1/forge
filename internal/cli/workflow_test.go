@@ -61,8 +61,10 @@ func TestWorkflowCLIListAndShow(t *testing.T) {
 		}
 
 		golden := readGolden(t, "workflow_show.golden.txt")
-		if strings.TrimSpace(out) != strings.TrimSpace(golden) {
-			t.Fatalf("workflow show output mismatch\nGot:\n%s\nWant:\n%s", out, golden)
+		normalized := strings.ReplaceAll(out, filepath.Join("/private", repo), "/repo")
+		normalized = strings.ReplaceAll(normalized, repo, "/repo")
+		if strings.TrimSpace(normalized) != strings.TrimSpace(golden) {
+			t.Fatalf("workflow show output mismatch\nGot:\n%s\nWant:\n%s", normalized, golden)
 		}
 	})
 }
