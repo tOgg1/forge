@@ -467,7 +467,7 @@ func (s *Server) StreamPaneUpdates(req *forgedv1.StreamPaneUpdatesRequest, strea
 	}
 
 	s.mu.RLock()
-	info, exists := s.agents[req.AgentId]
+	_, exists := s.agents[req.AgentId]
 	s.mu.RUnlock()
 
 	if !exists {
@@ -492,6 +492,7 @@ func (s *Server) StreamPaneUpdates(req *forgedv1.StreamPaneUpdatesRequest, strea
 		Dur("poll_interval", pollInterval).
 		Msg("starting pane update stream")
 
+	var info *agentInfo
 	for {
 		select {
 		case <-ctx.Done():

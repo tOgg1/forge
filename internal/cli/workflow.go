@@ -214,9 +214,7 @@ func normalizeWorkflowName(name string) (string, error) {
 	if trimmed == "" {
 		return "", errors.New("workflow name is required")
 	}
-	if strings.HasSuffix(trimmed, ".toml") {
-		trimmed = strings.TrimSuffix(trimmed, ".toml")
-	}
+	trimmed = strings.TrimSuffix(trimmed, ".toml")
 	if strings.Contains(trimmed, string(filepath.Separator)) || strings.Contains(trimmed, "..") {
 		return "", fmt.Errorf("invalid workflow name %q", trimmed)
 	}

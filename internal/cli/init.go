@@ -128,8 +128,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal init output: %w", err)
 		}
-		_, _ = io.WriteString(os.Stdout, string(data))
-		_, _ = io.WriteString(os.Stdout, "\n")
+		if _, err := os.Stdout.Write(data); err != nil {
+			return fmt.Errorf("failed to write init output: %w", err)
+		}
+		if _, err := os.Stdout.Write([]byte("\n")); err != nil {
+			return fmt.Errorf("failed to write init output: %w", err)
+		}
 		return nil
 	}
 

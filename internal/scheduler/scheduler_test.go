@@ -385,7 +385,11 @@ func TestScheduler_PauseResume(t *testing.T) {
 	if err := sched.Start(ctx); err != nil {
 		t.Fatalf("failed to start scheduler: %v", err)
 	}
-	defer sched.Stop()
+	defer func() {
+		if err := sched.Stop(); err != nil {
+			t.Errorf("unexpected stop error: %v", err)
+		}
+	}()
 
 	// Pause scheduler
 	if err := sched.Pause(); err != nil {
@@ -442,7 +446,11 @@ func TestScheduler_ScheduleNow_Paused(t *testing.T) {
 	if err := sched.Start(ctx); err != nil {
 		t.Fatalf("failed to start: %v", err)
 	}
-	defer sched.Stop()
+	defer func() {
+		if err := sched.Stop(); err != nil {
+			t.Errorf("unexpected stop error: %v", err)
+		}
+	}()
 
 	if err := sched.Pause(); err != nil {
 		t.Fatalf("failed to pause: %v", err)
@@ -570,8 +578,14 @@ func TestScheduler_IsEligibleForDispatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.paused {
-				sched.PauseAgent(tt.agent.ID)
-				defer sched.ResumeAgent(tt.agent.ID)
+				if err := sched.PauseAgent(tt.agent.ID); err != nil {
+					t.Fatalf("unexpected pause error: %v", err)
+				}
+				defer func(agentID string) {
+					if err := sched.ResumeAgent(agentID); err != nil {
+						t.Errorf("unexpected resume error: %v", err)
+					}
+				}(tt.agent.ID)
 			}
 
 			got := sched.isEligibleForDispatch(tt.agent)
@@ -683,7 +697,11 @@ func TestScheduler_ScheduleNow_Running(t *testing.T) {
 	if err := sched.Start(ctx); err != nil {
 		t.Fatalf("failed to start: %v", err)
 	}
-	defer sched.Stop()
+	defer func() {
+		if err := sched.Stop(); err != nil {
+			t.Errorf("unexpected stop error: %v", err)
+		}
+	}()
 
 	// Should succeed even with nil agent service (dispatch will just fail gracefully)
 	if err := sched.ScheduleNow("agent-1"); err != nil {
@@ -1120,4 +1138,12 @@ func TestScheduler_ConcurrentDispatchDifferentAgents(t *testing.T) {
 	// Cleanup
 	sched.unlockAgentDispatch(agent1)
 	sched.unlockAgentDispatch(agent2)
+}
+
+var _ = []any{
+	mockAgentService{},
+	newMockAgentService,
+	(*mockAgentService).addAgent,
+	(*mockAgentService).getMessages,
+	createPauseItem,
 }
