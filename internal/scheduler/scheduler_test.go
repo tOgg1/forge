@@ -22,9 +22,9 @@ type mockAgentService struct {
 	messages      map[string][]string
 	pausedAgents  map[string]time.Duration
 	resumedAgents map[string]bool
-	sendError     error
-	pauseError    error
-	listError     error
+	sendError     error //nolint:unused // reserved for future tests
+	pauseError    error //nolint:unused // reserved for future tests
+	listError     error //nolint:unused // reserved for future tests
 }
 
 func newMockAgentService() *mockAgentService {

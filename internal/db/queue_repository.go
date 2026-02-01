@@ -265,7 +265,9 @@ func (r *QueueRepository) InsertAt(ctx context.Context, agentID string, position
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	// Shift existing items down
 	_, err = tx.ExecContext(ctx, `

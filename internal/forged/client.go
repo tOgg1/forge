@@ -333,7 +333,7 @@ func (c *Client) Close() error {
 type sshDialer struct {
 	forwarder  ssh.PortForwarder
 	remotePort int
-	logger     zerolog.Logger
+	logger     zerolog.Logger //nolint:unused // reserved for future logging
 }
 
 // DialContext implements the grpc.WithContextDialer interface.
