@@ -1051,7 +1051,7 @@ func TestScheduler_ConcurrentDispatchPrevention(t *testing.T) {
 
 	// The dequeue count should match the number of items processed,
 	// not the number of dispatch attempts
-	dequeues := queueSvc.dequeueCalls
+	dequeues := queueSvc.dequeueCount()
 	queueLen := queueSvc.queueLength(agentID)
 
 	t.Logf("Dispatch attempts: %d, Dequeue calls: %d, Remaining queue: %d", dispatchAttempts, dequeues, queueLen)
