@@ -24,7 +24,7 @@ func init() {
 	skillsCmd.AddCommand(skillsBootstrapCmd)
 
 	skillsBootstrapCmd.Flags().BoolVarP(&skillsBootstrapForce, "force", "f", false, "overwrite existing skill files")
-	skillsBootstrapCmd.Flags().StringVar(&skillsBootstrapPath, "path", "", "skills source directory (default: .agent-skills in repo)")
+	skillsBootstrapCmd.Flags().StringVar(&skillsBootstrapPath, "path", "", "skills source directory (default: .agent-skills in repo if present)")
 	skillsBootstrapCmd.Flags().BoolVar(&skillsBootstrapAll, "all-profiles", false, "install for all profiles (not just default pool)")
 }
 
@@ -38,8 +38,9 @@ var skillsBootstrapCmd = &cobra.Command{
 	Short: "Bootstrap repo skills and install to configured harnesses",
 	Long: `Install skills into harness-specific locations based on configured profiles.
 
-By default, this installs the built-in skill set. Use --path to install from a
-custom skill source directory.`,
+By default, this installs the repo .agent-skills if present, falling back to
+the embedded skill set. Use --path to install from a custom skill source
+directory.`,
 	RunE: runSkillsBootstrap,
 }
 
@@ -72,8 +73,14 @@ func runSkillsBootstrap(cmd *cobra.Command, args []string) error {
 		}
 		installed, err = skills.InstallToHarnesses(repoPath, source, profiles, skillsBootstrapForce)
 	} else {
-		source = "builtin"
-		installed, err = skills.InstallBuiltinToHarnesses(repoPath, profiles, skillsBootstrapForce)
+		repoSkills := filepath.Join(repoPath, ".agent-skills")
+		if info, statErr := os.Stat(repoSkills); statErr == nil && info.IsDir() {
+			source = repoSkills
+			installed, err = skills.InstallToHarnesses(repoPath, repoSkills, profiles, skillsBootstrapForce)
+		} else {
+			source = "builtin"
+			installed, err = skills.InstallBuiltinToHarnesses(repoPath, profiles, skillsBootstrapForce)
+		}
 	}
 	if err != nil {
 		return err

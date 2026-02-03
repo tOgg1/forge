@@ -116,6 +116,10 @@ func InstallToHarnesses(baseDir, sourceDir string, profiles []config.ProfileConf
 }
 
 func resolveHarnessDest(baseDir string, harness models.Harness, authHome string) (string, bool) {
+	if authHome != "" {
+		return filepath.Join(authHome, "skills"), true
+	}
+
 	if baseDir != "" {
 		switch string(harness) {
 		case string(models.HarnessCodex):
@@ -129,10 +133,6 @@ func resolveHarnessDest(baseDir string, harness models.Harness, authHome string)
 		default:
 			return "", false
 		}
-	}
-
-	if authHome != "" {
-		return filepath.Join(authHome, "skills"), true
 	}
 
 	home, err := os.UserHomeDir()

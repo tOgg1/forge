@@ -17,16 +17,18 @@ repo_root="$(cd "${script_dir}/.." && pwd)"
 source_dir="${FORGE_SKILLS_SOURCE:-${repo_root}/.agent-skills}"
 config_path=""
 dry_run="false"
+delete_extras="false"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install-skills.sh [--config PATH] [--source DIR] [--dry-run]
+Usage: scripts/install-skills.sh [--config PATH] [--source DIR] [--dry-run] [--delete]
 
 Installs repo skills into harness-specific locations based on Forge config.
 
 Defaults:
   --config  $XDG_CONFIG_HOME/forge/config.yaml, ~/.config/forge/config.yaml, or ./config.yaml
   --source  .agent-skills (repo root)
+  --delete  remove files in destination not present in source (requires rsync)
 EOF
 }
 
@@ -42,6 +44,10 @@ while [ $# -gt 0 ]; do
       ;;
     --dry-run)
       dry_run="true"
+      shift
+      ;;
+    --delete)
+      delete_extras="true"
       shift
       ;;
     -h|--help)
@@ -186,8 +192,15 @@ sync_dir() {
 
   mkdir -p "$dest"
   if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete "${src}/" "${dest}/"
+    if [ "$delete_extras" = "true" ]; then
+      rsync -a --delete "${src}/" "${dest}/"
+    else
+      rsync -a "${src}/" "${dest}/"
+    fi
   else
+    if [ "$delete_extras" = "true" ]; then
+      fail "--delete requires rsync"
+    fi
     cp -R "${src}/." "${dest}/"
   fi
 }

@@ -97,14 +97,15 @@ See `docs/config.md` for details.
 
 ## Agent Skills
 
-Install built-in skills for configured harnesses with:
+Install repo skills for configured harnesses with:
 
 ```bash
 forge skills bootstrap
 ```
 
 If a profile has no `auth_home`, skills are installed into repo-local harness
-folders (for example `.codex/skills/`).
+folders (for example `.codex/skills/`). When `.agent-skills/` is missing, the
+CLI falls back to the embedded skills.
 
 Install skills into harness-specific locations with:
 
