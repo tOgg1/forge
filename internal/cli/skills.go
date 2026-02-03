@@ -96,7 +96,7 @@ func runSkillsBootstrap(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal output: %w", err)
 		}
-		_, _ = io.WriteString(os.Stdout, string(data))
+		_, _ = os.Stdout.Write(data)
 		_, _ = io.WriteString(os.Stdout, "\n")
 		return nil
 	}
