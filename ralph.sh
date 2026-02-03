@@ -109,9 +109,26 @@ parse_alias_command() {
   echo "$alias_output"
 }
 
+first_non_env_token() {
+  local cmd=$1
+  local token=""
+  for token in $cmd; do
+    if [[ "$token" == "env" ]]; then
+      continue
+    fi
+    if [[ "$token" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      continue
+    fi
+    printf '%s\n' "$token"
+    return 0
+  done
+  return 1
+}
+
 is_codex_cmd() {
   local cmd=$1
-  local first=${cmd%% *}
+  local first=""
+  first=$(first_non_env_token "$cmd" || true)
   [[ "$first" == "codex" || "$first" == */codex ]]
 }
 
@@ -255,19 +272,19 @@ start_loop() {
       cmd="$first exec -"
       prompt_mode="stdin"
     fi
-    codex_home=$(detect_codex_home || true)
-    if [[ -z "$codex_home" ]]; then
-      echo "Codex home not found under $HOME. Set CODEX_HOME and try again." >&2
-      exit 2
-    fi
     if [[ -n "${RALPH_CODEX_CONFIG:-}" ]]; then
       codex_config="$RALPH_CODEX_CONFIG"
     elif [[ -n "${CODEX_CONFIG:-}" ]]; then
       codex_config="$CODEX_CONFIG"
     else
-      local cfg_path="$codex_home/config.toml"
-      if [[ -f "$cfg_path" ]]; then
-        codex_config="$cfg_path"
+      codex_home=$(detect_codex_home || true)
+      if [[ -z "$codex_home" ]]; then
+        echo "Codex home not found under $HOME. Skipping Codex config/sandbox detection." >&2
+      else
+        local cfg_path="$codex_home/config.toml"
+        if [[ -f "$cfg_path" ]]; then
+          codex_config="$cfg_path"
+        fi
       fi
     fi
     if [[ -n "${RALPH_CODEX_SANDBOX:-}" ]]; then
@@ -281,7 +298,11 @@ start_loop() {
       cmd=${cmd/--full-auto/}
       cmd=$(printf '%s\n' "$cmd" | awk '{$1=$1;print}')
     fi
-    if [[ "$cmd" != *"--dangerously-bypass-approvals-and-sandbox"* && "$cmd" != *"--sandbox "* ]]; then
+    if [[ -n "$codex_sandbox" && "$cmd" == *"--dangerously-bypass-approvals-and-sandbox"* ]]; then
+      cmd=${cmd/--dangerously-bypass-approvals-and-sandbox/}
+      cmd=$(printf '%s\n' "$cmd" | awk '{$1=$1;print}')
+    fi
+    if [[ "$cmd" != *"--sandbox "* && "$cmd" != *"--sandbox="* ]]; then
       if [[ -n "$codex_sandbox" ]]; then
         if [[ "$cmd" == *" -" ]]; then
           cmd="${cmd% -} --sandbox $codex_sandbox -"

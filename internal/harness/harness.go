@@ -115,6 +115,14 @@ func defaultEnv() []string {
 
 func resolveCodexConfigPath(profile models.Profile) string {
 	candidates := []string{}
+	if profile.Env != nil {
+		if configPath := profile.Env["CODEX_CONFIG"]; configPath != "" {
+			candidates = append(candidates, configPath)
+		}
+	}
+	if configPath := os.Getenv("CODEX_CONFIG"); configPath != "" {
+		candidates = append(candidates, configPath)
+	}
 	if profile.AuthHome != "" {
 		candidates = append(candidates, filepath.Join(profile.AuthHome, "config.toml"))
 	}
@@ -173,24 +181,50 @@ func applyCodexSandbox(command string, codexConfig string) string {
 		return trimmed
 	}
 
+	tokens := strings.Fields(trimmed)
+	if len(tokens) == 0 {
+		return trimmed
+	}
+
 	// --full-auto forces workspace-write, so remove it when a stricter sandbox is configured.
-	if sandbox != "workspace-write" && strings.Contains(trimmed, "--full-auto") {
-		trimmed = strings.ReplaceAll(trimmed, "--full-auto", "")
-		trimmed = strings.Join(strings.Fields(trimmed), " ")
+	if sandbox != "workspace-write" {
+		tokens = filterTokens(tokens, map[string]struct{}{"--full-auto": {}})
 	}
 
-	// Respect explicit sandbox flags in the command template.
-	if strings.Contains(trimmed, "--dangerously-bypass-approvals-and-sandbox") || strings.Contains(trimmed, "--sandbox ") {
-		return trimmed
+	// When sandbox_mode is configured, drop the bypass flag so config wins.
+	tokens = filterTokens(tokens, map[string]struct{}{"--dangerously-bypass-approvals-and-sandbox": {}})
+
+	if hasSandboxFlag(tokens) || sandbox == "workspace-write" {
+		return strings.Join(tokens, " ")
 	}
 
-	if sandbox == "workspace-write" {
-		return trimmed
+	if len(tokens) > 0 && tokens[len(tokens)-1] == "-" {
+		tokens = append(tokens[:len(tokens)-1], "--sandbox", sandbox, "-")
+		return strings.Join(tokens, " ")
 	}
+	tokens = append(tokens, "--sandbox", sandbox)
+	return strings.Join(tokens, " ")
+}
 
-	if strings.HasSuffix(trimmed, " -") {
-		trimmed = strings.TrimSuffix(trimmed, " -")
-		return trimmed + " --sandbox " + sandbox + " -"
+func filterTokens(tokens []string, remove map[string]struct{}) []string {
+	if len(remove) == 0 {
+		return tokens
 	}
-	return trimmed + " --sandbox " + sandbox
+	out := tokens[:0]
+	for _, token := range tokens {
+		if _, ok := remove[token]; ok {
+			continue
+		}
+		out = append(out, token)
+	}
+	return out
+}
+
+func hasSandboxFlag(tokens []string) bool {
+	for _, token := range tokens {
+		if token == "--sandbox" || strings.HasPrefix(token, "--sandbox=") {
+			return true
+		}
+	}
+	return false
 }
