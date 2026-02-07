@@ -1,0 +1,169 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build release artifacts
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean --skip=publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          generate_release_notes: true
+
+  homebrew:
+    runs-on: ubuntu-latest
+    needs: publish
+    env:
+      HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'trmdy/homebrew-tap' }}
+      HOMEBREW_FORMULA_PATH: ${{ vars.HOMEBREW_FORMULA_PATH || 'Formula/forge.rb' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Validate Homebrew config
+        shell: bash
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOMEBREW_TAP_REPO}" ]; then
+            echo "::error::Missing HOMEBREW_TAP_REPO (repo variable)."
+            exit 1
+          fi
+          if [ -z "${HOMEBREW_TAP_GITHUB_TOKEN}" ]; then
+            echo "::error::Missing HOMEBREW_TAP_GITHUB_TOKEN (secret)."
+            exit 1
+          fi
+
+      - name: Resolve macOS checksums
+        id: checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [ -z "${version}" ] || [ "${version}" = "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Tag must be in form vX.Y.Z."
+            exit 1
+          fi
+
+          arm_file="dist/forge_${version}_darwin_arm64.tar.gz"
+          amd_file="dist/forge_${version}_darwin_amd64.tar.gz"
+          if [ ! -f "${arm_file}" ] || [ ! -f "${amd_file}" ]; then
+            echo "::error::Missing macOS artifacts in dist."
+            ls -la dist || true
+            exit 1
+          fi
+
+          arm_sha="$(sha256sum "${arm_file}" | awk '{print $1}')"
+          amd_sha="$(sha256sum "${amd_file}" | awk '{print $1}')"
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "arm_sha=${arm_sha}" >> "${GITHUB_OUTPUT}"
+          echo "amd_sha=${amd_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.HOMEBREW_TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        shell: bash
+        env:
+          VERSION: ${{ steps.checksums.outputs.version }}
+          ARM_SHA: ${{ steps.checksums.outputs.arm_sha }}
+          AMD_SHA: ${{ steps.checksums.outputs.amd_sha }}
+        run: |
+          set -euo pipefail
+          formula="homebrew-tap/${HOMEBREW_FORMULA_PATH}"
+          if [ ! -f "${formula}" ]; then
+            echo "::error::Formula not found: ${formula}"
+            exit 1
+          fi
+
+          export FORMULA="${formula}"
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          formula = pathlib.Path(os.environ["FORMULA"])
+          version = os.environ["VERSION"]
+          arm_sha = os.environ["ARM_SHA"]
+          amd_sha = os.environ["AMD_SHA"]
+
+          text = formula.read_text()
+          text, n1 = re.subn(r'version\\s+\"[^\"]+\"', f'version \"{version}\"', text)
+          text, n2 = re.subn(
+              r'(url \"[^\\n]*forge_[^\\n]*_darwin_arm64\\.tar\\.gz\"\\s*\\n\\s*sha256 \")[^\"]+(\"\\s*)',
+              r'\\1' + arm_sha + r'\\2',
+              text,
+          )
+          text, n3 = re.subn(
+              r'(url \"[^\\n]*forge_[^\\n]*_darwin_amd64\\.tar\\.gz\"\\s*\\n\\s*sha256 \")[^\"]+(\"\\s*)',
+              r'\\1' + amd_sha + r'\\2',
+              text,
+          )
+          if n1 == 0 or n2 == 0 or n3 == 0:
+              raise SystemExit("Pattern update failed; check formula format.")
+          formula.write_text(text)
+          PY
+
+      - name: Commit and push
+        shell: bash
+        env:
+          VERSION: ${{ steps.checksums.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd homebrew-tap
+          if git diff --quiet; then
+            echo "No Homebrew changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${HOMEBREW_FORMULA_PATH}"
+          git commit -m "forge ${VERSION}"
+          git push
