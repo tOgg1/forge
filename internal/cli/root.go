@@ -27,6 +27,7 @@ var (
 	logLevel       string
 	logFormat      string
 	chdirPath      string
+	robotHelp      bool
 
 	// Global config loader and config
 	configLoader *config.Loader
@@ -68,6 +69,10 @@ func Execute(version, commit, date string) error {
 func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if robotHelp {
+			printRobotHelp(cmd.OutOrStdout())
+			return &ExitError{Code: 0, Printed: true, Err: errRobotHelpShown}
+		}
 		return runPreflight(cmd)
 	}
 
@@ -86,11 +91,16 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "override logging level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "", "override logging format (json, console)")
 	rootCmd.PersistentFlags().StringVarP(&chdirPath, "chdir", "C", "", "change working directory for this command")
+	rootCmd.PersistentFlags().BoolVar(&robotHelp, "robot-help", false, "show agent-oriented help and exit")
 }
 
 // initConfig loads configuration using Viper with proper precedence:
 // defaults < config file < env vars < CLI flags
 func initConfig() {
+	if robotHelp {
+		// Allow `forge --robot-help` to work even if config/tmux/ssh are not set up yet.
+		return
+	}
 	configLoader = config.NewLoader()
 
 	if chdirPath != "" {
