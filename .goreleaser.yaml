@@ -2,7 +2,7 @@ project_name: forge
 
 release:
   github:
-    owner: tOgg1
+    owner: trmdy
     name: forge
 
 builds:

@@ -410,7 +410,7 @@ resolve_forge_tag() {
       fail "curl is required to resolve latest forged version"
     fi
     local tag
-    tag="$(curl -fsSL https://api.github.com/repos/tOgg1/forge/releases/latest | tr -d '\r' | awk -F\" '/tag_name/{print $4; exit}')"
+    tag="$(curl -fsSL https://api.github.com/repos/trmdy/forge/releases/latest | tr -d '\r' | awk -F\" '/tag_name/{print $4; exit}')"
     if [ -z "$tag" ]; then
       fail "failed to resolve latest forged version"
     fi
@@ -460,7 +460,7 @@ install_forged() {
   tag="$(resolve_forge_tag "$FORGE_FORGED_VERSION")"
   version="$(forge_archive_version "$tag")"
   asset="forge_${version}_${os}_${arch}.tar.gz"
-  url="https://github.com/tOgg1/forge/releases/download/${tag}/${asset}"
+  url="https://github.com/trmdy/forge/releases/download/${tag}/${asset}"
 
   tmpdir="$(mktemp -d)"
   trap 'rm -rf "$tmpdir"' RETURN
