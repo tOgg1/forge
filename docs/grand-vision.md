@@ -292,7 +292,7 @@ depends_on = ["fix_design"]
 
 **Canonical structure**:
 
-- `forge loop up|ps|msg|queue|stop|resume|rm|prune|scale|run`
+- `forge loop up|ps|msg|queue|stop|resume|rm|clean|scale|run`
 - `forge workflow run|ls|show|graph|validate`
 - `forge job run|ls|show|logs|cancel`
 - `forge trigger add|ls|rm` (cron/webhook)

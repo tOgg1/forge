@@ -43,7 +43,7 @@ Alias mapping:
 - `forge kill` -> `forge loop kill`
 - `forge resume` -> `forge loop resume`
 - `forge rm` -> `forge loop rm`
-- `forge prune` -> `forge loop prune`
+- `forge clean` -> `forge loop clean`
 - `forge scale` -> `forge loop scale`
 - `forge queue` -> `forge loop queue`
 - `forge run` -> `forge loop run`
@@ -150,14 +150,14 @@ forge rm --state stopped --force
 forge rm --all --force
 ```
 
-### `forge loop prune` (alias: `forge prune`)
+### `forge loop clean` (alias: `forge clean`)
 
 Remove inactive loop records (stopped or errored). Logs and ledgers remain on disk.
 
 ```bash
-forge prune
-forge prune --repo .
-forge prune --pool default
+forge clean
+forge clean --repo .
+forge clean --pool default
 ```
 
 ### `forge loop scale` (alias: `forge scale`)
