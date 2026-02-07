@@ -173,6 +173,123 @@ func TestRunnerClaudeHarnessRunsLoop(t *testing.T) {
 	}
 }
 
+func TestRunnerInjectsLoopEnv(t *testing.T) {
+	database, cleanup := testutil.NewTestDB(t)
+	defer cleanup()
+
+	repoDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = t.TempDir()
+	cfg.Global.ConfigDir = t.TempDir()
+
+	profileRepo := db.NewProfileRepository(database)
+	loopRepo := db.NewLoopRepository(database)
+
+	profile := &models.Profile{
+		Name:            "env-profile",
+		Harness:         models.HarnessPi,
+		PromptMode:      models.PromptModeEnv,
+		CommandTemplate: "pi -p \"$FORGE_PROMPT_CONTENT\"",
+		MaxConcurrency:  1,
+		Env: map[string]string{
+			"FMAIL_AGENT":     "manual-agent",
+			"FORGE_LOOP_NAME": "stale-loop-name",
+			"FORGE_LOOP_ID":   "stale-loop-id",
+			"CUSTOM_ENV":      "ok",
+		},
+	}
+	if err := profileRepo.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	loopEntry := &models.Loop{
+		Name:            "loop-env",
+		RepoPath:        repoDir,
+		BasePromptMsg:   "base",
+		IntervalSeconds: 1,
+		ProfileID:       profile.ID,
+		State:           models.LoopStateStopped,
+	}
+	if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	var capturedProfile models.Profile
+	runner := NewRunner(database, cfg)
+	runner.Exec = func(ctx context.Context, p models.Profile, promptPath, promptContent, workDir string, output io.Writer) (int, string, error) {
+		capturedProfile = p
+		return 0, "ok", nil
+	}
+
+	if err := runner.RunOnce(context.Background(), loopEntry.ID); err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+
+	if capturedProfile.Env["FORGE_LOOP_ID"] != loopEntry.ID {
+		t.Fatalf("expected FORGE_LOOP_ID=%q, got %q", loopEntry.ID, capturedProfile.Env["FORGE_LOOP_ID"])
+	}
+	if capturedProfile.Env["FORGE_LOOP_NAME"] != loopEntry.Name {
+		t.Fatalf("expected FORGE_LOOP_NAME=%q, got %q", loopEntry.Name, capturedProfile.Env["FORGE_LOOP_NAME"])
+	}
+	if capturedProfile.Env["FMAIL_AGENT"] != "manual-agent" {
+		t.Fatalf("expected explicit FMAIL_AGENT to be preserved, got %q", capturedProfile.Env["FMAIL_AGENT"])
+	}
+	if capturedProfile.Env["CUSTOM_ENV"] != "ok" {
+		t.Fatalf("expected CUSTOM_ENV to be preserved, got %q", capturedProfile.Env["CUSTOM_ENV"])
+	}
+}
+
+func TestRunnerDefaultsFmailAgentToLoopName(t *testing.T) {
+	database, cleanup := testutil.NewTestDB(t)
+	defer cleanup()
+
+	repoDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = t.TempDir()
+	cfg.Global.ConfigDir = t.TempDir()
+
+	profileRepo := db.NewProfileRepository(database)
+	loopRepo := db.NewLoopRepository(database)
+
+	profile := &models.Profile{
+		Name:            "default-fmail-profile",
+		Harness:         models.HarnessPi,
+		PromptMode:      models.PromptModeEnv,
+		CommandTemplate: "pi -p \"$FORGE_PROMPT_CONTENT\"",
+		MaxConcurrency:  1,
+	}
+	if err := profileRepo.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	loopEntry := &models.Loop{
+		Name:            "loop-default-fmail",
+		RepoPath:        repoDir,
+		BasePromptMsg:   "base",
+		IntervalSeconds: 1,
+		ProfileID:       profile.ID,
+		State:           models.LoopStateStopped,
+	}
+	if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	var capturedProfile models.Profile
+	runner := NewRunner(database, cfg)
+	runner.Exec = func(ctx context.Context, p models.Profile, promptPath, promptContent, workDir string, output io.Writer) (int, string, error) {
+		capturedProfile = p
+		return 0, "ok", nil
+	}
+
+	if err := runner.RunOnce(context.Background(), loopEntry.ID); err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+
+	if capturedProfile.Env["FMAIL_AGENT"] != loopEntry.Name {
+		t.Fatalf("expected FMAIL_AGENT=%q, got %q", loopEntry.Name, capturedProfile.Env["FMAIL_AGENT"])
+	}
+}
+
 func TestRunnerStopQueueStopsLoop(t *testing.T) {
 	database, cleanup := testutil.NewTestDB(t)
 	defer cleanup()

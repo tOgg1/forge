@@ -11,6 +11,7 @@ Forge focuses on a simple loop runtime instead of tmux- or node-managed agents. 
 - runs a harness command (pi, opencode, codex, claude)
 - appends logs + ledger entries
 - sleeps and repeats
+- injects runtime env: `FORGE_LOOP_ID`, `FORGE_LOOP_NAME` (`FMAIL_AGENT` defaults to loop name)
 
 Key features:
 

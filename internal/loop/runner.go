@@ -208,6 +208,8 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 			delete(loop.Metadata, "wait_until")
 		}
 
+		effectiveProfile := profileWithLoopEnv(profile, loop)
+
 		prompt, err := resolveBasePrompt(loop)
 		if err != nil {
 			loop.State = models.LoopStateError
@@ -260,7 +262,7 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 
 		logWriter.WriteLine(fmt.Sprintf("run %s start (profile=%s)", run.ID, profile.Name))
 
-		runResult, interruptResult := r.runWithInterrupt(ctx, loop, run, profile, effectivePromptPath, effectivePromptContent, logWriter)
+		runResult, interruptResult := r.runWithInterrupt(ctx, loop, run, effectiveProfile, effectivePromptPath, effectivePromptContent, logWriter)
 
 		run.Status = runResult.status
 		run.ExitCode = &runResult.exitCode
@@ -584,4 +586,27 @@ type runResult struct {
 	exitCode   int
 	outputTail string
 	errText    string
+}
+
+func profileWithLoopEnv(profile *models.Profile, loopEntry *models.Loop) *models.Profile {
+	if profile == nil {
+		return nil
+	}
+
+	effective := *profile
+	env := make(map[string]string, len(profile.Env)+3)
+	for key, value := range profile.Env {
+		env[key] = value
+	}
+
+	if loopEntry != nil {
+		env["FORGE_LOOP_ID"] = loopEntry.ID
+		env["FORGE_LOOP_NAME"] = loopEntry.Name
+		if strings.TrimSpace(env["FMAIL_AGENT"]) == "" {
+			env["FMAIL_AGENT"] = loopEntry.Name
+		}
+	}
+
+	effective.Env = env
+	return &effective
 }
