@@ -22,7 +22,7 @@ jobs:
       - name: Build release artifacts
         uses: goreleaser/goreleaser-action@v6
         with:
-          version: latest
+          version: "~> v2"
           args: release --clean --skip=publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -53,8 +53,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: publish
     env:
-      HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
-      HOMEBREW_FORMULA_PATH: ${{ vars.HOMEBREW_FORMULA_PATH }}
+      HOMEBREW_TAP_REPO_VAR: ${{ vars.HOMEBREW_TAP_REPO }}
+      HOMEBREW_FORMULA_PATH_VAR: ${{ vars.HOMEBREW_FORMULA_PATH }}
     steps:
       - name: Gate Homebrew publish
         id: gate
@@ -63,8 +63,12 @@ jobs:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          : "${HOMEBREW_TAP_REPO:=trmdy/homebrew-tap}"
-          : "${HOMEBREW_FORMULA_PATH:=Formula/forge.rb}"
+          HOMEBREW_TAP_REPO="${HOMEBREW_TAP_REPO_VAR:-trmdy/homebrew-tap}"
+          HOMEBREW_FORMULA_PATH="${HOMEBREW_FORMULA_PATH_VAR:-Formula/forge.rb}"
+          {
+            echo "HOMEBREW_TAP_REPO=${HOMEBREW_TAP_REPO}"
+            echo "HOMEBREW_FORMULA_PATH=${HOMEBREW_FORMULA_PATH}"
+          } >> "${GITHUB_ENV}"
 
           if [ -z "${HOMEBREW_TAP_GITHUB_TOKEN}" ]; then
             echo "enabled=false" >> "${GITHUB_OUTPUT}"
@@ -87,10 +91,12 @@ jobs:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          : "${HOMEBREW_TAP_REPO:=trmdy/homebrew-tap}"
-          : "${HOMEBREW_FORMULA_PATH:=Formula/forge.rb}"
           if [ -z "${HOMEBREW_TAP_REPO}" ]; then
             echo "::error::Missing HOMEBREW_TAP_REPO (repo variable)."
+            exit 1
+          fi
+          if [ -z "${HOMEBREW_FORMULA_PATH}" ]; then
+            echo "::error::Missing HOMEBREW_FORMULA_PATH (repo variable)."
             exit 1
           fi
           if [ -z "${HOMEBREW_TAP_GITHUB_TOKEN}" ]; then
