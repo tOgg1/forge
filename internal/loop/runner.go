@@ -37,6 +37,7 @@ type Runner struct {
 	OutputTailLines       int
 	InterruptPollInterval time.Duration
 	Exec                  ExecuteFunc
+	RunCommand            runCommandFunc
 }
 
 // NewRunner creates a Runner with default dependencies.
@@ -49,6 +50,7 @@ func NewRunner(database *db.DB, cfg *config.Config) *Runner {
 		OutputTailLines:       defaultOutputTailLines,
 		InterruptPollInterval: defaultInterruptInterval,
 		Exec:                  defaultExecute,
+		RunCommand:            defaultRunCommand,
 	}
 }
 
@@ -69,6 +71,9 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 	}
 	if r.Exec == nil {
 		r.Exec = defaultExecute
+	}
+	if r.RunCommand == nil {
+		r.RunCommand = defaultRunCommand
 	}
 	if r.OutputTailLines <= 0 {
 		r.OutputTailLines = defaultOutputTailLines
@@ -174,6 +179,35 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 			continue
 		}
 
+		stopCfg, stopCfgOK := loadStopConfig(loop)
+		stopState := loadStopState(loop)
+
+		if stopCfgOK && stopCfg.Quant != nil &&
+			quantWhenMatches(stopCfg.Quant.When, false) &&
+			quantEveryMatches(stopCfg.Quant.EveryN, iterationCount+1) {
+			timeout := time.Duration(stopCfg.Quant.TimeoutSeconds) * time.Second
+			res := r.RunCommand(ctx, loop.RepoPath, stopCfg.Quant.Cmd, timeout)
+			matched, matchReason := quantRuleMatches(*stopCfg.Quant, res)
+			if matched {
+				decision := normalizeDecision(stopCfg.Quant.Decision)
+				logWriter.WriteLine(fmt.Sprintf("quant stop matched (decision=%s exit_code=%d)", decision, res.exitCode))
+				if decision == stopDecisionStop {
+					loop.State = models.LoopStateStopped
+					loop.LastError = fmt.Sprintf("quant stop: %s", matchReason)
+					_ = loopRepo.Update(ctx, loop)
+					return nil
+				}
+			} else if strings.TrimSpace(matchReason) != "" {
+				logWriter.WriteLine(fmt.Sprintf("quant stop not matched: %s", matchReason))
+			}
+		}
+
+		runKind := "main"
+		// If the operator explicitly overrides the next prompt, don't inject a qualitative stop check.
+		if plan.OverridePrompt == nil && !singleRun && stopCfgOK && stopCfg.Qual != nil && qualDue(stopCfg.Qual, stopState) {
+			runKind = "qual_stop"
+		}
+
 		profile, waitUntil, err := r.selectProfile(ctx, loop, profileRepo, poolRepo, runRepo)
 		if err != nil {
 			loop.State = models.LoopStateError
@@ -220,6 +254,17 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 			}
 			prompt.Source = "override"
 			prompt.Override = true
+		} else if runKind == "qual_stop" {
+			prompt, err = resolveOverridePrompt(loop.RepoPath, stopCfg.Qual.Prompt)
+			if err != nil {
+				loop.State = models.LoopStateError
+				loop.LastError = err.Error()
+				_ = loopRepo.Update(ctx, loop)
+				logWriter.WriteLine(fmt.Sprintf("qual stop prompt error: %v", err))
+				return err
+			}
+			prompt.Source = "qual_stop"
+			prompt.Override = true
 		}
 
 		hasMessages := len(plan.Messages) > 0
@@ -239,6 +284,7 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 			PromptSource:   prompt.Source,
 			PromptPath:     prompt.Path,
 			PromptOverride: prompt.Override,
+			Metadata:       map[string]any{"kind": runKind},
 		}
 		if err := runRepo.Create(ctx, run); err != nil {
 			return err
@@ -277,6 +323,18 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 		loop.State = models.LoopStateSleeping
 		iterationCount++
 		setLoopIterationCount(loop, iterationCount)
+
+		stopState = loadStopState(loop)
+		switch runKind {
+		case "main":
+			stopState.MainIterationCount++
+		case "qual_stop":
+			stopState.QualIterationCount++
+			// Ensure we don't re-run the qualitative check for the same milestone.
+			stopState.QualLastMainCount = stopState.MainIterationCount
+		}
+		saveStopState(loop, stopState)
+
 		_ = loopRepo.Update(ctx, loop)
 
 		_ = markQueueCompleted(ctx, queueRepo, plan.ConsumeItemIDs)
@@ -316,6 +374,56 @@ func (r *Runner) runLoop(ctx context.Context, loopID string, singleRun bool) err
 			loop.State = models.LoopStateStopped
 			_ = loopRepo.Update(ctx, loop)
 			return nil
+		}
+
+		if runKind == "qual_stop" && stopCfgOK && stopCfg.Qual != nil {
+			signal, ok := parseQualSignal(runResult.outputTail)
+			if !ok {
+				onInvalid := normalizeOnInvalid(stopCfg.Qual.OnInvalid)
+				logWriter.WriteLine(fmt.Sprintf("qual stop invalid output (on_invalid=%s)", onInvalid))
+				if onInvalid == stopDecisionStop {
+					loop.State = models.LoopStateStopped
+					loop.LastError = "qual stop: invalid output (expected 0 or 1)"
+					_ = loopRepo.Update(ctx, loop)
+					return nil
+				}
+			} else if signal == 0 {
+				logWriter.WriteLine("qual stop signaled stop (0)")
+				loop.State = models.LoopStateStopped
+				loop.LastError = "qual stop: signaled stop"
+				_ = loopRepo.Update(ctx, loop)
+				return nil
+			} else {
+				logWriter.WriteLine("qual stop signaled continue (1)")
+			}
+		}
+
+		if stopCfgOK && stopCfg.Quant != nil &&
+			quantWhenMatches(stopCfg.Quant.When, true) &&
+			quantEveryMatches(stopCfg.Quant.EveryN, iterationCount) {
+			timeout := time.Duration(stopCfg.Quant.TimeoutSeconds) * time.Second
+			res := r.RunCommand(ctx, loop.RepoPath, stopCfg.Quant.Cmd, timeout)
+			matched, matchReason := quantRuleMatches(*stopCfg.Quant, res)
+			if matched {
+				decision := normalizeDecision(stopCfg.Quant.Decision)
+				logWriter.WriteLine(fmt.Sprintf("quant stop matched (decision=%s exit_code=%d)", decision, res.exitCode))
+				if decision == stopDecisionStop {
+					loop.State = models.LoopStateStopped
+					loop.LastError = fmt.Sprintf("quant stop: %s", matchReason)
+					_ = loopRepo.Update(ctx, loop)
+					return nil
+				}
+			} else if strings.TrimSpace(matchReason) != "" {
+				logWriter.WriteLine(fmt.Sprintf("quant stop not matched: %s", matchReason))
+			}
+		}
+
+		if runKind == "main" && !singleRun && stopCfgOK && stopCfg.Qual != nil {
+			stopState = loadStopState(loop)
+			if qualDue(stopCfg.Qual, stopState) {
+				logWriter.WriteLine("qual stop due; running immediately (next iteration)")
+				skipSleep = true
+			}
 		}
 
 		if reason, shouldStop := loopLimitReason(maxIterations, iterationCount, maxRuntime, startedAt); shouldStop {
@@ -452,6 +560,8 @@ func (r *Runner) attachLoopPID(ctx context.Context, loop *models.Loop, repo *db.
 	loop.Metadata["pid"] = os.Getpid()
 	loop.Metadata["started_at"] = time.Now().UTC().Format(time.RFC3339)
 	loop.Metadata["iteration_count"] = 0
+	// Loop "smart stop" state is runtime-scoped; keep config but reset counters.
+	resetStopState(loop)
 	return repo.Update(ctx, loop)
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,6 +80,27 @@ func parseTags(value string) []string {
 		out = append(out, tag)
 	}
 	return out
+}
+
+func parseCSVInts(value string) ([]int, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid int %q", part)
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 func parseDuration(value string, fallback time.Duration) (time.Duration, error) {

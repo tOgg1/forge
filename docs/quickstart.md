@@ -73,6 +73,24 @@ Forge sets `PI_CODING_AGENT_DIR` from `profile.auth_home` automatically.
 ./build/forge ps
 ```
 
+## Smart stop (optional)
+
+Quantitative stop (command-based):
+
+```bash
+./build/forge up --name review \
+  --quantitative-stop-cmd 'sv count --epic | rg -q "^0$"' \
+  --quantitative-stop-exit-codes 0
+```
+
+Qualitative stop (judge iteration, agent prints `0` stop / `1` continue):
+
+```bash
+./build/forge up --name review \
+  --qualitative-stop-every 5 \
+  --qualitative-stop-prompt stop-judge
+```
+
 ## Send messages and watch logs
 
 ```bash

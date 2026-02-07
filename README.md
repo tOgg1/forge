@@ -18,6 +18,7 @@ Key features:
 - **Loops**: background processes per repo
 - **Profiles + Pools**: harness + auth homes with concurrency caps
 - **Queue**: message, pause, stop, kill, next-prompt override
+- **Smart stop**: quantitative (command-based) + qualitative (judge iteration) stop rules
 - **Logs + Ledgers**: logs centralized in the data dir, ledgers committed per repo
 - **TUI**: 2x2 grid of active loops with log tails
 
@@ -67,6 +68,9 @@ forge pool set-default default
 
 # 4) Start a loop
 forge up --count 1
+# Optional: smart stop rules
+# forge up --name review --quantitative-stop-cmd 'sv count --epic | rg -q "^0$"' --quantitative-stop-exit-codes 0
+# forge up --name review --qualitative-stop-every 5 --qualitative-stop-prompt stop-judge
 
 # 5) Send a message and watch logs
 forge msg <loop-name> "Review the PRD and summarize next steps"

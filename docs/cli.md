@@ -88,7 +88,15 @@ forge up --count 1
 forge up --name review-loop --prompt review
 forge up --pool default --interval 30s --tags review
 forge up --max-iterations 10 --max-runtime 2h
+forge up --quantitative-stop-cmd 'sv count --epic | rg -q "^0$"' --quantitative-stop-exit-codes 0
+forge up --qualitative-stop-every 5 --qualitative-stop-prompt stop-judge
 ```
+
+Smart stop (loop-level):
+
+- Quantitative stop runs a shell command (repo workdir) and can match exit code/stdout/stderr. On match: stop or continue.
+- Qualitative stop injects a specialized next iteration using the same agent. The agent must output `0` (stop) or `1` (continue).
+See `docs/smart-stop.md`.
 
 ### `forge loop ps` (alias: `forge ps`)
 

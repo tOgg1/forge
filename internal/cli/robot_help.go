@@ -27,6 +27,12 @@ Quick Start (Loops)
 4) forge logs <loop>
 5) forge msg <loop> "instruction"
 
+Smart Stop (Loops)
+- quantitative: run cmd; match exit code + stdout/stderr; stop or continue; cadence via --quantitative-stop-every
+  - ex: forge up ... --quantitative-stop-cmd 'sv count --epic | rg -q \"^0$\"' --quantitative-stop-exit-codes 0
+- qualitative: every N main iters, run a special "judge" iteration (same agent); agent must print 0(stop) or 1(continue)
+  - ex: forge up ... --qualitative-stop-every 5 --qualitative-stop-prompt stop-judge
+
 Persistent Loop State (auto prompt injection)
 - forge work ...  : task pointer + status (task-tech-agnostic; use sv-..., jira-..., file.md)
 - forge mem ...   : per-loop key/value memory

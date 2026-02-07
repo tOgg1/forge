@@ -27,6 +27,23 @@ var (
 	loopUpMaxIterations int
 	loopUpTags          string
 
+	loopUpQuantStopCmd        string
+	loopUpQuantStopEvery      int
+	loopUpQuantStopWhen       string
+	loopUpQuantStopDecision   string
+	loopUpQuantStopExitCodes  string
+	loopUpQuantStopExitInvert bool
+	loopUpQuantStopStdoutMode string
+	loopUpQuantStopStderrMode string
+	loopUpQuantStopStdoutRe   string
+	loopUpQuantStopStderrRe   string
+	loopUpQuantStopTimeout    string
+
+	loopUpQualStopEvery     int
+	loopUpQualStopPrompt    string
+	loopUpQualStopPromptMsg string
+	loopUpQualStopOnInvalid string
+
 	startLoopProcessFunc = startLoopProcess
 )
 
@@ -44,12 +61,34 @@ func init() {
 	loopUpCmd.Flags().StringVarP(&loopUpMaxRuntime, "max-runtime", "r", "", "max runtime before stopping (e.g., 30m, 2h)")
 	loopUpCmd.Flags().IntVarP(&loopUpMaxIterations, "max-iterations", "i", 0, "max iterations before stopping (> 0 required)")
 	loopUpCmd.Flags().StringVar(&loopUpTags, "tags", "", "comma-separated tags")
+
+	loopUpCmd.Flags().StringVar(&loopUpQuantStopCmd, "quantitative-stop-cmd", "", "quantitative stop: command to execute (bash -lc)")
+	loopUpCmd.Flags().IntVar(&loopUpQuantStopEvery, "quantitative-stop-every", 1, "quantitative stop: evaluate every N iterations (> 0)")
+	loopUpCmd.Flags().StringVar(&loopUpQuantStopWhen, "quantitative-stop-when", "before", "quantitative stop: when to evaluate (before|after|both)")
+	loopUpCmd.Flags().StringVar(&loopUpQuantStopDecision, "quantitative-stop-decision", "stop", "quantitative stop: decision on match (stop|continue)")
+	loopUpCmd.Flags().StringVar(&loopUpQuantStopExitCodes, "quantitative-stop-exit-codes", "", "quantitative stop: match exit codes (comma-separated ints)")
+	loopUpCmd.Flags().BoolVar(&loopUpQuantStopExitInvert, "quantitative-stop-exit-invert", false, "quantitative stop: invert exit code match (match when exit not in codes)")
+	loopUpCmd.Flags().StringVar(&loopUpQuantStopStdoutMode, "quantitative-stop-stdout", "any", "quantitative stop: stdout mode (any|empty|nonempty)")
+	loopUpCmd.Flags().StringVar(&loopUpQuantStopStderrMode, "quantitative-stop-stderr", "any", "quantitative stop: stderr mode (any|empty|nonempty)")
+	loopUpCmd.Flags().StringVar(&loopUpQuantStopStdoutRe, "quantitative-stop-stdout-regex", "", "quantitative stop: stdout regex (RE2)")
+	loopUpCmd.Flags().StringVar(&loopUpQuantStopStderrRe, "quantitative-stop-stderr-regex", "", "quantitative stop: stderr regex (RE2)")
+	loopUpCmd.Flags().StringVar(&loopUpQuantStopTimeout, "quantitative-stop-timeout", "", "quantitative stop: command timeout (duration, e.g. 10s)")
+
+	loopUpCmd.Flags().IntVar(&loopUpQualStopEvery, "qualitative-stop-every", 0, "qualitative stop: run every N main iterations (> 0)")
+	loopUpCmd.Flags().StringVar(&loopUpQualStopPrompt, "qualitative-stop-prompt", "", "qualitative stop: prompt path or prompt name under .forge/prompts/")
+	loopUpCmd.Flags().StringVar(&loopUpQualStopPromptMsg, "qualitative-stop-prompt-msg", "", "qualitative stop: inline prompt content")
+	loopUpCmd.Flags().StringVar(&loopUpQualStopOnInvalid, "qualitative-stop-on-invalid", "continue", "qualitative stop: on invalid judge output (stop|continue)")
 }
 
 var loopUpCmd = &cobra.Command{
 	Use:   "up",
 	Short: "Start loop(s) for a repo",
-	Args:  cobra.NoArgs,
+	Long: `Start loop(s) for the current repo.
+
+Smart stop (optional):
+- quantitative: run a command and stop/continue on match (--quantitative-stop-*)
+- qualitative: every N main iterations, run a judge iteration; agent prints 0(stop) or 1(continue) (--qualitative-stop-*)`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if loopUpCount < 1 {
 			return fmt.Errorf("--count must be at least 1")
@@ -109,6 +148,88 @@ var loopUpCmd = &cobra.Command{
 		}
 
 		tags := parseTags(loopUpTags)
+
+		stopCfg := models.LoopStopConfig{}
+		if strings.TrimSpace(loopUpQuantStopCmd) != "" {
+			if loopUpQuantStopEvery <= 0 {
+				return fmt.Errorf("quantitative stop every must be > 0")
+			}
+			exitCodes, err := parseCSVInts(loopUpQuantStopExitCodes)
+			if err != nil {
+				return fmt.Errorf("quantitative stop exit codes: %w", err)
+			}
+			timeout, err := parseDuration(loopUpQuantStopTimeout, 0)
+			if err != nil {
+				return err
+			}
+			if timeout < 0 {
+				return fmt.Errorf("quantitative stop timeout must be >= 0")
+			}
+			stdoutMode := strings.ToLower(strings.TrimSpace(loopUpQuantStopStdoutMode))
+			stderrMode := strings.ToLower(strings.TrimSpace(loopUpQuantStopStderrMode))
+			if stdoutMode == "" {
+				stdoutMode = "any"
+			}
+			if stderrMode == "" {
+				stderrMode = "any"
+			}
+			noCriteria := len(exitCodes) == 0 &&
+				stdoutMode == "any" &&
+				stderrMode == "any" &&
+				strings.TrimSpace(loopUpQuantStopStdoutRe) == "" &&
+				strings.TrimSpace(loopUpQuantStopStderrRe) == ""
+			if noCriteria {
+				// Default: match success.
+				exitCodes = []int{0}
+			}
+
+			stopCfg.Quant = &models.LoopQuantStopConfig{
+				Cmd:            loopUpQuantStopCmd,
+				EveryN:         loopUpQuantStopEvery,
+				When:           loopUpQuantStopWhen,
+				Decision:       loopUpQuantStopDecision,
+				ExitCodes:      exitCodes,
+				ExitInvert:     loopUpQuantStopExitInvert,
+				StdoutMode:     stdoutMode,
+				StderrMode:     stderrMode,
+				StdoutRegex:    loopUpQuantStopStdoutRe,
+				StderrRegex:    loopUpQuantStopStderrRe,
+				TimeoutSeconds: int(timeout.Round(time.Second).Seconds()),
+			}
+		}
+
+		if loopUpQualStopEvery > 0 ||
+			strings.TrimSpace(loopUpQualStopPrompt) != "" ||
+			strings.TrimSpace(loopUpQualStopPromptMsg) != "" {
+			if loopUpQualStopEvery <= 0 {
+				return fmt.Errorf("qualitative stop every must be > 0")
+			}
+			if strings.TrimSpace(loopUpQualStopPrompt) != "" && strings.TrimSpace(loopUpQualStopPromptMsg) != "" {
+				return fmt.Errorf("use either --qualitative-stop-prompt or --qualitative-stop-prompt-msg, not both")
+			}
+
+			payload := models.NextPromptOverridePayload{}
+			if strings.TrimSpace(loopUpQualStopPromptMsg) != "" {
+				payload.Prompt = strings.TrimSpace(loopUpQualStopPromptMsg)
+				payload.IsPath = false
+			} else {
+				if strings.TrimSpace(loopUpQualStopPrompt) == "" {
+					return fmt.Errorf("qualitative stop requires --qualitative-stop-prompt or --qualitative-stop-prompt-msg")
+				}
+				resolved, _, err := resolvePromptPath(repoPath, loopUpQualStopPrompt)
+				if err != nil {
+					return err
+				}
+				payload.Prompt = resolved
+				payload.IsPath = true
+			}
+
+			stopCfg.Qual = &models.LoopQualStopConfig{
+				EveryN:    loopUpQualStopEvery,
+				Prompt:    payload,
+				OnInvalid: loopUpQualStopOnInvalid,
+			}
+		}
 
 		database, err := openDatabase()
 		if err != nil {
@@ -174,6 +295,9 @@ var loopUpCmd = &cobra.Command{
 				ProfileID:         profileID,
 				Tags:              tags,
 				State:             models.LoopStateStopped,
+			}
+			if stopCfg.Quant != nil || stopCfg.Qual != nil {
+				loopEntry.Metadata = map[string]any{"stop_config": stopCfg}
 			}
 			if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
 				return err

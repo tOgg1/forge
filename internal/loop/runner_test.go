@@ -712,6 +712,177 @@ func TestRunnerMaxRuntimeStopsImmediatelyWithoutSleepCycle(t *testing.T) {
 	}
 }
 
+func TestRunnerQuantStopBeforeRunStopsLoopWithoutRuns(t *testing.T) {
+	database, cleanup := testutil.NewTestDB(t)
+	defer cleanup()
+
+	repoDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = t.TempDir()
+	cfg.Global.ConfigDir = t.TempDir()
+
+	profileRepo := db.NewProfileRepository(database)
+	loopRepo := db.NewLoopRepository(database)
+	runRepo := db.NewLoopRunRepository(database)
+
+	profile := &models.Profile{
+		Name:            "quant-stop-profile",
+		Harness:         models.HarnessPi,
+		PromptMode:      models.PromptModeEnv,
+		CommandTemplate: "pi -p \"$FORGE_PROMPT_CONTENT\"",
+		MaxConcurrency:  1,
+	}
+	if err := profileRepo.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	stopCfg := models.LoopStopConfig{
+		Quant: &models.LoopQuantStopConfig{
+			Cmd:        "sv count --epic",
+			EveryN:     1,
+			When:       "before",
+			Decision:   "stop",
+			ExitCodes:  []int{0},
+			StdoutMode: "any",
+			StderrMode: "any",
+		},
+	}
+
+	loopEntry := &models.Loop{
+		Name:            "loop-quant-stop-before",
+		RepoPath:        repoDir,
+		BasePromptMsg:   "base",
+		IntervalSeconds: 0,
+		MaxIterations:   10,
+		ProfileID:       profile.ID,
+		State:           models.LoopStateStopped,
+		Metadata:        map[string]any{"stop_config": stopCfg},
+	}
+	if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	runner := NewRunner(database, cfg)
+	runner.RunCommand = func(ctx context.Context, workDir, cmd string, timeout time.Duration) commandResult {
+		return commandResult{exitCode: 0, stdout: "0\n", stderr: "", err: nil}
+	}
+	runner.Exec = func(ctx context.Context, profile models.Profile, promptPath, promptContent, workDir string, output io.Writer) (int, string, error) {
+		t.Fatalf("exec should not run when quant stop fires before run")
+		return 0, "", nil
+	}
+
+	if err := runner.RunLoop(context.Background(), loopEntry.ID); err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+
+	runs, err := runRepo.ListByLoop(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("expected 0 runs, got %d", len(runs))
+	}
+
+	updated, err := loopRepo.Get(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("get loop: %v", err)
+	}
+	if updated.State != models.LoopStateStopped {
+		t.Fatalf("expected loop stopped, got %s", updated.State)
+	}
+	if !strings.Contains(updated.LastError, "quant stop") {
+		t.Fatalf("expected quant stop last error, got %q", updated.LastError)
+	}
+}
+
+func TestRunnerQualStopRunsAsNextIterationAndStops(t *testing.T) {
+	database, cleanup := testutil.NewTestDB(t)
+	defer cleanup()
+
+	repoDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Global.DataDir = t.TempDir()
+	cfg.Global.ConfigDir = t.TempDir()
+
+	profileRepo := db.NewProfileRepository(database)
+	loopRepo := db.NewLoopRepository(database)
+	runRepo := db.NewLoopRunRepository(database)
+
+	profile := &models.Profile{
+		Name:            "qual-stop-profile",
+		Harness:         models.HarnessPi,
+		PromptMode:      models.PromptModeEnv,
+		CommandTemplate: "pi -p \"$FORGE_PROMPT_CONTENT\"",
+		MaxConcurrency:  1,
+	}
+	if err := profileRepo.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	stopCfg := models.LoopStopConfig{
+		Qual: &models.LoopQualStopConfig{
+			EveryN: 1,
+			Prompt: models.NextPromptOverridePayload{Prompt: "judge", IsPath: false},
+		},
+	}
+
+	loopEntry := &models.Loop{
+		Name:            "loop-qual-stop",
+		RepoPath:        repoDir,
+		BasePromptMsg:   "main",
+		IntervalSeconds: 0,
+		MaxIterations:   10,
+		ProfileID:       profile.ID,
+		State:           models.LoopStateStopped,
+		Metadata:        map[string]any{"stop_config": stopCfg},
+	}
+	if err := loopRepo.Create(context.Background(), loopEntry); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	runner := NewRunner(database, cfg)
+	runner.Exec = func(ctx context.Context, profile models.Profile, promptPath, promptContent, workDir string, output io.Writer) (int, string, error) {
+		if strings.HasPrefix(strings.TrimSpace(promptContent), "judge") {
+			return 0, "0\n", nil
+		}
+		return 0, "main ok\n", nil
+	}
+
+	if err := runner.RunLoop(context.Background(), loopEntry.ID); err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+
+	runs, err := runRepo.ListByLoop(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 2 {
+		b, _ := json.Marshal(runs)
+		t.Fatalf("expected 2 runs (main + qual), got %d: %s", len(runs), string(b))
+	}
+
+	seenQual := false
+	for _, run := range runs {
+		if run.PromptSource == "qual_stop" {
+			seenQual = true
+		}
+	}
+	if !seenQual {
+		t.Fatalf("expected a qual_stop run prompt_source")
+	}
+
+	updated, err := loopRepo.Get(context.Background(), loopEntry.ID)
+	if err != nil {
+		t.Fatalf("get loop: %v", err)
+	}
+	if updated.State != models.LoopStateStopped {
+		t.Fatalf("expected loop stopped, got %s", updated.State)
+	}
+	if !strings.Contains(updated.LastError, "qual stop") {
+		t.Fatalf("expected qual stop last error, got %q", updated.LastError)
+	}
+}
+
 func TestEnsureLoopPathsCreatesLogDirWhenLogPathSet(t *testing.T) {
 	database, cleanup := testutil.NewTestDB(t)
 	defer cleanup()

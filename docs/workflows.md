@@ -70,6 +70,8 @@ Use `stop` on loop steps (or anywhere it makes sense later). Supported fields:
 - `stop.tool` (table) — `{ name = "tk", args = ["ready"] }`
 - `stop.llm` (table) — `{ rubric = "coverage", pass_if = "good" }`
 
+Note: workflow stop conditions are separate from loop "smart stop" (CLI flags on `forge up` / `forge scale`). See `docs/smart-stop.md`.
+
 ## Hooks
 
 Use `hooks.pre` and `hooks.post` arrays for steps or workflow:
