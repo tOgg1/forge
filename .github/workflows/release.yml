@@ -50,24 +50,45 @@ jobs:
           generate_release_notes: true
 
   homebrew:
-    if: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN != '' }}
     runs-on: ubuntu-latest
     needs: publish
     env:
-      HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'trmdy/homebrew-tap' }}
-      HOMEBREW_FORMULA_PATH: ${{ vars.HOMEBREW_FORMULA_PATH || 'Formula/forge.rb' }}
+      HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+      HOMEBREW_FORMULA_PATH: ${{ vars.HOMEBREW_FORMULA_PATH }}
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
-
-      - name: Validate Homebrew config
+      - name: Gate Homebrew publish
+        id: gate
         shell: bash
         env:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          : "${HOMEBREW_TAP_REPO:=trmdy/homebrew-tap}"
+          : "${HOMEBREW_FORMULA_PATH:=Formula/forge.rb}"
+
+          if [ -z "${HOMEBREW_TAP_GITHUB_TOKEN}" ]; then
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "Homebrew: skipped (missing HOMEBREW_TAP_GITHUB_TOKEN secret)." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          echo "enabled=true" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/download-artifact@v4
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          name: dist
+          path: dist
+
+      - name: Validate Homebrew config
+        if: steps.gate.outputs.enabled == 'true'
+        shell: bash
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${HOMEBREW_TAP_REPO:=trmdy/homebrew-tap}"
+          : "${HOMEBREW_FORMULA_PATH:=Formula/forge.rb}"
           if [ -z "${HOMEBREW_TAP_REPO}" ]; then
             echo "::error::Missing HOMEBREW_TAP_REPO (repo variable)."
             exit 1
@@ -78,6 +99,7 @@ jobs:
           fi
 
       - name: Resolve macOS checksums
+        if: steps.gate.outputs.enabled == 'true'
         id: checksums
         shell: bash
         run: |
@@ -104,6 +126,7 @@ jobs:
           echo "amd_sha=${amd_sha}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout Homebrew tap
+        if: steps.gate.outputs.enabled == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ env.HOMEBREW_TAP_REPO }}
@@ -111,6 +134,7 @@ jobs:
           path: homebrew-tap
 
       - name: Update formula
+        if: steps.gate.outputs.enabled == 'true'
         shell: bash
         env:
           VERSION: ${{ steps.checksums.outputs.version }}
@@ -153,6 +177,7 @@ jobs:
           PY
 
       - name: Commit and push
+        if: steps.gate.outputs.enabled == 'true'
         shell: bash
         env:
           VERSION: ${{ steps.checksums.outputs.version }}
