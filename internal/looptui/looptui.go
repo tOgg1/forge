@@ -21,6 +21,7 @@ import (
 	"github.com/tOgg1/forge/internal/loop"
 	"github.com/tOgg1/forge/internal/models"
 	"github.com/tOgg1/forge/internal/names"
+	"github.com/tOgg1/forge/internal/procutil"
 )
 
 const (
@@ -1380,6 +1381,9 @@ func resumeLoop(ctx context.Context, database *db.DB, configFile, loopID string)
 	if err := startLoopProcessFn(loopEntry.ID, configFile); err != nil {
 		return "", err
 	}
+	if err := setLoopRunnerMetadata(ctx, loopRepo, loopEntry.ID, "local", ""); err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("Loop %q resumed (%s)", loopEntry.Name, loopDisplayID(loopEntry)), nil
 }
 
@@ -1487,6 +1491,9 @@ func createLoops(ctx context.Context, database *db.DB, dataDir, configFile strin
 			return "", "", err
 		}
 		if err := startLoopProcessFn(entry.ID, configFile); err != nil {
+			return "", "", err
+		}
+		if err := setLoopRunnerMetadata(ctx, loopRepo, entry.ID, "local", ""); err != nil {
 			return "", "", err
 		}
 		createdIDs = append(createdIDs, entry.ID)
@@ -1847,6 +1854,23 @@ func parseTags(value string) []string {
 	return out
 }
 
+func setLoopRunnerMetadata(ctx context.Context, loopRepo *db.LoopRepository, loopID, owner, instanceID string) error {
+	loopEntry, err := loopRepo.Get(ctx, loopID)
+	if err != nil {
+		return err
+	}
+	if loopEntry.Metadata == nil {
+		loopEntry.Metadata = make(map[string]any)
+	}
+	loopEntry.Metadata["runner_owner"] = owner
+	if strings.TrimSpace(instanceID) == "" {
+		delete(loopEntry.Metadata, "runner_instance_id")
+	} else {
+		loopEntry.Metadata["runner_instance_id"] = instanceID
+	}
+	return loopRepo.Update(ctx, loopEntry)
+}
+
 func resolvePoolByRef(ctx context.Context, repo *db.PoolRepository, ref string) (*models.Pool, error) {
 	pool, err := repo.GetByName(ctx, ref)
 	if err == nil {
@@ -1872,8 +1896,13 @@ func startLoopProcess(loopID, configFile string) error {
 	cmd := exec.Command(os.Args[0], args...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
+	cmd.Stdin = nil
+	procutil.ConfigureDetached(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start loop process: %w", err)
+	}
+	if cmd.Process != nil {
+		_ = cmd.Process.Release()
 	}
 	return nil
 }

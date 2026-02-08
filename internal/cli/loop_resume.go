@@ -10,8 +10,11 @@ import (
 	"github.com/tOgg1/forge/internal/models"
 )
 
+var loopResumeSpawnOwner string
+
 func init() {
 	rootCmd.AddCommand(loopResumeCmd)
+	loopResumeCmd.Flags().StringVar(&loopResumeSpawnOwner, "spawn-owner", string(loopSpawnOwnerAuto), "loop runner owner (local|daemon|auto)")
 }
 
 var loopResumeCmd = &cobra.Command{
@@ -37,7 +40,16 @@ var loopResumeCmd = &cobra.Command{
 			return fmt.Errorf("loop %q is %s; only stopped or errored loops can be resumed", loopEntry.Name, loopEntry.State)
 		}
 
-		if err := startLoopProcess(loopEntry.ID); err != nil {
+		spawnOwner, err := parseLoopSpawnOwner(loopResumeSpawnOwner)
+		if err != nil {
+			return err
+		}
+
+		startResult, err := startLoopRunnerFunc(loopEntry.ID, cfgFile, spawnOwner)
+		if err != nil {
+			return err
+		}
+		if err := setLoopRunnerMetadata(context.Background(), loopRepo, loopEntry.ID, startResult.Owner, startResult.InstanceID); err != nil {
 			return err
 		}
 

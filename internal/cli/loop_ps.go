@@ -21,6 +21,14 @@ var (
 	loopPsTag     string
 )
 
+type loopPSJSONEntry struct {
+	*models.Loop
+	RunnerOwner      string `json:"runner_owner,omitempty"`
+	RunnerInstanceID string `json:"runner_instance_id,omitempty"`
+	RunnerPIDAlive   *bool  `json:"runner_pid_alive,omitempty"`
+	RunnerDaemonLive *bool  `json:"runner_daemon_alive,omitempty"`
+}
+
 func init() {
 	rootCmd.AddCommand(loopPsCmd)
 
@@ -72,9 +80,27 @@ var loopPsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		livenessByLoop, err := reconcileLoopLiveness(context.Background(), loopRepo, loops)
+		if err != nil {
+			return err
+		}
 
 		if IsJSONOutput() || IsJSONLOutput() {
-			return WriteOutput(os.Stdout, loops)
+			rows := make([]loopPSJSONEntry, 0, len(loops))
+			for _, loopEntry := range loops {
+				if loopEntry == nil {
+					continue
+				}
+				liveness := livenessByLoop[loopEntry.ID]
+				rows = append(rows, loopPSJSONEntry{
+					Loop:             loopEntry,
+					RunnerOwner:      liveness.Owner,
+					RunnerInstanceID: liveness.InstanceID,
+					RunnerPIDAlive:   liveness.PIDAlive,
+					RunnerDaemonLive: liveness.DaemonAlive,
+				})
+			}
+			return WriteOutput(os.Stdout, rows)
 		}
 
 		if len(loops) == 0 {

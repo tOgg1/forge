@@ -254,6 +254,26 @@ func (c *Client) GetAgent(ctx context.Context, req *forgedv1.GetAgentRequest) (*
 	return c.svc.GetAgent(ctx, req)
 }
 
+// StartLoopRunner starts a daemon-owned loop runner.
+func (c *Client) StartLoopRunner(ctx context.Context, req *forgedv1.StartLoopRunnerRequest) (*forgedv1.StartLoopRunnerResponse, error) {
+	return c.svc.StartLoopRunner(ctx, req)
+}
+
+// StopLoopRunner stops a daemon-owned loop runner.
+func (c *Client) StopLoopRunner(ctx context.Context, req *forgedv1.StopLoopRunnerRequest) (*forgedv1.StopLoopRunnerResponse, error) {
+	return c.svc.StopLoopRunner(ctx, req)
+}
+
+// GetLoopRunner fetches one daemon-owned loop runner.
+func (c *Client) GetLoopRunner(ctx context.Context, req *forgedv1.GetLoopRunnerRequest) (*forgedv1.GetLoopRunnerResponse, error) {
+	return c.svc.GetLoopRunner(ctx, req)
+}
+
+// ListLoopRunners lists daemon-owned loop runners.
+func (c *Client) ListLoopRunners(ctx context.Context, req *forgedv1.ListLoopRunnersRequest) (*forgedv1.ListLoopRunnersResponse, error) {
+	return c.svc.ListLoopRunners(ctx, req)
+}
+
 // SendInput sends text or keys to an agent.
 func (c *Client) SendInput(ctx context.Context, req *forgedv1.SendInputRequest) (*forgedv1.SendInputResponse, error) {
 	return c.svc.SendInput(ctx, req)

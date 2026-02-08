@@ -30,9 +30,13 @@ var DefaultRateLimits = map[string]RateLimitConfig{
 	"/forged.v1.ForgedService/SendInput": {RequestsPerSecond: 50, BurstSize: 100},
 
 	// Read operations - higher limits
-	"/forged.v1.ForgedService/ListAgents":  {RequestsPerSecond: 100, BurstSize: 200},
-	"/forged.v1.ForgedService/GetAgent":    {RequestsPerSecond: 100, BurstSize: 200},
-	"/forged.v1.ForgedService/CapturePane": {RequestsPerSecond: 50, BurstSize: 100},
+	"/forged.v1.ForgedService/ListAgents":      {RequestsPerSecond: 100, BurstSize: 200},
+	"/forged.v1.ForgedService/GetAgent":        {RequestsPerSecond: 100, BurstSize: 200},
+	"/forged.v1.ForgedService/CapturePane":     {RequestsPerSecond: 50, BurstSize: 100},
+	"/forged.v1.ForgedService/StartLoopRunner": {RequestsPerSecond: 20, BurstSize: 40},
+	"/forged.v1.ForgedService/StopLoopRunner":  {RequestsPerSecond: 20, BurstSize: 40},
+	"/forged.v1.ForgedService/GetLoopRunner":   {RequestsPerSecond: 100, BurstSize: 200},
+	"/forged.v1.ForgedService/ListLoopRunners": {RequestsPerSecond: 100, BurstSize: 200},
 
 	// Transcript operations
 	"/forged.v1.ForgedService/GetTranscript": {RequestsPerSecond: 50, BurstSize: 100},

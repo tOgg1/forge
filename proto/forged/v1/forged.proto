@@ -40,6 +40,18 @@ service ForgedService {
   // GetAgent returns details for a specific agent.
   rpc GetAgent(GetAgentRequest) returns (GetAgentResponse);
 
+  // StartLoopRunner starts a loop runner process owned by the daemon.
+  rpc StartLoopRunner(StartLoopRunnerRequest) returns (StartLoopRunnerResponse);
+
+  // StopLoopRunner stops a daemon-owned loop runner.
+  rpc StopLoopRunner(StopLoopRunnerRequest) returns (StopLoopRunnerResponse);
+
+  // GetLoopRunner returns loop runner details for one loop.
+  rpc GetLoopRunner(GetLoopRunnerRequest) returns (GetLoopRunnerResponse);
+
+  // ListLoopRunners lists loop runners owned by this daemon.
+  rpc ListLoopRunners(ListLoopRunnersRequest) returns (ListLoopRunnersResponse);
+
   // -----------------------------------------------------------------------------
   // Screen Capture
   // -----------------------------------------------------------------------------
@@ -193,6 +205,65 @@ message GetAgentRequest {
 
 message GetAgentResponse {
   Agent agent = 1;
+}
+
+message StartLoopRunnerRequest {
+  // Loop ID in the runtime database.
+  string loop_id = 1;
+
+  // Optional explicit config path passed to the spawned forge process.
+  string config_path = 2;
+
+  // Optional explicit forge command path.
+  // If empty, daemon uses "forge" from PATH.
+  string command_path = 3;
+}
+
+message StartLoopRunnerResponse {
+  LoopRunner runner = 1;
+}
+
+message StopLoopRunnerRequest {
+  string loop_id = 1;
+  bool force = 2;
+}
+
+message StopLoopRunnerResponse {
+  bool success = 1;
+  LoopRunner runner = 2;
+}
+
+message GetLoopRunnerRequest {
+  string loop_id = 1;
+}
+
+message GetLoopRunnerResponse {
+  LoopRunner runner = 1;
+}
+
+message ListLoopRunnersRequest {}
+
+message ListLoopRunnersResponse {
+  repeated LoopRunner runners = 1;
+}
+
+message LoopRunner {
+  string loop_id = 1;
+  string instance_id = 2;
+  string config_path = 3;
+  string command_path = 4;
+  int32 pid = 5;
+  LoopRunnerState state = 6;
+  string last_error = 7;
+  google.protobuf.Timestamp started_at = 8;
+  google.protobuf.Timestamp stopped_at = 9;
+}
+
+enum LoopRunnerState {
+  LOOP_RUNNER_STATE_UNSPECIFIED = 0;
+  LOOP_RUNNER_STATE_RUNNING = 1;
+  LOOP_RUNNER_STATE_STOPPED = 2;
+  LOOP_RUNNER_STATE_ERROR = 3;
 }
 
 // =============================================================================

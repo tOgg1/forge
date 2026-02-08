@@ -3,6 +3,7 @@ package forged
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -69,6 +70,57 @@ func TestServerGetAgentNotFound(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("GetAgent() should return error for nonexistent agent")
+	}
+}
+
+func TestServerLoopRunnerLifecycle(t *testing.T) {
+	server := NewServer(zerolog.Nop())
+	server.loopCommandBuilder = func(_ string, _ ...string) *exec.Cmd {
+		return exec.Command("sleep", "5")
+	}
+
+	startResp, err := server.StartLoopRunner(context.Background(), &forgedv1.StartLoopRunnerRequest{
+		LoopId:      "loop-a",
+		CommandPath: "ignored",
+	})
+	if err != nil {
+		t.Fatalf("StartLoopRunner() error = %v", err)
+	}
+	if startResp.Runner == nil {
+		t.Fatalf("StartLoopRunner() runner is nil")
+	}
+	if startResp.Runner.State != forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_RUNNING {
+		t.Fatalf("runner state = %v, want RUNNING", startResp.Runner.State)
+	}
+
+	getResp, err := server.GetLoopRunner(context.Background(), &forgedv1.GetLoopRunnerRequest{LoopId: "loop-a"})
+	if err != nil {
+		t.Fatalf("GetLoopRunner() error = %v", err)
+	}
+	if getResp.Runner == nil || getResp.Runner.LoopId != "loop-a" {
+		t.Fatalf("unexpected GetLoopRunner response: %+v", getResp.Runner)
+	}
+
+	listResp, err := server.ListLoopRunners(context.Background(), &forgedv1.ListLoopRunnersRequest{})
+	if err != nil {
+		t.Fatalf("ListLoopRunners() error = %v", err)
+	}
+	if len(listResp.Runners) != 1 {
+		t.Fatalf("ListLoopRunners count = %d, want 1", len(listResp.Runners))
+	}
+
+	stopResp, err := server.StopLoopRunner(context.Background(), &forgedv1.StopLoopRunnerRequest{
+		LoopId: "loop-a",
+		Force:  true,
+	})
+	if err != nil {
+		t.Fatalf("StopLoopRunner() error = %v", err)
+	}
+	if !stopResp.Success {
+		t.Fatalf("StopLoopRunner() success = false")
+	}
+	if stopResp.Runner == nil || stopResp.Runner.State != forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_STOPPED {
+		t.Fatalf("unexpected StopLoopRunner state: %+v", stopResp.Runner)
 	}
 }
 

@@ -34,9 +34,11 @@ func TestLoopCLIUpMsgLogs(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalWd) }()
 
-	originalStart := startLoopProcessFunc
-	startLoopProcessFunc = func(string) error { return nil }
-	defer func() { startLoopProcessFunc = originalStart }()
+	originalStart := startLoopRunnerFunc
+	startLoopRunnerFunc = func(string, string, loopSpawnOwner) (loopRunnerStartResult, error) {
+		return loopRunnerStartResult{Owner: loopSpawnOwnerLocal}, nil
+	}
+	defer func() { startLoopRunnerFunc = originalStart }()
 
 	loopUpCount = 1
 	loopUpName = "smoke-loop"
@@ -136,9 +138,11 @@ func TestLoopCLIUpAcceptsZeroLimitsAsUnlimited(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalWd) }()
 
-	originalStart := startLoopProcessFunc
-	startLoopProcessFunc = func(string) error { return nil }
-	defer func() { startLoopProcessFunc = originalStart }()
+	originalStart := startLoopRunnerFunc
+	startLoopRunnerFunc = func(string, string, loopSpawnOwner) (loopRunnerStartResult, error) {
+		return loopRunnerStartResult{Owner: loopSpawnOwnerLocal}, nil
+	}
+	defer func() { startLoopRunnerFunc = originalStart }()
 
 	loopUpCount = 1
 	loopUpName = "reject-zero"

@@ -67,7 +67,9 @@ forge pool add default oc1
 forge pool set-default default
 
 # 4) Start a loop
-forge up --count 1
+forge up --count 1 --spawn-owner auto
+# optional: force daemon ownership (fails if forged unavailable)
+# forge up --count 1 --spawn-owner daemon
 # Optional: smart stop rules
 # forge up --name review --quantitative-stop-cmd 'sv count --epic | rg -q "^0$"' --quantitative-stop-exit-codes 0
 # forge up --name review --qualitative-stop-every 5 --qualitative-stop-prompt stop-judge
@@ -123,3 +125,17 @@ See `docs/skills.md` for details.
 ## CLI Reference
 
 See `docs/cli.md` for the full CLI surface.
+
+## Loop runner ownership
+
+Loop runners can be spawned with explicit ownership:
+
+- `local`: detached local process
+- `daemon`: owned by `forged` daemon
+- `auto` (default): daemon first, local detached fallback if daemon unavailable
+
+Commands supporting owner selection:
+
+- `forge up --spawn-owner ...`
+- `forge scale --spawn-owner ...`
+- `forge resume --spawn-owner ...`

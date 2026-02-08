@@ -26,6 +26,7 @@ var (
 	loopScaleTags          string
 	loopScaleNamePrefix    string
 	loopScaleKill          bool
+	loopScaleSpawnOwner    string
 
 	loopScaleQuantStopCmd        string
 	loopScaleQuantStopEvery      int
@@ -59,6 +60,7 @@ func init() {
 	loopScaleCmd.Flags().StringVar(&loopScaleTags, "tags", "", "comma-separated tags")
 	loopScaleCmd.Flags().StringVar(&loopScaleNamePrefix, "name-prefix", "", "name prefix for new loops")
 	loopScaleCmd.Flags().BoolVar(&loopScaleKill, "kill", false, "kill extra loops instead of stopping")
+	loopScaleCmd.Flags().StringVar(&loopScaleSpawnOwner, "spawn-owner", string(loopSpawnOwnerAuto), "loop runner owner (local|daemon|auto)")
 
 	loopScaleCmd.Flags().StringVar(&loopScaleQuantStopCmd, "quantitative-stop-cmd", "", "quantitative stop: command to execute (bash -lc)")
 	loopScaleCmd.Flags().IntVar(&loopScaleQuantStopEvery, "quantitative-stop-every", 1, "quantitative stop: evaluate every N iterations (> 0)")
@@ -273,6 +275,10 @@ For new loops, you can configure smart stop:
 
 		if len(loops) < loopScaleCount {
 			toCreate := loopScaleCount - len(loops)
+			spawnOwner, err := parseLoopSpawnOwner(loopScaleSpawnOwner)
+			if err != nil {
+				return err
+			}
 			existingNames := make(map[string]struct{}, len(loops))
 			for _, entry := range loops {
 				existingNames[entry.Name] = struct{}{}
@@ -313,7 +319,11 @@ For new loops, you can configure smart stop:
 					return err
 				}
 
-				if err := startLoopProcess(loopEntry.ID); err != nil {
+				startResult, err := startLoopRunnerFunc(loopEntry.ID, cfgFile, spawnOwner)
+				if err != nil {
+					return err
+				}
+				if err := setLoopRunnerMetadata(context.Background(), loopRepo, loopEntry.ID, startResult.Owner, startResult.InstanceID); err != nil {
 					return err
 				}
 			}

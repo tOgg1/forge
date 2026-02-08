@@ -22,10 +22,32 @@ Purpose
 
 Quick Start (Loops)
 1) forge init
-2) forge up --name <loop-name> --prompt <prompt-name|path>
+2) forge up --name <loop-name> --prompt <prompt-name|path> --spawn-owner auto
 3) forge ps
 4) forge logs <loop>
 5) forge msg <loop> "instruction"
+
+Loop Runner Ownership
+- owner modes: local | daemon | auto (default auto)
+- apply on spawn cmds:
+  - forge up --spawn-owner <mode>
+  - forge scale --spawn-owner <mode>
+  - forge resume --spawn-owner <mode>
+- auto policy:
+  - daemon reachable: start runner via forged
+  - daemon unavailable: warn + detached local fallback
+- daemon mode:
+  - if forged unavailable => hard error (no fallback)
+
+Detached spawn + stale-state reconciliation
+- local spawn detached from caller session/process group (survives parent shell exit)
+- forge ps reconciles stale running loops:
+  - running + dead/missing pid + no daemon runner => state set to stopped, reason stale_runner
+- diagnostics (JSON):
+  - runner_owner
+  - runner_instance_id
+  - runner_pid_alive
+  - runner_daemon_alive
 
 Smart Stop (Loops)
 - quantitative: run cmd; match exit code + stdout/stderr; stop or continue; cadence via --quantitative-stop-every

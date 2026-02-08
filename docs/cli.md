@@ -88,6 +88,8 @@ forge up --count 1
 forge up --name review-loop --prompt review
 forge up --pool default --interval 30s --tags review
 forge up --max-iterations 10 --max-runtime 2h
+forge up --spawn-owner auto
+forge up --spawn-owner daemon
 forge up --quantitative-stop-cmd 'sv count --epic | rg -q "^0$"' --quantitative-stop-exit-codes 0
 forge up --qualitative-stop-every 5 --qualitative-stop-prompt stop-judge
 ```
@@ -98,6 +100,12 @@ Smart stop (loop-level):
 - Qualitative stop injects a specialized next iteration using the same agent. The agent must output `0` (stop) or `1` (continue).
 See `docs/smart-stop.md`.
 
+Loop runner ownership (`--spawn-owner`):
+
+- `auto` (default): try local `forged` daemon; if unavailable, warn and use detached local spawn.
+- `daemon`: require daemon; fail if daemon unavailable.
+- `local`: always detached local spawn.
+
 ### `forge loop ps` (alias: `forge ps`)
 
 List loops.
@@ -106,7 +114,19 @@ List loops.
 forge ps
 forge ps --state running
 forge ps --pool default
+forge ps --json
 ```
+
+`forge ps` reconciles stale states before rendering:
+
+- if loop state is `running` but runner PID is dead/missing and no daemon runner exists, loop is marked `stopped` with reason `stale_runner`.
+
+JSON output includes runner diagnostics:
+
+- `runner_owner`
+- `runner_instance_id`
+- `runner_pid_alive`
+- `runner_daemon_alive`
 
 ### `forge loop logs` (alias: `forge logs`)
 
@@ -146,6 +166,7 @@ Resume a stopped or errored loop.
 
 ```bash
 forge resume review-loop
+forge resume review-loop --spawn-owner auto
 ```
 
 ### `forge loop rm` (alias: `forge rm`)
@@ -176,6 +197,7 @@ Scale loops to a target count.
 forge scale --count 3 --pool default
 forge scale --count 0 --kill
 forge scale --count 2 --max-iterations 5 --max-runtime 1h
+forge scale --count 3 --spawn-owner daemon
 ```
 
 ### `forge loop queue` (alias: `forge queue`)

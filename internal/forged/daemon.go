@@ -423,12 +423,19 @@ func (d *Daemon) shutdown() {
 		d.logger.Debug().Msg("state poller stopped")
 	}
 
-	// 4. Stop gRPC server
+	// 4. Stop daemon-owned loop runners
+	if d.server != nil {
+		d.logger.Debug().Msg("stopping daemon-owned loop runners...")
+		d.server.StopAllLoopRunners(true)
+		d.logger.Debug().Msg("daemon-owned loop runners stopped")
+	}
+
+	// 5. Stop gRPC server
 	d.logger.Debug().Msg("stopping gRPC server...")
 	d.grpcServer.GracefulStop()
 	d.logger.Debug().Msg("gRPC server stopped")
 
-	// 5. Stop mail servers
+	// 6. Stop mail servers
 	d.logger.Debug().Msg("stopping mail servers...")
 	if d.mailRelay != nil {
 		d.logger.Debug().Msg("stopping mail relay...")
@@ -438,14 +445,14 @@ func (d *Daemon) shutdown() {
 	d.shutdownMailServers()
 	d.logger.Debug().Msg("mail servers stopped")
 
-	// 6. Stop resource monitor
+	// 7. Stop resource monitor
 	if d.resourceMonitor != nil {
 		d.logger.Debug().Msg("stopping resource monitor...")
 		d.resourceMonitor.Stop()
 		d.logger.Debug().Msg("resource monitor stopped")
 	}
 
-	// 7. Close database
+	// 8. Close database
 	if d.database != nil {
 		d.logger.Debug().Msg("closing database...")
 		if err := d.database.Close(); err != nil {

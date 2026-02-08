@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/tOgg1/forge/gen/forged/v1"
+	"github.com/tOgg1/forge/internal/procutil"
 	"github.com/tOgg1/forge/internal/tmux"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -71,6 +75,19 @@ type agentInfo struct {
 	transcriptNext int64 // next ID for new entries
 }
 
+type loopRunnerInfo struct {
+	loopID      string
+	instanceID  string
+	configPath  string
+	commandPath string
+	pid         int
+	state       forgedv1.LoopRunnerState
+	lastError   string
+	startedAt   time.Time
+	stoppedAt   *time.Time
+	cmd         *exec.Cmd
+}
+
 // Server implements the ForgedService gRPC interface.
 type Server struct {
 	forgedv1.UnimplementedForgedServiceServer
@@ -96,6 +113,10 @@ type Server struct {
 
 	// Resource monitor for enforcing resource caps
 	resourceMonitor *ResourceMonitor
+
+	loopRunners map[string]*loopRunnerInfo // keyed by loop ID
+
+	loopCommandBuilder func(name string, args ...string) *exec.Cmd
 }
 
 // ServerOption configures the Server.
@@ -113,14 +134,16 @@ func NewServer(logger zerolog.Logger, opts ...ServerOption) *Server {
 	hostname, _ := os.Hostname()
 
 	s := &Server{
-		logger:    logger,
-		tmux:      tmux.NewLocalClient(),
-		startedAt: time.Now(),
-		hostname:  hostname,
-		version:   "dev",
-		agents:    make(map[string]*agentInfo),
-		events:    make([]storedEvent, 0, maxStoredEvents),
-		eventSubs: make(map[string]*eventSubscriber),
+		logger:             logger,
+		tmux:               tmux.NewLocalClient(),
+		startedAt:          time.Now(),
+		hostname:           hostname,
+		version:            "dev",
+		agents:             make(map[string]*agentInfo),
+		events:             make([]storedEvent, 0, maxStoredEvents),
+		eventSubs:          make(map[string]*eventSubscriber),
+		loopRunners:        make(map[string]*loopRunnerInfo),
+		loopCommandBuilder: exec.Command,
 	}
 
 	for _, opt := range opts {
@@ -452,6 +475,208 @@ func (s *Server) GetAgent(ctx context.Context, req *forgedv1.GetAgentRequest) (*
 	return &forgedv1.GetAgentResponse{Agent: s.agentToProto(info)}, nil
 }
 
+// StartLoopRunner starts a daemon-owned loop runner process.
+func (s *Server) StartLoopRunner(ctx context.Context, req *forgedv1.StartLoopRunnerRequest) (*forgedv1.StartLoopRunnerResponse, error) {
+	if req.LoopId == "" {
+		return nil, status.Error(codes.InvalidArgument, "loop_id is required")
+	}
+
+	loopID := strings.TrimSpace(req.LoopId)
+	commandPath := strings.TrimSpace(req.CommandPath)
+	if commandPath == "" {
+		commandPath = "forge"
+	}
+
+	args := []string{"loop", "run", loopID}
+	if configPath := strings.TrimSpace(req.ConfigPath); configPath != "" {
+		args = append([]string{"--config", configPath}, args...)
+	}
+
+	s.mu.Lock()
+	if existing, ok := s.loopRunners[loopID]; ok {
+		s.refreshLoopRunnerLocked(existing)
+		if existing.state == forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_RUNNING {
+			s.mu.Unlock()
+			return nil, status.Errorf(codes.AlreadyExists, "loop runner %q already running", loopID)
+		}
+	}
+	s.mu.Unlock()
+
+	cmdBuilder := s.loopCommandBuilder
+	if cmdBuilder == nil {
+		cmdBuilder = exec.Command
+	}
+	cmd := cmdBuilder(commandPath, args...)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+
+	if err := cmd.Start(); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to start loop runner: %v", err)
+	}
+
+	now := time.Now().UTC()
+	info := &loopRunnerInfo{
+		loopID:      loopID,
+		instanceID:  uuid.NewString(),
+		configPath:  strings.TrimSpace(req.ConfigPath),
+		commandPath: commandPath,
+		pid:         cmd.Process.Pid,
+		state:       forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_RUNNING,
+		startedAt:   now,
+		cmd:         cmd,
+	}
+
+	s.mu.Lock()
+	s.loopRunners[loopID] = info
+	s.mu.Unlock()
+
+	go s.waitForLoopRunnerExit(loopID, info.instanceID, cmd)
+
+	s.logger.Info().
+		Str("loop_id", loopID).
+		Str("instance_id", info.instanceID).
+		Int("pid", info.pid).
+		Msg("loop runner started")
+
+	return &forgedv1.StartLoopRunnerResponse{Runner: s.loopRunnerToProto(info)}, nil
+}
+
+// StopLoopRunner stops a daemon-owned loop runner process.
+func (s *Server) StopLoopRunner(ctx context.Context, req *forgedv1.StopLoopRunnerRequest) (*forgedv1.StopLoopRunnerResponse, error) {
+	if req.LoopId == "" {
+		return nil, status.Error(codes.InvalidArgument, "loop_id is required")
+	}
+
+	runner, err := s.stopLoopRunner(strings.TrimSpace(req.LoopId), req.Force)
+	if err != nil {
+		return nil, err
+	}
+	return &forgedv1.StopLoopRunnerResponse{
+		Success: true,
+		Runner:  s.loopRunnerToProto(runner),
+	}, nil
+}
+
+// GetLoopRunner returns one daemon-owned loop runner.
+func (s *Server) GetLoopRunner(ctx context.Context, req *forgedv1.GetLoopRunnerRequest) (*forgedv1.GetLoopRunnerResponse, error) {
+	if req.LoopId == "" {
+		return nil, status.Error(codes.InvalidArgument, "loop_id is required")
+	}
+
+	loopID := strings.TrimSpace(req.LoopId)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	info, ok := s.loopRunners[loopID]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "loop runner %q not found", loopID)
+	}
+	s.refreshLoopRunnerLocked(info)
+	return &forgedv1.GetLoopRunnerResponse{Runner: s.loopRunnerToProto(info)}, nil
+}
+
+// ListLoopRunners lists daemon-owned loop runners.
+func (s *Server) ListLoopRunners(ctx context.Context, req *forgedv1.ListLoopRunnersRequest) (*forgedv1.ListLoopRunnersResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	loopIDs := make([]string, 0, len(s.loopRunners))
+	for loopID := range s.loopRunners {
+		loopIDs = append(loopIDs, loopID)
+	}
+	sort.Strings(loopIDs)
+
+	runners := make([]*forgedv1.LoopRunner, 0, len(loopIDs))
+	for _, loopID := range loopIDs {
+		info := s.loopRunners[loopID]
+		s.refreshLoopRunnerLocked(info)
+		runners = append(runners, s.loopRunnerToProto(info))
+	}
+
+	return &forgedv1.ListLoopRunnersResponse{Runners: runners}, nil
+}
+
+func (s *Server) waitForLoopRunnerExit(loopID, instanceID string, cmd *exec.Cmd) {
+	err := cmd.Wait()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	info, ok := s.loopRunners[loopID]
+	if !ok || info.instanceID != instanceID {
+		return
+	}
+
+	now := time.Now().UTC()
+	info.stoppedAt = &now
+
+	if err != nil {
+		if info.state != forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_STOPPED {
+			info.state = forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_ERROR
+			info.lastError = err.Error()
+		}
+		s.logger.Warn().
+			Err(err).
+			Str("loop_id", loopID).
+			Str("instance_id", instanceID).
+			Msg("loop runner exited with error")
+		return
+	}
+
+	if info.state != forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_STOPPED {
+		info.state = forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_STOPPED
+	}
+	info.lastError = ""
+}
+
+func (s *Server) stopLoopRunner(loopID string, force bool) (*loopRunnerInfo, error) {
+	s.mu.Lock()
+	info, ok := s.loopRunners[loopID]
+	if !ok {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.NotFound, "loop runner %q not found", loopID)
+	}
+
+	s.refreshLoopRunnerLocked(info)
+	if info.state != forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_RUNNING {
+		s.mu.Unlock()
+		return info, nil
+	}
+
+	process := info.cmd.Process
+	s.mu.Unlock()
+
+	if process == nil {
+		return nil, status.Errorf(codes.Internal, "loop runner %q has no process handle", loopID)
+	}
+
+	var signalErr error
+	if force {
+		signalErr = process.Kill()
+	} else {
+		signalErr = process.Signal(os.Interrupt)
+		if signalErr != nil {
+			signalErr = process.Kill()
+		}
+	}
+	if signalErr != nil {
+		return nil, status.Errorf(codes.Internal, "failed to stop loop runner %q: %v", loopID, signalErr)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	info = s.loopRunners[loopID]
+	if info != nil {
+		now := time.Now().UTC()
+		info.state = forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_STOPPED
+		info.lastError = ""
+		info.stoppedAt = &now
+	}
+
+	return info, nil
+}
+
 // =============================================================================
 // Screen Capture
 // =============================================================================
@@ -754,6 +979,55 @@ func (s *Server) Ping(ctx context.Context, req *forgedv1.PingRequest) (*forgedv1
 // =============================================================================
 // Helpers
 // =============================================================================
+
+// StopAllLoopRunners stops all loop runners managed by this daemon.
+func (s *Server) StopAllLoopRunners(force bool) {
+	s.mu.RLock()
+	loopIDs := make([]string, 0, len(s.loopRunners))
+	for loopID := range s.loopRunners {
+		loopIDs = append(loopIDs, loopID)
+	}
+	s.mu.RUnlock()
+
+	for _, loopID := range loopIDs {
+		_, _ = s.stopLoopRunner(loopID, force)
+	}
+}
+
+func (s *Server) refreshLoopRunnerLocked(info *loopRunnerInfo) {
+	if info == nil {
+		return
+	}
+	if info.state != forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_RUNNING {
+		return
+	}
+	if procutil.IsProcessAlive(info.pid) {
+		return
+	}
+	now := time.Now().UTC()
+	info.state = forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_STOPPED
+	info.stoppedAt = &now
+}
+
+func (s *Server) loopRunnerToProto(info *loopRunnerInfo) *forgedv1.LoopRunner {
+	if info == nil {
+		return nil
+	}
+	proto := &forgedv1.LoopRunner{
+		LoopId:      info.loopID,
+		InstanceId:  info.instanceID,
+		ConfigPath:  info.configPath,
+		CommandPath: info.commandPath,
+		Pid:         int32(info.pid),
+		State:       info.state,
+		LastError:   info.lastError,
+		StartedAt:   timestamppb.New(info.startedAt),
+	}
+	if info.stoppedAt != nil && !info.stoppedAt.IsZero() {
+		proto.StoppedAt = timestamppb.New(*info.stoppedAt)
+	}
+	return proto
+}
 
 func (s *Server) agentToProto(info *agentInfo) *forgedv1.Agent {
 	return &forgedv1.Agent{

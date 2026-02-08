@@ -26,6 +26,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type LoopRunnerState int32
+
+const (
+	LoopRunnerState_LOOP_RUNNER_STATE_UNSPECIFIED LoopRunnerState = 0
+	LoopRunnerState_LOOP_RUNNER_STATE_RUNNING     LoopRunnerState = 1
+	LoopRunnerState_LOOP_RUNNER_STATE_STOPPED     LoopRunnerState = 2
+	LoopRunnerState_LOOP_RUNNER_STATE_ERROR       LoopRunnerState = 3
+)
+
+// Enum value maps for LoopRunnerState.
+var (
+	LoopRunnerState_name = map[int32]string{
+		0: "LOOP_RUNNER_STATE_UNSPECIFIED",
+		1: "LOOP_RUNNER_STATE_RUNNING",
+		2: "LOOP_RUNNER_STATE_STOPPED",
+		3: "LOOP_RUNNER_STATE_ERROR",
+	}
+	LoopRunnerState_value = map[string]int32{
+		"LOOP_RUNNER_STATE_UNSPECIFIED": 0,
+		"LOOP_RUNNER_STATE_RUNNING":     1,
+		"LOOP_RUNNER_STATE_STOPPED":     2,
+		"LOOP_RUNNER_STATE_ERROR":       3,
+	}
+)
+
+func (x LoopRunnerState) Enum() *LoopRunnerState {
+	p := new(LoopRunnerState)
+	*p = x
+	return p
+}
+
+func (x LoopRunnerState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (LoopRunnerState) Descriptor() protoreflect.EnumDescriptor {
+	return file_forged_v1_forged_proto_enumTypes[0].Descriptor()
+}
+
+func (LoopRunnerState) Type() protoreflect.EnumType {
+	return &file_forged_v1_forged_proto_enumTypes[0]
+}
+
+func (x LoopRunnerState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use LoopRunnerState.Descriptor instead.
+func (LoopRunnerState) EnumDescriptor() ([]byte, []int) {
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{0}
+}
+
 // ResourceLimitAction defines what happens when limits are exceeded.
 type ResourceLimitAction int32
 
@@ -66,11 +118,11 @@ func (x ResourceLimitAction) String() string {
 }
 
 func (ResourceLimitAction) Descriptor() protoreflect.EnumDescriptor {
-	return file_forged_v1_forged_proto_enumTypes[0].Descriptor()
+	return file_forged_v1_forged_proto_enumTypes[1].Descriptor()
 }
 
 func (ResourceLimitAction) Type() protoreflect.EnumType {
-	return &file_forged_v1_forged_proto_enumTypes[0]
+	return &file_forged_v1_forged_proto_enumTypes[1]
 }
 
 func (x ResourceLimitAction) Number() protoreflect.EnumNumber {
@@ -79,7 +131,7 @@ func (x ResourceLimitAction) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ResourceLimitAction.Descriptor instead.
 func (ResourceLimitAction) EnumDescriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{0}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{1}
 }
 
 type AgentState int32
@@ -133,11 +185,11 @@ func (x AgentState) String() string {
 }
 
 func (AgentState) Descriptor() protoreflect.EnumDescriptor {
-	return file_forged_v1_forged_proto_enumTypes[1].Descriptor()
+	return file_forged_v1_forged_proto_enumTypes[2].Descriptor()
 }
 
 func (AgentState) Type() protoreflect.EnumType {
-	return &file_forged_v1_forged_proto_enumTypes[1]
+	return &file_forged_v1_forged_proto_enumTypes[2]
 }
 
 func (x AgentState) Number() protoreflect.EnumNumber {
@@ -146,7 +198,7 @@ func (x AgentState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AgentState.Descriptor instead.
 func (AgentState) EnumDescriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{1}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{2}
 }
 
 type EventType int32
@@ -197,11 +249,11 @@ func (x EventType) String() string {
 }
 
 func (EventType) Descriptor() protoreflect.EnumDescriptor {
-	return file_forged_v1_forged_proto_enumTypes[2].Descriptor()
+	return file_forged_v1_forged_proto_enumTypes[3].Descriptor()
 }
 
 func (EventType) Type() protoreflect.EnumType {
-	return &file_forged_v1_forged_proto_enumTypes[2]
+	return &file_forged_v1_forged_proto_enumTypes[3]
 }
 
 func (x EventType) Number() protoreflect.EnumNumber {
@@ -210,7 +262,7 @@ func (x EventType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EventType.Descriptor instead.
 func (EventType) EnumDescriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{2}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{3}
 }
 
 // ResourceType identifies the type of resource being monitored.
@@ -247,11 +299,11 @@ func (x ResourceType) String() string {
 }
 
 func (ResourceType) Descriptor() protoreflect.EnumDescriptor {
-	return file_forged_v1_forged_proto_enumTypes[3].Descriptor()
+	return file_forged_v1_forged_proto_enumTypes[4].Descriptor()
 }
 
 func (ResourceType) Type() protoreflect.EnumType {
-	return &file_forged_v1_forged_proto_enumTypes[3]
+	return &file_forged_v1_forged_proto_enumTypes[4]
 }
 
 func (x ResourceType) Number() protoreflect.EnumNumber {
@@ -260,7 +312,7 @@ func (x ResourceType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ResourceType.Descriptor instead.
 func (ResourceType) EnumDescriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{3}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{4}
 }
 
 type TranscriptEntryType int32
@@ -308,11 +360,11 @@ func (x TranscriptEntryType) String() string {
 }
 
 func (TranscriptEntryType) Descriptor() protoreflect.EnumDescriptor {
-	return file_forged_v1_forged_proto_enumTypes[4].Descriptor()
+	return file_forged_v1_forged_proto_enumTypes[5].Descriptor()
 }
 
 func (TranscriptEntryType) Type() protoreflect.EnumType {
-	return &file_forged_v1_forged_proto_enumTypes[4]
+	return &file_forged_v1_forged_proto_enumTypes[5]
 }
 
 func (x TranscriptEntryType) Number() protoreflect.EnumNumber {
@@ -321,7 +373,7 @@ func (x TranscriptEntryType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TranscriptEntryType.Descriptor instead.
 func (TranscriptEntryType) EnumDescriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{4}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{5}
 }
 
 type Health int32
@@ -360,11 +412,11 @@ func (x Health) String() string {
 }
 
 func (Health) Descriptor() protoreflect.EnumDescriptor {
-	return file_forged_v1_forged_proto_enumTypes[5].Descriptor()
+	return file_forged_v1_forged_proto_enumTypes[6].Descriptor()
 }
 
 func (Health) Type() protoreflect.EnumType {
-	return &file_forged_v1_forged_proto_enumTypes[5]
+	return &file_forged_v1_forged_proto_enumTypes[6]
 }
 
 func (x Health) Number() protoreflect.EnumNumber {
@@ -373,7 +425,7 @@ func (x Health) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Health.Descriptor instead.
 func (Health) EnumDescriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{5}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{6}
 }
 
 type SpawnAgentRequest struct {
@@ -1041,6 +1093,494 @@ func (x *GetAgentResponse) GetAgent() *Agent {
 	return nil
 }
 
+type StartLoopRunnerRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Loop ID in the runtime database.
+	LoopId string `protobuf:"bytes,1,opt,name=loop_id,json=loopId,proto3" json:"loop_id,omitempty"`
+	// Optional explicit config path passed to the spawned forge process.
+	ConfigPath string `protobuf:"bytes,2,opt,name=config_path,json=configPath,proto3" json:"config_path,omitempty"`
+	// Optional explicit forge command path.
+	// If empty, daemon uses "forge" from PATH.
+	CommandPath   string `protobuf:"bytes,3,opt,name=command_path,json=commandPath,proto3" json:"command_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartLoopRunnerRequest) Reset() {
+	*x = StartLoopRunnerRequest{}
+	mi := &file_forged_v1_forged_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartLoopRunnerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartLoopRunnerRequest) ProtoMessage() {}
+
+func (x *StartLoopRunnerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_forged_v1_forged_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartLoopRunnerRequest.ProtoReflect.Descriptor instead.
+func (*StartLoopRunnerRequest) Descriptor() ([]byte, []int) {
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *StartLoopRunnerRequest) GetLoopId() string {
+	if x != nil {
+		return x.LoopId
+	}
+	return ""
+}
+
+func (x *StartLoopRunnerRequest) GetConfigPath() string {
+	if x != nil {
+		return x.ConfigPath
+	}
+	return ""
+}
+
+func (x *StartLoopRunnerRequest) GetCommandPath() string {
+	if x != nil {
+		return x.CommandPath
+	}
+	return ""
+}
+
+type StartLoopRunnerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Runner        *LoopRunner            `protobuf:"bytes,1,opt,name=runner,proto3" json:"runner,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartLoopRunnerResponse) Reset() {
+	*x = StartLoopRunnerResponse{}
+	mi := &file_forged_v1_forged_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartLoopRunnerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartLoopRunnerResponse) ProtoMessage() {}
+
+func (x *StartLoopRunnerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_forged_v1_forged_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartLoopRunnerResponse.ProtoReflect.Descriptor instead.
+func (*StartLoopRunnerResponse) Descriptor() ([]byte, []int) {
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *StartLoopRunnerResponse) GetRunner() *LoopRunner {
+	if x != nil {
+		return x.Runner
+	}
+	return nil
+}
+
+type StopLoopRunnerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LoopId        string                 `protobuf:"bytes,1,opt,name=loop_id,json=loopId,proto3" json:"loop_id,omitempty"`
+	Force         bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StopLoopRunnerRequest) Reset() {
+	*x = StopLoopRunnerRequest{}
+	mi := &file_forged_v1_forged_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StopLoopRunnerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StopLoopRunnerRequest) ProtoMessage() {}
+
+func (x *StopLoopRunnerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_forged_v1_forged_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StopLoopRunnerRequest.ProtoReflect.Descriptor instead.
+func (*StopLoopRunnerRequest) Descriptor() ([]byte, []int) {
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *StopLoopRunnerRequest) GetLoopId() string {
+	if x != nil {
+		return x.LoopId
+	}
+	return ""
+}
+
+func (x *StopLoopRunnerRequest) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
+type StopLoopRunnerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Runner        *LoopRunner            `protobuf:"bytes,2,opt,name=runner,proto3" json:"runner,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StopLoopRunnerResponse) Reset() {
+	*x = StopLoopRunnerResponse{}
+	mi := &file_forged_v1_forged_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StopLoopRunnerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StopLoopRunnerResponse) ProtoMessage() {}
+
+func (x *StopLoopRunnerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_forged_v1_forged_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StopLoopRunnerResponse.ProtoReflect.Descriptor instead.
+func (*StopLoopRunnerResponse) Descriptor() ([]byte, []int) {
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *StopLoopRunnerResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *StopLoopRunnerResponse) GetRunner() *LoopRunner {
+	if x != nil {
+		return x.Runner
+	}
+	return nil
+}
+
+type GetLoopRunnerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LoopId        string                 `protobuf:"bytes,1,opt,name=loop_id,json=loopId,proto3" json:"loop_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetLoopRunnerRequest) Reset() {
+	*x = GetLoopRunnerRequest{}
+	mi := &file_forged_v1_forged_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetLoopRunnerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetLoopRunnerRequest) ProtoMessage() {}
+
+func (x *GetLoopRunnerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_forged_v1_forged_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetLoopRunnerRequest.ProtoReflect.Descriptor instead.
+func (*GetLoopRunnerRequest) Descriptor() ([]byte, []int) {
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *GetLoopRunnerRequest) GetLoopId() string {
+	if x != nil {
+		return x.LoopId
+	}
+	return ""
+}
+
+type GetLoopRunnerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Runner        *LoopRunner            `protobuf:"bytes,1,opt,name=runner,proto3" json:"runner,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetLoopRunnerResponse) Reset() {
+	*x = GetLoopRunnerResponse{}
+	mi := &file_forged_v1_forged_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetLoopRunnerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetLoopRunnerResponse) ProtoMessage() {}
+
+func (x *GetLoopRunnerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_forged_v1_forged_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetLoopRunnerResponse.ProtoReflect.Descriptor instead.
+func (*GetLoopRunnerResponse) Descriptor() ([]byte, []int) {
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetLoopRunnerResponse) GetRunner() *LoopRunner {
+	if x != nil {
+		return x.Runner
+	}
+	return nil
+}
+
+type ListLoopRunnersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListLoopRunnersRequest) Reset() {
+	*x = ListLoopRunnersRequest{}
+	mi := &file_forged_v1_forged_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListLoopRunnersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListLoopRunnersRequest) ProtoMessage() {}
+
+func (x *ListLoopRunnersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_forged_v1_forged_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListLoopRunnersRequest.ProtoReflect.Descriptor instead.
+func (*ListLoopRunnersRequest) Descriptor() ([]byte, []int) {
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{17}
+}
+
+type ListLoopRunnersResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Runners       []*LoopRunner          `protobuf:"bytes,1,rep,name=runners,proto3" json:"runners,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListLoopRunnersResponse) Reset() {
+	*x = ListLoopRunnersResponse{}
+	mi := &file_forged_v1_forged_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListLoopRunnersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListLoopRunnersResponse) ProtoMessage() {}
+
+func (x *ListLoopRunnersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_forged_v1_forged_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListLoopRunnersResponse.ProtoReflect.Descriptor instead.
+func (*ListLoopRunnersResponse) Descriptor() ([]byte, []int) {
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ListLoopRunnersResponse) GetRunners() []*LoopRunner {
+	if x != nil {
+		return x.Runners
+	}
+	return nil
+}
+
+type LoopRunner struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LoopId        string                 `protobuf:"bytes,1,opt,name=loop_id,json=loopId,proto3" json:"loop_id,omitempty"`
+	InstanceId    string                 `protobuf:"bytes,2,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	ConfigPath    string                 `protobuf:"bytes,3,opt,name=config_path,json=configPath,proto3" json:"config_path,omitempty"`
+	CommandPath   string                 `protobuf:"bytes,4,opt,name=command_path,json=commandPath,proto3" json:"command_path,omitempty"`
+	Pid           int32                  `protobuf:"varint,5,opt,name=pid,proto3" json:"pid,omitempty"`
+	State         LoopRunnerState        `protobuf:"varint,6,opt,name=state,proto3,enum=forged.v1.LoopRunnerState" json:"state,omitempty"`
+	LastError     string                 `protobuf:"bytes,7,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	StoppedAt     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=stopped_at,json=stoppedAt,proto3" json:"stopped_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoopRunner) Reset() {
+	*x = LoopRunner{}
+	mi := &file_forged_v1_forged_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoopRunner) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoopRunner) ProtoMessage() {}
+
+func (x *LoopRunner) ProtoReflect() protoreflect.Message {
+	mi := &file_forged_v1_forged_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoopRunner.ProtoReflect.Descriptor instead.
+func (*LoopRunner) Descriptor() ([]byte, []int) {
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *LoopRunner) GetLoopId() string {
+	if x != nil {
+		return x.LoopId
+	}
+	return ""
+}
+
+func (x *LoopRunner) GetInstanceId() string {
+	if x != nil {
+		return x.InstanceId
+	}
+	return ""
+}
+
+func (x *LoopRunner) GetConfigPath() string {
+	if x != nil {
+		return x.ConfigPath
+	}
+	return ""
+}
+
+func (x *LoopRunner) GetCommandPath() string {
+	if x != nil {
+		return x.CommandPath
+	}
+	return ""
+}
+
+func (x *LoopRunner) GetPid() int32 {
+	if x != nil {
+		return x.Pid
+	}
+	return 0
+}
+
+func (x *LoopRunner) GetState() LoopRunnerState {
+	if x != nil {
+		return x.State
+	}
+	return LoopRunnerState_LOOP_RUNNER_STATE_UNSPECIFIED
+}
+
+func (x *LoopRunner) GetLastError() string {
+	if x != nil {
+		return x.LastError
+	}
+	return ""
+}
+
+func (x *LoopRunner) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
+	}
+	return nil
+}
+
+func (x *LoopRunner) GetStoppedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StoppedAt
+	}
+	return nil
+}
+
 type Agent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Unique identifier.
@@ -1073,7 +1613,7 @@ type Agent struct {
 
 func (x *Agent) Reset() {
 	*x = Agent{}
-	mi := &file_forged_v1_forged_proto_msgTypes[11]
+	mi := &file_forged_v1_forged_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1085,7 +1625,7 @@ func (x *Agent) String() string {
 func (*Agent) ProtoMessage() {}
 
 func (x *Agent) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[11]
+	mi := &file_forged_v1_forged_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1098,7 +1638,7 @@ func (x *Agent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Agent.ProtoReflect.Descriptor instead.
 func (*Agent) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{11}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *Agent) GetId() string {
@@ -1204,7 +1744,7 @@ type AgentResourceUsage struct {
 
 func (x *AgentResourceUsage) Reset() {
 	*x = AgentResourceUsage{}
-	mi := &file_forged_v1_forged_proto_msgTypes[12]
+	mi := &file_forged_v1_forged_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1216,7 +1756,7 @@ func (x *AgentResourceUsage) String() string {
 func (*AgentResourceUsage) ProtoMessage() {}
 
 func (x *AgentResourceUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[12]
+	mi := &file_forged_v1_forged_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1229,7 +1769,7 @@ func (x *AgentResourceUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentResourceUsage.ProtoReflect.Descriptor instead.
 func (*AgentResourceUsage) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{12}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *AgentResourceUsage) GetCpuPercent() float64 {
@@ -1281,7 +1821,7 @@ type CapturePaneRequest struct {
 
 func (x *CapturePaneRequest) Reset() {
 	*x = CapturePaneRequest{}
-	mi := &file_forged_v1_forged_proto_msgTypes[13]
+	mi := &file_forged_v1_forged_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1293,7 +1833,7 @@ func (x *CapturePaneRequest) String() string {
 func (*CapturePaneRequest) ProtoMessage() {}
 
 func (x *CapturePaneRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[13]
+	mi := &file_forged_v1_forged_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1306,7 +1846,7 @@ func (x *CapturePaneRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapturePaneRequest.ProtoReflect.Descriptor instead.
 func (*CapturePaneRequest) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{13}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *CapturePaneRequest) GetAgentId() string {
@@ -1350,7 +1890,7 @@ type CapturePaneResponse struct {
 
 func (x *CapturePaneResponse) Reset() {
 	*x = CapturePaneResponse{}
-	mi := &file_forged_v1_forged_proto_msgTypes[14]
+	mi := &file_forged_v1_forged_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1362,7 +1902,7 @@ func (x *CapturePaneResponse) String() string {
 func (*CapturePaneResponse) ProtoMessage() {}
 
 func (x *CapturePaneResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[14]
+	mi := &file_forged_v1_forged_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1375,7 +1915,7 @@ func (x *CapturePaneResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapturePaneResponse.ProtoReflect.Descriptor instead.
 func (*CapturePaneResponse) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{14}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CapturePaneResponse) GetContent() string {
@@ -1443,7 +1983,7 @@ type StreamPaneUpdatesRequest struct {
 
 func (x *StreamPaneUpdatesRequest) Reset() {
 	*x = StreamPaneUpdatesRequest{}
-	mi := &file_forged_v1_forged_proto_msgTypes[15]
+	mi := &file_forged_v1_forged_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1455,7 +1995,7 @@ func (x *StreamPaneUpdatesRequest) String() string {
 func (*StreamPaneUpdatesRequest) ProtoMessage() {}
 
 func (x *StreamPaneUpdatesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[15]
+	mi := &file_forged_v1_forged_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1468,7 +2008,7 @@ func (x *StreamPaneUpdatesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamPaneUpdatesRequest.ProtoReflect.Descriptor instead.
 func (*StreamPaneUpdatesRequest) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{15}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *StreamPaneUpdatesRequest) GetAgentId() string {
@@ -1519,7 +2059,7 @@ type StreamPaneUpdatesResponse struct {
 
 func (x *StreamPaneUpdatesResponse) Reset() {
 	*x = StreamPaneUpdatesResponse{}
-	mi := &file_forged_v1_forged_proto_msgTypes[16]
+	mi := &file_forged_v1_forged_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1531,7 +2071,7 @@ func (x *StreamPaneUpdatesResponse) String() string {
 func (*StreamPaneUpdatesResponse) ProtoMessage() {}
 
 func (x *StreamPaneUpdatesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[16]
+	mi := &file_forged_v1_forged_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1544,7 +2084,7 @@ func (x *StreamPaneUpdatesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamPaneUpdatesResponse.ProtoReflect.Descriptor instead.
 func (*StreamPaneUpdatesResponse) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{16}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *StreamPaneUpdatesResponse) GetAgentId() string {
@@ -1605,7 +2145,7 @@ type StreamEventsRequest struct {
 
 func (x *StreamEventsRequest) Reset() {
 	*x = StreamEventsRequest{}
-	mi := &file_forged_v1_forged_proto_msgTypes[17]
+	mi := &file_forged_v1_forged_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1617,7 +2157,7 @@ func (x *StreamEventsRequest) String() string {
 func (*StreamEventsRequest) ProtoMessage() {}
 
 func (x *StreamEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[17]
+	mi := &file_forged_v1_forged_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1630,7 +2170,7 @@ func (x *StreamEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamEventsRequest.ProtoReflect.Descriptor instead.
 func (*StreamEventsRequest) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{17}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *StreamEventsRequest) GetCursor() string {
@@ -1671,7 +2211,7 @@ type StreamEventsResponse struct {
 
 func (x *StreamEventsResponse) Reset() {
 	*x = StreamEventsResponse{}
-	mi := &file_forged_v1_forged_proto_msgTypes[18]
+	mi := &file_forged_v1_forged_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1683,7 +2223,7 @@ func (x *StreamEventsResponse) String() string {
 func (*StreamEventsResponse) ProtoMessage() {}
 
 func (x *StreamEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[18]
+	mi := &file_forged_v1_forged_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1696,7 +2236,7 @@ func (x *StreamEventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamEventsResponse.ProtoReflect.Descriptor instead.
 func (*StreamEventsResponse) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{18}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *StreamEventsResponse) GetEvent() *Event {
@@ -1736,7 +2276,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_forged_v1_forged_proto_msgTypes[19]
+	mi := &file_forged_v1_forged_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1748,7 +2288,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[19]
+	mi := &file_forged_v1_forged_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1761,7 +2301,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{19}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *Event) GetId() string {
@@ -1926,7 +2466,7 @@ type AgentStateChangedEvent struct {
 
 func (x *AgentStateChangedEvent) Reset() {
 	*x = AgentStateChangedEvent{}
-	mi := &file_forged_v1_forged_proto_msgTypes[20]
+	mi := &file_forged_v1_forged_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1938,7 +2478,7 @@ func (x *AgentStateChangedEvent) String() string {
 func (*AgentStateChangedEvent) ProtoMessage() {}
 
 func (x *AgentStateChangedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[20]
+	mi := &file_forged_v1_forged_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1951,7 +2491,7 @@ func (x *AgentStateChangedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStateChangedEvent.ProtoReflect.Descriptor instead.
 func (*AgentStateChangedEvent) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{20}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *AgentStateChangedEvent) GetPreviousState() AgentState {
@@ -1987,7 +2527,7 @@ type AgentOutputEvent struct {
 
 func (x *AgentOutputEvent) Reset() {
 	*x = AgentOutputEvent{}
-	mi := &file_forged_v1_forged_proto_msgTypes[21]
+	mi := &file_forged_v1_forged_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1999,7 +2539,7 @@ func (x *AgentOutputEvent) String() string {
 func (*AgentOutputEvent) ProtoMessage() {}
 
 func (x *AgentOutputEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[21]
+	mi := &file_forged_v1_forged_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2012,7 +2552,7 @@ func (x *AgentOutputEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentOutputEvent.ProtoReflect.Descriptor instead.
 func (*AgentOutputEvent) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{21}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *AgentOutputEvent) GetText() string {
@@ -2045,7 +2585,7 @@ type ApprovalRequestedEvent struct {
 
 func (x *ApprovalRequestedEvent) Reset() {
 	*x = ApprovalRequestedEvent{}
-	mi := &file_forged_v1_forged_proto_msgTypes[22]
+	mi := &file_forged_v1_forged_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2057,7 +2597,7 @@ func (x *ApprovalRequestedEvent) String() string {
 func (*ApprovalRequestedEvent) ProtoMessage() {}
 
 func (x *ApprovalRequestedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[22]
+	mi := &file_forged_v1_forged_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2070,7 +2610,7 @@ func (x *ApprovalRequestedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovalRequestedEvent.ProtoReflect.Descriptor instead.
 func (*ApprovalRequestedEvent) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{22}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ApprovalRequestedEvent) GetApprovalId() string {
@@ -2115,7 +2655,7 @@ type ApprovalResolvedEvent struct {
 
 func (x *ApprovalResolvedEvent) Reset() {
 	*x = ApprovalResolvedEvent{}
-	mi := &file_forged_v1_forged_proto_msgTypes[23]
+	mi := &file_forged_v1_forged_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2127,7 +2667,7 @@ func (x *ApprovalResolvedEvent) String() string {
 func (*ApprovalResolvedEvent) ProtoMessage() {}
 
 func (x *ApprovalResolvedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[23]
+	mi := &file_forged_v1_forged_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2140,7 +2680,7 @@ func (x *ApprovalResolvedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovalResolvedEvent.ProtoReflect.Descriptor instead.
 func (*ApprovalResolvedEvent) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{23}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ApprovalResolvedEvent) GetApprovalId() string {
@@ -2178,7 +2718,7 @@ type ErrorEvent struct {
 
 func (x *ErrorEvent) Reset() {
 	*x = ErrorEvent{}
-	mi := &file_forged_v1_forged_proto_msgTypes[24]
+	mi := &file_forged_v1_forged_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2190,7 +2730,7 @@ func (x *ErrorEvent) String() string {
 func (*ErrorEvent) ProtoMessage() {}
 
 func (x *ErrorEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[24]
+	mi := &file_forged_v1_forged_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2203,7 +2743,7 @@ func (x *ErrorEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorEvent.ProtoReflect.Descriptor instead.
 func (*ErrorEvent) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{24}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ErrorEvent) GetCode() string {
@@ -2246,7 +2786,7 @@ type ResourceViolationEvent struct {
 
 func (x *ResourceViolationEvent) Reset() {
 	*x = ResourceViolationEvent{}
-	mi := &file_forged_v1_forged_proto_msgTypes[25]
+	mi := &file_forged_v1_forged_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2258,7 +2798,7 @@ func (x *ResourceViolationEvent) String() string {
 func (*ResourceViolationEvent) ProtoMessage() {}
 
 func (x *ResourceViolationEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[25]
+	mi := &file_forged_v1_forged_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2271,7 +2811,7 @@ func (x *ResourceViolationEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceViolationEvent.ProtoReflect.Descriptor instead.
 func (*ResourceViolationEvent) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{25}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ResourceViolationEvent) GetResourceType() ResourceType {
@@ -2321,7 +2861,7 @@ type PaneContentChangedEvent struct {
 
 func (x *PaneContentChangedEvent) Reset() {
 	*x = PaneContentChangedEvent{}
-	mi := &file_forged_v1_forged_proto_msgTypes[26]
+	mi := &file_forged_v1_forged_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2333,7 +2873,7 @@ func (x *PaneContentChangedEvent) String() string {
 func (*PaneContentChangedEvent) ProtoMessage() {}
 
 func (x *PaneContentChangedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[26]
+	mi := &file_forged_v1_forged_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2346,7 +2886,7 @@ func (x *PaneContentChangedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PaneContentChangedEvent.ProtoReflect.Descriptor instead.
 func (*PaneContentChangedEvent) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{26}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *PaneContentChangedEvent) GetContentHash() string {
@@ -2379,7 +2919,7 @@ type GetTranscriptRequest struct {
 
 func (x *GetTranscriptRequest) Reset() {
 	*x = GetTranscriptRequest{}
-	mi := &file_forged_v1_forged_proto_msgTypes[27]
+	mi := &file_forged_v1_forged_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2391,7 +2931,7 @@ func (x *GetTranscriptRequest) String() string {
 func (*GetTranscriptRequest) ProtoMessage() {}
 
 func (x *GetTranscriptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[27]
+	mi := &file_forged_v1_forged_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2404,7 +2944,7 @@ func (x *GetTranscriptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTranscriptRequest.ProtoReflect.Descriptor instead.
 func (*GetTranscriptRequest) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{27}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *GetTranscriptRequest) GetAgentId() string {
@@ -2451,7 +2991,7 @@ type GetTranscriptResponse struct {
 
 func (x *GetTranscriptResponse) Reset() {
 	*x = GetTranscriptResponse{}
-	mi := &file_forged_v1_forged_proto_msgTypes[28]
+	mi := &file_forged_v1_forged_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2463,7 +3003,7 @@ func (x *GetTranscriptResponse) String() string {
 func (*GetTranscriptResponse) ProtoMessage() {}
 
 func (x *GetTranscriptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[28]
+	mi := &file_forged_v1_forged_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2476,7 +3016,7 @@ func (x *GetTranscriptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTranscriptResponse.ProtoReflect.Descriptor instead.
 func (*GetTranscriptResponse) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{28}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *GetTranscriptResponse) GetAgentId() string {
@@ -2523,7 +3063,7 @@ type TranscriptEntry struct {
 
 func (x *TranscriptEntry) Reset() {
 	*x = TranscriptEntry{}
-	mi := &file_forged_v1_forged_proto_msgTypes[29]
+	mi := &file_forged_v1_forged_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2535,7 +3075,7 @@ func (x *TranscriptEntry) String() string {
 func (*TranscriptEntry) ProtoMessage() {}
 
 func (x *TranscriptEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[29]
+	mi := &file_forged_v1_forged_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2548,7 +3088,7 @@ func (x *TranscriptEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TranscriptEntry.ProtoReflect.Descriptor instead.
 func (*TranscriptEntry) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{29}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *TranscriptEntry) GetTimestamp() *timestamppb.Timestamp {
@@ -2591,7 +3131,7 @@ type StreamTranscriptRequest struct {
 
 func (x *StreamTranscriptRequest) Reset() {
 	*x = StreamTranscriptRequest{}
-	mi := &file_forged_v1_forged_proto_msgTypes[30]
+	mi := &file_forged_v1_forged_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2603,7 +3143,7 @@ func (x *StreamTranscriptRequest) String() string {
 func (*StreamTranscriptRequest) ProtoMessage() {}
 
 func (x *StreamTranscriptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[30]
+	mi := &file_forged_v1_forged_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2616,7 +3156,7 @@ func (x *StreamTranscriptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamTranscriptRequest.ProtoReflect.Descriptor instead.
 func (*StreamTranscriptRequest) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{30}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *StreamTranscriptRequest) GetAgentId() string {
@@ -2645,7 +3185,7 @@ type StreamTranscriptResponse struct {
 
 func (x *StreamTranscriptResponse) Reset() {
 	*x = StreamTranscriptResponse{}
-	mi := &file_forged_v1_forged_proto_msgTypes[31]
+	mi := &file_forged_v1_forged_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2657,7 +3197,7 @@ func (x *StreamTranscriptResponse) String() string {
 func (*StreamTranscriptResponse) ProtoMessage() {}
 
 func (x *StreamTranscriptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[31]
+	mi := &file_forged_v1_forged_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2670,7 +3210,7 @@ func (x *StreamTranscriptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamTranscriptResponse.ProtoReflect.Descriptor instead.
 func (*StreamTranscriptResponse) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{31}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *StreamTranscriptResponse) GetEntries() []*TranscriptEntry {
@@ -2695,7 +3235,7 @@ type GetStatusRequest struct {
 
 func (x *GetStatusRequest) Reset() {
 	*x = GetStatusRequest{}
-	mi := &file_forged_v1_forged_proto_msgTypes[32]
+	mi := &file_forged_v1_forged_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2707,7 +3247,7 @@ func (x *GetStatusRequest) String() string {
 func (*GetStatusRequest) ProtoMessage() {}
 
 func (x *GetStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[32]
+	mi := &file_forged_v1_forged_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2720,7 +3260,7 @@ func (x *GetStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetStatusRequest) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{32}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{41}
 }
 
 type GetStatusResponse struct {
@@ -2733,7 +3273,7 @@ type GetStatusResponse struct {
 
 func (x *GetStatusResponse) Reset() {
 	*x = GetStatusResponse{}
-	mi := &file_forged_v1_forged_proto_msgTypes[33]
+	mi := &file_forged_v1_forged_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2745,7 +3285,7 @@ func (x *GetStatusResponse) String() string {
 func (*GetStatusResponse) ProtoMessage() {}
 
 func (x *GetStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[33]
+	mi := &file_forged_v1_forged_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2758,7 +3298,7 @@ func (x *GetStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetStatusResponse) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{33}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *GetStatusResponse) GetStatus() *DaemonStatus {
@@ -2790,7 +3330,7 @@ type DaemonStatus struct {
 
 func (x *DaemonStatus) Reset() {
 	*x = DaemonStatus{}
-	mi := &file_forged_v1_forged_proto_msgTypes[34]
+	mi := &file_forged_v1_forged_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2802,7 +3342,7 @@ func (x *DaemonStatus) String() string {
 func (*DaemonStatus) ProtoMessage() {}
 
 func (x *DaemonStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[34]
+	mi := &file_forged_v1_forged_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2815,7 +3355,7 @@ func (x *DaemonStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonStatus.ProtoReflect.Descriptor instead.
 func (*DaemonStatus) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{34}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *DaemonStatus) GetVersion() string {
@@ -2883,7 +3423,7 @@ type ResourceUsage struct {
 
 func (x *ResourceUsage) Reset() {
 	*x = ResourceUsage{}
-	mi := &file_forged_v1_forged_proto_msgTypes[35]
+	mi := &file_forged_v1_forged_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2895,7 +3435,7 @@ func (x *ResourceUsage) String() string {
 func (*ResourceUsage) ProtoMessage() {}
 
 func (x *ResourceUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[35]
+	mi := &file_forged_v1_forged_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2908,7 +3448,7 @@ func (x *ResourceUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceUsage.ProtoReflect.Descriptor instead.
 func (*ResourceUsage) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{35}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ResourceUsage) GetCpuPercent() float64 {
@@ -2951,7 +3491,7 @@ type HealthStatus struct {
 
 func (x *HealthStatus) Reset() {
 	*x = HealthStatus{}
-	mi := &file_forged_v1_forged_proto_msgTypes[36]
+	mi := &file_forged_v1_forged_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2963,7 +3503,7 @@ func (x *HealthStatus) String() string {
 func (*HealthStatus) ProtoMessage() {}
 
 func (x *HealthStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[36]
+	mi := &file_forged_v1_forged_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2976,7 +3516,7 @@ func (x *HealthStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthStatus.ProtoReflect.Descriptor instead.
 func (*HealthStatus) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{36}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *HealthStatus) GetHealth() Health {
@@ -3009,7 +3549,7 @@ type HealthCheck struct {
 
 func (x *HealthCheck) Reset() {
 	*x = HealthCheck{}
-	mi := &file_forged_v1_forged_proto_msgTypes[37]
+	mi := &file_forged_v1_forged_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3021,7 +3561,7 @@ func (x *HealthCheck) String() string {
 func (*HealthCheck) ProtoMessage() {}
 
 func (x *HealthCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[37]
+	mi := &file_forged_v1_forged_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3034,7 +3574,7 @@ func (x *HealthCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheck.ProtoReflect.Descriptor instead.
 func (*HealthCheck) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{37}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *HealthCheck) GetName() string {
@@ -3073,7 +3613,7 @@ type PingRequest struct {
 
 func (x *PingRequest) Reset() {
 	*x = PingRequest{}
-	mi := &file_forged_v1_forged_proto_msgTypes[38]
+	mi := &file_forged_v1_forged_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3085,7 +3625,7 @@ func (x *PingRequest) String() string {
 func (*PingRequest) ProtoMessage() {}
 
 func (x *PingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[38]
+	mi := &file_forged_v1_forged_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3098,7 +3638,7 @@ func (x *PingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingRequest.ProtoReflect.Descriptor instead.
 func (*PingRequest) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{38}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{47}
 }
 
 type PingResponse struct {
@@ -3113,7 +3653,7 @@ type PingResponse struct {
 
 func (x *PingResponse) Reset() {
 	*x = PingResponse{}
-	mi := &file_forged_v1_forged_proto_msgTypes[39]
+	mi := &file_forged_v1_forged_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3125,7 +3665,7 @@ func (x *PingResponse) String() string {
 func (*PingResponse) ProtoMessage() {}
 
 func (x *PingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_forged_v1_forged_proto_msgTypes[39]
+	mi := &file_forged_v1_forged_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3138,7 +3678,7 @@ func (x *PingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingResponse.ProtoReflect.Descriptor instead.
 func (*PingResponse) Descriptor() ([]byte, []int) {
-	return file_forged_v1_forged_proto_rawDescGZIP(), []int{39}
+	return file_forged_v1_forged_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *PingResponse) GetTimestamp() *timestamppb.Timestamp {
@@ -3205,7 +3745,43 @@ const file_forged_v1_forged_proto_rawDesc = "" +
 	"\x0fGetAgentRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\":\n" +
 	"\x10GetAgentResponse\x12&\n" +
-	"\x05agent\x18\x01 \x01(\v2\x10.forged.v1.AgentR\x05agent\"\xf4\x03\n" +
+	"\x05agent\x18\x01 \x01(\v2\x10.forged.v1.AgentR\x05agent\"u\n" +
+	"\x16StartLoopRunnerRequest\x12\x17\n" +
+	"\aloop_id\x18\x01 \x01(\tR\x06loopId\x12\x1f\n" +
+	"\vconfig_path\x18\x02 \x01(\tR\n" +
+	"configPath\x12!\n" +
+	"\fcommand_path\x18\x03 \x01(\tR\vcommandPath\"H\n" +
+	"\x17StartLoopRunnerResponse\x12-\n" +
+	"\x06runner\x18\x01 \x01(\v2\x15.forged.v1.LoopRunnerR\x06runner\"F\n" +
+	"\x15StopLoopRunnerRequest\x12\x17\n" +
+	"\aloop_id\x18\x01 \x01(\tR\x06loopId\x12\x14\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\"a\n" +
+	"\x16StopLoopRunnerResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12-\n" +
+	"\x06runner\x18\x02 \x01(\v2\x15.forged.v1.LoopRunnerR\x06runner\"/\n" +
+	"\x14GetLoopRunnerRequest\x12\x17\n" +
+	"\aloop_id\x18\x01 \x01(\tR\x06loopId\"F\n" +
+	"\x15GetLoopRunnerResponse\x12-\n" +
+	"\x06runner\x18\x01 \x01(\v2\x15.forged.v1.LoopRunnerR\x06runner\"\x18\n" +
+	"\x16ListLoopRunnersRequest\"J\n" +
+	"\x17ListLoopRunnersResponse\x12/\n" +
+	"\arunners\x18\x01 \x03(\v2\x15.forged.v1.LoopRunnerR\arunners\"\xe3\x02\n" +
+	"\n" +
+	"LoopRunner\x12\x17\n" +
+	"\aloop_id\x18\x01 \x01(\tR\x06loopId\x12\x1f\n" +
+	"\vinstance_id\x18\x02 \x01(\tR\n" +
+	"instanceId\x12\x1f\n" +
+	"\vconfig_path\x18\x03 \x01(\tR\n" +
+	"configPath\x12!\n" +
+	"\fcommand_path\x18\x04 \x01(\tR\vcommandPath\x12\x10\n" +
+	"\x03pid\x18\x05 \x01(\x05R\x03pid\x120\n" +
+	"\x05state\x18\x06 \x01(\x0e2\x1a.forged.v1.LoopRunnerStateR\x05state\x12\x1d\n" +
+	"\n" +
+	"last_error\x18\a \x01(\tR\tlastError\x129\n" +
+	"\n" +
+	"started_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x129\n" +
+	"\n" +
+	"stopped_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tstoppedAt\"\xf4\x03\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12+\n" +
@@ -3368,7 +3944,12 @@ const file_forged_v1_forged_proto_rawDesc = "" +
 	"\vPingRequest\"b\n" +
 	"\fPingResponse\x128\n" +
 	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion*\xa0\x01\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion*\x8f\x01\n" +
+	"\x0fLoopRunnerState\x12!\n" +
+	"\x1dLOOP_RUNNER_STATE_UNSPECIFIED\x10\x00\x12\x1d\n" +
+	"\x19LOOP_RUNNER_STATE_RUNNING\x10\x01\x12\x1d\n" +
+	"\x19LOOP_RUNNER_STATE_STOPPED\x10\x02\x12\x1b\n" +
+	"\x17LOOP_RUNNER_STATE_ERROR\x10\x03*\xa0\x01\n" +
 	"\x13ResourceLimitAction\x12%\n" +
 	"!RESOURCE_LIMIT_ACTION_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aRESOURCE_LIMIT_ACTION_WARN\x10\x01\x12\"\n" +
@@ -3410,7 +3991,8 @@ const file_forged_v1_forged_proto_rawDesc = "" +
 	"\x12HEALTH_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eHEALTH_HEALTHY\x10\x01\x12\x13\n" +
 	"\x0fHEALTH_DEGRADED\x10\x02\x12\x14\n" +
-	"\x10HEALTH_UNHEALTHY\x10\x032\xb1\a\n" +
+	"\x10HEALTH_UNHEALTHY\x10\x032\x90\n" +
+	"\n" +
 	"\rForgedService\x12I\n" +
 	"\n" +
 	"SpawnAgent\x12\x1c.forged.v1.SpawnAgentRequest\x1a\x1d.forged.v1.SpawnAgentResponse\x12F\n" +
@@ -3418,7 +4000,11 @@ const file_forged_v1_forged_proto_rawDesc = "" +
 	"\tSendInput\x12\x1b.forged.v1.SendInputRequest\x1a\x1c.forged.v1.SendInputResponse\x12I\n" +
 	"\n" +
 	"ListAgents\x12\x1c.forged.v1.ListAgentsRequest\x1a\x1d.forged.v1.ListAgentsResponse\x12C\n" +
-	"\bGetAgent\x12\x1a.forged.v1.GetAgentRequest\x1a\x1b.forged.v1.GetAgentResponse\x12L\n" +
+	"\bGetAgent\x12\x1a.forged.v1.GetAgentRequest\x1a\x1b.forged.v1.GetAgentResponse\x12X\n" +
+	"\x0fStartLoopRunner\x12!.forged.v1.StartLoopRunnerRequest\x1a\".forged.v1.StartLoopRunnerResponse\x12U\n" +
+	"\x0eStopLoopRunner\x12 .forged.v1.StopLoopRunnerRequest\x1a!.forged.v1.StopLoopRunnerResponse\x12R\n" +
+	"\rGetLoopRunner\x12\x1f.forged.v1.GetLoopRunnerRequest\x1a .forged.v1.GetLoopRunnerResponse\x12X\n" +
+	"\x0fListLoopRunners\x12!.forged.v1.ListLoopRunnersRequest\x1a\".forged.v1.ListLoopRunnersResponse\x12L\n" +
 	"\vCapturePane\x12\x1d.forged.v1.CapturePaneRequest\x1a\x1e.forged.v1.CapturePaneResponse\x12`\n" +
 	"\x11StreamPaneUpdates\x12#.forged.v1.StreamPaneUpdatesRequest\x1a$.forged.v1.StreamPaneUpdatesResponse0\x01\x12Q\n" +
 	"\fStreamEvents\x12\x1e.forged.v1.StreamEventsRequest\x1a\x1f.forged.v1.StreamEventsResponse0\x01\x12R\n" +
@@ -3441,141 +4027,166 @@ func file_forged_v1_forged_proto_rawDescGZIP() []byte {
 	return file_forged_v1_forged_proto_rawDescData
 }
 
-var file_forged_v1_forged_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_forged_v1_forged_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
+var file_forged_v1_forged_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
+var file_forged_v1_forged_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
 var file_forged_v1_forged_proto_goTypes = []any{
-	(ResourceLimitAction)(0),          // 0: forged.v1.ResourceLimitAction
-	(AgentState)(0),                   // 1: forged.v1.AgentState
-	(EventType)(0),                    // 2: forged.v1.EventType
-	(ResourceType)(0),                 // 3: forged.v1.ResourceType
-	(TranscriptEntryType)(0),          // 4: forged.v1.TranscriptEntryType
-	(Health)(0),                       // 5: forged.v1.Health
-	(*SpawnAgentRequest)(nil),         // 6: forged.v1.SpawnAgentRequest
-	(*ResourceLimits)(nil),            // 7: forged.v1.ResourceLimits
-	(*SpawnAgentResponse)(nil),        // 8: forged.v1.SpawnAgentResponse
-	(*KillAgentRequest)(nil),          // 9: forged.v1.KillAgentRequest
-	(*KillAgentResponse)(nil),         // 10: forged.v1.KillAgentResponse
-	(*SendInputRequest)(nil),          // 11: forged.v1.SendInputRequest
-	(*SendInputResponse)(nil),         // 12: forged.v1.SendInputResponse
-	(*ListAgentsRequest)(nil),         // 13: forged.v1.ListAgentsRequest
-	(*ListAgentsResponse)(nil),        // 14: forged.v1.ListAgentsResponse
-	(*GetAgentRequest)(nil),           // 15: forged.v1.GetAgentRequest
-	(*GetAgentResponse)(nil),          // 16: forged.v1.GetAgentResponse
-	(*Agent)(nil),                     // 17: forged.v1.Agent
-	(*AgentResourceUsage)(nil),        // 18: forged.v1.AgentResourceUsage
-	(*CapturePaneRequest)(nil),        // 19: forged.v1.CapturePaneRequest
-	(*CapturePaneResponse)(nil),       // 20: forged.v1.CapturePaneResponse
-	(*StreamPaneUpdatesRequest)(nil),  // 21: forged.v1.StreamPaneUpdatesRequest
-	(*StreamPaneUpdatesResponse)(nil), // 22: forged.v1.StreamPaneUpdatesResponse
-	(*StreamEventsRequest)(nil),       // 23: forged.v1.StreamEventsRequest
-	(*StreamEventsResponse)(nil),      // 24: forged.v1.StreamEventsResponse
-	(*Event)(nil),                     // 25: forged.v1.Event
-	(*AgentStateChangedEvent)(nil),    // 26: forged.v1.AgentStateChangedEvent
-	(*AgentOutputEvent)(nil),          // 27: forged.v1.AgentOutputEvent
-	(*ApprovalRequestedEvent)(nil),    // 28: forged.v1.ApprovalRequestedEvent
-	(*ApprovalResolvedEvent)(nil),     // 29: forged.v1.ApprovalResolvedEvent
-	(*ErrorEvent)(nil),                // 30: forged.v1.ErrorEvent
-	(*ResourceViolationEvent)(nil),    // 31: forged.v1.ResourceViolationEvent
-	(*PaneContentChangedEvent)(nil),   // 32: forged.v1.PaneContentChangedEvent
-	(*GetTranscriptRequest)(nil),      // 33: forged.v1.GetTranscriptRequest
-	(*GetTranscriptResponse)(nil),     // 34: forged.v1.GetTranscriptResponse
-	(*TranscriptEntry)(nil),           // 35: forged.v1.TranscriptEntry
-	(*StreamTranscriptRequest)(nil),   // 36: forged.v1.StreamTranscriptRequest
-	(*StreamTranscriptResponse)(nil),  // 37: forged.v1.StreamTranscriptResponse
-	(*GetStatusRequest)(nil),          // 38: forged.v1.GetStatusRequest
-	(*GetStatusResponse)(nil),         // 39: forged.v1.GetStatusResponse
-	(*DaemonStatus)(nil),              // 40: forged.v1.DaemonStatus
-	(*ResourceUsage)(nil),             // 41: forged.v1.ResourceUsage
-	(*HealthStatus)(nil),              // 42: forged.v1.HealthStatus
-	(*HealthCheck)(nil),               // 43: forged.v1.HealthCheck
-	(*PingRequest)(nil),               // 44: forged.v1.PingRequest
-	(*PingResponse)(nil),              // 45: forged.v1.PingResponse
-	nil,                               // 46: forged.v1.SpawnAgentRequest.EnvEntry
-	nil,                               // 47: forged.v1.TranscriptEntry.MetadataEntry
-	(*durationpb.Duration)(nil),       // 48: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil),     // 49: google.protobuf.Timestamp
+	(LoopRunnerState)(0),              // 0: forged.v1.LoopRunnerState
+	(ResourceLimitAction)(0),          // 1: forged.v1.ResourceLimitAction
+	(AgentState)(0),                   // 2: forged.v1.AgentState
+	(EventType)(0),                    // 3: forged.v1.EventType
+	(ResourceType)(0),                 // 4: forged.v1.ResourceType
+	(TranscriptEntryType)(0),          // 5: forged.v1.TranscriptEntryType
+	(Health)(0),                       // 6: forged.v1.Health
+	(*SpawnAgentRequest)(nil),         // 7: forged.v1.SpawnAgentRequest
+	(*ResourceLimits)(nil),            // 8: forged.v1.ResourceLimits
+	(*SpawnAgentResponse)(nil),        // 9: forged.v1.SpawnAgentResponse
+	(*KillAgentRequest)(nil),          // 10: forged.v1.KillAgentRequest
+	(*KillAgentResponse)(nil),         // 11: forged.v1.KillAgentResponse
+	(*SendInputRequest)(nil),          // 12: forged.v1.SendInputRequest
+	(*SendInputResponse)(nil),         // 13: forged.v1.SendInputResponse
+	(*ListAgentsRequest)(nil),         // 14: forged.v1.ListAgentsRequest
+	(*ListAgentsResponse)(nil),        // 15: forged.v1.ListAgentsResponse
+	(*GetAgentRequest)(nil),           // 16: forged.v1.GetAgentRequest
+	(*GetAgentResponse)(nil),          // 17: forged.v1.GetAgentResponse
+	(*StartLoopRunnerRequest)(nil),    // 18: forged.v1.StartLoopRunnerRequest
+	(*StartLoopRunnerResponse)(nil),   // 19: forged.v1.StartLoopRunnerResponse
+	(*StopLoopRunnerRequest)(nil),     // 20: forged.v1.StopLoopRunnerRequest
+	(*StopLoopRunnerResponse)(nil),    // 21: forged.v1.StopLoopRunnerResponse
+	(*GetLoopRunnerRequest)(nil),      // 22: forged.v1.GetLoopRunnerRequest
+	(*GetLoopRunnerResponse)(nil),     // 23: forged.v1.GetLoopRunnerResponse
+	(*ListLoopRunnersRequest)(nil),    // 24: forged.v1.ListLoopRunnersRequest
+	(*ListLoopRunnersResponse)(nil),   // 25: forged.v1.ListLoopRunnersResponse
+	(*LoopRunner)(nil),                // 26: forged.v1.LoopRunner
+	(*Agent)(nil),                     // 27: forged.v1.Agent
+	(*AgentResourceUsage)(nil),        // 28: forged.v1.AgentResourceUsage
+	(*CapturePaneRequest)(nil),        // 29: forged.v1.CapturePaneRequest
+	(*CapturePaneResponse)(nil),       // 30: forged.v1.CapturePaneResponse
+	(*StreamPaneUpdatesRequest)(nil),  // 31: forged.v1.StreamPaneUpdatesRequest
+	(*StreamPaneUpdatesResponse)(nil), // 32: forged.v1.StreamPaneUpdatesResponse
+	(*StreamEventsRequest)(nil),       // 33: forged.v1.StreamEventsRequest
+	(*StreamEventsResponse)(nil),      // 34: forged.v1.StreamEventsResponse
+	(*Event)(nil),                     // 35: forged.v1.Event
+	(*AgentStateChangedEvent)(nil),    // 36: forged.v1.AgentStateChangedEvent
+	(*AgentOutputEvent)(nil),          // 37: forged.v1.AgentOutputEvent
+	(*ApprovalRequestedEvent)(nil),    // 38: forged.v1.ApprovalRequestedEvent
+	(*ApprovalResolvedEvent)(nil),     // 39: forged.v1.ApprovalResolvedEvent
+	(*ErrorEvent)(nil),                // 40: forged.v1.ErrorEvent
+	(*ResourceViolationEvent)(nil),    // 41: forged.v1.ResourceViolationEvent
+	(*PaneContentChangedEvent)(nil),   // 42: forged.v1.PaneContentChangedEvent
+	(*GetTranscriptRequest)(nil),      // 43: forged.v1.GetTranscriptRequest
+	(*GetTranscriptResponse)(nil),     // 44: forged.v1.GetTranscriptResponse
+	(*TranscriptEntry)(nil),           // 45: forged.v1.TranscriptEntry
+	(*StreamTranscriptRequest)(nil),   // 46: forged.v1.StreamTranscriptRequest
+	(*StreamTranscriptResponse)(nil),  // 47: forged.v1.StreamTranscriptResponse
+	(*GetStatusRequest)(nil),          // 48: forged.v1.GetStatusRequest
+	(*GetStatusResponse)(nil),         // 49: forged.v1.GetStatusResponse
+	(*DaemonStatus)(nil),              // 50: forged.v1.DaemonStatus
+	(*ResourceUsage)(nil),             // 51: forged.v1.ResourceUsage
+	(*HealthStatus)(nil),              // 52: forged.v1.HealthStatus
+	(*HealthCheck)(nil),               // 53: forged.v1.HealthCheck
+	(*PingRequest)(nil),               // 54: forged.v1.PingRequest
+	(*PingResponse)(nil),              // 55: forged.v1.PingResponse
+	nil,                               // 56: forged.v1.SpawnAgentRequest.EnvEntry
+	nil,                               // 57: forged.v1.TranscriptEntry.MetadataEntry
+	(*durationpb.Duration)(nil),       // 58: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil),     // 59: google.protobuf.Timestamp
 }
 var file_forged_v1_forged_proto_depIdxs = []int32{
-	46, // 0: forged.v1.SpawnAgentRequest.env:type_name -> forged.v1.SpawnAgentRequest.EnvEntry
-	7,  // 1: forged.v1.SpawnAgentRequest.resource_limits:type_name -> forged.v1.ResourceLimits
-	0,  // 2: forged.v1.ResourceLimits.action:type_name -> forged.v1.ResourceLimitAction
-	48, // 3: forged.v1.ResourceLimits.grace_period:type_name -> google.protobuf.Duration
-	17, // 4: forged.v1.SpawnAgentResponse.agent:type_name -> forged.v1.Agent
-	48, // 5: forged.v1.KillAgentRequest.grace_period:type_name -> google.protobuf.Duration
-	1,  // 6: forged.v1.ListAgentsRequest.states:type_name -> forged.v1.AgentState
-	17, // 7: forged.v1.ListAgentsResponse.agents:type_name -> forged.v1.Agent
-	17, // 8: forged.v1.GetAgentResponse.agent:type_name -> forged.v1.Agent
-	1,  // 9: forged.v1.Agent.state:type_name -> forged.v1.AgentState
-	49, // 10: forged.v1.Agent.spawned_at:type_name -> google.protobuf.Timestamp
-	49, // 11: forged.v1.Agent.last_activity_at:type_name -> google.protobuf.Timestamp
-	7,  // 12: forged.v1.Agent.resource_limits:type_name -> forged.v1.ResourceLimits
-	18, // 13: forged.v1.Agent.resource_usage:type_name -> forged.v1.AgentResourceUsage
-	49, // 14: forged.v1.AgentResourceUsage.measured_at:type_name -> google.protobuf.Timestamp
-	49, // 15: forged.v1.CapturePaneResponse.captured_at:type_name -> google.protobuf.Timestamp
-	48, // 16: forged.v1.StreamPaneUpdatesRequest.min_interval:type_name -> google.protobuf.Duration
-	49, // 17: forged.v1.StreamPaneUpdatesResponse.timestamp:type_name -> google.protobuf.Timestamp
-	1,  // 18: forged.v1.StreamPaneUpdatesResponse.detected_state:type_name -> forged.v1.AgentState
-	2,  // 19: forged.v1.StreamEventsRequest.types:type_name -> forged.v1.EventType
-	25, // 20: forged.v1.StreamEventsResponse.event:type_name -> forged.v1.Event
-	2,  // 21: forged.v1.Event.type:type_name -> forged.v1.EventType
-	49, // 22: forged.v1.Event.timestamp:type_name -> google.protobuf.Timestamp
-	26, // 23: forged.v1.Event.agent_state_changed:type_name -> forged.v1.AgentStateChangedEvent
-	27, // 24: forged.v1.Event.agent_output:type_name -> forged.v1.AgentOutputEvent
-	28, // 25: forged.v1.Event.approval_requested:type_name -> forged.v1.ApprovalRequestedEvent
-	29, // 26: forged.v1.Event.approval_resolved:type_name -> forged.v1.ApprovalResolvedEvent
-	30, // 27: forged.v1.Event.error:type_name -> forged.v1.ErrorEvent
-	32, // 28: forged.v1.Event.pane_content_changed:type_name -> forged.v1.PaneContentChangedEvent
-	31, // 29: forged.v1.Event.resource_violation:type_name -> forged.v1.ResourceViolationEvent
-	1,  // 30: forged.v1.AgentStateChangedEvent.previous_state:type_name -> forged.v1.AgentState
-	1,  // 31: forged.v1.AgentStateChangedEvent.new_state:type_name -> forged.v1.AgentState
-	3,  // 32: forged.v1.ResourceViolationEvent.resource_type:type_name -> forged.v1.ResourceType
-	0,  // 33: forged.v1.ResourceViolationEvent.action_taken:type_name -> forged.v1.ResourceLimitAction
-	49, // 34: forged.v1.GetTranscriptRequest.start_time:type_name -> google.protobuf.Timestamp
-	49, // 35: forged.v1.GetTranscriptRequest.end_time:type_name -> google.protobuf.Timestamp
-	35, // 36: forged.v1.GetTranscriptResponse.entries:type_name -> forged.v1.TranscriptEntry
-	49, // 37: forged.v1.TranscriptEntry.timestamp:type_name -> google.protobuf.Timestamp
-	4,  // 38: forged.v1.TranscriptEntry.type:type_name -> forged.v1.TranscriptEntryType
-	47, // 39: forged.v1.TranscriptEntry.metadata:type_name -> forged.v1.TranscriptEntry.MetadataEntry
-	35, // 40: forged.v1.StreamTranscriptResponse.entries:type_name -> forged.v1.TranscriptEntry
-	40, // 41: forged.v1.GetStatusResponse.status:type_name -> forged.v1.DaemonStatus
-	49, // 42: forged.v1.DaemonStatus.started_at:type_name -> google.protobuf.Timestamp
-	48, // 43: forged.v1.DaemonStatus.uptime:type_name -> google.protobuf.Duration
-	41, // 44: forged.v1.DaemonStatus.resources:type_name -> forged.v1.ResourceUsage
-	42, // 45: forged.v1.DaemonStatus.health:type_name -> forged.v1.HealthStatus
-	5,  // 46: forged.v1.HealthStatus.health:type_name -> forged.v1.Health
-	43, // 47: forged.v1.HealthStatus.checks:type_name -> forged.v1.HealthCheck
-	5,  // 48: forged.v1.HealthCheck.health:type_name -> forged.v1.Health
-	49, // 49: forged.v1.HealthCheck.last_check:type_name -> google.protobuf.Timestamp
-	49, // 50: forged.v1.PingResponse.timestamp:type_name -> google.protobuf.Timestamp
-	6,  // 51: forged.v1.ForgedService.SpawnAgent:input_type -> forged.v1.SpawnAgentRequest
-	9,  // 52: forged.v1.ForgedService.KillAgent:input_type -> forged.v1.KillAgentRequest
-	11, // 53: forged.v1.ForgedService.SendInput:input_type -> forged.v1.SendInputRequest
-	13, // 54: forged.v1.ForgedService.ListAgents:input_type -> forged.v1.ListAgentsRequest
-	15, // 55: forged.v1.ForgedService.GetAgent:input_type -> forged.v1.GetAgentRequest
-	19, // 56: forged.v1.ForgedService.CapturePane:input_type -> forged.v1.CapturePaneRequest
-	21, // 57: forged.v1.ForgedService.StreamPaneUpdates:input_type -> forged.v1.StreamPaneUpdatesRequest
-	23, // 58: forged.v1.ForgedService.StreamEvents:input_type -> forged.v1.StreamEventsRequest
-	33, // 59: forged.v1.ForgedService.GetTranscript:input_type -> forged.v1.GetTranscriptRequest
-	36, // 60: forged.v1.ForgedService.StreamTranscript:input_type -> forged.v1.StreamTranscriptRequest
-	38, // 61: forged.v1.ForgedService.GetStatus:input_type -> forged.v1.GetStatusRequest
-	44, // 62: forged.v1.ForgedService.Ping:input_type -> forged.v1.PingRequest
-	8,  // 63: forged.v1.ForgedService.SpawnAgent:output_type -> forged.v1.SpawnAgentResponse
-	10, // 64: forged.v1.ForgedService.KillAgent:output_type -> forged.v1.KillAgentResponse
-	12, // 65: forged.v1.ForgedService.SendInput:output_type -> forged.v1.SendInputResponse
-	14, // 66: forged.v1.ForgedService.ListAgents:output_type -> forged.v1.ListAgentsResponse
-	16, // 67: forged.v1.ForgedService.GetAgent:output_type -> forged.v1.GetAgentResponse
-	20, // 68: forged.v1.ForgedService.CapturePane:output_type -> forged.v1.CapturePaneResponse
-	22, // 69: forged.v1.ForgedService.StreamPaneUpdates:output_type -> forged.v1.StreamPaneUpdatesResponse
-	24, // 70: forged.v1.ForgedService.StreamEvents:output_type -> forged.v1.StreamEventsResponse
-	34, // 71: forged.v1.ForgedService.GetTranscript:output_type -> forged.v1.GetTranscriptResponse
-	37, // 72: forged.v1.ForgedService.StreamTranscript:output_type -> forged.v1.StreamTranscriptResponse
-	39, // 73: forged.v1.ForgedService.GetStatus:output_type -> forged.v1.GetStatusResponse
-	45, // 74: forged.v1.ForgedService.Ping:output_type -> forged.v1.PingResponse
-	63, // [63:75] is the sub-list for method output_type
-	51, // [51:63] is the sub-list for method input_type
-	51, // [51:51] is the sub-list for extension type_name
-	51, // [51:51] is the sub-list for extension extendee
-	0,  // [0:51] is the sub-list for field type_name
+	56, // 0: forged.v1.SpawnAgentRequest.env:type_name -> forged.v1.SpawnAgentRequest.EnvEntry
+	8,  // 1: forged.v1.SpawnAgentRequest.resource_limits:type_name -> forged.v1.ResourceLimits
+	1,  // 2: forged.v1.ResourceLimits.action:type_name -> forged.v1.ResourceLimitAction
+	58, // 3: forged.v1.ResourceLimits.grace_period:type_name -> google.protobuf.Duration
+	27, // 4: forged.v1.SpawnAgentResponse.agent:type_name -> forged.v1.Agent
+	58, // 5: forged.v1.KillAgentRequest.grace_period:type_name -> google.protobuf.Duration
+	2,  // 6: forged.v1.ListAgentsRequest.states:type_name -> forged.v1.AgentState
+	27, // 7: forged.v1.ListAgentsResponse.agents:type_name -> forged.v1.Agent
+	27, // 8: forged.v1.GetAgentResponse.agent:type_name -> forged.v1.Agent
+	26, // 9: forged.v1.StartLoopRunnerResponse.runner:type_name -> forged.v1.LoopRunner
+	26, // 10: forged.v1.StopLoopRunnerResponse.runner:type_name -> forged.v1.LoopRunner
+	26, // 11: forged.v1.GetLoopRunnerResponse.runner:type_name -> forged.v1.LoopRunner
+	26, // 12: forged.v1.ListLoopRunnersResponse.runners:type_name -> forged.v1.LoopRunner
+	0,  // 13: forged.v1.LoopRunner.state:type_name -> forged.v1.LoopRunnerState
+	59, // 14: forged.v1.LoopRunner.started_at:type_name -> google.protobuf.Timestamp
+	59, // 15: forged.v1.LoopRunner.stopped_at:type_name -> google.protobuf.Timestamp
+	2,  // 16: forged.v1.Agent.state:type_name -> forged.v1.AgentState
+	59, // 17: forged.v1.Agent.spawned_at:type_name -> google.protobuf.Timestamp
+	59, // 18: forged.v1.Agent.last_activity_at:type_name -> google.protobuf.Timestamp
+	8,  // 19: forged.v1.Agent.resource_limits:type_name -> forged.v1.ResourceLimits
+	28, // 20: forged.v1.Agent.resource_usage:type_name -> forged.v1.AgentResourceUsage
+	59, // 21: forged.v1.AgentResourceUsage.measured_at:type_name -> google.protobuf.Timestamp
+	59, // 22: forged.v1.CapturePaneResponse.captured_at:type_name -> google.protobuf.Timestamp
+	58, // 23: forged.v1.StreamPaneUpdatesRequest.min_interval:type_name -> google.protobuf.Duration
+	59, // 24: forged.v1.StreamPaneUpdatesResponse.timestamp:type_name -> google.protobuf.Timestamp
+	2,  // 25: forged.v1.StreamPaneUpdatesResponse.detected_state:type_name -> forged.v1.AgentState
+	3,  // 26: forged.v1.StreamEventsRequest.types:type_name -> forged.v1.EventType
+	35, // 27: forged.v1.StreamEventsResponse.event:type_name -> forged.v1.Event
+	3,  // 28: forged.v1.Event.type:type_name -> forged.v1.EventType
+	59, // 29: forged.v1.Event.timestamp:type_name -> google.protobuf.Timestamp
+	36, // 30: forged.v1.Event.agent_state_changed:type_name -> forged.v1.AgentStateChangedEvent
+	37, // 31: forged.v1.Event.agent_output:type_name -> forged.v1.AgentOutputEvent
+	38, // 32: forged.v1.Event.approval_requested:type_name -> forged.v1.ApprovalRequestedEvent
+	39, // 33: forged.v1.Event.approval_resolved:type_name -> forged.v1.ApprovalResolvedEvent
+	40, // 34: forged.v1.Event.error:type_name -> forged.v1.ErrorEvent
+	42, // 35: forged.v1.Event.pane_content_changed:type_name -> forged.v1.PaneContentChangedEvent
+	41, // 36: forged.v1.Event.resource_violation:type_name -> forged.v1.ResourceViolationEvent
+	2,  // 37: forged.v1.AgentStateChangedEvent.previous_state:type_name -> forged.v1.AgentState
+	2,  // 38: forged.v1.AgentStateChangedEvent.new_state:type_name -> forged.v1.AgentState
+	4,  // 39: forged.v1.ResourceViolationEvent.resource_type:type_name -> forged.v1.ResourceType
+	1,  // 40: forged.v1.ResourceViolationEvent.action_taken:type_name -> forged.v1.ResourceLimitAction
+	59, // 41: forged.v1.GetTranscriptRequest.start_time:type_name -> google.protobuf.Timestamp
+	59, // 42: forged.v1.GetTranscriptRequest.end_time:type_name -> google.protobuf.Timestamp
+	45, // 43: forged.v1.GetTranscriptResponse.entries:type_name -> forged.v1.TranscriptEntry
+	59, // 44: forged.v1.TranscriptEntry.timestamp:type_name -> google.protobuf.Timestamp
+	5,  // 45: forged.v1.TranscriptEntry.type:type_name -> forged.v1.TranscriptEntryType
+	57, // 46: forged.v1.TranscriptEntry.metadata:type_name -> forged.v1.TranscriptEntry.MetadataEntry
+	45, // 47: forged.v1.StreamTranscriptResponse.entries:type_name -> forged.v1.TranscriptEntry
+	50, // 48: forged.v1.GetStatusResponse.status:type_name -> forged.v1.DaemonStatus
+	59, // 49: forged.v1.DaemonStatus.started_at:type_name -> google.protobuf.Timestamp
+	58, // 50: forged.v1.DaemonStatus.uptime:type_name -> google.protobuf.Duration
+	51, // 51: forged.v1.DaemonStatus.resources:type_name -> forged.v1.ResourceUsage
+	52, // 52: forged.v1.DaemonStatus.health:type_name -> forged.v1.HealthStatus
+	6,  // 53: forged.v1.HealthStatus.health:type_name -> forged.v1.Health
+	53, // 54: forged.v1.HealthStatus.checks:type_name -> forged.v1.HealthCheck
+	6,  // 55: forged.v1.HealthCheck.health:type_name -> forged.v1.Health
+	59, // 56: forged.v1.HealthCheck.last_check:type_name -> google.protobuf.Timestamp
+	59, // 57: forged.v1.PingResponse.timestamp:type_name -> google.protobuf.Timestamp
+	7,  // 58: forged.v1.ForgedService.SpawnAgent:input_type -> forged.v1.SpawnAgentRequest
+	10, // 59: forged.v1.ForgedService.KillAgent:input_type -> forged.v1.KillAgentRequest
+	12, // 60: forged.v1.ForgedService.SendInput:input_type -> forged.v1.SendInputRequest
+	14, // 61: forged.v1.ForgedService.ListAgents:input_type -> forged.v1.ListAgentsRequest
+	16, // 62: forged.v1.ForgedService.GetAgent:input_type -> forged.v1.GetAgentRequest
+	18, // 63: forged.v1.ForgedService.StartLoopRunner:input_type -> forged.v1.StartLoopRunnerRequest
+	20, // 64: forged.v1.ForgedService.StopLoopRunner:input_type -> forged.v1.StopLoopRunnerRequest
+	22, // 65: forged.v1.ForgedService.GetLoopRunner:input_type -> forged.v1.GetLoopRunnerRequest
+	24, // 66: forged.v1.ForgedService.ListLoopRunners:input_type -> forged.v1.ListLoopRunnersRequest
+	29, // 67: forged.v1.ForgedService.CapturePane:input_type -> forged.v1.CapturePaneRequest
+	31, // 68: forged.v1.ForgedService.StreamPaneUpdates:input_type -> forged.v1.StreamPaneUpdatesRequest
+	33, // 69: forged.v1.ForgedService.StreamEvents:input_type -> forged.v1.StreamEventsRequest
+	43, // 70: forged.v1.ForgedService.GetTranscript:input_type -> forged.v1.GetTranscriptRequest
+	46, // 71: forged.v1.ForgedService.StreamTranscript:input_type -> forged.v1.StreamTranscriptRequest
+	48, // 72: forged.v1.ForgedService.GetStatus:input_type -> forged.v1.GetStatusRequest
+	54, // 73: forged.v1.ForgedService.Ping:input_type -> forged.v1.PingRequest
+	9,  // 74: forged.v1.ForgedService.SpawnAgent:output_type -> forged.v1.SpawnAgentResponse
+	11, // 75: forged.v1.ForgedService.KillAgent:output_type -> forged.v1.KillAgentResponse
+	13, // 76: forged.v1.ForgedService.SendInput:output_type -> forged.v1.SendInputResponse
+	15, // 77: forged.v1.ForgedService.ListAgents:output_type -> forged.v1.ListAgentsResponse
+	17, // 78: forged.v1.ForgedService.GetAgent:output_type -> forged.v1.GetAgentResponse
+	19, // 79: forged.v1.ForgedService.StartLoopRunner:output_type -> forged.v1.StartLoopRunnerResponse
+	21, // 80: forged.v1.ForgedService.StopLoopRunner:output_type -> forged.v1.StopLoopRunnerResponse
+	23, // 81: forged.v1.ForgedService.GetLoopRunner:output_type -> forged.v1.GetLoopRunnerResponse
+	25, // 82: forged.v1.ForgedService.ListLoopRunners:output_type -> forged.v1.ListLoopRunnersResponse
+	30, // 83: forged.v1.ForgedService.CapturePane:output_type -> forged.v1.CapturePaneResponse
+	32, // 84: forged.v1.ForgedService.StreamPaneUpdates:output_type -> forged.v1.StreamPaneUpdatesResponse
+	34, // 85: forged.v1.ForgedService.StreamEvents:output_type -> forged.v1.StreamEventsResponse
+	44, // 86: forged.v1.ForgedService.GetTranscript:output_type -> forged.v1.GetTranscriptResponse
+	47, // 87: forged.v1.ForgedService.StreamTranscript:output_type -> forged.v1.StreamTranscriptResponse
+	49, // 88: forged.v1.ForgedService.GetStatus:output_type -> forged.v1.GetStatusResponse
+	55, // 89: forged.v1.ForgedService.Ping:output_type -> forged.v1.PingResponse
+	74, // [74:90] is the sub-list for method output_type
+	58, // [58:74] is the sub-list for method input_type
+	58, // [58:58] is the sub-list for extension type_name
+	58, // [58:58] is the sub-list for extension extendee
+	0,  // [0:58] is the sub-list for field type_name
 }
 
 func init() { file_forged_v1_forged_proto_init() }
@@ -3583,7 +4194,7 @@ func file_forged_v1_forged_proto_init() {
 	if File_forged_v1_forged_proto != nil {
 		return
 	}
-	file_forged_v1_forged_proto_msgTypes[19].OneofWrappers = []any{
+	file_forged_v1_forged_proto_msgTypes[28].OneofWrappers = []any{
 		(*Event_AgentStateChanged)(nil),
 		(*Event_AgentOutput)(nil),
 		(*Event_ApprovalRequested)(nil),
@@ -3597,8 +4208,8 @@ func file_forged_v1_forged_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_forged_v1_forged_proto_rawDesc), len(file_forged_v1_forged_proto_rawDesc)),
-			NumEnums:      6,
-			NumMessages:   42,
+			NumEnums:      7,
+			NumMessages:   51,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

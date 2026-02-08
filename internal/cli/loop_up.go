@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -26,6 +25,7 @@ var (
 	loopUpMaxRuntime    string
 	loopUpMaxIterations int
 	loopUpTags          string
+	loopUpSpawnOwner    string
 
 	loopUpQuantStopCmd        string
 	loopUpQuantStopEvery      int
@@ -43,8 +43,6 @@ var (
 	loopUpQualStopPrompt    string
 	loopUpQualStopPromptMsg string
 	loopUpQualStopOnInvalid string
-
-	startLoopProcessFunc = startLoopProcess
 )
 
 func init() {
@@ -61,6 +59,7 @@ func init() {
 	loopUpCmd.Flags().StringVarP(&loopUpMaxRuntime, "max-runtime", "r", "", "max runtime before stopping (e.g., 30m, 2h; 0s/empty = no limit)")
 	loopUpCmd.Flags().IntVarP(&loopUpMaxIterations, "max-iterations", "i", 0, "max iterations before stopping (0 = no limit)")
 	loopUpCmd.Flags().StringVar(&loopUpTags, "tags", "", "comma-separated tags")
+	loopUpCmd.Flags().StringVar(&loopUpSpawnOwner, "spawn-owner", string(loopSpawnOwnerAuto), "loop runner owner (local|daemon|auto)")
 
 	loopUpCmd.Flags().StringVar(&loopUpQuantStopCmd, "quantitative-stop-cmd", "", "quantitative stop: command to execute (bash -lc)")
 	loopUpCmd.Flags().IntVar(&loopUpQuantStopEvery, "quantitative-stop-every", 1, "quantitative stop: evaluate every N iterations (> 0)")
@@ -266,6 +265,10 @@ Smart stop (optional):
 		}
 
 		created := make([]*models.Loop, 0, loopUpCount)
+		spawnOwner, err := parseLoopSpawnOwner(loopUpSpawnOwner)
+		if err != nil {
+			return err
+		}
 		for i := 0; i < loopUpCount; i++ {
 			name := loopUpName
 			if name == "" {
@@ -306,7 +309,11 @@ Smart stop (optional):
 				return err
 			}
 
-			if err := startLoopProcessFunc(loopEntry.ID); err != nil {
+			startResult, err := startLoopRunnerFunc(loopEntry.ID, cfgFile, spawnOwner)
+			if err != nil {
+				return err
+			}
+			if err := setLoopRunnerMetadata(context.Background(), loopRepo, loopEntry.ID, startResult.Owner, startResult.InstanceID); err != nil {
 				return err
 			}
 
@@ -327,21 +334,4 @@ Smart stop (optional):
 
 		return nil
 	},
-}
-
-func startLoopProcess(loopID string) error {
-	args := []string{"loop", "run", loopID}
-	if cfgFile != "" {
-		args = append([]string{"--config", cfgFile}, args...)
-	}
-
-	cmd := exec.Command(os.Args[0], args...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start loop process: %w", err)
-	}
-
-	return nil
 }
