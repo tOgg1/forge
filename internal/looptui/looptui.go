@@ -1702,10 +1702,6 @@ func (m model) renderTabBar(width int) string {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(m.palette.TextMuted)).Render(full)
 }
 
-func paneWidths(width int) (int, int) {
-	return paneWidthsForTab(width, tabOverview)
-}
-
 func paneWidthsForTab(width int, tab mainTab) (int, int) {
 	ratio := 0.44
 	if tab == tabMultiLogs {
