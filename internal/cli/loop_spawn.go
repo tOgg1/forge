@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	forgedv1 "github.com/tOgg1/forge/gen/forged/v1"
 	"github.com/tOgg1/forge/internal/forged"
 	"github.com/tOgg1/forge/internal/procutil"
@@ -38,7 +39,7 @@ var (
 func parseLoopSpawnOwner(raw string) (loopSpawnOwner, error) {
 	normalized := strings.ToLower(strings.TrimSpace(raw))
 	if normalized == "" {
-		return loopSpawnOwnerAuto, nil
+		return loopSpawnOwnerLocal, nil
 	}
 	switch loopSpawnOwner(normalized) {
 	case loopSpawnOwnerLocal, loopSpawnOwnerDaemon, loopSpawnOwnerAuto:
@@ -46,6 +47,13 @@ func parseLoopSpawnOwner(raw string) (loopSpawnOwner, error) {
 	default:
 		return "", fmt.Errorf("invalid --spawn-owner %q (valid: local|daemon|auto)", raw)
 	}
+}
+
+func resolveSpawnOwner(cmd *cobra.Command, raw string) (loopSpawnOwner, error) {
+	if cmd != nil && !cmd.Flags().Changed("spawn-owner") && strings.EqualFold(strings.TrimSpace(raw), string(loopSpawnOwnerAuto)) {
+		return loopSpawnOwnerLocal, nil
+	}
+	return parseLoopSpawnOwner(raw)
 }
 
 func startLoopRunner(loopID, configFile string, owner loopSpawnOwner) (loopRunnerStartResult, error) {

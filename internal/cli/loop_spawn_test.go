@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestParseLoopSpawnOwner(t *testing.T) {
@@ -13,7 +15,7 @@ func TestParseLoopSpawnOwner(t *testing.T) {
 		want    loopSpawnOwner
 		wantErr bool
 	}{
-		{input: "", want: loopSpawnOwnerAuto},
+		{input: "", want: loopSpawnOwnerLocal},
 		{input: "auto", want: loopSpawnOwnerAuto},
 		{input: "local", want: loopSpawnOwnerLocal},
 		{input: "daemon", want: loopSpawnOwnerDaemon},
@@ -110,5 +112,34 @@ func TestStartLoopRunnerDaemonDoesNotFallback(t *testing.T) {
 	}
 	if localCalled {
 		t.Fatalf("local fallback should not run for daemon owner")
+	}
+}
+
+func TestResolveSpawnOwnerImplicitAutoDefaultsToLocal(t *testing.T) {
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().String("spawn-owner", string(loopSpawnOwnerAuto), "")
+
+	got, err := resolveSpawnOwner(cmd, string(loopSpawnOwnerAuto))
+	if err != nil {
+		t.Fatalf("resolveSpawnOwner: %v", err)
+	}
+	if got != loopSpawnOwnerLocal {
+		t.Fatalf("owner = %q, want %q", got, loopSpawnOwnerLocal)
+	}
+}
+
+func TestResolveSpawnOwnerExplicitAutoStaysAuto(t *testing.T) {
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().String("spawn-owner", string(loopSpawnOwnerAuto), "")
+	if err := cmd.Flags().Set("spawn-owner", string(loopSpawnOwnerAuto)); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	got, err := resolveSpawnOwner(cmd, string(loopSpawnOwnerAuto))
+	if err != nil {
+		t.Fatalf("resolveSpawnOwner: %v", err)
+	}
+	if got != loopSpawnOwnerAuto {
+		t.Fatalf("owner = %q, want %q", got, loopSpawnOwnerAuto)
 	}
 }

@@ -69,15 +69,15 @@ Forge sets `PI_CODING_AGENT_DIR` from `profile.auth_home` automatically.
 ## Start loops
 
 ```bash
-./build/forge up --count 1 --spawn-owner auto
+./build/forge up --count 1
 ./build/forge ps
 ```
 
 Ownership modes for runner spawn:
 
-- `--spawn-owner auto` (default): prefer local `forged`; fallback to detached local spawn if daemon unavailable.
+- `--spawn-owner local` (default): always detached local spawn.
+- `--spawn-owner auto`: prefer local `forged`; fallback to detached local spawn if daemon unavailable.
 - `--spawn-owner daemon`: require daemon; fail if unavailable.
-- `--spawn-owner local`: always detached local spawn.
 
 ## Smart stop (optional)
 

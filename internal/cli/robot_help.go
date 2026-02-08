@@ -22,17 +22,19 @@ Purpose
 
 Quick Start (Loops)
 1) forge init
-2) forge up --name <loop-name> --prompt <prompt-name|path> --spawn-owner auto
+2) forge up --name <loop-name> --prompt <prompt-name|path>
 3) forge ps
 4) forge logs <loop>
 5) forge msg <loop> "instruction"
 
 Loop Runner Ownership
-- owner modes: local | daemon | auto (default auto)
+- owner modes: local | daemon | auto (default local)
 - apply on spawn cmds:
   - forge up --spawn-owner <mode>
   - forge scale --spawn-owner <mode>
   - forge resume --spawn-owner <mode>
+- local policy (default):
+  - detached local runner; no daemon dependency
 - auto policy:
   - daemon reachable: start runner via forged
   - daemon unavailable: warn + detached local fallback

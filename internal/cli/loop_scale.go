@@ -275,7 +275,7 @@ For new loops, you can configure smart stop:
 
 		if len(loops) < loopScaleCount {
 			toCreate := loopScaleCount - len(loops)
-			spawnOwner, err := parseLoopSpawnOwner(loopScaleSpawnOwner)
+			spawnOwner, err := resolveSpawnOwner(cmd, loopScaleSpawnOwner)
 			if err != nil {
 				return err
 			}

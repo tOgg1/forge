@@ -40,7 +40,7 @@ var loopResumeCmd = &cobra.Command{
 			return fmt.Errorf("loop %q is %s; only stopped or errored loops can be resumed", loopEntry.Name, loopEntry.State)
 		}
 
-		spawnOwner, err := parseLoopSpawnOwner(loopResumeSpawnOwner)
+		spawnOwner, err := resolveSpawnOwner(cmd, loopResumeSpawnOwner)
 		if err != nil {
 			return err
 		}

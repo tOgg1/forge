@@ -23,6 +23,7 @@ Reviewer: codex
   - `forge up --spawn-owner local|daemon|auto`
   - `forge loop scale --spawn-owner local|daemon|auto`
   - `forge loop resume --spawn-owner local|daemon|auto`
+- default mode: `local`
 - `auto` behavior:
   - try daemon first
   - on daemon failure: warn + local detached fallback

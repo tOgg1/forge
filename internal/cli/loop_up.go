@@ -265,7 +265,7 @@ Smart stop (optional):
 		}
 
 		created := make([]*models.Loop, 0, loopUpCount)
-		spawnOwner, err := parseLoopSpawnOwner(loopUpSpawnOwner)
+		spawnOwner, err := resolveSpawnOwner(cmd, loopUpSpawnOwner)
 		if err != nil {
 			return err
 		}
