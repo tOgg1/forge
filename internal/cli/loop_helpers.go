@@ -114,6 +114,17 @@ func parseDuration(value string, fallback time.Duration) (time.Duration, error) 
 	return parsed, nil
 }
 
+func durationSecondsCeil(value time.Duration) int {
+	if value <= 0 {
+		return 0
+	}
+	seconds := int(value / time.Second)
+	if value%time.Second != 0 {
+		seconds++
+	}
+	return seconds
+}
+
 func selectLoops(ctx context.Context, loopRepo *db.LoopRepository, poolRepo *db.PoolRepository, profileRepo *db.ProfileRepository, selector loopSelector) ([]*models.Loop, error) {
 	loops, err := loopRepo.List(ctx)
 	if err != nil {

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -21,6 +22,7 @@ var (
 	loopScalePrompt        string
 	loopScalePromptMsg     string
 	loopScaleInterval      string
+	loopScaleInitialWait   string
 	loopScaleMaxRuntime    string
 	loopScaleMaxIterations int
 	loopScaleTags          string
@@ -55,6 +57,7 @@ func init() {
 	loopScaleCmd.Flags().StringVar(&loopScalePrompt, "prompt", "", "base prompt path or name")
 	loopScaleCmd.Flags().StringVar(&loopScalePromptMsg, "prompt-msg", "", "base prompt content for each iteration")
 	loopScaleCmd.Flags().StringVar(&loopScaleInterval, "interval", "", "sleep interval")
+	loopScaleCmd.Flags().StringVar(&loopScaleInitialWait, "initial-wait", "", "wait before first iteration for new loops")
 	loopScaleCmd.Flags().StringVarP(&loopScaleMaxRuntime, "max-runtime", "r", "", "max runtime before stopping (e.g., 30m, 2h; 0s/empty = no limit)")
 	loopScaleCmd.Flags().IntVarP(&loopScaleMaxIterations, "max-iterations", "i", 0, "max iterations before stopping (0 = no limit)")
 	loopScaleCmd.Flags().StringVar(&loopScaleTags, "tags", "", "comma-separated tags")
@@ -106,6 +109,13 @@ For new loops, you can configure smart stop:
 		interval, err := parseDuration(loopScaleInterval, cfg.LoopDefaults.Interval)
 		if err != nil {
 			return err
+		}
+		initialWait, err := parseDuration(loopScaleInitialWait, 0)
+		if err != nil {
+			return err
+		}
+		if initialWait < 0 {
+			return fmt.Errorf("initial wait must be >= 0")
 		}
 		if loopScaleMaxIterations < 0 {
 			return fmt.Errorf("max iterations must be >= 0")
@@ -317,6 +327,19 @@ For new loops, you can configure smart stop:
 				loopEntry.LedgerPath = loop.LedgerPath(repoPath, loopEntry.Name, loopEntry.ID)
 				if err := loopRepo.Update(context.Background(), loopEntry); err != nil {
 					return err
+				}
+				if initialWait > 0 {
+					payload, _ := json.Marshal(models.LoopPausePayload{
+						DurationSeconds: durationSecondsCeil(initialWait),
+						Reason:          "initial wait",
+					})
+					item := &models.LoopQueueItem{
+						Type:    models.LoopQueueItemPause,
+						Payload: payload,
+					}
+					if err := queueRepo.Enqueue(context.Background(), loopEntry.ID, item); err != nil {
+						return err
+					}
 				}
 
 				startResult, err := startLoopRunnerFunc(loopEntry.ID, cfgFile, spawnOwner)
