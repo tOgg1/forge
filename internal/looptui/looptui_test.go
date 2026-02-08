@@ -3,6 +3,8 @@ package looptui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,242 @@ import (
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/models"
 )
+
+func TestMainModeTabAndThemeShortcuts(t *testing.T) {
+	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 8, Theme: "default"})
+	m.loops = []loopView{
+		testLoopView("id-a", "ida", "alpha", models.LoopStateRunning, "/tmp/a"),
+	}
+	m.applyFilters("", 0)
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	if m.tab != tabLogs {
+		t.Fatalf("expected logs tab, got %v", m.tab)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	if m.tab != tabRuns {
+		t.Fatalf("expected runs tab after ], got %v", m.tab)
+	}
+
+	themeBefore := m.palette.Name
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if m.palette.Name == themeBefore {
+		t.Fatalf("expected theme to cycle from %q", themeBefore)
+	}
+
+	m.tab = tabLogs
+	layerBefore := m.logLayer
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if m.logLayer == layerBefore {
+		t.Fatalf("expected layer to cycle from %v", layerBefore)
+	}
+}
+
+func TestRunSelectionAndLogSourceCycle(t *testing.T) {
+	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 8, Theme: "default"})
+	m.loops = []loopView{
+		testLoopView("id-a", "ida", "alpha", models.LoopStateRunning, "/tmp/a"),
+	}
+	m.applyFilters("", 0)
+	m.tab = tabLogs
+	m.runHistory = []runView{
+		{
+			Run: &models.LoopRun{
+				ID:         "run-1",
+				Status:     models.LoopRunStatusSuccess,
+				StartedAt:  time.Now().Add(-time.Minute).UTC(),
+				OutputTail: "first",
+			},
+			Harness: models.HarnessOpenCode,
+		},
+		{
+			Run: &models.LoopRun{
+				ID:         "run-2",
+				Status:     models.LoopRunStatusError,
+				StartedAt:  time.Now().UTC(),
+				OutputTail: "second",
+			},
+			Harness: models.HarnessOpenCode,
+		},
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	if m.logSource != logSourceLatestRun {
+		t.Fatalf("expected latest-run source, got %v", m.logSource)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	if m.logSource != logSourceRunSelection {
+		t.Fatalf("expected selected-run source, got %v", m.logSource)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'.'}})
+	if m.selectedRun != 1 {
+		t.Fatalf("expected selected run index 1, got %d", m.selectedRun)
+	}
+
+	view, ok := m.selectedView()
+	if !ok {
+		t.Fatalf("expected selected view")
+	}
+	display := m.currentLogDisplay(view)
+	if got := strings.Join(display.Lines, "\n"); !strings.Contains(got, "second") {
+		t.Fatalf("expected selected run output, got %q", got)
+	}
+}
+
+func TestMultiTargetViewsPrioritizesPinnedLoops(t *testing.T) {
+	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 8})
+	m.filtered = []loopView{
+		testLoopView("id-a", "ida", "alpha", models.LoopStateRunning, "/tmp/a"),
+		testLoopView("id-b", "idb", "beta", models.LoopStateRunning, "/tmp/b"),
+		testLoopView("id-c", "idc", "gamma", models.LoopStateRunning, "/tmp/c"),
+	}
+	m.pinned["id-c"] = struct{}{}
+
+	targets := m.multiTargetViews(2)
+	if len(targets) != 2 {
+		t.Fatalf("expected 2 targets, got %d", len(targets))
+	}
+	if targets[0].Loop.ID != "id-c" {
+		t.Fatalf("expected pinned loop id-c first, got %s", targets[0].Loop.ID)
+	}
+	if targets[1].Loop.ID != "id-a" {
+		t.Fatalf("expected fallback id-a second, got %s", targets[1].Loop.ID)
+	}
+}
+
+func TestMultiPageBounds(t *testing.T) {
+	page, totalPages, start, end := multiPageBounds(10, 4, 0)
+	if page != 0 || totalPages != 3 || start != 0 || end != 4 {
+		t.Fatalf("unexpected first page bounds page=%d total=%d start=%d end=%d", page, totalPages, start, end)
+	}
+
+	page, totalPages, start, end = multiPageBounds(10, 4, 99)
+	if page != 2 || totalPages != 3 || start != 8 || end != 10 {
+		t.Fatalf("unexpected clamped page bounds page=%d total=%d start=%d end=%d", page, totalPages, start, end)
+	}
+}
+
+func TestMainModeMultiLogsPagingKeys(t *testing.T) {
+	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 8, Theme: "default"})
+	m.filtered = []loopView{
+		testLoopView("id-a", "ida", "alpha", models.LoopStateRunning, "/tmp/a"),
+		testLoopView("id-b", "idb", "beta", models.LoopStateRunning, "/tmp/b"),
+		testLoopView("id-c", "idc", "gamma", models.LoopStateRunning, "/tmp/c"),
+	}
+	m.tab = tabMultiLogs
+	m.layoutIdx = layoutIndexFor(1, 1)
+	m.focusRight = true
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'.'}})
+	if m.multiPage != 1 {
+		t.Fatalf("expected page 1, got %d", m.multiPage)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'.'}})
+	if m.multiPage != 2 {
+		t.Fatalf("expected page 2, got %d", m.multiPage)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{','}})
+	if m.multiPage != 1 {
+		t.Fatalf("expected page 1 after back, got %d", m.multiPage)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyHome})
+	if m.multiPage != 0 {
+		t.Fatalf("expected home to go to first page, got %d", m.multiPage)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnd})
+	if m.multiPage != 2 {
+		t.Fatalf("expected end to go to last page, got %d", m.multiPage)
+	}
+}
+
+func TestHelpModeToggleFromMain(t *testing.T) {
+	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 8, Theme: "default"})
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	if m.mode != modeHelp {
+		t.Fatalf("expected help mode, got %v", m.mode)
+	}
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeMain {
+		t.Fatalf("expected return to main mode, got %v", m.mode)
+	}
+}
+
+func TestTailFileReturnsLastLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "loop.log")
+	content := strings.Join([]string{
+		"one",
+		"two",
+		"three",
+		"four",
+		"five",
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	lines, err := tailFile(path, 2)
+	if err != nil {
+		t.Fatalf("tail file: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+	if lines[0] != "four" || lines[1] != "five" {
+		t.Fatalf("unexpected tail lines: %#v", lines)
+	}
+}
+
+func TestLogWindowBoundsSupportsScroll(t *testing.T) {
+	start, end, scroll := logWindowBounds(100, 10, 15)
+	if start != 75 || end != 85 {
+		t.Fatalf("unexpected window %d-%d", start, end)
+	}
+	if scroll != 15 {
+		t.Fatalf("unexpected scroll %d", scroll)
+	}
+}
+
+func TestDesiredSelectedLogLinesGrowsWithScroll(t *testing.T) {
+	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 20})
+	m.tab = tabLogs
+	m.logSource = logSourceLive
+	base := m.desiredSelectedLogLines()
+	m.logScroll = 500
+	scrolled := m.desiredSelectedLogLines()
+	if scrolled <= base {
+		t.Fatalf("expected scrolled lines > base (%d <= %d)", scrolled, base)
+	}
+}
+
+func TestSetTabMultiEnablesZenByDefault(t *testing.T) {
+	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 8})
+	m.setTab(tabMultiLogs)
+	if !m.focusRight {
+		t.Fatalf("expected zen mode enabled for multi logs tab")
+	}
+	m.setTab(tabOverview)
+	if m.focusRight {
+		t.Fatalf("expected zen mode disabled when leaving multi logs")
+	}
+}
+
+func TestMainModePgUpScrollsLogs(t *testing.T) {
+	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 20})
+	m.tab = tabLogs
+	before := m.logScroll
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	if m.logScroll <= before {
+		t.Fatalf("expected log scroll to increase")
+	}
+}
 
 func TestModeTransitions(t *testing.T) {
 	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 8})
