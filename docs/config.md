@@ -89,6 +89,7 @@ Pools are ordered lists of profile references.
 ### tui
 
 - `tui.refresh_interval` (duration): UI refresh rate. Default: `2s`.
+- `tui.theme` (string): TUI palette. One of `default`, `high-contrast`, `ocean`, `sunset`. Default: `default`.
 
 ## Repo config (`.forge/forge.yaml`)
 

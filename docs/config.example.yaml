@@ -67,3 +67,5 @@ loop_defaults:
 tui:
   # How often to refresh the display
   refresh_interval: 2s
+  # Palette: default, high-contrast, ocean, sunset
+  theme: default

@@ -46,6 +46,7 @@ func runTUI() error {
 	if cfg := GetConfig(); cfg != nil {
 		loopConfig.DataDir = cfg.Global.DataDir
 		loopConfig.RefreshInterval = cfg.TUI.RefreshInterval
+		loopConfig.Theme = cfg.TUI.Theme
 		loopConfig.DefaultInterval = cfg.LoopDefaults.Interval
 		loopConfig.DefaultPrompt = cfg.LoopDefaults.Prompt
 		loopConfig.DefaultPromptMsg = cfg.LoopDefaults.PromptMsg

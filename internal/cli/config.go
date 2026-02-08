@@ -226,7 +226,7 @@ tui:
   # Default: 500ms
   # refresh_interval: 500ms
 
-  # Color theme: default, high-contrast
+  # Color theme: default, high-contrast, ocean, sunset
   # Default: default
   # theme: default
 

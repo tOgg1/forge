@@ -249,7 +249,7 @@ type TUIConfig struct {
 	// RefreshInterval is how often to refresh the display.
 	RefreshInterval time.Duration `yaml:"refresh_interval" mapstructure:"refresh_interval"`
 
-	// Theme is the color theme (default, high-contrast).
+	// Theme is the color theme (default, high-contrast, ocean, sunset).
 	Theme string `yaml:"theme" mapstructure:"theme"`
 
 	// ShowTimestamps shows timestamps in the UI.
@@ -482,9 +482,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("tui.refresh_interval must be greater than 0")
 	}
 	switch strings.ToLower(strings.TrimSpace(c.TUI.Theme)) {
-	case "default", "high-contrast":
+	case "default", "high-contrast", "ocean", "sunset":
 	default:
-		return fmt.Errorf("tui.theme must be one of default, high-contrast")
+		return fmt.Errorf("tui.theme must be one of default, high-contrast, ocean, sunset")
 	}
 
 	// Event retention validation
