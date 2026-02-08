@@ -20,7 +20,7 @@ Key features:
 - **Queue**: message, pause, stop, kill, next-prompt override
 - **Smart stop**: quantitative (command-based) + qualitative (judge iteration) stop rules
 - **Logs + Ledgers**: logs centralized in the data dir, ledgers committed per repo
-- **TUI**: 2x2 grid of active loops with log tails
+- **TUI**: themed loop dashboard with tabs (`Overview`, `Logs`, `Runs`, `Multi Logs`), harness-aware log highlighting, and configurable multi-log layouts up to `4x4`
 
 ## Core Concepts
 
@@ -67,7 +67,9 @@ forge pool add default oc1
 forge pool set-default default
 
 # 4) Start a loop
-forge up --count 1 --spawn-owner auto
+forge up --count 1
+# optional: explicit local ownership (default)
+# forge up --count 1 --spawn-owner local
 # optional: force daemon ownership (fails if forged unavailable)
 # forge up --count 1 --spawn-owner daemon
 # Optional: smart stop rules
@@ -130,9 +132,9 @@ See `docs/cli.md` for the full CLI surface.
 
 Loop runners can be spawned with explicit ownership:
 
-- `local`: detached local process
+- `local` (default): detached local process
 - `daemon`: owned by `forged` daemon
-- `auto` (default): daemon first, local detached fallback if daemon unavailable
+- `auto`: daemon first, local detached fallback if daemon unavailable
 
 Commands supporting owner selection:
 

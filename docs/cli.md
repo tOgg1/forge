@@ -59,6 +59,23 @@ forge
 forge tui
 ```
 
+TUI quick keys:
+
+- `1/2/3/4`: switch tabs (`Overview`, `Logs`, `Runs`, `Multi Logs`)
+- `]/[`: next/previous tab
+- `t`: cycle color theme (`default`, `high-contrast`, `ocean`, `sunset`)
+- `z`: zen mode (expand/collapse right pane)
+- `j/k` or arrows: move selected loop
+- `space`: pin/unpin selected loop for multi-log tab
+- `m`: cycle multi-log layouts up to `4x4`
+- `v`: cycle log source (`live`, `latest-run`, `selected-run`)
+- `,` / `.`: previous/next run in logs/runs tabs
+- `pgup` / `pgdown` / `home` / `end` / `u` / `d`: deep log scrolling in logs/runs/expanded views
+- `l`: expanded log viewer
+- `n`: new-loop wizard
+- `/`: filter mode
+- `S/K/D`: stop/kill/delete with confirmation
+
 ### `forge init`
 
 Initialize `.forge/` scaffolding and optional `PROMPT.md`.
@@ -87,8 +104,9 @@ Start loop(s) in the current repo.
 forge up --count 1
 forge up --name review-loop --prompt review
 forge up --pool default --interval 30s --tags review
+forge up --name review-loop --initial-wait 2m
 forge up --max-iterations 10 --max-runtime 2h
-forge up --spawn-owner auto
+forge up --spawn-owner local
 forge up --spawn-owner daemon
 forge up --quantitative-stop-cmd 'sv count --epic | rg -q "^0$"' --quantitative-stop-exit-codes 0
 forge up --qualitative-stop-every 5 --qualitative-stop-prompt stop-judge
@@ -102,9 +120,9 @@ See `docs/smart-stop.md`.
 
 Loop runner ownership (`--spawn-owner`):
 
-- `auto` (default): try local `forged` daemon; if unavailable, warn and use detached local spawn.
+- `local` (default): detached local spawn.
+- `auto`: try local `forged` daemon; if unavailable, warn and use detached local spawn.
 - `daemon`: require daemon; fail if daemon unavailable.
-- `local`: always detached local spawn.
 
 ### `forge loop ps` (alias: `forge ps`)
 
@@ -166,7 +184,7 @@ Resume a stopped or errored loop.
 
 ```bash
 forge resume review-loop
-forge resume review-loop --spawn-owner auto
+forge resume review-loop --spawn-owner local
 ```
 
 ### `forge loop rm` (alias: `forge rm`)
@@ -195,8 +213,10 @@ Scale loops to a target count.
 
 ```bash
 forge scale --count 3 --pool default
+forge scale --count 3 --initial-wait 45s
 forge scale --count 0 --kill
 forge scale --count 2 --max-iterations 5 --max-runtime 1h
+forge scale --count 3 --spawn-owner local
 forge scale --count 3 --spawn-owner daemon
 ```
 
