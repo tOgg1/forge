@@ -211,6 +211,24 @@ func TestCreateLoopsWizardPath(t *testing.T) {
 	}
 }
 
+func TestBuildWizardSpecAllowsUnlimitedLimits(t *testing.T) {
+	spec, err := buildWizardSpec(
+		wizardValues{Name: "wizard-loop", Count: "1", MaxRuntime: "", MaxIterations: ""},
+		30*time.Second,
+		"",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("buildWizardSpec: %v", err)
+	}
+	if spec.MaxRuntime != 0 {
+		t.Fatalf("expected MaxRuntime=0 (unlimited), got %s", spec.MaxRuntime)
+	}
+	if spec.MaxIterations != 0 {
+		t.Fatalf("expected MaxIterations=0 (unlimited), got %d", spec.MaxIterations)
+	}
+}
+
 func TestViewEmptyStateGuidesLoopCreation(t *testing.T) {
 	m := newModel(nil, Config{RefreshInterval: time.Second, LogLines: 8})
 	m.applyFilters("", 0)

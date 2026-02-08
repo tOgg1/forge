@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/tOgg1/forge/internal/config"
@@ -114,7 +113,7 @@ func TestLoopCLIUpMsgLogs(t *testing.T) {
 	}
 }
 
-func TestLoopCLIUpRejectsZeroLimits(t *testing.T) {
+func TestLoopCLIUpAcceptsZeroLimitsAsUnlimited(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmpDir, "PROMPT.md"), []byte("prompt"), 0o644); err != nil {
 		t.Fatalf("write PROMPT.md: %v", err)
@@ -149,13 +148,12 @@ func TestLoopCLIUpRejectsZeroLimits(t *testing.T) {
 	loopUpPrompt = ""
 	loopUpPromptMsg = ""
 	loopUpInterval = ""
-	loopUpMaxRuntime = "1m"
+	loopUpMaxRuntime = ""
 	loopUpMaxIterations = 0
 	loopUpTags = ""
 
-	err := loopUpCmd.RunE(loopUpCmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "must be > 0") {
-		t.Fatalf("expected >0 validation error, got %v", err)
+	if err := loopUpCmd.RunE(loopUpCmd, nil); err != nil {
+		t.Fatalf("loop up: %v", err)
 	}
 
 	database, err := openDatabase()
@@ -169,7 +167,13 @@ func TestLoopCLIUpRejectsZeroLimits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list loops: %v", err)
 	}
-	if len(loops) != 0 {
-		t.Fatalf("expected no loops created, got %d", len(loops))
+	if len(loops) != 1 {
+		t.Fatalf("expected 1 loop created, got %d", len(loops))
+	}
+	if loops[0].MaxIterations != 0 {
+		t.Fatalf("expected MaxIterations=0 (unlimited), got %d", loops[0].MaxIterations)
+	}
+	if loops[0].MaxRuntimeSeconds != 0 {
+		t.Fatalf("expected MaxRuntimeSeconds=0 (unlimited), got %d", loops[0].MaxRuntimeSeconds)
 	}
 }

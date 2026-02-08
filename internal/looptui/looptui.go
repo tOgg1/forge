@@ -1546,19 +1546,17 @@ func buildWizardSpec(values wizardValues, defaultInterval time.Duration, default
 	if maxRuntime < 0 {
 		return wizardSpec{}, fmt.Errorf("max runtime must be >= 0")
 	}
-	if maxRuntime == 0 {
-		return wizardSpec{}, fmt.Errorf("max-runtime must be > 0")
-	}
-
-	if strings.TrimSpace(values.MaxIterations) == "" {
-		return wizardSpec{}, fmt.Errorf("max-iterations must be > 0")
-	}
-	maxIterations, err := strconv.Atoi(strings.TrimSpace(values.MaxIterations))
-	if err != nil {
-		return wizardSpec{}, fmt.Errorf("invalid max-iterations %q", values.MaxIterations)
-	}
-	if maxIterations <= 0 {
-		return wizardSpec{}, fmt.Errorf("max-iterations must be > 0")
+	// Zero maxRuntime/maxIterations means "no limit" (unset).
+	maxIterations := 0
+	if strings.TrimSpace(values.MaxIterations) != "" {
+		parsed, err := strconv.Atoi(strings.TrimSpace(values.MaxIterations))
+		if err != nil {
+			return wizardSpec{}, fmt.Errorf("invalid max-iterations %q", values.MaxIterations)
+		}
+		if parsed < 0 {
+			return wizardSpec{}, fmt.Errorf("max-iterations must be >= 0")
+		}
+		maxIterations = parsed
 	}
 
 	promptRef := strings.TrimSpace(values.Prompt)
@@ -1611,18 +1609,17 @@ func validateWizardStep(step int, values wizardValues, defaultInterval time.Dura
 		if err != nil {
 			return err
 		}
-		if maxRuntime == 0 {
-			return fmt.Errorf("max-runtime must be > 0")
+		if maxRuntime < 0 {
+			return fmt.Errorf("max runtime must be >= 0")
 		}
-		if strings.TrimSpace(values.MaxIterations) == "" {
-			return fmt.Errorf("max-iterations must be > 0")
-		}
-		parsed, err := strconv.Atoi(strings.TrimSpace(values.MaxIterations))
-		if err != nil {
-			return fmt.Errorf("invalid max-iterations %q", values.MaxIterations)
-		}
-		if parsed <= 0 {
-			return fmt.Errorf("max-iterations must be > 0")
+		if strings.TrimSpace(values.MaxIterations) != "" {
+			parsed, err := strconv.Atoi(strings.TrimSpace(values.MaxIterations))
+			if err != nil {
+				return fmt.Errorf("invalid max-iterations %q", values.MaxIterations)
+			}
+			if parsed < 0 {
+				return fmt.Errorf("max-iterations must be >= 0")
+			}
 		}
 	}
 	return nil
