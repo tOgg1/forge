@@ -17,3 +17,20 @@ require_flag_for_strong_overlap = true
 [protect]
 mode = "guard"
 paths = [".tickets/"]
+
+[tasks]
+id_prefix = "forge"
+id_min_len = 3
+statuses = [
+    "open",
+    "in_progress",
+    "closed",
+]
+default_status = "open"
+in_progress_status = "in_progress"
+closed_statuses = ["closed"]
+
+[tasks.compaction]
+auto = false
+max_log_mb = 200
+older_than = "180d"
