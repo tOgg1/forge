@@ -21,6 +21,8 @@ func TestRustDaemonProtoGateSpecPinned(t *testing.T) {
 		"StartLoopRunner",
 		"StreamEvents",
 		"TestDaemonProtoGateProtoSurfaceLocked",
+		"internal/parity/testdata/oracle/expected/forged/proto-wire/summary.json",
+		"TestProtoWireGateCriticalRPCFixtures",
 	} {
 		if !strings.Contains(gateDoc, want) {
 			t.Fatalf("rust-daemon-proto-gate.md drift: missing %q", want)
@@ -33,5 +35,8 @@ func TestRustDaemonProtoGateSpecPinned(t *testing.T) {
 
 	if !strings.Contains(workflow, "TestDaemonProtoGate") {
 		t.Fatalf("ci parity job missing daemon/proto gate test invocation")
+	}
+	if !strings.Contains(workflow, "TestProtoWireGate") {
+		t.Fatalf("ci parity job missing proto wire gate test invocation")
 	}
 }

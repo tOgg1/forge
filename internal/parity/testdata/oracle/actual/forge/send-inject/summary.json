@@ -1,0 +1,97 @@
+{
+  "inject": {
+    "blocked_error": "agent is working; use --force to inject without confirmation",
+    "forced_agent_state": "working",
+    "forced_bypassed_queue": true,
+    "forced_injected": true,
+    "forced_message": "inject forced",
+    "forced_target_agent_id": "agent-send-inject-busy"
+  },
+  "mock_calls": [
+    {
+      "agent_id": "agent-send-inject-busy",
+      "message": "immediate blocked",
+      "skip_idle_check": false
+    },
+    {
+      "agent_id": "agent-send-inject-busy",
+      "message": "immediate forced",
+      "skip_idle_check": true
+    },
+    {
+      "agent_id": "agent-send-inject-busy",
+      "message": "inject forced",
+      "skip_idle_check": true
+    }
+  ],
+  "send_immediate": {
+    "blocked_error": "agent is not idle (use --skip-idle-check to force)",
+    "forced_error": ""
+  },
+  "send_queue": {
+    "after": {
+      "position": 3,
+      "type": "message"
+    },
+    "front": {
+      "position": 1,
+      "type": "message"
+    },
+    "normal": {
+      "position": 1,
+      "type": "message"
+    },
+    "order_after_dispatch": [
+      {
+        "position": 0,
+        "text": "front queued",
+        "type": "message"
+      },
+      {
+        "position": 2,
+        "text": "normal queued",
+        "type": "message"
+      },
+      {
+        "position": 3,
+        "text": "after queued",
+        "type": "message"
+      },
+      {
+        "condition_type": "when_idle",
+        "position": 4,
+        "text": "idle queued",
+        "type": "conditional"
+      }
+    ],
+    "order_before_dispatch": [
+      {
+        "position": 0,
+        "text": "front queued",
+        "type": "message"
+      },
+      {
+        "position": 2,
+        "text": "normal queued",
+        "type": "message"
+      },
+      {
+        "position": 3,
+        "text": "after queued",
+        "type": "message"
+      },
+      {
+        "condition_type": "when_idle",
+        "position": 4,
+        "text": "idle queued",
+        "type": "conditional"
+      }
+    ],
+    "pending_after_dispatch": 4,
+    "pending_before_dispatch": 4,
+    "when_idle": {
+      "position": 3,
+      "type": "conditional"
+    }
+  }
+}

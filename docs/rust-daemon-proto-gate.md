@@ -44,10 +44,21 @@ Define strict, testable gate criteria for daemon/proto parity before Rust cutove
   - event ordering guarantees,
   - terminal/error semantics.
 
+5. Proto wire baseline fixtures
+- Critical unary RPC response wire baselines are source-controlled:
+  - `internal/parity/testdata/oracle/expected/forged/proto-wire/summary.json`
+  - `internal/parity/testdata/oracle/actual/forged/proto-wire/summary.json`
+- Baseline tests:
+  - `TestProtoWireGateCriticalRPCFixtures`
+  - `TestProtoWireGateBaseline`
+- Covered RPC fixtures include:
+  - `SpawnAgent`, `KillAgent`, `SendInput`, `StartLoopRunner`, `StopLoopRunner`, `GetStatus`, `Ping`.
+
 ## CI gate wiring
 
 - `parity` workflow job runs:
   - `go test ./internal/parity -run '^TestDaemonProtoGate' -count=1`
+  - `go test ./internal/parity -run '^TestProtoWireGate' -count=1`
 - This baseline gate is required in PR CI.
 
 ## Evidence for final cutover

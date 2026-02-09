@@ -67,6 +67,8 @@ jobs:
         run: go test ./internal/parity -run '^TestSchemaFingerprintBaseline$' -count=1
       - name: Run daemon/proto parity gate baseline tests
         run: go test ./internal/parity -run '^TestDaemonProtoGate' -count=1
+      - name: Run proto wire baseline gate tests
+        run: go test ./internal/parity -run '^TestProtoWireGate' -count=1
       - name: Run runtime parity gate baseline test
         run: go test ./internal/parity -run '^TestRuntimeGateLoopQueueSmartStopLedger$' -count=1
       - name: Run fmail parity gate baseline test
