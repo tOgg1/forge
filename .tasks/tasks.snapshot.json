@@ -1,14 +1,35 @@
 {
   "schema_version": "sv.tasks.v1",
-  "generated_at": "2026-02-09T16:05:56.588695Z",
+  "generated_at": "2026-02-09T16:07:56.367193Z",
   "tasks": [
+    {
+      "id": "forge-0qj",
+      "title": "CI: Rust fmt/clippy/test jobs",
+      "status": "closed",
+      "priority": "P0",
+      "created_at": "2026-02-09T15:36:45.056727Z",
+      "updated_at": "2026-02-09T16:07:56.345564Z",
+      "created_by": "codex",
+      "updated_by": "rust-dev-codex-smoke-1",
+      "body": "Scope:\n- Add Rust quality jobs to CI from day one.\n\nDeliverables:\n- Workflow jobs for fmt/clippy/test.\n\nAcceptance:\n- Rust checks required on PRs.\n\nTests:\n- Intentional-failure validation run.",
+      "epic": "forge-180",
+      "project": "prj-vr0104gr",
+      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
+      "workspace": "forge",
+      "branch": "main",
+      "started_at": "2026-02-09T16:03:51.508062Z",
+      "started_by": "rust-dev-codex-smoke-1",
+      "closed_at": "2026-02-09T16:07:56.345564Z",
+      "closed_by": "rust-dev-codex-smoke-1",
+      "comments_count": 0
+    },
     {
       "id": "forge-cxh",
       "title": "CI foundation: dual-stack checks from day one",
-      "status": "in_progress",
+      "status": "closed",
       "priority": "P0",
       "created_at": "2026-02-09T15:26:13.433481Z",
-      "updated_at": "2026-02-09T16:05:56.579341Z",
+      "updated_at": "2026-02-09T16:07:27.861705Z",
       "created_by": "codex",
       "updated_by": "rust-dev-codex-smoke-1",
       "body": "Scope:\n- Add dual-stack CI while Go remains source-of-truth.\n- Ensure Rust checks run every PR from start.\n\nDeliverables:\n- Rust jobs: fmt, clippy (deny warnings), test, coverage upload.\n- Dual-run parity job stub connected to characterization harness.\n- Artifact retention for golden diffs.\n\nAcceptance:\n- CI red if Rust checks fail.\n- CI red on parity regression.\n\nTests:\n- CI workflow tests + intentional-failure validation.",
@@ -19,6 +40,8 @@
       "branch": "main",
       "started_at": "2026-02-09T16:05:56.579341Z",
       "started_by": "rust-dev-codex-smoke-1",
+      "closed_at": "2026-02-09T16:07:27.861705Z",
+      "closed_by": "rust-dev-codex-smoke-1",
       "comments_count": 0
     },
     {
@@ -61,25 +84,6 @@
       "started_by": "rust-dev-claude-smoke-1",
       "closed_at": "2026-02-09T16:04:57.429023Z",
       "closed_by": "rust-dev-claude-smoke-1",
-      "comments_count": 0
-    },
-    {
-      "id": "forge-0qj",
-      "title": "CI: Rust fmt/clippy/test jobs",
-      "status": "in_progress",
-      "priority": "P0",
-      "created_at": "2026-02-09T15:36:45.056727Z",
-      "updated_at": "2026-02-09T16:03:51.508062Z",
-      "created_by": "codex",
-      "updated_by": "rust-dev-codex-smoke-1",
-      "body": "Scope:\n- Add Rust quality jobs to CI from day one.\n\nDeliverables:\n- Workflow jobs for fmt/clippy/test.\n\nAcceptance:\n- Rust checks required on PRs.\n\nTests:\n- Intentional-failure validation run.",
-      "epic": "forge-180",
-      "project": "prj-vr0104gr",
-      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
-      "workspace": "forge",
-      "branch": "main",
-      "started_at": "2026-02-09T16:03:51.508062Z",
-      "started_by": "rust-dev-codex-smoke-1",
       "comments_count": 0
     },
     {
