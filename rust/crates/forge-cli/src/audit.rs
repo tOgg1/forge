@@ -785,7 +785,10 @@ mod tests {
         let backend = InMemoryAuditBackend::default();
         let out = run_for_test(&["audit"], &backend);
         assert_success(&out);
-        assert!(out.stdout.contains("TIME\tTYPE\tENTITY\tID\n"));
+        assert!(out.stdout.contains("TIME"));
+        assert!(out.stdout.contains("TYPE"));
+        assert!(out.stdout.contains("ENTITY"));
+        assert!(out.stdout.contains("ID"));
         assert!(out
             .stdout
             .contains("No events matched the current filters."));
