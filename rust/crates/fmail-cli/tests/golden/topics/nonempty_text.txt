@@ -1,0 +1,3 @@
+TOPIC  MESSAGES  LAST ACTIVITY
+bugs   5         30m ago
+tasks  12        1d ago

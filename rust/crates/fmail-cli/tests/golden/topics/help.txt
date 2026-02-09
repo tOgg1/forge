@@ -1,0 +1,8 @@
+List topics with activity
+
+Usage:
+  fmail topics [flags]
+
+Flags:
+      --json    Output as JSON
+  -h, --help    Help for topics

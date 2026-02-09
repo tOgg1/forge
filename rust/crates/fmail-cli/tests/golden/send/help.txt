@@ -1,0 +1,16 @@
+Send a message to a topic or agent
+
+Usage:
+  fmail send <target> [message] [flags]
+
+Arguments:
+  target    Topic name or @agent for direct message
+  message   Message body (optional if --file is used)
+
+Flags:
+  -f, --file string       Read message body from file
+  -r, --reply-to string   Reference a previous message ID
+  -p, --priority string   Set priority (low, normal, high)
+  -t, --tag string        Add tag (repeatable, comma-separated)
+      --json              Output result as JSON
+  -h, --help              Help for send

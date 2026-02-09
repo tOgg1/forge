@@ -1,0 +1,7 @@
+[
+  {
+    "name": "bugs",
+    "messages": 3,
+    "last_activity": "2026-02-09T11:00:00Z"
+  }
+]

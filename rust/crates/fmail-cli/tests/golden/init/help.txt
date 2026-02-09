@@ -1,0 +1,6 @@
+Usage: fmail init [flags]
+
+Initialize a project mailbox
+
+Flags:
+  --project string   Explicit project ID

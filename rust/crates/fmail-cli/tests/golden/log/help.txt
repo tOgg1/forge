@@ -1,0 +1,15 @@
+View recent messages
+
+Usage:
+  fmail log [topic|@agent] [flags]
+
+Arguments:
+  topic|@agent  Topic name or @agent for DM (optional, defaults to all topics)
+
+Flags:
+  -n, --limit int       Max messages to show (default: 20)
+      --since string    Filter by time window (e.g. 1h, 2d, 2024-01-15T10:30:00Z)
+      --from string     Filter by sender
+  -f, --follow          Stream new messages (poll-based)
+      --json            Output as JSON
+  -h, --help            Help for log

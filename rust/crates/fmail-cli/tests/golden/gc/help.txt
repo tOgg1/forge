@@ -1,0 +1,7 @@
+Usage: fmail gc [flags]
+
+Remove old messages
+
+Flags:
+  --days int     Remove messages older than N days (default 7)
+  --dry-run      Show what would be removed
