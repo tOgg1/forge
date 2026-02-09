@@ -18,9 +18,22 @@ func (m *Model) renderHeader() string {
 		palette = styles.DefaultTheme
 	}
 
+	now := m.status.now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	fg := lipgloss.Color(palette.Base.Foreground)
+	bg := lipgloss.Color(palette.Chrome.Header)
+	if m.activeViewID() == ViewLiveTail && !m.flashUntil.IsZero() && now.Before(m.flashUntil) {
+		// Flash: invert-ish colors for high-priority messages in Live Tail.
+		fg = lipgloss.Color(palette.Chrome.Header)
+		bg = lipgloss.Color(palette.Base.Foreground)
+	}
+
 	style := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(palette.Base.Foreground)).
-		Background(lipgloss.Color(palette.Chrome.Header)).
+		Foreground(fg).
+		Background(bg).
 		Bold(true).
 		Padding(0, 1)
 
@@ -29,10 +42,6 @@ func (m *Model) renderHeader() string {
 		left = left + " | " + crumb
 	}
 	center := fmt.Sprintf("project: %s", m.projectID)
-	now := m.status.now
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
 	right := fmt.Sprintf("agent: %s  %s", m.selfAgent, now.Format("15:04"))
 	line := joinHeader(left, center, right, m.width)
 	return style.Width(maxInt(0, m.width)).Render(line)
