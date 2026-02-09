@@ -1,7 +1,26 @@
 {
   "schema_version": "sv.tasks.v1",
-  "generated_at": "2026-02-09T16:45:42.634218Z",
+  "generated_at": "2026-02-09T16:46:22.132853Z",
   "tasks": [
+    {
+      "id": "forge-qaz",
+      "title": "Oracle: send/inject fixtures",
+      "status": "in_progress",
+      "priority": "P1",
+      "created_at": "2026-02-09T15:36:40.783556Z",
+      "updated_at": "2026-02-09T16:46:22.122379Z",
+      "created_by": "codex",
+      "updated_by": "rust-full-codex-4",
+      "body": "Scope:\n- Capture non-legacy send/inject behavior including validation and queue impacts.\n\nDeliverables:\n- Golden outputs and side-effect assertions for send/inject flows.\n\nAcceptance:\n- Behavior parity preserved for agent-targeted commands.\n\nTests:\n- Scenario tests with mocked transport/state.",
+      "epic": "forge-180",
+      "project": "prj-vr0104gr",
+      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
+      "workspace": "forge",
+      "branch": "main",
+      "started_at": "2026-02-09T16:46:22.122379Z",
+      "started_by": "rust-full-codex-4",
+      "comments_count": 0
+    },
     {
       "id": "forge-dvy",
       "title": "Parity matrix + cutover gate specification",
@@ -62,25 +81,6 @@
       "started_by": "rust-full-codex-6",
       "closed_at": "2026-02-09T16:45:14.136544Z",
       "closed_by": "rust-full-codex-5",
-      "comments_count": 0
-    },
-    {
-      "id": "forge-qaz",
-      "title": "Oracle: send/inject fixtures",
-      "status": "in_progress",
-      "priority": "P1",
-      "created_at": "2026-02-09T15:36:40.783556Z",
-      "updated_at": "2026-02-09T16:45:00.670080Z",
-      "created_by": "codex",
-      "updated_by": "rust-full-codex-2",
-      "body": "Scope:\n- Capture non-legacy send/inject behavior including validation and queue impacts.\n\nDeliverables:\n- Golden outputs and side-effect assertions for send/inject flows.\n\nAcceptance:\n- Behavior parity preserved for agent-targeted commands.\n\nTests:\n- Scenario tests with mocked transport/state.",
-      "epic": "forge-180",
-      "project": "prj-vr0104gr",
-      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
-      "workspace": "forge",
-      "branch": "main",
-      "started_at": "2026-02-09T16:45:00.670080Z",
-      "started_by": "rust-full-codex-2",
       "comments_count": 0
     },
     {
