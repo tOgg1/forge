@@ -484,12 +484,20 @@ func (v *searchView) renderResults(width, height int, palette styles.Theme) stri
 	matchText := strings.TrimSpace(parsed.Query.Text)
 
 	bookmarked := make(map[string]bool)
+	annotated := make(map[string]bool)
 	readMarkers := make(map[string]string)
 	if v.state != nil {
 		snap := v.state.Snapshot()
 		for _, bm := range snap.Bookmarks {
 			if strings.TrimSpace(bm.MessageID) != "" {
 				bookmarked[bm.MessageID] = true
+			}
+		}
+		for id, note := range snap.Annotations {
+			id = strings.TrimSpace(id)
+			note = strings.TrimSpace(note)
+			if id != "" && note != "" {
+				annotated[id] = true
 			}
 		}
 		for k, vv := range snap.ReadMarkers {
@@ -502,6 +510,9 @@ func (v *searchView) renderResults(width, height int, palette styles.Theme) stri
 	for i := range v.results {
 		r := v.results[i]
 		if parsed.Query.HasBookmark && !bookmarked[r.Message.ID] {
+			continue
+		}
+		if parsed.Query.HasAnnotation && !annotated[r.Message.ID] {
 			continue
 		}
 		if parsed.Query.IsUnread {

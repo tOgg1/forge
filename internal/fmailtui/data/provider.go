@@ -84,6 +84,7 @@ type SearchQuery struct {
 	HasReply bool
 	// View-level filters (provider may ignore them).
 	HasBookmark bool
+	HasAnnotation bool
 	IsUnread    bool
 }
 

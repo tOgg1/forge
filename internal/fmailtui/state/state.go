@@ -21,6 +21,7 @@ const (
 	defaultDebounce = 1 * time.Second
 	maxBookmarks    = 500
 	bookmarkMaxAge  = 30 * 24 * time.Hour
+	maxNotifications = 50
 )
 
 type TUIState struct {
@@ -34,6 +35,7 @@ type TUIState struct {
 	SavedSearches []SavedSearch           `json:"saved_searches,omitempty"` // named search presets
 	Preferences   Preferences             `json:"preferences,omitempty"`    // UI preferences
 	NotifyRules   []NotificationRule      `json:"notify_rules,omitempty"`   // notification configuration
+	Notifications []Notification          `json:"notifications,omitempty"`  // persisted recent notifications
 	LastView      string                  `json:"last_view,omitempty"`      // last active view (for session restore)
 	LastTopic     string                  `json:"last_topic,omitempty"`     // last viewed topic
 }
@@ -77,12 +79,33 @@ type Preferences struct {
 }
 
 type NotificationRule struct {
-	Name     string   `json:"name"`
-	Topic    string   `json:"topic,omitempty"`    // glob
-	From     string   `json:"from,omitempty"`     // glob
-	Priority string   `json:"priority,omitempty"` // min priority
-	Tags     []string `json:"tags,omitempty"`
-	Enabled  bool     `json:"enabled"`
+	Name            string   `json:"name"`
+	Topic           string   `json:"topic,omitempty"`    // glob
+	From            string   `json:"from,omitempty"`     // glob
+	To              string   `json:"to,omitempty"`       // glob
+	Priority        string   `json:"priority,omitempty"` // min priority
+	Tags            []string `json:"tags,omitempty"`     // any tag match
+	Text            string   `json:"text,omitempty"`     // regex
+	ActionHighlight bool     `json:"action_highlight,omitempty"`
+	ActionBell      bool     `json:"action_bell,omitempty"`
+	ActionFlash     bool     `json:"action_flash,omitempty"`
+	ActionBadge     bool     `json:"action_badge,omitempty"`
+	Enabled         bool     `json:"enabled"`
+}
+
+type Notification struct {
+	MessageID  string    `json:"message_id"`
+	Target     string    `json:"target,omitempty"` // topic or @agent
+	From       string    `json:"from,omitempty"`
+	Priority   string    `json:"priority,omitempty"`
+	RuleName   string    `json:"rule_name,omitempty"`
+	RuleLabel  string    `json:"rule_label,omitempty"`
+	Preview    string    `json:"preview,omitempty"`
+	Timestamp  time.Time `json:"timestamp,omitempty"`
+	Unread     bool      `json:"unread,omitempty"`
+	Badge      bool      `json:"badge,omitempty"`
+	Highlight  bool      `json:"highlight,omitempty"`
+	OccurredAt time.Time `json:"occurred_at,omitempty"` // backwards-compatible fallback timestamp
 }
 
 type Manager struct {
@@ -269,6 +292,21 @@ func (m *Manager) IsBookmarked(messageID string) bool {
 	return false
 }
 
+func (m *Manager) BookmarkNote(messageID string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" || len(m.state.Bookmarks) == 0 {
+		return ""
+	}
+	for _, bm := range m.state.Bookmarks {
+		if strings.TrimSpace(bm.MessageID) == messageID {
+			return strings.TrimSpace(bm.Note)
+		}
+	}
+	return ""
+}
+
 // ToggleBookmark toggles a bookmark for a message.
 // Returns true when the bookmark was added, false when removed/no-op.
 func (m *Manager) ToggleBookmark(messageID, topic string) bool {
@@ -304,6 +342,109 @@ func (m *Manager) ToggleBookmark(messageID, topic string) bool {
 	m.state.Bookmarks = append([]Bookmark{next}, filtered...)
 	m.markDirtyLocked()
 	return true
+}
+
+// UpsertBookmark adds a bookmark or updates its note (and topic if needed).
+func (m *Manager) UpsertBookmark(messageID, topic, note string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	messageID = strings.TrimSpace(messageID)
+	topic = strings.TrimSpace(topic)
+	note = strings.TrimSpace(note)
+	if messageID == "" || topic == "" {
+		return
+	}
+
+	next := make([]Bookmark, 0, len(m.state.Bookmarks)+1)
+	updated := false
+	for _, bm := range m.state.Bookmarks {
+		if strings.TrimSpace(bm.MessageID) != messageID {
+			next = append(next, bm)
+			continue
+		}
+		bm.MessageID = messageID
+		bm.Topic = topic
+		bm.Note = note
+		if bm.CreatedAt.IsZero() {
+			bm.CreatedAt = time.Now().UTC()
+		}
+		next = append(next, bm)
+		updated = true
+	}
+	if !updated {
+		next = append([]Bookmark{{
+			MessageID: messageID,
+			Topic:     topic,
+			Note:      note,
+			CreatedAt: time.Now().UTC(),
+		}}, next...)
+	}
+
+	m.state.Bookmarks = next
+	m.markDirtyLocked()
+}
+
+// DeleteBookmark removes a bookmark by message ID.
+func (m *Manager) DeleteBookmark(messageID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" || len(m.state.Bookmarks) == 0 {
+		return false
+	}
+	next := make([]Bookmark, 0, len(m.state.Bookmarks))
+	removed := false
+	for _, bm := range m.state.Bookmarks {
+		if strings.TrimSpace(bm.MessageID) == messageID {
+			removed = true
+			continue
+		}
+		next = append(next, bm)
+	}
+	if !removed {
+		return false
+	}
+	m.state.Bookmarks = next
+	m.markDirtyLocked()
+	return true
+}
+
+func (m *Manager) Annotation(messageID string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" || len(m.state.Annotations) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(m.state.Annotations[messageID])
+}
+
+// SetAnnotation adds or updates an annotation. Empty note deletes.
+func (m *Manager) SetAnnotation(messageID, note string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	messageID = strings.TrimSpace(messageID)
+	note = strings.TrimSpace(note)
+	if messageID == "" {
+		return
+	}
+	if m.state.Annotations == nil {
+		m.state.Annotations = make(map[string]string)
+	}
+	if note == "" {
+		if _, ok := m.state.Annotations[messageID]; !ok {
+			return
+		}
+		delete(m.state.Annotations, messageID)
+		m.markDirtyLocked()
+		return
+	}
+	if strings.TrimSpace(m.state.Annotations[messageID]) == note {
+		return
+	}
+	m.state.Annotations[messageID] = note
+	m.markDirtyLocked()
 }
 
 func (m *Manager) Draft(target string) (ComposeDraft, bool) {
@@ -455,6 +596,67 @@ func (m *Manager) SetStarredTopics(topics []string) {
 	}
 	sort.Strings(normalized)
 	m.state.StarredTopics = normalized
+	m.markDirtyLocked()
+}
+
+func (m *Manager) NotificationRules() []NotificationRule {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.state.NotifyRules) == 0 {
+		return nil
+	}
+	return append([]NotificationRule(nil), m.state.NotifyRules...)
+}
+
+func (m *Manager) SetNotificationRules(rules []NotificationRule) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(rules) == 0 {
+		m.state.NotifyRules = nil
+		m.markDirtyLocked()
+		return
+	}
+	next := make([]NotificationRule, 0, len(rules))
+	for _, rule := range rules {
+		normalized, ok := normalizeNotificationRule(rule)
+		if !ok {
+			continue
+		}
+		next = append(next, normalized)
+	}
+	m.state.NotifyRules = next
+	m.markDirtyLocked()
+}
+
+func (m *Manager) Notifications() []Notification {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.state.Notifications) == 0 {
+		return nil
+	}
+	return append([]Notification(nil), m.state.Notifications...)
+}
+
+func (m *Manager) SetNotifications(notifications []Notification) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(notifications) == 0 {
+		m.state.Notifications = nil
+		m.markDirtyLocked()
+		return
+	}
+	next := make([]Notification, 0, len(notifications))
+	for _, item := range notifications {
+		normalized, ok := normalizeNotification(item)
+		if !ok {
+			continue
+		}
+		next = append(next, normalized)
+		if len(next) == maxNotifications {
+			break
+		}
+	}
+	m.state.Notifications = next
 	m.markDirtyLocked()
 }
 
@@ -635,6 +837,12 @@ func normalizeState(state TUIState, now time.Time) TUIState {
 			if bm.MessageID == "" || bm.Topic == "" {
 				continue
 			}
+			bm.MessageID = strings.TrimSpace(bm.MessageID)
+			bm.Topic = strings.TrimSpace(bm.Topic)
+			bm.Note = strings.TrimSpace(bm.Note)
+			if bm.MessageID == "" || bm.Topic == "" {
+				continue
+			}
 			if !bm.CreatedAt.IsZero() && now.Sub(bm.CreatedAt) > bookmarkMaxAge {
 				continue
 			}
@@ -682,6 +890,34 @@ func normalizeState(state TUIState, now time.Time) TUIState {
 		}
 		state.Groups = normalized
 	}
+	if len(state.NotifyRules) > 0 {
+		normalized := make([]NotificationRule, 0, len(state.NotifyRules))
+		for _, rule := range state.NotifyRules {
+			norm, ok := normalizeNotificationRule(rule)
+			if !ok {
+				continue
+			}
+			normalized = append(normalized, norm)
+		}
+		state.NotifyRules = normalized
+	}
+	if len(state.Notifications) > 0 {
+		normalized := make([]Notification, 0, len(state.Notifications))
+		for _, item := range state.Notifications {
+			norm, ok := normalizeNotification(item)
+			if !ok {
+				continue
+			}
+			normalized = append(normalized, norm)
+		}
+		sort.SliceStable(normalized, func(i, j int) bool {
+			return notificationTimestamp(normalized[i]).After(notificationTimestamp(normalized[j]))
+		})
+		if len(normalized) > maxNotifications {
+			normalized = normalized[:maxNotifications]
+		}
+		state.Notifications = normalized
+	}
 	state.Preferences = normalizePreferences(state.Preferences)
 
 	return state
@@ -722,6 +958,9 @@ func cloneState(state TUIState) TUIState {
 	}
 	if len(state.NotifyRules) > 0 {
 		out.NotifyRules = append([]NotificationRule(nil), state.NotifyRules...)
+	}
+	if len(state.Notifications) > 0 {
+		out.Notifications = append([]Notification(nil), state.Notifications...)
 	}
 	return out
 }
@@ -859,4 +1098,59 @@ func normalizeStringList(values []string) []string {
 		return nil
 	}
 	return out
+}
+
+func normalizeNotificationRule(rule NotificationRule) (NotificationRule, bool) {
+	rule.Name = strings.TrimSpace(rule.Name)
+	if rule.Name == "" {
+		return NotificationRule{}, false
+	}
+	rule.Topic = strings.TrimSpace(rule.Topic)
+	rule.From = strings.TrimSpace(rule.From)
+	rule.To = strings.TrimSpace(rule.To)
+	rule.Priority = strings.TrimSpace(strings.ToLower(rule.Priority))
+	switch rule.Priority {
+	case "", "low", "normal", "high":
+	default:
+		rule.Priority = ""
+	}
+	rule.Tags = normalizeStringList(rule.Tags)
+	rule.Text = strings.TrimSpace(rule.Text)
+	if !(rule.ActionHighlight || rule.ActionBell || rule.ActionFlash || rule.ActionBadge) {
+		rule.ActionBadge = true
+	}
+	return rule, true
+}
+
+func normalizeNotification(item Notification) (Notification, bool) {
+	item.MessageID = strings.TrimSpace(item.MessageID)
+	if item.MessageID == "" {
+		return Notification{}, false
+	}
+	item.Target = strings.TrimSpace(item.Target)
+	item.From = strings.TrimSpace(item.From)
+	item.Priority = strings.TrimSpace(strings.ToLower(item.Priority))
+	switch item.Priority {
+	case "", "low", "normal", "high":
+	default:
+		item.Priority = ""
+	}
+	item.RuleName = strings.TrimSpace(item.RuleName)
+	item.RuleLabel = strings.TrimSpace(item.RuleLabel)
+	item.Preview = strings.TrimSpace(item.Preview)
+	if item.Timestamp.IsZero() && !item.OccurredAt.IsZero() {
+		item.Timestamp = item.OccurredAt
+	}
+	if item.Timestamp.IsZero() {
+		item.Timestamp = time.Now().UTC()
+	}
+	item.Timestamp = item.Timestamp.UTC()
+	return item, true
+}
+
+func notificationTimestamp(item Notification) time.Time {
+	if !item.Timestamp.IsZero() {
+		return item.Timestamp
+	}
+	return item.OccurredAt
 }

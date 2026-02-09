@@ -28,6 +28,9 @@ type FileProvider struct {
 	agentsCache   timedEntry[[]fmail.AgentRecord]
 	topicMsgCache map[string]timedEntry[[]fmail.Message]
 	dmMsgCache    map[string]timedEntry[[]fmail.Message]
+
+	searchMu    sync.Mutex
+	searchIndex *textSearchIndex
 }
 
 func NewFileProvider(cfg FileProviderConfig) (*FileProvider, error) {
@@ -225,6 +228,13 @@ func (p *FileProvider) Agents() ([]fmail.AgentRecord, error) {
 }
 
 func (p *FileProvider) Search(query SearchQuery) ([]SearchResult, error) {
+	if strings.TrimSpace(query.Text) != "" {
+		return p.searchWithIndex(query)
+	}
+	return p.searchLinear(query)
+}
+
+func (p *FileProvider) searchLinear(query SearchQuery) ([]SearchResult, error) {
 	topicNames, err := p.listTopicNames()
 	if err != nil {
 		return nil, err
@@ -339,6 +349,123 @@ func (p *FileProvider) Search(query SearchQuery) ([]SearchResult, error) {
 				Next:        next,
 			})
 		}
+	}
+
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].Message.ID != results[j].Message.ID {
+			return results[i].Message.ID < results[j].Message.ID
+		}
+		return results[i].Topic < results[j].Topic
+	})
+	return results, nil
+}
+
+func (p *FileProvider) searchWithIndex(query SearchQuery) ([]SearchResult, error) {
+	now := time.Now().UTC()
+	idx, err := p.ensureTextIndex(now)
+	if err != nil {
+		return nil, err
+	}
+
+	scope := strings.TrimSpace(query.In)
+	if scope != "" {
+		if !strings.HasPrefix(scope, "@") {
+			// Keep as-is for topic scope.
+		} else {
+			// Ensure DM scope matches index target keys.
+			scope = "@" + strings.TrimPrefix(scope, "@")
+		}
+	}
+
+	terms := tokenizeForIndex(strings.ToLower(query.Text))
+	if len(terms) == 0 {
+		// Fallback to linear scan for non-tokenizable input.
+		query.Text = strings.TrimSpace(query.Text)
+		query.In = scope
+		return p.searchLinear(query)
+	}
+
+	// Build candidate set by intersecting postings for all query terms.
+	candidates := make(map[searchRef]struct{})
+	first := true
+	for _, term := range terms {
+		refs := idx.postings[term]
+		if len(refs) == 0 {
+			return nil, nil
+		}
+		if first {
+			for _, r := range refs {
+				candidates[r] = struct{}{}
+			}
+			first = false
+			continue
+		}
+		next := make(map[searchRef]struct{}, len(candidates))
+		for _, r := range refs {
+			if _, ok := candidates[r]; ok {
+				next[r] = struct{}{}
+			}
+		}
+		candidates = next
+		if len(candidates) == 0 {
+			return nil, nil
+		}
+	}
+
+	results := make([]SearchResult, 0, len(candidates))
+	replyByTarget := make(map[string]map[string]struct{})
+
+	for ref := range candidates {
+		if scope != "" && ref.target != scope {
+			continue
+		}
+		target, ok := idx.targets[ref.target]
+		if !ok || ref.idx < 0 || ref.idx >= len(target.messages) {
+			continue
+		}
+		msg := target.messages[ref.idx]
+
+		// has:reply needs the full target slice; build lazily per target.
+		if query.HasReply {
+			set, ok := replyByTarget[ref.target]
+			if !ok {
+				set = make(map[string]struct{}, len(target.messages))
+				for i := range target.messages {
+					if parent := strings.TrimSpace(target.messages[i].ReplyTo); parent != "" {
+						set[parent] = struct{}{}
+					}
+				}
+				replyByTarget[ref.target] = set
+			}
+			if _, ok := set[strings.TrimSpace(msg.ID)]; !ok {
+				continue
+			}
+		}
+
+		ok, offset, length := searchMatches(&msg, query)
+		if !ok {
+			continue
+		}
+
+		var prev *fmail.Message
+		var next *fmail.Message
+		if ref.idx > 0 {
+			pm := cloneMessage(target.messages[ref.idx-1])
+			prev = &pm
+		}
+		if ref.idx+1 < len(target.messages) {
+			nm := cloneMessage(target.messages[ref.idx+1])
+			next = &nm
+		}
+
+		results = append(results, SearchResult{
+			Message:     cloneMessage(msg),
+			Topic:       ref.target,
+			MatchOffset: offset,
+			MatchLength: length,
+			Prev:        prev,
+			Next:        next,
+		})
 	}
 
 	sort.SliceStable(results, func(i, j int) bool {

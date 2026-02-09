@@ -137,6 +137,46 @@ func TestManager_ToggleBookmarkRoundTrip(t *testing.T) {
 	require.False(t, loaded.IsBookmarked("20260209-101010-0001"))
 }
 
+func TestManager_UpsertBookmarkUpdatesNote(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".fmail", "tui-state.json")
+	m := New(path)
+	require.NoError(t, m.Load())
+
+	m.UpsertBookmark("20260209-101010-0001", "task", "first")
+	require.True(t, m.IsBookmarked("20260209-101010-0001"))
+	require.Equal(t, "first", m.BookmarkNote("20260209-101010-0001"))
+
+	m.UpsertBookmark("20260209-101010-0001", "task", "updated")
+	require.Equal(t, "updated", m.BookmarkNote("20260209-101010-0001"))
+
+	require.NoError(t, m.SaveNow())
+	loaded := New(path)
+	require.NoError(t, loaded.Load())
+	require.Equal(t, "updated", loaded.BookmarkNote("20260209-101010-0001"))
+
+	require.True(t, loaded.DeleteBookmark("20260209-101010-0001"))
+	require.False(t, loaded.IsBookmarked("20260209-101010-0001"))
+}
+
+func TestManager_AnnotationRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".fmail", "tui-state.json")
+	m := New(path)
+	require.NoError(t, m.Load())
+
+	require.Equal(t, "", m.Annotation("m1"))
+	m.SetAnnotation("m1", "note")
+	require.Equal(t, "note", m.Annotation("m1"))
+	require.NoError(t, m.SaveNow())
+
+	loaded := New(path)
+	require.NoError(t, loaded.Load())
+	require.Equal(t, "note", loaded.Annotation("m1"))
+	loaded.SetAnnotation("m1", "")
+	require.Equal(t, "", loaded.Annotation("m1"))
+}
+
 func TestManager_LayoutPreferencesRoundTripAndNormalize(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, ".fmail", "tui-state.json")
@@ -180,4 +220,70 @@ func TestManager_ThemePreferenceRoundTrip(t *testing.T) {
 	require.NoError(t, loaded.Load())
 	require.Equal(t, "high-contrast", loaded.Theme())
 	require.Equal(t, "high-contrast", loaded.Preferences().Theme)
+}
+
+func TestManager_NotificationRulesAndNotificationsRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".fmail", "tui-state.json")
+	m := New(path)
+	require.NoError(t, m.Load())
+
+	m.SetNotificationRules([]NotificationRule{
+		{
+			Name:            "high-priority",
+			Priority:        "HIGH",
+			ActionBell:      true,
+			ActionHighlight: true,
+			Enabled:         true,
+		},
+		{
+			Name:       "auth-watch",
+			Topic:      "task*",
+			From:       "coder-*",
+			To:         "@architect",
+			Tags:       []string{"auth", "auth"},
+			Text:       "refresh.*token",
+			ActionBadge: true,
+			Enabled:    true,
+		},
+	})
+
+	m.SetNotifications([]Notification{
+		{
+			MessageID: "20260209-103000-0001",
+			Target:    "task",
+			From:      "architect",
+			RuleName:  "high-priority",
+			RuleLabel: "HIGH",
+			Priority:  "HIGH",
+			Preview:   "ship it",
+			Unread:    true,
+		},
+		{
+			MessageID: "20260209-102900-0001",
+			Target:    "task",
+			From:      "tester",
+			RuleName:  "auth-watch",
+			RuleLabel: "RULE \"auth-watch\"",
+			Priority:  "normal",
+			Preview:   "old one",
+			Unread:    false,
+		},
+	})
+	require.NoError(t, m.SaveNow())
+
+	loaded := New(path)
+	require.NoError(t, loaded.Load())
+	rules := loaded.NotificationRules()
+	require.Len(t, rules, 2)
+	require.Equal(t, "high", rules[0].Priority)
+	require.False(t, rules[0].ActionBadge) // badge not defaulted since rule already has bell+highlight
+	require.True(t, rules[0].ActionBell)
+	require.True(t, rules[0].ActionHighlight)
+
+	notes := loaded.Notifications()
+	require.Len(t, notes, 2)
+	require.Equal(t, "20260209-103000-0001", notes[0].MessageID)
+	require.Equal(t, "high", notes[0].Priority)
+	require.True(t, notes[0].Unread)
 }

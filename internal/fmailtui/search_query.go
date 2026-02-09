@@ -58,6 +58,8 @@ func parseSearchInput(raw string, now time.Time) parsedSearch {
 				out.HasReply = true
 			case "bookmark":
 				out.HasBookmark = true
+			case "annotation":
+				out.HasAnnotation = true
 			}
 		case "is":
 			if strings.EqualFold(val, "unread") {
