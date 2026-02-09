@@ -1,0 +1,177 @@
+---
+loop_id: 345f513c-e945-400a-99f1-575484df2974
+loop_name: rust-full-claude-1
+repo_path: /Users/trmd/Code/oss--forge/repos/forge
+created_at: 2026-02-09T16:15:33Z
+---
+
+# Loop Ledger: rust-full-claude-1
+
+## 2026-02-09T16:20:09Z
+
+- run_id: b1183191-2e21-4f18-a58d-69fea61bd8d3
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T16:15:33Z
+- finished_at: 2026-02-09T16:20:09Z
+- exit_code: 0
+
+```
+## Task Summary: `forge-wmb` — Coverage gate: choose coverage tooling and report format
+
+**Status**: Closed
+
+**What was done**:
+
+The coverage tooling and report format were already partially documented by other agents. I completed the task by:
+
+1. **Enhanced `docs/rust-coverage-policy.md`** with:
+   - Detailed tooling rationale explaining why `cargo-llvm-cov` was chosen (LLVM source-based instrumentation, macOS+Linux support, first-class CI install)
+   - Explicit rejected alternatives (`cargo-tarpaulin`, `grcov`) with reasons
+   - Local development instructions (text summary, LCOV, HTML report commands)
+
+2. **Verified all enforcement mechanisms are in place**:
+   - CI workflow `.github/workflows/ci.yml` has `rust-coverage` job with `cargo-llvm-cov`
+   - LCOV output at `rust/coverage/lcov.info`
+   - Text summary in GitHub step summary
+   - Drift test `TestRustCoveragePolicyAndWorkflowPinned` passes
+
+**Validation**:
+- `go test ./internal/doccheck/...` — all 4 tests pass
+- `cargo fmt --check` — pass
+- `cargo clippy --workspace --all-targets -- -D warnings` — pass
+- `cargo test --workspace` — 1 test pass
+```
+
+## 2026-02-09T17:25:25Z
+
+- run_id: 4cc043f3-757d-43aa-abe7-5212ca09f886
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T17:15:20Z
+- finished_at: 2026-02-09T17:25:25Z
+- exit_code: 0
+
+```
+## Task Summary: `forge-k3v` - CLI port: forge run
+
+**Status: Closed**
+
+### What was done
+
+The `forge run` command Rust port was completed with full wiring, tests, and oracle fixtures. The implementation was partially done by another agent (codex) who created `run.rs` with the core logic, and partially wired in `lib.rs`. My contributions:
+
+**Wiring & integration (lib.rs):**
+- Added `"run"` to the root help text (`run       Run a single loop iteration`)
+- Added `run` to the help assertion test (`assert!(rendered.contains("run"))`)
+- Verified `run` module registration, dispatch, and accessibility test were present (other agents had done these)
+
+**Oracle fixtures & integration tests:**
+- Created `testdata/run_oracle.json` - golden fixture with 4 steps (run by name, run by short id, run unknown loop, run missing arg)
+- Enhanced `tests/run_command_test.rs` with:
+  - `run_oracle_flow_matches_golden` - full oracle flow test against golden fixture
+  - `run_help_flag_shows_usage` - help flag behavior test
+  - Total: 11 integration tests all passing
+
+**Validation:**
+- `cargo fmt --check` - clean
+- `cargo clippy -p forge-cli -- -D warnings` - clean  
+- `cargo test -p forge-cli --test run_command_test` - 11/11 pass
+- `cargo test -p forge-cli --lib -- run::tests` - 10/10 pass
+
+**Note:** Workspace-wide `cargo clippy --workspace --all-targets` has pre-existing failures from other agents' in-progress work (scale command missing golden files). These are unrelated to this task.
+```
+
+## 2026-02-09T17:30:05Z
+
+- run_id: e7a5da79-5c1e-4893-927d-a01844bd455f
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T17:26:10Z
+- finished_at: 2026-02-09T17:30:05Z
+- exit_code: 0
+
+```
+## Task Summary: forge-mb6 — DB migration parity: 012
+
+**Status**: Closed
+
+**What was done**: Ported migration 012 (`loop_work_state`) to the Rust `forge-db` crate.
+
+**Architecture insight**: The Rust migration infrastructure shares the same Go SQL files via `build.rs` `include_str!` embedding. Migration 012 SQL was already auto-embedded. The deliverable was the migration-specific test fixture.
+
+**Deliverable**: `rust/crates/forge-db/tests/migration_012_test.rs` with 2 tests:
+1. `migration_012_embedded_sql_matches_go_files` — verifies embedded SQL matches Go source files exactly
+2. `migration_012_up_down_parity` — comprehensive schema validation:
+   - Table `loop_work_state` creation with all 10 columns
+   - 3 indexes (`idx_loop_work_state_loop_id`, `_loop_current`, `_loop_updated`)
+   - Update trigger (`update_loop_work_state_timestamp`)
+   - Default values (`loop_iteration=0`, `is_current=0`)
+   - UNIQUE constraint on `(loop_id, task_id)`
+   - Foreign key CASCADE delete from `loops`
+   - Clean rollback to version 11
+
+**Validation**:
+- `cargo fmt --check`: PASS
+- `cargo clippy -p forge-db --test migration_012_test -- -D warnings`: PASS
+- `cargo test -p forge-db --test migration_012_test`: 2/2 PASS
+- `cargo test -p forge-db --lib`: 14/14 PASS
+```
+
+## 2026-02-09T17:38:55Z
+
+- run_id: a075944d-aecd-4c9f-91db-94c657cdaf89
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T17:30:50Z
+- finished_at: 2026-02-09T17:38:55Z
+- exit_code: 0
+
+```
+## Task Summary: forge-dzc (CLI port: forge msg) — CLOSED
+
+**What was done:**
+
+1. **Found existing implementation** — `msg.rs` already existed with core functionality (message append, steer, template, sequence, next-prompt) and was wired into `lib.rs`. Integration tests and golden files also existed from concurrent agent work.
+
+2. **Fixed Go parity bug** — The existing test `now_without_message_uses_operator_interrupt` expected `forge msg <loop> --now` (no message text) to succeed. Per Go parity analysis of `loop_msg.go:59`, this case should return "message text required" error. Fixed the test to match Go behavior.
+
+3. **Added 11 new unit tests** covering:
+   - `now_with_message_sends_steer` — steer message enqueue with `--now` + text
+   - `msg_enqueues_message_append` — verifies queue item type and payload
+   - `msg_json_output_matches_oracle` — `{"loops":1,"queued":true}` format
+   - `msg_human_output` — `"Queued message for 1 loop(s)"`
+   - `msg_quiet_suppresses_output` — `--quiet` mode
+   - `msg_no_match_returns_error` — empty backend
+   - `msg_all_enqueues_for_every_loop` — multi-loop broadcast
+   - `msg_filters_by_pool` — pool selector
+   - `msg_jsonl_output` — compact JSON
+   - `msg_ambiguous_ref_returns_error` — fuzzy match error
+   - `msg_requires_message_text_for_loop_only` — single-arg validation
+
+4. **Added 4 integration tests** with golden file validation:
+   - `msg_no_match_returns_error`, `msg_enqueues_for_matched_loops`, `msg_filters_by_pool`, `msg_integration_scenario`
+
+**Validation:** 29 total tests pass (16 unit + 13 integration). `cargo fmt --check` and `cargo clippy` clean on msg files. Pre-existing `ps.rs` clippy errors from another agent are not related.
+```
+

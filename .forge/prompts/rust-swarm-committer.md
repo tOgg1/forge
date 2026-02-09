@@ -16,7 +16,8 @@ Hard guardrails
 
 Per-iteration protocol
 1. Register:
-- `fmail register "$FMAIL_AGENT"` (ignore if already registered).
+- `export FMAIL_AGENT="${FORGE_LOOP_NAME:-rust-committer}"`
+- `fmail register || true`
 2. Inspect:
 - `sv task list --project prj-vr0104gr --status in_progress --json`
 - `git status --short`

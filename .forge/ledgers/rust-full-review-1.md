@@ -1,0 +1,213 @@
+---
+loop_id: 6edf00b8-50da-4bba-9d62-fa25c970051a
+loop_name: rust-full-review-1
+repo_path: /Users/trmd/Code/oss--forge/repos/forge
+created_at: 2026-02-09T16:15:33Z
+---
+
+# Loop Ledger: rust-full-review-1
+
+## 2026-02-09T16:18:59Z
+
+- run_id: 2509b9d7-73dc-4b79-b7ae-402eff842134
+- loop_name: rust-full-review-1
+- status: success
+- profile: cc3
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-09T16:15:33Z
+- finished_at: 2026-02-09T16:18:59Z
+- exit_code: 0
+
+```
+## Review Complete: `forge-3sw` (Package Include Matrix)
+
+### Findings Summary
+
+| # | Severity | Finding | Location | Fix |
+|---|----------|---------|----------|-----|
+| 1 | **P0** | `internal/adapters` missing from include matrix | Runtime dep via `internal/agent/service.go:15`, `internal/state/engine.go:12` | Add to include table → `forge-runner` or `forge-core` |
+| 2 | **P0** | `internal/vault` missing from include matrix | Runtime dep via `internal/account/service.go:21` — credential resolution for agent spawn | Add to include table → `forge-core`, note "CLI drop, package include" |
+| 3 | **P1** | `internal/beads` missing from include matrix | Runtime dep via `internal/workspace/service.go:13` | Add to include table → `forge-core` |
+| 4 | **P1** | `internal/cli` missing from include matrix | CLI wiring package for `cmd/forge/main.go:11` | Add to include table → `forge-cli` |
+| 5 | **P2** | Reachability drift: `internal/account/caam` and `internal/recipes` appear in `go list -deps` despite being correctly classified as drop | Compile-time import from legacy CLI files | Document known false-positive in reachability section |
+| 6 | **P2** | False completeness claim on line 53 | `docs/rust-package-include-matrix.md:53` | Fix claim after adding missing packages |
+| 7 | **P3** | Go tests blocked by toolchain mismatch (go1.25.7 vs go1.25.6) | Environment | Not a code issue |
+
+### Validation Method
+- Enumerated all `internal/` directories
+- Ran `go list -deps` across all 5 binaries (`forge`, `forged`, `forge-agent-runner`, `fmail`, `fmail-tui`)
+- Cross-referenced reachability output against both the include and non-include tables
+- Traced import chains to confirm runtime vs compile-time-only dependencies
+
+### Verdict: **Issues** — 4 runtime packages must be added before acceptance criteria ("No included runtime package is left unmapped") are met.
+```
+
+## 2026-02-09T16:25:36Z
+
+- run_id: 664edc5b-cc62-420c-9888-d98d991a6181
+- loop_name: rust-full-review-1
+- status: success
+- profile: cc3
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-09T16:20:59Z
+- finished_at: 2026-02-09T16:25:36Z
+- exit_code: 0
+
+```
+## Review Cycle Complete
+
+### Tasks Reviewed
+
+| Task | Area | Verdict |
+|------|------|---------|
+| **forge-kh6** | forge-core crate bootstrap | **ISSUES** (5 findings) |
+| **forge-wf5** | Oracle harness + comparator | **PASS** (1 minor note) |
+| **forge-8a8** | Schema fingerprint baseline | **PASS** |
+| **forge-fxv** | Root/global flags snapshot | **PASS** |
+
+### Test Results
+- `go test ./internal/parity/...` — **10/10 PASS**
+- `go test ...doccheck -run TestForgeRootSnapshotsCurrent` — **PASS**
+- `cargo test -p forge-core -p fmail-core -p forge-parity-stub` — **17/17 PASS**
+- `cargo check --all-targets` — **FAIL** (forge-tui missing bin file)
+
+### Findings Summary
+
+**P0-BLOCKER** (1):
+1. `forge-tui` workspace build broken — `Cargo.toml` declares `[[bin]] path="src/bin/forge-tui.rs"` but file doesn't exist. `cargo check --all-targets` fails.
+
+**P1-HIGH** (2):
+2. `EventType` enum has ~18 parity gaps vs Go `internal/models/event.go` — many variants missing or renamed (e.g. `approval.granted` vs Go's `approval.approved`, `rate_limit.hit` vs `rate_limit.detected`).
+3. `LoopQueueItemStatus` missing `Skipped` variant and uses `Processing` where Go uses `Dispatched`.
+
+**P2-MEDIUM** (2):
+4. `QueueItemStatus` enum completely missing from Rust (Go has 5 variants).
+5. `fmail-core/Cargo.toml` uses hardcoded edition/license/publish instead of workspace references.
+
+**P3-LOW** (1):
+6. Comparator `reUnixHomePath` regex only normalizes `/Users/` (macOS), not `/home/` (Linux). CI runs on Linux.
+
+All findings sent via fmail to task channel and orchestrator.
+```
+
+## 2026-02-09T16:32:01Z
+
+- run_id: dd6f8b0c-a917-4a44-aa29-e62113e07f3b
+- loop_name: rust-full-review-1
+- status: success
+- profile: cc3
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-09T16:27:36Z
+- finished_at: 2026-02-09T16:32:01Z
+- exit_code: 0
+
+```
+## Review Complete — Bootstrap Tasks (forge-jrx, forge-q2g, forge-srd, forge-gq8)
+
+### Fix Applied
+- **`rust/crates/forge-cli/Cargo.toml`** — Added missing `[lints] workspace = true`. Without this, workspace lint policy (forbid unsafe_code, deny unwrap_used/dbg_macro/expect_used/todo) was silently unenforced for the entire forge-cli crate.
+
+### Findings Summary
+
+| # | Severity | Task | Finding | File |
+|---|----------|------|---------|------|
+| 1 | **HIGH** (FIXED) | forge-q2g | `forge-cli` missing `[lints] workspace = true` | `rust/crates/forge-cli/Cargo.toml` |
+| 2 | **HIGH** | forge-jrx | EventType enum has 10+ naming/semantic mismatches vs Go (`node.online` vs `NodeCreated`, `approval.approved` vs `ApprovalGranted`, missing `approval.denied`, `message.completed`, `message.failed`, etc.) | `rust/crates/forge-core/src/event.rs:9` |
+| 3 | **HIGH** | forge-jrx | `LoopQueueItemStatus` uses `Processing` where Go has `Dispatched`; missing `Skipped` variant (4 vs 5 variants) | `rust/crates/forge-core/src/queue.rs:33` |
+| 4 | **MEDIUM** | forge-jrx | Doccheck test only validates 5/12 crates for workspace keys and does NOT check `[lints] workspace = true` at all | `internal/doccheck/rust_workspace_lint_policy_test.go:72` |
+| 5 | **MEDIUM** | forge-jrx | Config struct ~2% complete (only `DatabaseConfig` + `LoggingConfig` vs 11+ sections in Go) | `rust/crates/forge-core/src/config.rs:8` |
+| 6 | **LOW** | forge-jrx | 12 enums missing `Display` impl — no string serialization parity testable | `rust/crates/forge-core/src/models.rs` |
+
+### Validation
+- `cargo check --workspace`: clean
+- `cargo test --workspace`: 28 tests, all pass
+- `cargo clippy --workspace --all-targets`: clean
+- `cargo fmt --all -- --check`: clean
+```
+
+## 2026-02-09T17:47:11Z
+
+- run_id: 1f5608ab-c4af-482d-84fa-a4321f86dc26
+- loop_name: rust-full-review-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-09T17:43:24Z
+- finished_at: 2026-02-09T17:47:11Z
+- exit_code: 0
+
+```
++   - Evidence:
++     - Unknown command fallback: `rust/crates/forge-cli/src/lib.rs:188`
++     - Probe: `cargo run -q -p forge-cli -- --definitely-not-a-real-flag` => `unknown forge command: --definitely-not-a-real-flag` + full help.
++   - Parity risk: Go snapshot expects `unknown flag: --definitely-not-a-real-flag` (`docs/forge/help/forge-root-invalid-flag.stderr.txt:1`).
++   - Fix hint: root-level detection for unrecognized `-`/`--` tokens, classify as invalid flag (`ERR_INVALID_FLAG` in JSON modes).
++
++4. **Medium**: no-args behavior drift.
++   - Evidence:
++     - Rust: empty command branch renders help: `rust/crates/forge-cli/src/lib.rs:68`
++     - Go: default root action runs TUI: `internal/cli/root.go:53`
++   - Parity risk: root UX contract mismatch (help claims no-args launches TUI).
++   - Fix hint: map no-args root path to TUI/preflight entrypoint.
++
++5. **Medium**: regression test gaps for root parity.
++   - Evidence:
++     - Existing root tests focus on help/version/unknown-command only: `rust/crates/forge-cli/tests/root_command_test.rs:6`
++     - Missing cases: `--robot-help`, invalid-root-flag shape, `--config` invalid path failure, `--chdir` invalid path failure, no-args TUI default behavior.
++   - Fix hint: add root parity tests + golden fixtures for error surface.
++
++## Validation Notes
++
++- Ran: `cargo test -p forge-cli --test root_command_test` (pass).
++- Ran: `cargo test -p forge-cli --lib` (pass).
++- Attempted Go parity tests: `go test ./internal/cli -run 'TestRoot|TestRobotHelp|TestWatchRequiresJSONL|TestForgeRootSnapshotsCurrent'` (blocked by local Go toolchain mismatch: stdlib/object version `go1.25.7` vs tool `go1.25.6`).
+
+tokens used
+72,960
+1. High: `--config` / `--chdir` parsed but never applied.  
+`rust/crates/forge-cli/src/error_envelope.rs:61`, `rust/crates/forge-cli/src/error_envelope.rs:85`, `rust/crates/forge-cli/src/lib.rs:57`  
+Evidence:  
+- `cargo run -q -p forge-cli -- --config /definitely/not/real.yaml ps` => exit `0`, `No loops found`  
+- `cargo run -q -p forge-cli -- --chdir /definitely/not/a/dir ps` => exit `0`, `No loops found`  
+Parity baseline applies/fails fast in Go root init: `internal/cli/root.go:106`, `internal/cli/root.go:119`.
+
+2. High: `--robot-help` dead flag (parsed, no behavior).  
+`rust/crates/forge-cli/src/error_envelope.rs:59`, `rust/crates/forge-cli/src/lib.rs:67`  
+Evidence: `cargo run -q -p forge-cli -- --robot-help` prints normal help, not robot-help payload.  
+Go behavior exists: `internal/cli/root.go:72`, `internal/cli/robot_help_test.go:10`.
+
+3. Medium: unknown root flags misclassified as unknown command + full help.  
+`rust/crates/forge-cli/src/lib.rs:188`  
+Evidence: `cargo run -q -p forge-cli -- --definitely-not-a-real-flag` => `unknown forge command: ...` + help text.  
+Expected snapshot: `docs/forge/help/forge-root-invalid-flag.stderr.txt:1` (`unknown flag: --definitely-not-a-real-flag`).
+
+4. Medium: no-args behavior drift.  
+`rust/crates/forge-cli/src/lib.rs:68`  
+Rust prints help; Go default action is TUI path: `internal/cli/root.go:53`.
+
+5. Medium: missing regression tests for above root semantics.  
+`rust/crates/forge-cli/tests/root_command_test.rs:6`  
+Gaps: robot-help, invalid root flag shape, config/chdir invalid-path failures, no-args TUI/default path.
+
+Summary:
+- Reviewed task: `forge-5dc`.
+- Sent findings via `fmail` to `task` and summary to `@forge-orchestrator`.
+- Added review note: `docs/review/2026-02-09-forge-5dc-root-cli-review.md`.
+- Validation run:
+  - `cargo test -p forge-cli --test root_command_test` passed.
+  - `cargo test -p forge-cli --lib` passed.
+  - Go parity test attempt blocked by local toolchain mismatch (`go1.25.7` stdlib vs `go1.25.6` tool).
+```
+
