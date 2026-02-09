@@ -992,7 +992,7 @@ func (m *Model) initViews() {
 	m.views[ViewThread] = newThreadView(m.root, m.provider, m.tuiState)
 	m.views[ViewAgents] = newAgentsView(m.root, m.provider)
 	m.views[ViewOperator] = newOperatorView(m.root, m.projectID, m.selfAgent, m.store, m.provider, m.tuiState)
-	m.views[ViewSearch] = newPlaceholderView(ViewSearch, "Search")
+	m.views[ViewSearch] = newSearchView(m.root, m.selfAgent, m.provider, m.tuiState)
 	m.views[ViewLiveTail] = newLiveTailView(m.root, m.selfAgent, m.provider, m.tuiState)
 	m.views[ViewTimeline] = newTimelineView(m.root, m.selfAgent, m.provider, m.tuiState)
 }
