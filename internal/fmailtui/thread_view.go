@@ -2,6 +2,7 @@ package fmailtui
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -17,12 +18,13 @@ import (
 )
 
 const (
-	threadPageSize          = 100
-	threadMaxVisibleDepth   = 6
-	threadMaxVisibleLines   = 50
-	threadRefreshInterval   = 2 * time.Second
-	threadNewMessageTagline = "new messages"
+	threadPageSize        = 100
+	threadMaxDepth        = 6
+	threadMaxBodyLines    = 50
+	threadRefreshInterval = 2 * time.Second
 )
+
+var inlineCodePattern = regexp.MustCompile("`[^`]+`")
 
 type threadMode int
 
@@ -34,63 +36,57 @@ const (
 type threadTickMsg struct{}
 
 type threadLoadedMsg struct {
-	now          time.Time
-	target       string
-	msgs         []fmail.Message
-	total        int
-	participants int
-	lastErr      error
+	now    time.Time
+	topics []data.TopicInfo
+	topic  string
+	msgs   []fmail.Message
+	err    error
 }
 
-type threadIncomingMsg struct {
-	msg fmail.Message
-}
-
-type threadBlock struct {
-	id        string
-	startLine int
-	endLine   int
-}
-
-type threadItem struct {
-	node         *threading.ThreadNode
-	prefix       string
-	depthClamped bool
-	threadBreak  bool
+type threadRow struct {
+	msg         fmail.Message
+	hasChildren bool
+	connector   string
+	depth       int
+	overflow    bool
+	groupGap    bool
+	replyTo     string
+	crossTarget string
+	truncated   bool
+	hiddenLines int
 }
 
 type threadView struct {
 	root     string
 	provider data.MessageProvider
 
-	now    time.Time
-	target string // topic name or "@agent"
+	now     time.Time
+	lastErr error
+
+	topics []data.TopicInfo
+	topic  string
 
 	mode threadMode
 
-	limit int
-	total int
-	msgs  []fmail.Message
-
-	participants int
-
-	selected int
-	scroll   int
+	allMsgs      []fmail.Message
+	windowStart  int
+	rows         []threadRow
+	rowIndexByID map[string]int
 
 	collapsed      map[string]bool
 	expandedBodies map[string]bool
 	readMarkers    map[string]string
-	newMessages    int
 
-	lastWidth  int
-	lastHeight int
-	blocks     []threadBlock
-	lines      []string
+	selected int
+	top      int
 
-	subCh     <-chan fmail.Message
-	subCancel func()
+	lastWidth    int
+	lastHeight   int
+	viewportRows int
+	pendingNew   int
+	newestID     string
 
-	lastErr error
+	initialized bool
 }
 
 func newThreadView(root string, provider data.MessageProvider) *threadView {
@@ -98,26 +94,31 @@ func newThreadView(root string, provider data.MessageProvider) *threadView {
 		root:           root,
 		provider:       provider,
 		mode:           threadModeThreaded,
-		limit:          threadPageSize,
 		collapsed:      make(map[string]bool),
 		expandedBodies: make(map[string]bool),
 		readMarkers:    make(map[string]string),
-	}
-}
-
-func (v *threadView) Close() {
-	if v == nil {
-		return
-	}
-	if v.subCancel != nil {
-		v.subCancel()
-		v.subCancel = nil
+		rowIndexByID:   make(map[string]int),
 	}
 }
 
 func (v *threadView) Init() tea.Cmd {
-	v.startSubscription()
-	return tea.Batch(v.loadCmd(), threadTickCmd(), v.waitForMessageCmd())
+	return tea.Batch(v.loadCmd(), threadTickCmd())
+}
+
+func (v *threadView) SetTarget(target string) tea.Cmd {
+	next := strings.TrimSpace(target)
+	if next == "" {
+		return nil
+	}
+	if next == v.topic {
+		return v.loadCmd()
+	}
+	v.topic = next
+	v.windowStart = 0
+	v.pendingNew = 0
+	v.selected = 0
+	v.top = 0
+	return v.loadCmd()
 }
 
 func (v *threadView) Update(msg tea.Msg) tea.Cmd {
@@ -127,11 +128,6 @@ func (v *threadView) Update(msg tea.Msg) tea.Cmd {
 	case threadLoadedMsg:
 		v.applyLoaded(typed)
 		return nil
-	case threadIncomingMsg:
-		if v.isRelevant(typed.msg) && v.scroll < v.maxScroll() {
-			v.newMessages++
-		}
-		return tea.Batch(v.waitForMessageCmd(), v.loadCmd())
 	case tea.KeyMsg:
 		return v.handleKey(typed)
 	}
@@ -143,329 +139,409 @@ func (v *threadView) View(width, height int, theme Theme) string {
 		return ""
 	}
 
-	if v.lastWidth != width || v.lastHeight != height {
-		v.lastWidth = width
-		v.lastHeight = height
-		v.rebuildRender()
-	}
-	if len(v.lines) == 0 {
-		v.rebuildRender()
-	}
+	v.lastWidth = width
+	v.lastHeight = height
 
 	palette := themePalette(theme)
-	base := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Foreground)).Background(lipgloss.Color(palette.Base.Background))
-
 	header := v.renderHeader(width, palette)
-	bodyHeight := height - lipgloss.Height(header)
-	if bodyHeight < 0 {
-		bodyHeight = 0
+	meta := v.renderMeta(width, palette)
+
+	bodyHeight := height - lipgloss.Height(header) - lipgloss.Height(meta)
+	if bodyHeight < 1 {
+		bodyHeight = 1
 	}
-	body := v.renderBody(bodyHeight, palette)
-	out := lipgloss.JoinVertical(lipgloss.Left, header, body)
+	v.viewportRows = maxInt(1, bodyHeight/4)
+
+	body := v.renderRows(width, bodyHeight, palette)
+	content := lipgloss.JoinVertical(lipgloss.Left, header, meta, body)
 	if v.lastErr != nil {
 		errLine := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Priority.High)).Render("data error: " + truncate(v.lastErr.Error(), maxInt(0, width-2)))
-		out = lipgloss.JoinVertical(lipgloss.Left, out, errLine)
-	}
-	return base.Render(out)
-}
-
-func (v *threadView) applyLoaded(loaded threadLoadedMsg) {
-	v.now = loaded.now
-	v.lastErr = loaded.lastErr
-	if loaded.lastErr != nil {
-		return
+		content = lipgloss.JoinVertical(lipgloss.Left, content, errLine)
 	}
 
-	oldTarget := v.target
-	selectedID := v.selectedMessageID()
-
-	v.target = loaded.target
-	v.msgs = loaded.msgs
-	v.total = loaded.total
-	v.participants = loaded.participants
-
-	if oldTarget != loaded.target {
-		v.collapsed = make(map[string]bool)
-		v.expandedBodies = make(map[string]bool)
-		v.newMessages = 0
-	}
-
-	v.rebuildRender()
-	if oldTarget != loaded.target {
-		v.selected = maxInt(0, len(v.blocks)-1)
-		v.scrollToSelection()
-	} else {
-		v.restoreSelection(selectedID)
-	}
-	v.updateReadMarker()
+	base := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Foreground)).Background(lipgloss.Color(palette.Base.Background))
+	return base.Render(content)
 }
 
 func (v *threadView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
+	case "j", "down":
+		v.moveSelection(1)
+		return nil
+	case "k", "up":
+		if v.tryLoadOlderOnUp() {
+			return nil
+		}
+		v.moveSelection(-1)
+		return nil
+	case "ctrl+d":
+		v.moveSelection(maxInt(1, v.pageStep()))
+		return nil
+	case "ctrl+u":
+		v.moveSelection(-maxInt(1, v.pageStep()))
+		return nil
+	case "g":
+		v.selected = 0
+		v.top = 0
+		v.advanceReadMarker()
+		return nil
+	case "G", "end":
+		v.jumpBottom()
+		return nil
 	case "f":
-		selectedID := v.selectedMessageID()
 		if v.mode == threadModeThreaded {
 			v.mode = threadModeFlat
 		} else {
 			v.mode = threadModeThreaded
 		}
-		v.rebuildRender()
-		v.restoreSelection(selectedID)
-		v.updateReadMarker()
+		anchor := v.selectedID()
+		v.rebuildRows(anchor, false)
+		v.ensureVisible()
 		return nil
-	case "g", "home":
-		v.selected = 0
-		v.scrollToSelection()
-		v.updateReadMarker()
-		return v.maybeLoadOlder()
-	case "G", "end":
-		v.selected = maxInt(0, len(v.blocks)-1)
-		v.scrollToSelection()
-		v.newMessages = 0
-		v.updateReadMarker()
-		return nil
-	case "j", "down":
-		v.selected = minInt(maxInt(0, len(v.blocks)-1), v.selected+1)
-		v.scrollToSelection()
-		v.updateReadMarker()
-		return nil
-	case "k", "up":
-		v.selected = maxInt(0, v.selected-1)
-		v.scrollToSelection()
-		v.updateReadMarker()
-		return v.maybeLoadOlder()
-	case "ctrl+d":
-		v.pageBy(1)
-		return nil
-	case "ctrl+u":
-		v.pageBy(-1)
-		return v.maybeLoadOlder()
+	case "[":
+		return v.switchTopic(-1)
+	case "]":
+		return v.switchTopic(1)
 	case "enter":
-		return v.toggleSelected()
+		return v.handleEnter()
 	}
 	return nil
 }
 
-func (v *threadView) pageBy(dir int) {
-	if v.lastHeight <= 0 {
-		return
-	}
-	delta := maxInt(1, v.lastHeight/2)
-	v.scroll += dir * delta
-	if v.scroll < 0 {
-		v.scroll = 0
-	}
-	if v.scroll > v.maxScroll() {
-		v.scroll = v.maxScroll()
-	}
-
-	for i := range v.blocks {
-		if v.blocks[i].startLine >= v.scroll {
-			v.selected = i
-			break
-		}
-	}
-	v.updateReadMarker()
-}
-
-func (v *threadView) maybeLoadOlder() tea.Cmd {
-	if v.total <= len(v.msgs) || len(v.blocks) == 0 || v.selected > 0 {
+func (v *threadView) switchTopic(delta int) tea.Cmd {
+	if len(v.topics) == 0 {
 		return nil
 	}
-	v.limit += threadPageSize
-	if v.limit > v.total {
-		v.limit = v.total
+	idx := v.topicIndex(v.topic)
+	if idx < 0 {
+		idx = 0
 	}
+	idx = (idx + delta + len(v.topics)) % len(v.topics)
+	v.topic = v.topics[idx].Name
+	v.windowStart = 0
+	v.pendingNew = 0
+	v.selected = 0
+	v.top = 0
 	return v.loadCmd()
 }
 
-func (v *threadView) toggleSelected() tea.Cmd {
-	id := v.selectedMessageID()
+func (v *threadView) handleEnter() tea.Cmd {
+	row := v.selectedRow()
+	if row == nil {
+		return nil
+	}
+	id := strings.TrimSpace(row.msg.ID)
 	if id == "" {
 		return nil
 	}
 
-	if v.bodyIsLong(id) {
-		v.expandedBodies[id] = !v.expandedBodies[id]
-		v.rebuildRender()
+	if row.truncated {
+		v.expandedBodies[id] = true
+		v.rebuildRows(id, false)
+		v.ensureVisible()
 		return nil
 	}
 
-	if v.mode == threadModeThreaded {
+	if v.mode == threadModeThreaded && row.hasChildren {
 		v.collapsed[id] = !v.collapsed[id]
-		selectedID := v.selectedMessageID()
-		v.rebuildRender()
-		v.restoreSelection(selectedID)
+		v.rebuildRows(id, false)
+		v.ensureVisible()
 	}
 	return nil
 }
 
-func (v *threadView) selectedMessageID() string {
-	if v.selected < 0 || v.selected >= len(v.blocks) {
-		return ""
-	}
-	return v.blocks[v.selected].id
-}
-
-func (v *threadView) restoreSelection(id string) {
-	if id == "" {
-		v.ensureSelectionInRange()
-		return
-	}
-	for i := range v.blocks {
-		if v.blocks[i].id == id {
-			v.selected = i
-			v.scrollToSelection()
-			return
-		}
-	}
-	v.ensureSelectionInRange()
-}
-
-func (v *threadView) updateReadMarker() {
-	if strings.TrimSpace(v.target) == "" {
-		return
-	}
-	id := v.selectedMessageID()
-	if id == "" {
-		return
-	}
-	if prev := strings.TrimSpace(v.readMarkers[v.target]); prev == "" || id > prev {
-		v.readMarkers[v.target] = id
-	}
-}
-
-func (v *threadView) ensureSelectionInRange() {
-	if v.selected < 0 {
+func (v *threadView) moveSelection(delta int) {
+	if len(v.rows) == 0 {
 		v.selected = 0
-	}
-	if v.selected >= len(v.blocks) {
-		v.selected = maxInt(0, len(v.blocks)-1)
-	}
-}
-
-func (v *threadView) scrollToSelection() {
-	if v.selected < 0 || v.selected >= len(v.blocks) {
+		v.top = 0
 		return
 	}
-	block := v.blocks[v.selected]
-	if v.scroll > block.startLine {
-		v.scroll = block.startLine
-		return
-	}
-	if v.lastHeight > 0 && block.endLine > v.scroll+v.lastHeight {
-		v.scroll = maxInt(0, block.endLine-v.lastHeight)
-	}
+	v.selected = clampInt(v.selected+delta, 0, len(v.rows)-1)
+	v.ensureVisible()
+	v.advanceReadMarker()
 }
 
-func (v *threadView) maxScroll() int {
-	if v.lastHeight <= 0 {
-		return maxInt(0, len(v.lines)-1)
+func (v *threadView) pageStep() int {
+	if v.viewportRows > 0 {
+		return maxInt(1, v.viewportRows/2)
 	}
-	return maxInt(0, len(v.lines)-v.lastHeight)
+	if v.lastHeight > 0 {
+		return maxInt(1, v.lastHeight/8)
+	}
+	return 6
+}
+
+func (v *threadView) tryLoadOlderOnUp() bool {
+	if v.selected > 0 || v.windowStart <= 0 || len(v.allMsgs) == 0 {
+		return false
+	}
+	anchorID := v.selectedID()
+	prevStart := v.windowStart
+	v.windowStart = maxInt(0, v.windowStart-threadPageSize)
+	if v.windowStart == prevStart {
+		return false
+	}
+	v.rebuildRows(anchorID, false)
+	idx := v.indexForID(anchorID)
+	if idx > 0 {
+		v.selected = idx - 1
+	}
+	v.ensureVisible()
+	v.advanceReadMarker()
+	return true
+}
+
+func (v *threadView) jumpBottom() {
+	if len(v.rows) == 0 {
+		v.selected = 0
+		v.top = 0
+		v.pendingNew = 0
+		return
+	}
+	v.selected = len(v.rows) - 1
+	v.top = maxInt(0, v.selected-v.viewportRows+1)
+	v.pendingNew = 0
+	v.advanceReadMarker()
+}
+
+func (v *threadView) ensureVisible() {
+	if len(v.rows) == 0 {
+		v.selected = 0
+		v.top = 0
+		return
+	}
+	v.selected = clampInt(v.selected, 0, len(v.rows)-1)
+	if v.selected < v.top {
+		v.top = v.selected
+	}
+	visible := maxInt(1, v.viewportRows)
+	if v.selected >= v.top+visible {
+		v.top = v.selected - visible + 1
+	}
+	maxTop := maxInt(0, len(v.rows)-1)
+	v.top = clampInt(v.top, 0, maxTop)
+}
+
+func (v *threadView) applyLoaded(msg threadLoadedMsg) {
+	v.now = msg.now
+	v.lastErr = msg.err
+	if msg.err != nil {
+		return
+	}
+
+	prevTopic := v.topic
+	prevAnchor := v.selectedID()
+	wasAtBottom := v.isAtBottom()
+	prevNewest := v.newestID
+
+	v.topics = sortTopicsByActivity(msg.topics)
+	if strings.TrimSpace(msg.topic) != "" {
+		v.topic = msg.topic
+	} else if v.topic == "" && len(v.topics) > 0 {
+		v.topic = v.topics[0].Name
+	}
+
+	v.allMsgs = append([]fmail.Message(nil), msg.msgs...)
+	if !v.initialized || v.topic != prevTopic {
+		v.windowStart = initialWindowStart(len(v.allMsgs))
+		v.initialized = true
+		prevAnchor = ""
+	}
+	v.windowStart = clampInt(v.windowStart, 0, maxInt(0, len(v.allMsgs)-1))
+
+	if len(v.allMsgs) > 0 {
+		v.newestID = v.allMsgs[len(v.allMsgs)-1].ID
+	} else {
+		v.newestID = ""
+	}
+
+	if prevNewest != "" && v.newestID != "" && v.newestID > prevNewest && !wasAtBottom {
+		v.pendingNew += countNewerMessages(v.allMsgs, prevNewest)
+	}
+
+	preferBottom := wasAtBottom && prevTopic == v.topic
+	v.rebuildRows(prevAnchor, preferBottom)
+	if preferBottom {
+		v.pendingNew = 0
+	}
+	v.ensureVisible()
+	v.advanceReadMarker()
 }
 
 func (v *threadView) renderHeader(width int, palette styles.Theme) string {
-	title := strings.TrimSpace(v.target)
-	if title == "" {
-		title = "(no topic)"
+	topic := strings.TrimSpace(v.topic)
+	if topic == "" {
+		topic = "(no topic)"
 	}
-	metaCount := fmt.Sprintf("%d messages", v.total)
-	if v.total > len(v.msgs) {
-		metaCount = fmt.Sprintf("%d/%d messages", len(v.msgs), v.total)
-	}
-	meta := fmt.Sprintf("%s  %d participants", metaCount, v.participants)
-	if v.mode == threadModeFlat {
-		meta += "  flat"
-	}
-	left := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render(title)
-	right := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render(meta)
-	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
-	}
+	participants := v.participantCount(topic)
+	left := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render(topic)
+	right := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render(fmt.Sprintf("%d messages  %d participants", len(v.allMsgs), participants))
+
+	gap := maxInt(1, width-lipgloss.Width(left)-lipgloss.Width(right))
 	return truncateVis(left+strings.Repeat(" ", gap)+right, width)
 }
 
-func (v *threadView) renderBody(height int, palette styles.Theme) string {
+func (v *threadView) renderMeta(width int, palette styles.Theme) string {
+	mode := "threaded"
+	if v.mode == threadModeFlat {
+		mode = "flat"
+	}
+	marker := strings.TrimSpace(v.readMarkers[v.topic])
+	meta := fmt.Sprintf("mode:%s  j/k move  ctrl+d/u page  g/G top/bot  Enter expand/collapse  f toggle  [ ] topic", mode)
+	if marker != "" {
+		meta = meta + "  read:" + shortID(marker)
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render(truncateVis(meta, width))
+}
+
+func (v *threadView) renderRows(width, height int, palette styles.Theme) string {
 	if height <= 0 {
 		return ""
 	}
-	if len(v.lines) == 0 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render("no messages")
-	}
-	if v.scroll > v.maxScroll() {
-		v.scroll = v.maxScroll()
-	}
-	if v.scroll < 0 {
-		v.scroll = 0
+	if len(v.rows) == 0 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render("No messages")
 	}
 
-	start := v.scroll
-	end := minInt(len(v.lines), start+height)
-	out := append([]string(nil), v.lines[start:end]...)
+	v.ensureVisible()
+	start := clampInt(v.top, 0, maxInt(0, len(v.rows)-1))
+	remaining := height
+	out := make([]string, 0, height)
+	mapper := styles.NewAgentColorMapper()
+	msgStyles := styles.NewMessageStyles(palette, mapper)
 
-	if v.newMessages > 0 && v.scroll < v.maxScroll() && len(out) > 0 {
-		tag := fmt.Sprintf("%s: %d (G jump)", threadNewMessageTagline, v.newMessages)
-		out[len(out)-1] = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Accent)).Bold(true).Render(truncateVis(tag, maxInt(0, v.lastWidth-1)))
+	for i := start; i < len(v.rows) && remaining > 0; i++ {
+		row := v.rows[i]
+		if row.groupGap && len(out) > 0 && remaining > 0 {
+			out = append(out, "")
+			remaining--
+			if remaining <= 0 {
+				break
+			}
+		}
+
+		selected := i == v.selected
+		unread := v.isUnread(row.msg.ID)
+		lines := v.renderRowCard(row, width, selected, unread, palette, mapper, msgStyles)
+		if len(lines) > remaining {
+			lines = lines[:remaining]
+		}
+		out = append(out, lines...)
+		remaining -= len(lines)
 	}
+
+	if v.pendingNew > 0 && !v.isAtBottom() && len(out) > 0 {
+		indicator := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Accent)).Bold(true).Render(fmt.Sprintf("New messages (%d) - press G", v.pendingNew))
+		out[len(out)-1] = truncateVis(indicator, width)
+	}
+
 	return strings.Join(out, "\n")
+}
+
+func (v *threadView) renderRowCard(row threadRow, width int, selected bool, unread bool, palette styles.Theme, mapper *styles.AgentColorMapper, msgStyles styles.MessageStyles) []string {
+	agentColor := mapper.ColorCode(row.msg.From)
+	borderColor := agentColor
+	if selected {
+		borderColor = palette.Chrome.SelectedItem
+	}
+
+	timeLabel := relativeTime(row.msg.Time, v.now)
+	if selected {
+		timeLabel = row.msg.Time.UTC().Format(time.RFC3339)
+	}
+
+	agentName := mapper.Foreground(row.msg.From).Render(strings.TrimSpace(row.msg.From))
+	indent := row.connector
+	if row.overflow {
+		indent = indent + "... "
+	}
+	unreadDot := ""
+	if unread {
+		unreadDot = msgStyles.RenderUnreadIndicator(true) + " "
+	}
+
+	header := fmt.Sprintf("%s%s (%s)", indent+unreadDot+agentName, "", timeLabel)
+	content := []string{header}
+
+	bodyWidth := maxInt(10, width-8-lipgloss.Width(indent))
+	bodyLines := renderBodyLines(messageBodyString(row.msg.Body), bodyWidth, palette)
+	if row.truncated {
+		limit := minInt(threadMaxBodyLines, len(bodyLines))
+		bodyLines = bodyLines[:limit]
+	}
+
+	bodyPrefix := strings.Repeat(" ", lipgloss.Width(indent))
+	for _, line := range bodyLines {
+		content = append(content, bodyPrefix+line)
+	}
+	if row.truncated {
+		content = append(content, bodyPrefix+fmt.Sprintf("... [show more] (%d lines)", row.hiddenLines))
+	}
+
+	footerParts := make([]string, 0, 4)
+	if badge := msgStyles.RenderPriorityBadge(row.msg.Priority); badge != "" {
+		footerParts = append(footerParts, badge)
+	}
+	if tags := msgStyles.RenderTagPills(row.msg.Tags); tags != "" {
+		footerParts = append(footerParts, tags)
+	}
+	if row.replyTo != "" {
+		reply := "↩ " + shortID(row.replyTo)
+		if row.crossTarget != "" {
+			reply = reply + " from " + row.crossTarget
+		}
+		footerParts = append(footerParts, reply)
+	}
+	if len(footerParts) > 0 {
+		content = append(content, bodyPrefix+strings.Join(footerParts, "  "))
+	}
+	if selected {
+		details := fmt.Sprintf("id:%s", row.msg.ID)
+		if host := strings.TrimSpace(row.msg.Host); host != "" {
+			details += "  host:" + host
+		}
+		content = append(content, bodyPrefix+details)
+	}
+
+	card := strings.Join(content, "\n")
+	cardStyle := lipgloss.NewStyle().BorderLeft(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color(borderColor)).PaddingLeft(1)
+	if selected {
+		cardStyle = cardStyle.Bold(true)
+	}
+	return strings.Split(cardStyle.Width(maxInt(0, width)).Render(card), "\n")
 }
 
 func (v *threadView) loadCmd() tea.Cmd {
 	if v.provider == nil {
 		return func() tea.Msg {
-			return threadLoadedMsg{now: time.Now().UTC(), lastErr: fmt.Errorf("missing provider")}
+			return threadLoadedMsg{now: time.Now().UTC(), err: fmt.Errorf("missing provider")}
 		}
 	}
-
-	currentTarget := strings.TrimSpace(v.target)
-	limit := v.limit
+	currentTopic := strings.TrimSpace(v.topic)
 	return func() tea.Msg {
 		now := time.Now().UTC()
-		target := currentTarget
-		if target == "" {
-			topics, err := v.provider.Topics()
-			if err != nil {
-				return threadLoadedMsg{now: now, lastErr: err}
-			}
-			target = mostRecentTopic(topics)
-		}
-
-		if target == "" {
-			return threadLoadedMsg{now: now, target: "", msgs: nil, total: 0, participants: 0}
-		}
-
-		var all []fmail.Message
-		var err error
-		if strings.HasPrefix(target, "@") {
-			all, err = v.provider.DMs(strings.TrimPrefix(target, "@"), data.MessageFilter{})
-		} else {
-			all, err = v.provider.Messages(target, data.MessageFilter{})
-		}
+		topics, err := v.provider.Topics()
 		if err != nil {
-			return threadLoadedMsg{now: now, target: target, lastErr: err}
+			return threadLoadedMsg{now: now, err: err}
+		}
+		sortedTopics := sortTopicsByActivity(topics)
+
+		topic := currentTopic
+		if topic == "" && len(sortedTopics) > 0 {
+			topic = sortedTopics[0].Name
+		}
+		if topic != "" && !topicExists(sortedTopics, topic) && len(sortedTopics) > 0 {
+			topic = sortedTopics[0].Name
 		}
 
-		total := len(all)
-		msgs := all
-		if total > 1000 {
-			if limit <= 0 {
-				limit = threadPageSize
+		msgs := []fmail.Message{}
+		if topic != "" {
+			msgs, err = v.provider.Messages(topic, data.MessageFilter{})
+			if err != nil {
+				return threadLoadedMsg{now: now, topics: sortedTopics, topic: topic, err: err}
 			}
-			if limit > total {
-				limit = total
-			}
-			msgs = all[total-limit:]
 		}
 
-		return threadLoadedMsg{
-			now:          now,
-			target:       target,
-			msgs:         msgs,
-			total:        total,
-			participants: len(uniqueParticipants(all)),
-		}
+		return threadLoadedMsg{now: now, topics: sortedTopics, topic: topic, msgs: msgs}
 	}
 }
 
@@ -475,329 +551,413 @@ func threadTickCmd() tea.Cmd {
 	})
 }
 
-func (v *threadView) startSubscription() {
-	if v.provider == nil || v.subCh != nil {
+func (v *threadView) rebuildRows(anchorID string, preferBottom bool) {
+	msgs := v.windowMessages()
+	rows := make([]threadRow, 0, len(msgs))
+
+	if v.mode == threadModeFlat {
+		sorted := append([]fmail.Message(nil), msgs...)
+		sortMessages(sorted)
+		for _, msg := range sorted {
+			truncated, hidden := v.bodyTruncation(msg)
+			rows = append(rows, threadRow{msg: msg, truncated: truncated, hiddenLines: hidden})
+		}
+	} else {
+		threads := threading.BuildThreads(msgs)
+		for tIdx, thread := range threads {
+			if thread == nil {
+				continue
+			}
+			nodes := threading.FlattenThread(thread)
+			for _, node := range nodes {
+				if node == nil || node.Message == nil {
+					continue
+				}
+				if v.hiddenByCollapsedAncestor(node) {
+					continue
+				}
+				depth := minInt(node.Depth, threadMaxDepth)
+				overflow := node.Depth > threadMaxDepth
+				connector := v.nodeConnector(node)
+				crossTarget := ""
+				if threading.IsCrossTargetReply(node) && node.Parent != nil && node.Parent.Message != nil {
+					crossTarget = strings.TrimSpace(node.Parent.Message.To)
+				}
+				truncated, hidden := v.bodyTruncation(*node.Message)
+				rows = append(rows, threadRow{
+					msg:         *node.Message,
+					hasChildren: len(node.Children) > 0,
+					connector:   connector,
+					depth:       depth,
+					overflow:    overflow,
+					groupGap:    tIdx > 0 && node.Parent == nil,
+					replyTo:     strings.TrimSpace(node.Message.ReplyTo),
+					crossTarget: crossTarget,
+					truncated:   truncated,
+					hiddenLines: hidden,
+				})
+			}
+		}
+	}
+
+	v.rows = rows
+	v.rowIndexByID = make(map[string]int, len(rows))
+	for idx := range rows {
+		if id := strings.TrimSpace(rows[idx].msg.ID); id != "" {
+			v.rowIndexByID[id] = idx
+		}
+	}
+
+	if len(rows) == 0 {
+		v.selected = 0
+		v.top = 0
 		return
 	}
-	ch, cancel := v.provider.Subscribe(data.SubscriptionFilter{IncludeDM: true})
-	v.subCh = ch
-	v.subCancel = cancel
+	if preferBottom {
+		v.selected = len(rows) - 1
+		v.top = maxInt(0, v.selected-v.viewportRows+1)
+		return
+	}
+	if idx := v.indexForID(anchorID); idx >= 0 {
+		v.selected = idx
+	} else {
+		v.selected = clampInt(v.selected, 0, len(rows)-1)
+	}
 }
 
-func (v *threadView) waitForMessageCmd() tea.Cmd {
-	if v.subCh == nil {
+func (v *threadView) windowMessages() []fmail.Message {
+	if len(v.allMsgs) == 0 {
 		return nil
 	}
-	return func() tea.Msg {
-		msg, ok := <-v.subCh
-		if !ok {
-			return nil
-		}
-		return threadIncomingMsg{msg: msg}
-	}
-}
-
-func (v *threadView) isRelevant(msg fmail.Message) bool {
-	target := strings.TrimSpace(v.target)
-	if target == "" {
-		return false
-	}
-	if strings.EqualFold(strings.TrimSpace(msg.To), target) {
-		return true
-	}
-	if strings.HasPrefix(target, "@") {
-		peer := strings.TrimPrefix(target, "@")
-		return strings.EqualFold(msg.From, peer) && strings.HasPrefix(msg.To, "@")
-	}
-	return false
-}
-
-func (v *threadView) rebuildRender() {
-	width := v.lastWidth
-	if width <= 0 {
-		width = 100
-	}
-
-	palette := themePalette(ThemeDefault)
-	mapper := styles.NewAgentColorMapper()
-
-	selectedID := v.selectedMessageID()
-	readMarker := strings.TrimSpace(v.readMarkers[v.target])
-
-	items := v.buildItems()
-	blocks := make([]threadBlock, 0, len(items))
-	lines := make([]string, 0, len(items)*4)
-
-	for _, item := range items {
-		if item.threadBreak {
-			lines = append(lines, "")
-			continue
-		}
-		if item.node == nil || item.node.Message == nil {
-			continue
-		}
-		id := item.node.Message.ID
-		selected := id == selectedID
-		unread := readMarker == "" || id > readMarker
-		expanded := v.expandedBodies[id]
-
-		start := len(lines)
-		rendered := renderThreadMessage(item, width, palette, mapper, selected, unread, expanded)
-		lines = append(lines, rendered...)
-		end := len(lines)
-		blocks = append(blocks, threadBlock{id: id, startLine: start, endLine: end})
-	}
-
-	v.blocks = blocks
-	v.lines = lines
-	v.ensureSelectionInRange()
-	v.scrollToSelection()
-}
-
-func (v *threadView) buildItems() []threadItem {
-	if len(v.msgs) == 0 {
+	start := clampInt(v.windowStart, 0, maxInt(0, len(v.allMsgs)-1))
+	if start >= len(v.allMsgs) {
 		return nil
 	}
-	if v.mode == threadModeFlat {
-		msgs := append([]fmail.Message(nil), v.msgs...)
-		sort.SliceStable(msgs, func(i, j int) bool { return msgs[i].ID < msgs[j].ID })
-		out := make([]threadItem, 0, len(msgs))
-		for i := range msgs {
-			msg := msgs[i]
-			out = append(out, threadItem{node: &threading.ThreadNode{Message: &msg}})
-		}
-		return out
-	}
-
-	threads := threading.BuildThreads(v.msgs)
-	out := make([]threadItem, 0, len(v.msgs)+len(threads))
-	for i, th := range threads {
-		nodes := threading.FlattenThread(th)
-		for _, node := range nodes {
-			if node == nil || node.Message == nil {
-				continue
-			}
-			if v.isCollapsedByAncestor(node) {
-				continue
-			}
-			prefix, clamped := prefixForNode(node, threadMaxVisibleDepth)
-			out = append(out, threadItem{node: node, prefix: prefix, depthClamped: clamped})
-		}
-		if i < len(threads)-1 {
-			out = append(out, threadItem{threadBreak: true})
-		}
-	}
+	out := make([]fmail.Message, len(v.allMsgs[start:]))
+	copy(out, v.allMsgs[start:])
 	return out
 }
 
-func (v *threadView) isCollapsedByAncestor(node *threading.ThreadNode) bool {
-	for cur := node.Parent; cur != nil; cur = cur.Parent {
-		if cur.Message != nil && v.collapsed[cur.Message.ID] {
+func (v *threadView) hiddenByCollapsedAncestor(node *threading.ThreadNode) bool {
+	for p := node.Parent; p != nil; p = p.Parent {
+		if p.Message == nil {
+			continue
+		}
+		if v.collapsed[p.Message.ID] {
 			return true
 		}
 	}
 	return false
 }
 
-func renderThreadMessage(item threadItem, width int, palette styles.Theme, mapper *styles.AgentColorMapper, selected bool, unread bool, expanded bool) []string {
-	node := item.node
-	if node == nil || node.Message == nil {
-		return nil
+func (v *threadView) nodeConnector(node *threading.ThreadNode) string {
+	if node == nil || node.Message == nil || node.Parent == nil {
+		return ""
 	}
-	msg := node.Message
-
-	left := mapper.Foreground(msg.From).Render("▌")
-	if selected {
-		left = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Accent)).Bold(true).Render("▌")
-	}
-	if unread {
-		left = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Accent)).Bold(true).Render("●")
-	}
-
-	prefix := item.prefix
-	if item.depthClamped {
-		prefix = "... " + prefix
-	}
-	ts := msg.Time.UTC().Format("15:04")
-	if selected {
-		ts = msg.Time.UTC().Format(time.RFC3339)
-	}
-	header := fmt.Sprintf("%s%s%s (%s)", left, prefix, mapper.Foreground(msg.From).Render(msg.From), ts)
-	if selected {
-		host := strings.TrimSpace(msg.Host)
-		if host == "" {
-			host = "-"
-		}
-		header += "  id:" + msg.ID + " host:" + host
-	}
-
-	innerW := maxInt(16, width-2-lipgloss.Width(prefix))
-	bodyLines := renderMessageBody(fmt.Sprint(msg.Body), innerW, palette)
-	truncated := false
-	if len(bodyLines) > threadMaxVisibleLines && !expanded {
-		bodyLines = bodyLines[:threadMaxVisibleLines]
-		truncated = true
-	}
-
-	out := make([]string, 0, 2+len(bodyLines)+2)
-	out = append(out, truncateVis(header, width))
-	for _, line := range bodyLines {
-		out = append(out, truncateVis("  "+prefix+line, width))
-	}
-
-	footerParts := make([]string, 0, 4)
-	if prio := strings.TrimSpace(msg.Priority); prio != "" && !strings.EqualFold(prio, fmail.PriorityNormal) {
-		footerParts = append(footerParts, "["+strings.ToUpper(prio)+"]")
-	}
-	if len(msg.Tags) > 0 {
-		tags := make([]string, 0, len(msg.Tags))
-		for _, tag := range msg.Tags {
-			tag = strings.TrimSpace(tag)
-			if tag == "" {
-				continue
-			}
-			tags = append(tags, "["+strings.ToLower(tag)+"]")
-		}
-		if len(tags) > 0 {
-			footerParts = append(footerParts, strings.Join(tags, " "))
-		}
-	}
-	if node.Parent != nil && node.Parent.Message != nil {
-		footerParts = append(footerParts, "reply-to:"+shortID(node.Parent.Message.ID))
-	}
-	if len(footerParts) > 0 {
-		footer := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render(strings.Join(footerParts, "  "))
-		out = append(out, truncateVis("  "+prefix+footer, width))
-	}
-
-	if truncated {
-		label := "... [show more]"
-		if expanded {
-			label = "[show less]"
-		}
-		out = append(out, truncateVis("  "+prefix+label, width))
-	}
-
-	return out
-}
-
-func renderMessageBody(body string, width int, palette styles.Theme) []string {
-	body = strings.ReplaceAll(body, "\r\n", "\n")
-	body = strings.TrimRight(body, "\n")
-	if body == "" {
-		return []string{""}
-	}
-
-	codeBlock := lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("252"))
-	inlineCode := lipgloss.NewStyle().Background(lipgloss.Color("238")).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb))
-
-	lines := strings.Split(body, "\n")
-	out := make([]string, 0, len(lines))
-	inFence := false
-	for _, raw := range lines {
-		trimmed := strings.TrimSpace(raw)
-		if strings.HasPrefix(trimmed, "```") {
-			inFence = !inFence
-			out = append(out, codeBlock.Render(trimmed))
+	ancestors := ancestorChain(node)
+	parts := make([]string, 0, len(ancestors))
+	for _, anc := range ancestors {
+		if anc.Parent == nil {
 			continue
 		}
-		if inFence {
-			out = append(out, codeBlock.Render(raw))
-			continue
-		}
-
-		wrapped := wordwrap.String(raw, maxInt(1, width))
-		parts := strings.Split(wrapped, "\n")
-		for _, part := range parts {
-			out = append(out, highlightInlineCode(part, inlineCode))
+		if v.isLastChild(anc) {
+			parts = append(parts, "   ")
+		} else {
+			parts = append(parts, "│  ")
 		}
 	}
-	return out
-}
-
-func highlightInlineCode(line string, style lipgloss.Style) string {
-	if !strings.Contains(line, "`") {
-		return line
-	}
-	parts := strings.Split(line, "`")
-	if len(parts) < 3 {
-		return line
-	}
-	for i := 1; i < len(parts); i += 2 {
-		parts[i] = style.Render("`" + parts[i] + "`")
+	if v.isLastChild(node) {
+		parts = append(parts, "└─ ")
+	} else {
+		parts = append(parts, "├─ ")
 	}
 	return strings.Join(parts, "")
 }
 
-func prefixForNode(node *threading.ThreadNode, maxDepth int) (string, bool) {
-	if node == nil || node.Parent == nil {
-		return "", false
+func ancestorChain(node *threading.ThreadNode) []*threading.ThreadNode {
+	out := make([]*threading.ThreadNode, 0, 8)
+	for cur := node.Parent; cur != nil; cur = cur.Parent {
+		out = append(out, cur)
 	}
-
-	path := make([]*threading.ThreadNode, 0, 8)
-	for cur := node; cur != nil; cur = cur.Parent {
-		path = append(path, cur)
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
 	}
-	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
-		path[i], path[j] = path[j], path[i]
-	}
-
-	depth := len(path) - 1
-	clamped := depth > maxDepth
-	visibleDepth := depth
-	if visibleDepth > maxDepth {
-		visibleDepth = maxDepth
-	}
-
-	start := 0
-	if depth > visibleDepth {
-		start = depth - visibleDepth
-	}
-
-	segments := make([]string, 0, visibleDepth)
-	for i := 0; i < visibleDepth; i++ {
-		parent := path[start+i]
-		child := path[start+i+1]
-		if i == visibleDepth-1 {
-			if hasNextSibling(parent, child) {
-				segments = append(segments, "├─ ")
-			} else {
-				segments = append(segments, "└─ ")
-			}
-			continue
-		}
-		if hasNextSibling(parent, child) {
-			segments = append(segments, "│  ")
-		} else {
-			segments = append(segments, "   ")
-		}
-	}
-	return strings.Join(segments, ""), clamped
+	return out
 }
 
-func hasNextSibling(parent, child *threading.ThreadNode) bool {
-	if parent == nil || child == nil || len(parent.Children) == 0 {
-		return false
+func (v *threadView) isLastChild(node *threading.ThreadNode) bool {
+	if node == nil || node.Parent == nil {
+		return true
 	}
-	children := append([]*threading.ThreadNode(nil), parent.Children...)
-	sort.SliceStable(children, func(i, j int) bool {
-		if children[i] == nil || children[i].Message == nil {
+	siblings := sortedChildren(node.Parent.Children)
+	if len(siblings) == 0 {
+		return true
+	}
+	last := siblings[len(siblings)-1]
+	if last == nil || last.Message == nil || node.Message == nil {
+		return true
+	}
+	return last.Message.ID == node.Message.ID
+}
+
+func sortedChildren(children []*threading.ThreadNode) []*threading.ThreadNode {
+	cloned := append([]*threading.ThreadNode(nil), children...)
+	sort.SliceStable(cloned, func(i, j int) bool {
+		if cloned[i] == nil || cloned[i].Message == nil {
 			return false
 		}
-		if children[j] == nil || children[j].Message == nil {
+		if cloned[j] == nil || cloned[j].Message == nil {
 			return true
 		}
-		if !children[i].Message.Time.Equal(children[j].Message.Time) {
-			return children[i].Message.Time.Before(children[j].Message.Time)
+		left := *cloned[i].Message
+		right := *cloned[j].Message
+		if !left.Time.Equal(right.Time) {
+			return left.Time.Before(right.Time)
 		}
-		return children[i].Message.ID < children[j].Message.ID
+		return left.ID < right.ID
 	})
-	for i := range children {
-		if children[i] == child {
-			return i < len(children)-1
+	return cloned
+}
+
+func (v *threadView) bodyTruncation(msg fmail.Message) (bool, int) {
+	id := strings.TrimSpace(msg.ID)
+	if id != "" && v.expandedBodies[id] {
+		return false, 0
+	}
+	raw := strings.ReplaceAll(messageBodyString(msg.Body), "\r\n", "\n")
+	count := len(strings.Split(raw, "\n"))
+	if count > threadMaxBodyLines {
+		return true, count - threadMaxBodyLines
+	}
+	return false, 0
+}
+
+func (v *threadView) selectedID() string {
+	if v.selected < 0 || v.selected >= len(v.rows) {
+		return ""
+	}
+	return strings.TrimSpace(v.rows[v.selected].msg.ID)
+}
+
+func (v *threadView) selectedRow() *threadRow {
+	if v.selected < 0 || v.selected >= len(v.rows) {
+		return nil
+	}
+	return &v.rows[v.selected]
+}
+
+func (v *threadView) indexForID(id string) int {
+	if strings.TrimSpace(id) == "" {
+		return -1
+	}
+	if idx, ok := v.rowIndexByID[id]; ok {
+		return idx
+	}
+	return -1
+}
+
+func (v *threadView) isAtBottom() bool {
+	if len(v.rows) == 0 {
+		return true
+	}
+	return v.selected >= len(v.rows)-1
+}
+
+func (v *threadView) isUnread(id string) bool {
+	marker := strings.TrimSpace(v.readMarkers[v.topic])
+	if marker == "" {
+		return false
+	}
+	return id > marker
+}
+
+func (v *threadView) advanceReadMarker() {
+	if strings.TrimSpace(v.topic) == "" {
+		return
+	}
+	id := v.selectedID()
+	if id == "" {
+		return
+	}
+	if prev := strings.TrimSpace(v.readMarkers[v.topic]); prev == "" || id > prev {
+		v.readMarkers[v.topic] = id
+	}
+}
+
+func (v *threadView) topicIndex(topic string) int {
+	for i := range v.topics {
+		if v.topics[i].Name == topic {
+			return i
+		}
+	}
+	return -1
+}
+
+func (v *threadView) participantCount(topic string) int {
+	for i := range v.topics {
+		if v.topics[i].Name == topic {
+			return len(v.topics[i].Participants)
+		}
+	}
+	return 0
+}
+
+func sortTopicsByActivity(topics []data.TopicInfo) []data.TopicInfo {
+	out := append([]data.TopicInfo(nil), topics...)
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].LastActivity.Equal(out[j].LastActivity) {
+			return out[i].LastActivity.After(out[j].LastActivity)
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func topicExists(topics []data.TopicInfo, topic string) bool {
+	for i := range topics {
+		if topics[i].Name == topic {
+			return true
 		}
 	}
 	return false
+}
+
+func sortMessages(msgs []fmail.Message) {
+	sort.SliceStable(msgs, func(i, j int) bool {
+		if msgs[i].ID != msgs[j].ID {
+			return msgs[i].ID < msgs[j].ID
+		}
+		if !msgs[i].Time.Equal(msgs[j].Time) {
+			return msgs[i].Time.Before(msgs[j].Time)
+		}
+		return msgs[i].From < msgs[j].From
+	})
+}
+
+func initialWindowStart(total int) int {
+	if total > 1000 {
+		return maxInt(0, total-threadPageSize)
+	}
+	return 0
+}
+
+func countNewerMessages(messages []fmail.Message, marker string) int {
+	if marker == "" {
+		return 0
+	}
+	count := 0
+	for i := range messages {
+		if messages[i].ID > marker {
+			count++
+		}
+	}
+	return count
+}
+
+func relativeTime(ts time.Time, now time.Time) string {
+	if ts.IsZero() {
+		return "unknown"
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	delta := now.Sub(ts)
+	if delta < 0 {
+		delta = -delta
+	}
+	switch {
+	case delta < time.Minute:
+		return fmt.Sprintf("%ds ago", int(delta.Seconds()))
+	case delta < time.Hour:
+		return fmt.Sprintf("%dm ago", int(delta.Minutes()))
+	case delta < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(delta.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(delta.Hours()/24))
+	}
+}
+
+func renderBodyLines(body string, width int, palette styles.Theme) []string {
+	if width <= 0 {
+		width = 1
+	}
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	if strings.TrimSpace(body) == "" {
+		return []string{""}
+	}
+
+	codeStyle := lipgloss.NewStyle().Background(lipgloss.Color(palette.Borders.Divider)).Foreground(lipgloss.Color(palette.Base.Foreground))
+	inlineCodeStyle := lipgloss.NewStyle().Background(lipgloss.Color(palette.Base.Border)).Foreground(lipgloss.Color(palette.Base.Foreground)).Bold(true)
+
+	inCode := false
+	lines := strings.Split(body, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inCode = !inCode
+			continue
+		}
+
+		if inCode {
+			wrapped := wrapLines(line, width)
+			for _, codeLine := range wrapped {
+				out = append(out, codeStyle.Render(codeLine))
+			}
+			continue
+		}
+
+		wrapped := wrapLines(line, width)
+		for _, textLine := range wrapped {
+			out = append(out, highlightInlineCode(textLine, inlineCodeStyle))
+		}
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
+
+func wrapLines(line string, width int) []string {
+	if width <= 0 {
+		return []string{line}
+	}
+	wrapped := wordwrap.String(line, width)
+	parts := strings.Split(wrapped, "\n")
+	if len(parts) == 0 {
+		return []string{""}
+	}
+	return parts
+}
+
+func highlightInlineCode(line string, style lipgloss.Style) string {
+	matches := inlineCodePattern.FindAllStringIndex(line, -1)
+	if len(matches) == 0 {
+		return line
+	}
+	var b strings.Builder
+	cursor := 0
+	for _, m := range matches {
+		if m[0] > cursor {
+			b.WriteString(line[cursor:m[0]])
+		}
+		b.WriteString(style.Render(line[m[0]:m[1]]))
+		cursor = m[1]
+	}
+	if cursor < len(line) {
+		b.WriteString(line[cursor:])
+	}
+	return b.String()
+}
+
+func messageBodyString(body any) string {
+	if body == nil {
+		return ""
+	}
+	if s, ok := body.(string); ok {
+		return s
+	}
+	return fmt.Sprint(body)
 }
 
 func shortID(id string) string {
@@ -806,49 +966,4 @@ func shortID(id string) string {
 		return id
 	}
 	return id[:8]
-}
-
-func uniqueParticipants(messages []fmail.Message) []string {
-	set := make(map[string]struct{}, 16)
-	for i := range messages {
-		if from := strings.TrimSpace(messages[i].From); from != "" {
-			set[from] = struct{}{}
-		}
-		if to := strings.TrimSpace(messages[i].To); strings.HasPrefix(to, "@") {
-			set[strings.TrimPrefix(to, "@")] = struct{}{}
-		}
-	}
-	out := make([]string, 0, len(set))
-	for name := range set {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func mostRecentTopic(topics []data.TopicInfo) string {
-	if len(topics) == 0 {
-		return ""
-	}
-	best := topics[0]
-	for i := 1; i < len(topics); i++ {
-		if topics[i].LastActivity.After(best.LastActivity) {
-			best = topics[i]
-		}
-	}
-	return strings.TrimSpace(best.Name)
-}
-
-func (v *threadView) bodyIsLong(id string) bool {
-	if id == "" {
-		return false
-	}
-	for i := range v.msgs {
-		if v.msgs[i].ID != id {
-			continue
-		}
-		raw := fmt.Sprint(v.msgs[i].Body)
-		return len(strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")) > threadMaxVisibleLines
-	}
-	return false
 }

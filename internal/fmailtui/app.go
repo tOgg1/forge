@@ -114,6 +114,10 @@ type pushViewMsg struct {
 
 type popViewMsg struct{}
 
+type openThreadMsg struct {
+	target string // topic name or "@agent"
+}
+
 func pushViewCmd(id ViewID) tea.Cmd {
 	return func() tea.Msg {
 		return pushViewMsg{id: id}
@@ -123,6 +127,12 @@ func pushViewCmd(id ViewID) tea.Cmd {
 func popViewCmd() tea.Cmd {
 	return func() tea.Msg {
 		return popViewMsg{}
+	}
+}
+
+func openThreadCmd(target string) tea.Cmd {
+	return func() tea.Msg {
+		return openThreadMsg{target: target}
 	}
 }
 
@@ -219,11 +229,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = typed.Width
 		m.height = typed.Height
 		return m, nil
+	case openThreadMsg:
+		if view := m.views[ViewThread]; view != nil {
+			if setter, ok := view.(interface {
+				SetTarget(string) tea.Cmd
+			}); ok {
+				return m, setter.SetTarget(typed.target)
+			}
+		}
+		return m, nil
 	case pushViewMsg:
 		m.pushView(typed.id)
+		if view := m.activeView(); view != nil {
+			return m, view.Init()
+		}
 		return m, nil
 	case popViewMsg:
 		m.popView()
+		if view := m.activeView(); view != nil {
+			return m, view.Init()
+		}
 		return m, nil
 	case tea.KeyMsg:
 		if cmd, handled := m.handleGlobalKey(typed); handled {
@@ -260,11 +285,17 @@ func (m *Model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "esc", "backspace":
 		m.popView()
+		if view := m.activeView(); view != nil {
+			return view.Init(), true
+		}
 		return nil, true
 	}
 
 	if next, ok := viewSwitchKeys[msg.String()]; ok {
 		m.pushView(next)
+		if view := m.activeView(); view != nil {
+			return view.Init(), true
+		}
 		return nil, true
 	}
 	return nil, false

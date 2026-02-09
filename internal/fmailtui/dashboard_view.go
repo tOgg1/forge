@@ -315,8 +315,27 @@ func (v *dashboardView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		case focusAgents:
 			return pushViewCmd(ViewAgents)
 		case focusTopics:
-			return pushViewCmd(ViewTopics)
+			if v.topicIdx >= 0 && v.topicIdx < len(v.topics) {
+				return tea.Batch(
+					openThreadCmd(v.topics[v.topicIdx].Name),
+					pushViewCmd(ViewThread),
+				)
+			}
+			return pushViewCmd(ViewThread)
 		case focusFeed:
+			if len(v.feed) > 0 {
+				idx := len(v.feed) - 1 - v.feedOffset
+				if idx < 0 {
+					idx = 0
+				}
+				if idx >= len(v.feed) {
+					idx = len(v.feed) - 1
+				}
+				target := strings.TrimSpace(v.feed[idx].To)
+				if target != "" {
+					return tea.Batch(openThreadCmd(target), pushViewCmd(ViewThread))
+				}
+			}
 			return pushViewCmd(ViewThread)
 		default:
 			return pushViewCmd(ViewTopics)
