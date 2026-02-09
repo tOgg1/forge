@@ -19,6 +19,7 @@ type FileProvider struct {
 	store           *fmail.Store
 	cacheTTL        time.Duration
 	metadataTTL     time.Duration
+	searchIndexTTL  time.Duration
 	pollMin         time.Duration
 	pollMax         time.Duration
 	subscribeBuffer int
@@ -36,6 +37,7 @@ type FileProvider struct {
 
 	searchMu    sync.Mutex
 	searchIndex *textSearchIndex
+	searchDirty map[string]struct{}
 
 	messageReadLookups atomic.Int64
 	messageDiskReads   atomic.Int64
@@ -61,6 +63,10 @@ func NewFileProvider(cfg FileProviderConfig) (*FileProvider, error) {
 	metadataTTL := cfg.MetadataTTL
 	if metadataTTL <= 0 {
 		metadataTTL = defaultMetadataTTL
+	}
+	searchIndexTTL := cfg.SearchIndexTTL
+	if searchIndexTTL <= 0 {
+		searchIndexTTL = defaultSearchIndexTTL
 	}
 	pollMin := cfg.PollInterval
 	if pollMin <= 0 {
@@ -96,6 +102,7 @@ func NewFileProvider(cfg FileProviderConfig) (*FileProvider, error) {
 		store:                store,
 		cacheTTL:             cacheTTL,
 		metadataTTL:          metadataTTL,
+		searchIndexTTL:       searchIndexTTL,
 		pollMin:              pollMin,
 		pollMax:              pollMax,
 		subscribeBuffer:      subscribeBuffer,
@@ -106,6 +113,7 @@ func NewFileProvider(cfg FileProviderConfig) (*FileProvider, error) {
 		topicMetadataCache:   make(map[string]topicMetadataEntry),
 		dmDirMetadataCache:   make(map[string]dmDirMetadataEntry),
 		dmConversationsCache: make(map[string]timedEntry[[]DMConversation]),
+		searchDirty:          make(map[string]struct{}),
 	}, nil
 }
 

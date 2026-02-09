@@ -362,8 +362,11 @@ func (p *FileProvider) storeDMConversations(viewer string, conversations []DMCon
 
 func (p *FileProvider) invalidateCachesForMessage(message fmail.Message) {
 	target := strings.TrimSpace(message.To)
+	if target == "" {
+		return
+	}
+	searchTarget := ""
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	if strings.HasPrefix(target, "@") {
 		agent := strings.TrimPrefix(target, "@")
@@ -373,6 +376,11 @@ func (p *FileProvider) invalidateCachesForMessage(message fmail.Message) {
 		delete(p.dmMsgCache, agent)
 		p.markDMMetadataDirtyLocked(agent)
 		p.dmConversationsCache = make(map[string]timedEntry[[]DMConversation])
+		if agent != "" {
+			searchTarget = "@" + agent
+		}
+		p.mu.Unlock()
+		p.markSearchTargetDirty(searchTarget)
 		return
 	}
 
@@ -383,6 +391,9 @@ func (p *FileProvider) invalidateCachesForMessage(message fmail.Message) {
 	p.topicsCache = timedEntry[[]TopicInfo]{}
 	delete(p.topicMsgCache, topic)
 	p.markTopicMetadataDirtyLocked(topic)
+	searchTarget = topic
+	p.mu.Unlock()
+	p.markSearchTargetDirty(searchTarget)
 }
 
 func (p *FileProvider) invalidateMetadataForPath(path string) {
@@ -390,20 +401,24 @@ func (p *FileProvider) invalidateMetadataForPath(path string) {
 	if kind == "" || key == "" {
 		return
 	}
+	searchTarget := ""
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	switch kind {
 	case "topic":
 		p.topicsCache = timedEntry[[]TopicInfo]{}
 		delete(p.topicMsgCache, key)
 		p.markTopicMetadataDirtyLocked(key)
+		searchTarget = key
 	case "dm":
 		delete(p.dmMsgCache, key)
 		p.markDMMetadataDirtyLocked(key)
 		p.dmConversationsCache = make(map[string]timedEntry[[]DMConversation])
+		searchTarget = "@" + key
 	}
+	p.mu.Unlock()
+	p.markSearchTargetDirty(searchTarget)
 }
 
 func (p *FileProvider) markTopicMetadataDirtyLocked(topic string) {
@@ -455,6 +470,19 @@ func (p *FileProvider) metadataTargetFromPath(path string) (string, string) {
 	default:
 		return "", ""
 	}
+}
+
+func (p *FileProvider) markSearchTargetDirty(target string) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return
+	}
+	p.searchMu.Lock()
+	defer p.searchMu.Unlock()
+	if p.searchDirty == nil {
+		p.searchDirty = make(map[string]struct{})
+	}
+	p.searchDirty[target] = struct{}{}
 }
 
 func cloneTopicInfo(info TopicInfo) TopicInfo {
