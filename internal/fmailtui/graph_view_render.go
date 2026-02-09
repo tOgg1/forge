@@ -31,15 +31,26 @@ func (v *graphView) View(width, height int, theme Theme) string {
 		truncateVis(v.hintLine(), width),
 	}
 
-	canvasH := height - len(top) - 6
+	detailsH := 0
+	if v.showDetails {
+		detailsH = 6
+	}
+
+	canvasH := height - len(top) - detailsH
 	if canvasH < 4 {
 		canvasH = maxInt(0, height-len(top))
 	}
 
 	lines := make([]string, 0, height)
 	lines = append(lines, top...)
-	lines = append(lines, v.renderCanvas(width, canvasH)...)
-	lines = append(lines, v.renderDetails(width)...)
+	if v.topicOverlay {
+		lines = append(lines, v.renderOverlayCanvas(width, canvasH)...)
+	} else {
+		lines = append(lines, v.renderCanvas(width, canvasH)...)
+	}
+	if v.showDetails {
+		lines = append(lines, v.renderDetails(width)...)
+	}
 	return truncateLines(lines, height)
 }
 
@@ -47,11 +58,19 @@ func (v *graphView) headerLine() string {
 	label := v.windowLabel()
 	nodes := len(v.snap.Nodes)
 	edges := len(v.snap.Edges)
-	return fmt.Sprintf("Graph  last %s  %d messages  %d nodes  %d edges", label, v.snap.Messages, nodes, edges)
+	mode := "agents"
+	if v.topicOverlay {
+		mode = "topics"
+	}
+	cluster := ""
+	if v.clusters {
+		cluster = "  clusters:on"
+	}
+	return fmt.Sprintf("Graph  last %s  mode:%s%s  %d messages  %d nodes  %d edges", label, mode, cluster, v.snap.Messages, nodes, edges)
 }
 
 func (v *graphView) hintLine() string {
-	return "[/]:range  h/l:time-pan  Tab:next node  +/-:zoom  arrows:pan  r:refresh"
+	return "[/]:range  h/l:time-pan  t:overlay  c:clusters  Tab:next node  +/-:zoom  arrows:pan  Enter:details  r:refresh"
 }
 
 func (v *graphView) windowLabel() string {

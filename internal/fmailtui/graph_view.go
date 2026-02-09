@@ -37,10 +37,13 @@ type graphView struct {
 
 	snap graphSnapshot
 
-	zoom     int
-	panX     int
-	panY     int
-	selected int
+	zoom         int
+	panX         int
+	panY         int
+	selected     int
+	showDetails  bool
+	topicOverlay bool
+	clusters     bool
 
 	subCh     <-chan fmail.Message
 	subCancel func()
@@ -63,9 +66,10 @@ func newGraphView(root, self string, provider data.MessageProvider) *graphView {
 			7 * 24 * time.Hour,
 			0, // all-time
 		},
-		windowIdx: 1,
-		seen:      make(map[string]struct{}, 1024),
-		zoom:      0,
+		windowIdx:   1,
+		seen:        make(map[string]struct{}, 1024),
+		zoom:        0,
+		showDetails: true,
 	}
 }
 
@@ -161,6 +165,12 @@ func (v *graphView) handleKey(msg tea.KeyMsg) tea.Cmd {
 				v.selected = len(v.snap.Nodes) - 1
 			}
 		}
+	case "enter":
+		v.showDetails = !v.showDetails
+	case "t":
+		v.topicOverlay = !v.topicOverlay
+	case "c":
+		v.clusters = !v.clusters
 	case "up":
 		v.panY--
 	case "down":
