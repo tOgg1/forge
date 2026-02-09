@@ -42,6 +42,7 @@ const (
 	ViewLiveTail  ViewID = "live-tail"
 	ViewTimeline  ViewID = "timeline"
 	ViewStats     ViewID = "stats"
+	ViewHeatmap   ViewID = "heatmap"
 	ViewBookmarks ViewID = "bookmarks"
 	ViewNotify    ViewID = "notifications"
 )
@@ -54,6 +55,7 @@ var viewSwitchKeys = map[string]ViewID{
 	"l": ViewLiveTail,
 	"m": ViewTimeline,
 	"p": ViewStats,
+	"H": ViewHeatmap,
 	"N": ViewNotify,
 	"D": ViewDashboard,
 	"S": ViewSearch,
@@ -72,6 +74,7 @@ var dashboardAssignableViews = []ViewID{
 	ViewSearch,
 	ViewTimeline,
 	ViewStats,
+	ViewHeatmap,
 	ViewBookmarks,
 	ViewNotify,
 }
@@ -162,6 +165,12 @@ type openThreadMsg struct {
 	focusID string // optional message ID to focus within the thread
 }
 
+type applyTimelineMsg struct {
+	filterRaw string
+	windowEnd time.Time
+	zoom      time.Duration
+}
+
 func pushViewCmd(id ViewID) tea.Cmd {
 	return func() tea.Msg {
 		return pushViewMsg{id: id}
@@ -177,6 +186,16 @@ func popViewCmd() tea.Cmd {
 func openThreadCmd(target, focusID string) tea.Cmd {
 	return func() tea.Msg {
 		return openThreadMsg{target: target, focusID: focusID}
+	}
+}
+
+func applyTimelineCmd(filterRaw string, windowEnd time.Time, zoom time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		return applyTimelineMsg{
+			filterRaw: strings.TrimSpace(filterRaw),
+			windowEnd: windowEnd,
+			zoom:      zoom,
+		}
 	}
 }
 
@@ -308,6 +327,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = typed.Width
 		m.height = typed.Height
+		return m, nil
+	case applyTimelineMsg:
+		if view := m.views[ViewTimeline]; view != nil {
+			if timeline, ok := view.(*timelineView); ok {
+				timeline.filterRaw = strings.TrimSpace(typed.filterRaw)
+				timeline.filter = parseTimelineFilter(timeline.filterRaw)
+				if !typed.windowEnd.IsZero() {
+					timeline.windowEnd = typed.windowEnd.UTC()
+				}
+				if typed.zoom > 0 {
+					timeline.zoomIdx = timelineZoomIdxFor(typed.zoom)
+				}
+				timeline.rebuildVisible()
+			}
+		}
 		return m, nil
 	case openThreadMsg:
 		if view := m.views[ViewThread]; view != nil {
@@ -736,6 +770,18 @@ func (m *Model) renderLayoutBody(contentHeight int) string {
 	}
 }
 
+func timelineZoomIdxFor(window time.Duration) int {
+	if window <= 0 || len(timelineZoomLevels) == 0 {
+		return 0
+	}
+	for i, level := range timelineZoomLevels {
+		if level >= window {
+			return i
+		}
+	}
+	return len(timelineZoomLevels) - 1
+}
+
 func (m *Model) renderSplitPanes(spec layout.Spec, panes []layout.Pane) string {
 	if len(panes) <= 1 {
 		return m.renderPane(panes[0])
@@ -1027,6 +1073,7 @@ func (m *Model) initViews() {
 	m.views[ViewLiveTail] = newLiveTailView(m.root, m.selfAgent, m.provider, m.tuiState)
 	m.views[ViewTimeline] = newTimelineView(m.root, m.selfAgent, m.provider, m.tuiState)
 	m.views[ViewStats] = newStatsView(m.root, m.selfAgent, m.provider)
+	m.views[ViewHeatmap] = newHeatmapView(m.root, m.selfAgent, m.provider)
 	m.views[ViewBookmarks] = newBookmarksView(m.root, m.store, m.provider, m.tuiState)
 	m.views[ViewNotify] = newNotificationsView(m.selfAgent, m.provider, m.notifications)
 }

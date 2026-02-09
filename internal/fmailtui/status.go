@@ -364,6 +364,8 @@ func viewLabel(id ViewID) string {
 		return "Timeline"
 	case ViewStats:
 		return "Stats"
+	case ViewHeatmap:
+		return "Heatmap"
 	case ViewBookmarks:
 		return "Bookmarks"
 	case ViewNotify:

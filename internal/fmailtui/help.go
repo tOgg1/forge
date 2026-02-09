@@ -152,6 +152,18 @@ func helpForView(id ViewID) []helpSection {
 				{key: "h/l or ←/→", desc: "pan window"},
 			}},
 		}
+	case ViewHeatmap:
+		return []helpSection{
+			global,
+			{title: "Heatmap", items: []helpItem{
+				{key: "Arrow keys", desc: "move cell selection"},
+				{key: "Enter", desc: "open in Timeline view"},
+				{key: "t", desc: "toggle agent/topic mode"},
+				{key: "s", desc: "cycle sort"},
+				{key: "[ / ]", desc: "adjust time range"},
+				{key: "h/l or ←/→", desc: "pan window"},
+			}},
+		}
 	case ViewNotify:
 		return []helpSection{
 			global,
