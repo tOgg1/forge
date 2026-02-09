@@ -338,3 +338,34 @@ Implemented the `LoopKVRepository` in Rust with full Go behavioral parity.
 **Validation**: `cargo fmt --check` PASS, `cargo clippy --workspace --all-targets -- -D warnings` PASS, 13/13 tests PASS.
 ```
 
+## 2026-02-09T18:21:08Z
+
+- run_id: fac4856d-f21e-44ce-9a2d-23c1981ee6d3
+- loop_name: rust-full-claude-4
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:14:25Z
+- finished_at: 2026-02-09T18:21:08Z
+- exit_code: 0
+
+```
+## Task Complete: `forge-ja5` — CLI port: forge config
+
+**What was done:**
+- Created `rust/crates/forge-cli/src/config.rs` with full `forge config` command implementation
+- Two subcommands ported with Go parity:
+  - `forge config init [--force|-f]` — creates default global config at `~/.config/forge/config.yaml`
+  - `forge config path` — prints the config file path
+- Both subcommands support `--json` and `--jsonl` output modes
+- `ConfigBackend` trait with `FilesystemConfigBackend` (production) and `InMemoryConfigBackend` (testing)
+- Embedded `DEFAULT_GLOBAL_CONFIG` template matching Go's template exactly
+- Registered in `lib.rs`: module declaration, command dispatch, help text
+- 17 unit tests covering all paths: help, path (text/json/jsonl), init (create/exists/force/force-short), error cases
+
+**Validation:** `cargo fmt --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace` — all pass, 0 failures.
+```
+
