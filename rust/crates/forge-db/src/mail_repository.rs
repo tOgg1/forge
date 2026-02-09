@@ -26,7 +26,9 @@ impl RecipientType {
             "agent" => Ok(Self::Agent),
             "workspace" => Ok(Self::Workspace),
             "broadcast" => Ok(Self::Broadcast),
-            other => Err(DbError::Validation(format!("invalid recipient_type: {other}"))),
+            other => Err(DbError::Validation(format!(
+                "invalid recipient_type: {other}"
+            ))),
         }
     }
 }
@@ -116,7 +118,10 @@ impl<'a> MailRepository<'a> {
         row.ok_or(DbError::MailThreadNotFound)
     }
 
-    pub fn list_threads_by_workspace(&self, workspace_id: &str) -> Result<Vec<MailThread>, DbError> {
+    pub fn list_threads_by_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<MailThread>, DbError> {
         let mut stmt = self.db.conn().prepare(
             "SELECT id, workspace_id, subject, created_at, updated_at
              FROM mail_threads
@@ -150,7 +155,8 @@ impl<'a> MailRepository<'a> {
             return Err(DbError::Validation("recipient_type is required".into()));
         }
         let recipient_type = RecipientType::parse(msg.recipient_type.trim())?;
-        if recipient_type != RecipientType::Broadcast && msg.recipient_id.as_deref().unwrap_or("").trim().is_empty()
+        if recipient_type != RecipientType::Broadcast
+            && msg.recipient_id.as_deref().unwrap_or("").trim().is_empty()
         {
             return Err(DbError::Validation("recipient_id is required".into()));
         }
@@ -258,7 +264,7 @@ impl<'a> MailRepository<'a> {
         );
 
         let mut args: Vec<rusqlite::types::Value> = Vec::new();
-        args.push(kind.as_str().into());
+        args.push(kind.as_str().to_string().into());
 
         match kind {
             RecipientType::Broadcast => {}
@@ -344,4 +350,3 @@ fn bool_to_int(value: bool) -> i64 {
         0
     }
 }
-

@@ -8,6 +8,7 @@ pub mod loop_queue_repository;
 pub mod loop_repository;
 pub mod loop_run_repository;
 pub mod loop_work_state_repository;
+pub mod mail_repository;
 pub mod pool_repository;
 pub mod port_repository;
 pub mod profile_repository;
@@ -102,6 +103,10 @@ pub enum DbError {
     AlertNotFound,
     #[error("approval not found")]
     ApprovalNotFound,
+    #[error("mail thread not found")]
+    MailThreadNotFound,
+    #[error("mail message not found")]
+    MailMessageNotFound,
     #[error("transcript not found")]
     TranscriptNotFound,
     #[error("queue item not found")]
