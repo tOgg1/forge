@@ -1,0 +1,2 @@
+# crate minimum_line_coverage_percent
+forge-parity-stub 100

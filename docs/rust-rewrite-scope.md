@@ -11,6 +11,9 @@ Use rewrite window to remove legacy code safely.
 
 Companion manifest: `docs/rust-port-manifest.md`.
 Baseline snapshot: `docs/rust-baseline-inventory-v2026-02-09.md`.
+Parity matrix: `docs/rust-parity-matrix.md`.
+Legacy drop freeze: `docs/rust-legacy-drop-list.md`.
+Coverage gate policy: `docs/rust-coverage-policy.md`.
 
 ## Non-Negotiables
 
@@ -266,7 +269,11 @@ Decision snapshot date: 2026-02-09
 
 | Decision area | Current proposal | Artifact | Owner sign-off |
 |---|---|---|---|
-| Non-legacy command parity | Port all non-legacy command surface | `docs/rust-port-manifest.md` | pending |
-| Legacy command groups | Drop groups behind `addLegacyCommand(...)` | `docs/rust-legacy-drop-list.md` | pending |
-| fmail/fmail-tui command surface | Port full current help-visible surface | `docs/rust-fmail-command-manifest.md` | pending |
-| Parity gates and cutover style | Single final switch gated by parity evidence | `docs/adr/0005-rust-single-switch-policy.md` | pending |
+| Non-legacy command parity | Port all non-legacy command surface | `docs/rust-port-manifest.md` | signed 2026-02-09 (owner directive; task comment) |
+| Legacy command groups | Drop groups behind `addLegacyCommand(...)` | `docs/rust-legacy-drop-list.md` | signed 2026-02-09 (owner directive; task comment) |
+| fmail/fmail-tui command surface | Port full current help-visible surface | `docs/rust-fmail-command-manifest.md` | signed 2026-02-09 (owner directive; task comment) |
+| Parity gates and cutover style | Single final switch gated by parity evidence | `docs/adr/0005-rust-single-switch-policy.md` | signed 2026-02-09 (owner directive; task comment) |
+
+Scope lock note:
+- All visible command groups are now explicitly classified in docs as port/drop.
+- Legacy carry-over is disallowed unless re-opened via explicit owner decision.
