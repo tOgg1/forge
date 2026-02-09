@@ -28,7 +28,7 @@ func TestNewDefaultsHostname(t *testing.T) {
 func TestRunReturnsOnCanceledContext(t *testing.T) {
 	cfg := config.DefaultConfig()
 	// Use a high ephemeral port to avoid conflicts with other tests
-	daemon, err := New(cfg, zerolog.Nop(), Options{Port: 50099, DisableDatabase: true})
+	daemon, err := New(cfg, zerolog.Nop(), Options{Port: 50099, MailPort: -1, DisableDatabase: true})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

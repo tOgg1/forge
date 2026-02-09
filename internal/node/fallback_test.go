@@ -303,6 +303,7 @@ func TestFallbackPolicy(t *testing.T) {
 			if tt.policy == FallbackPolicyForgedOnly {
 				_, err := NewNodeExecutor(context.Background(), node, nil,
 					WithFallbackPolicy(tt.policy),
+					WithForgedPort(1),
 					WithPingTimeout(100*time.Millisecond),
 				)
 				if err == nil {

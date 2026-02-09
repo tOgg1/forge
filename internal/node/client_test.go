@@ -104,6 +104,7 @@ func TestNewClient_AutoFallbackToSSH(t *testing.T) {
 		node,
 		WithClientMode(ClientModeAuto),
 		WithPreferDaemon(true),
+		WithDaemonPort(1),
 		WithDaemonTimeout(100*time.Millisecond),
 		WithSSHExecutorFunc(mockSSHExecutorFunc(mockExec)),
 		WithClientLogger(zerolog.Nop()),

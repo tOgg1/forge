@@ -22,9 +22,13 @@ func (d *Daemon) startMailServers(errCh chan<- error) error {
 	if d.mailServer == nil {
 		return nil
 	}
+	if d.opts.MailPort < 0 {
+		d.logger.Info().Msg("forge mail tcp server disabled")
+		return nil
+	}
 
 	resolver := newWorkspaceProjectResolver(d.wsRepo)
-	tcpAddr := fmt.Sprintf("%s:%d", DefaultHost, DefaultMailPort)
+	tcpAddr := fmt.Sprintf("%s:%d", DefaultHost, d.opts.MailPort)
 	listener, err := net.Listen("tcp", tcpAddr)
 	if err != nil {
 		return fmt.Errorf("mail tcp listen: %w", err)

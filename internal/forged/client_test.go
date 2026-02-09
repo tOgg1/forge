@@ -32,7 +32,7 @@ func TestDialDirect(t *testing.T) {
 	if err := cfg.EnsureDirectories(); err != nil {
 		t.Fatalf("failed to create config dirs: %v", err)
 	}
-	daemon, err := New(cfg, zerolog.Nop(), Options{Port: 50100})
+	daemon, err := New(cfg, zerolog.Nop(), Options{Port: 50100, MailPort: -1})
 	if err != nil {
 		t.Fatalf("failed to create daemon: %v", err)
 	}
