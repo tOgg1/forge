@@ -6,8 +6,11 @@ use forge_ftui_adapter::style::{ThemeKind, ThemeSpec};
 use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 
 pub mod bookmarks;
+pub mod heatmap;
 pub mod live_tail;
 pub mod notifications;
+pub mod replay;
+pub mod search;
 pub mod state_help;
 pub mod timeline;
 
@@ -15,6 +18,7 @@ pub use bookmarks::{
     apply_bookmarks_input, parse_bookmarks_filter, render_bookmarks_frame, BookmarkEntry,
     BookmarksFilter, BookmarksViewModel,
 };
+pub use heatmap::{apply_heatmap_input, render_heatmap_frame, HeatmapViewModel};
 pub use live_tail::{
     apply_live_tail_input, parse_live_tail_filter, render_live_tail_frame, LiveTailFilter,
     LiveTailMessage, LiveTailViewModel, LIVE_TAIL_MAX_MESSAGES,
@@ -23,6 +27,8 @@ pub use notifications::{
     apply_notifications_input, render_notifications_frame, NotificationItem, NotificationRule,
     NotificationsFocus, NotificationsViewModel, NOTIFICATION_MEMORY_LIMIT,
 };
+pub use replay::{apply_replay_input, render_replay_frame, ReplayEntry, ReplayViewModel};
+pub use search::{apply_search_input, render_search_frame, SearchResultEntry, SearchViewModel};
 pub use state_help::{
     default_keymap, render_help_frame, Bookmark, KeyBinding, PersistedState, UiPreferences,
 };
