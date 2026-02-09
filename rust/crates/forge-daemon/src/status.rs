@@ -1,69 +1,9 @@
+use std::process::Command;
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Health {
-    Unspecified,
-    Healthy,
-    Degraded,
-    Unhealthy,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HealthCheck {
-    pub name: String,
-    pub health: Health,
-    pub message: String,
-    pub last_check: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HealthStatus {
-    pub health: Health,
-    pub checks: Vec<HealthCheck>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ResourceUsage {
-    pub cpu_percent: f64,
-    pub memory_bytes: i64,
-    pub memory_limit_bytes: i64,
-    pub open_fds: i32,
-}
-
-impl Default for ResourceUsage {
-    fn default() -> Self {
-        Self {
-            cpu_percent: 0.0,
-            memory_bytes: 0,
-            memory_limit_bytes: 0,
-            open_fds: 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct DaemonStatus {
-    pub version: String,
-    pub hostname: String,
-    pub started_at: DateTime<Utc>,
-    pub uptime: Duration,
-    pub agent_count: i32,
-    pub resources: ResourceUsage,
-    pub health: HealthStatus,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct GetStatusResponse {
-    pub status: DaemonStatus,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PingResponse {
-    pub timestamp: DateTime<Utc>,
-    pub version: String,
-}
+use forge_rpc::forged::v1 as proto;
 
 type TmuxHealthProbe = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 
@@ -81,7 +21,7 @@ impl StatusService {
             version: version.into(),
             hostname: hostname.into(),
             started_at: Utc::now(),
-            tmux_health_probe: Arc::new(|| Ok(())),
+            tmux_health_probe: Arc::new(default_tmux_health_probe),
         }
     }
 
@@ -98,68 +38,64 @@ impl StatusService {
         self
     }
 
-    pub fn ping(&self) -> PingResponse {
-        PingResponse {
-            timestamp: Utc::now(),
+    pub fn ping(&self) -> proto::PingResponse {
+        proto::PingResponse {
+            timestamp: Some(datetime_to_timestamp(Utc::now())),
             version: self.version.clone(),
         }
     }
 
-    pub fn get_status(&self, agent_count: usize) -> GetStatusResponse {
-        let mut uptime = Utc::now() - self.started_at;
-        if uptime < Duration::zero() {
-            uptime = Duration::zero();
-        }
-
+    pub fn get_status(&self, agent_count: usize) -> proto::GetStatusResponse {
+        let uptime = Utc::now() - self.started_at;
         let agent_count = i32::try_from(agent_count).unwrap_or(i32::MAX);
 
-        GetStatusResponse {
-            status: DaemonStatus {
+        proto::GetStatusResponse {
+            status: Some(proto::DaemonStatus {
                 version: self.version.clone(),
                 hostname: self.hostname.clone(),
-                started_at: self.started_at,
-                uptime,
+                started_at: Some(datetime_to_timestamp(self.started_at)),
+                uptime: Some(duration_to_prost(uptime)),
                 agent_count,
-                resources: self.get_resource_usage(),
-                health: self.get_health_status(),
-            },
+                resources: Some(self.get_resource_usage()),
+                health: Some(self.get_health_status()),
+            }),
         }
     }
 
-    pub fn get_resource_usage(&self) -> ResourceUsage {
+    pub fn get_resource_usage(&self) -> proto::ResourceUsage {
         current_resource_usage()
     }
 
-    pub fn get_health_status(&self) -> HealthStatus {
+    pub fn get_health_status(&self) -> proto::HealthStatus {
         let now = Utc::now();
-        let mut checks = vec![HealthCheck {
+        let mut checks = vec![proto::HealthCheck {
             name: "tmux".to_string(),
-            health: Health::Healthy,
+            health: proto::Health::Healthy as i32,
             message: "tmux available".to_string(),
-            last_check: now,
+            last_check: Some(datetime_to_timestamp(now)),
         }];
 
         if let Err(err) = (self.tmux_health_probe)() {
-            checks[0].health = Health::Unhealthy;
+            checks[0].health = proto::Health::Unhealthy as i32;
             checks[0].message = format!("tmux error: {err}");
         }
 
-        HealthStatus {
-            health: overall_health(&checks),
+        proto::HealthStatus {
+            health: overall_health(&checks) as i32,
             checks,
         }
     }
 }
 
-fn overall_health(checks: &[HealthCheck]) -> Health {
-    let mut overall = Health::Healthy;
+fn overall_health(checks: &[proto::HealthCheck]) -> proto::Health {
+    let mut overall = proto::Health::Healthy;
 
     for check in checks {
-        if check.health == Health::Unhealthy {
-            return Health::Unhealthy;
+        if check.health == proto::Health::Unhealthy as i32 {
+            return proto::Health::Unhealthy;
         }
-        if check.health == Health::Degraded && overall == Health::Healthy {
-            overall = Health::Degraded;
+        if check.health == proto::Health::Degraded as i32 && overall == proto::Health::Healthy {
+            overall = proto::Health::Degraded;
         }
     }
 
@@ -167,65 +103,118 @@ fn overall_health(checks: &[HealthCheck]) -> Health {
 }
 
 #[cfg(unix)]
-fn current_resource_usage() -> ResourceUsage {
+fn current_resource_usage() -> proto::ResourceUsage {
     use nix::sys::resource::{getrusage, UsageWho};
 
     let usage = match getrusage(UsageWho::RUSAGE_SELF) {
         Ok(usage) => usage,
-        Err(_) => return ResourceUsage::default(),
+        Err(_) => return proto::ResourceUsage::default(),
     };
 
     let max_rss = usage.max_rss();
 
     let memory_bytes = match max_rss.checked_mul(1024) {
         Some(value) => value,
-        None => return ResourceUsage::default(),
+        None => return proto::ResourceUsage::default(),
     };
 
-    ResourceUsage {
+    proto::ResourceUsage {
         memory_bytes,
-        ..ResourceUsage::default()
+        ..proto::ResourceUsage::default()
     }
 }
 
 #[cfg(not(unix))]
-fn current_resource_usage() -> ResourceUsage {
-    ResourceUsage::default()
+fn current_resource_usage() -> proto::ResourceUsage {
+    proto::ResourceUsage::default()
+}
+
+fn datetime_to_timestamp(dt: DateTime<Utc>) -> prost_types::Timestamp {
+    prost_types::Timestamp {
+        seconds: dt.timestamp(),
+        nanos: dt.timestamp_subsec_nanos() as i32,
+    }
+}
+
+fn duration_to_prost(d: Duration) -> prost_types::Duration {
+    // Chrono supports negative durations; split via nanoseconds with canonical remainder.
+    let total_nanos = d.num_nanoseconds().unwrap_or_else(|| {
+        if d < Duration::zero() {
+            i64::MIN
+        } else {
+            i64::MAX
+        }
+    });
+
+    let seconds = total_nanos / 1_000_000_000;
+    let nanos = (total_nanos % 1_000_000_000) as i32;
+
+    prost_types::Duration { seconds, nanos }
+}
+
+fn default_tmux_health_probe() -> Result<(), String> {
+    let output = Command::new("tmux")
+        .arg("list-sessions")
+        .output()
+        .map_err(|e| format!("failed to execute tmux: {e}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = stderr.trim();
+    if stderr.is_empty() {
+        return Err(format!("tmux list-sessions failed: {}", output.status));
+    }
+
+    Err(stderr.to_string())
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
-    use super::{overall_health, Health, HealthCheck, StatusService};
-    use chrono::{Duration, Utc};
+    use super::{overall_health, proto, StatusService};
+    use chrono::{Duration, TimeZone, Utc};
 
     #[test]
     fn ping_returns_version_and_timestamp() {
-        let service = StatusService::new("test-version", "test-host");
+        let service =
+            StatusService::new("test-version", "test-host").with_tmux_health_probe(|| Ok(()));
         let before = Utc::now();
         let resp = service.ping();
         let after = Utc::now();
 
         assert_eq!(resp.version, "test-version");
-        assert!(resp.timestamp >= before);
-        assert!(resp.timestamp <= after);
+        let ts = resp.timestamp.expect("timestamp");
+        let dt = Utc
+            .timestamp_opt(ts.seconds, ts.nanos as u32)
+            .single()
+            .expect("timestamp valid");
+        assert!(dt >= before);
+        assert!(dt <= after);
     }
 
     #[test]
     fn get_status_reports_core_fields() {
         let started_at = Utc::now() - Duration::seconds(3);
-        let service = StatusService::new("v1.2.3", "node-1").with_started_at(started_at);
+        let service = StatusService::new("v1.2.3", "node-1")
+            .with_started_at(started_at)
+            .with_tmux_health_probe(|| Ok(()));
 
-        let status = service.get_status(7).status;
+        let status = service.get_status(7).status.expect("status");
 
         assert_eq!(status.version, "v1.2.3");
         assert_eq!(status.hostname, "node-1");
-        assert_eq!(status.started_at, started_at);
         assert_eq!(status.agent_count, 7);
-        assert!(status.uptime >= Duration::seconds(2));
-        assert_eq!(status.health.health, Health::Healthy);
-        assert_eq!(status.health.checks.len(), 1);
-        assert_eq!(status.health.checks[0].name, "tmux");
-        assert_eq!(status.health.checks[0].message, "tmux available");
+        let started = status.started_at.expect("started_at");
+        assert_eq!(started.seconds, started_at.timestamp());
+        assert!(status.uptime.expect("uptime").seconds >= 2);
+        let health = status.health.expect("health");
+        assert_eq!(health.health, proto::Health::Healthy as i32);
+        assert_eq!(health.checks.len(), 1);
+        assert_eq!(health.checks[0].name, "tmux");
+        assert_eq!(health.checks[0].message, "tmux available");
     }
 
     #[test]
@@ -233,53 +222,58 @@ mod tests {
         let service = StatusService::new("dev", "node")
             .with_tmux_health_probe(|| Err("dial timeout".to_string()));
 
-        let health = service.get_status(0).status.health;
+        let health = service
+            .get_status(0)
+            .status
+            .expect("status")
+            .health
+            .expect("health");
 
-        assert_eq!(health.health, Health::Unhealthy);
+        assert_eq!(health.health, proto::Health::Unhealthy as i32);
         assert_eq!(health.checks.len(), 1);
-        assert_eq!(health.checks[0].health, Health::Unhealthy);
+        assert_eq!(health.checks[0].health, proto::Health::Unhealthy as i32);
         assert_eq!(health.checks[0].message, "tmux error: dial timeout");
     }
 
     #[test]
     fn overall_health_prefers_unhealthy_then_degraded() {
-        let healthy = HealthCheck {
+        let healthy = proto::HealthCheck {
             name: "a".to_string(),
-            health: Health::Healthy,
+            health: proto::Health::Healthy as i32,
             message: String::new(),
-            last_check: Utc::now(),
+            last_check: None,
         };
-        let degraded = HealthCheck {
+        let degraded = proto::HealthCheck {
             name: "b".to_string(),
-            health: Health::Degraded,
+            health: proto::Health::Degraded as i32,
             message: String::new(),
-            last_check: Utc::now(),
+            last_check: None,
         };
-        let unhealthy = HealthCheck {
+        let unhealthy = proto::HealthCheck {
             name: "c".to_string(),
-            health: Health::Unhealthy,
+            health: proto::Health::Unhealthy as i32,
             message: String::new(),
-            last_check: Utc::now(),
+            last_check: None,
         };
 
         assert_eq!(
             overall_health(std::slice::from_ref(&healthy)),
-            Health::Healthy
+            proto::Health::Healthy
         );
         assert_eq!(
             overall_health(&[healthy.clone(), degraded.clone()]),
-            Health::Degraded
+            proto::Health::Degraded
         );
         assert_eq!(
             overall_health(&[healthy, degraded, unhealthy]),
-            Health::Unhealthy
+            proto::Health::Unhealthy
         );
     }
 
     #[cfg(unix)]
     #[test]
     fn unix_resource_usage_reports_non_negative_memory() {
-        let service = StatusService::new("dev", "node");
+        let service = StatusService::new("dev", "node").with_tmux_health_probe(|| Ok(()));
         let usage = service.get_resource_usage();
         assert!(usage.memory_bytes >= 0);
     }
