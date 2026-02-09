@@ -33,6 +33,22 @@ var (
 	sendEditor    bool
 )
 
+type agentMessageSender interface {
+	SendMessage(ctx context.Context, agentID string, message string, opts *agent.SendMessageOptions) error
+}
+
+var newAgentMessageSender = func(database *db.DB) agentMessageSender {
+	nodeRepo := db.NewNodeRepository(database)
+	nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
+	wsRepo := db.NewWorkspaceRepository(database)
+	agentRepo := db.NewAgentRepository(database)
+	queueRepo := db.NewQueueRepository(database)
+	wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
+
+	tmuxClient := tmux.NewLocalClient()
+	return agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
+}
+
 func init() {
 	rootCmd.AddCommand(sendCmd)
 
@@ -416,20 +432,12 @@ func writeQueueResults(message string, results []sendResult, opts queueOptions) 
 }
 
 func sendImmediateMessages(ctx context.Context, database *db.DB, agents []*models.Agent, message string, skipIdle bool) error {
-	nodeRepo := db.NewNodeRepository(database)
-	nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
-	wsRepo := db.NewWorkspaceRepository(database)
-	agentRepo := db.NewAgentRepository(database)
-	queueRepo := db.NewQueueRepository(database)
-	wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
-
-	tmuxClient := tmux.NewLocalClient()
-	agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
+	sender := newAgentMessageSender(database)
 
 	results := make([]sendResult, 0, len(agents))
 	for _, agentInfo := range agents {
 		opts := &agent.SendMessageOptions{SkipIdleCheck: skipIdle}
-		if err := agentService.SendMessage(ctx, agentInfo.ID, message, opts); err != nil {
+		if err := sender.SendMessage(ctx, agentInfo.ID, message, opts); err != nil {
 			if errors.Is(err, agent.ErrServiceAgentNotFound) {
 				results = append(results, sendResult{AgentID: agentInfo.ID, Error: "agent not found"})
 				continue

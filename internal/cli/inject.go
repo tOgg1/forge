@@ -11,9 +11,6 @@ import (
 	"github.com/tOgg1/forge/internal/agent"
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/models"
-	"github.com/tOgg1/forge/internal/node"
-	"github.com/tOgg1/forge/internal/tmux"
-	"github.com/tOgg1/forge/internal/workspace"
 )
 
 var (
@@ -78,15 +75,8 @@ Non-idle agents require confirmation (use --force to skip).`,
 		}
 		defer database.Close()
 
-		nodeRepo := db.NewNodeRepository(database)
-		nodeService := node.NewService(nodeRepo, node.WithPublisher(newEventPublisher(database)))
-		wsRepo := db.NewWorkspaceRepository(database)
 		agentRepo := db.NewAgentRepository(database)
-		queueRepo := db.NewQueueRepository(database)
-		wsService := workspace.NewService(wsRepo, nodeService, agentRepo, workspace.WithPublisher(newEventPublisher(database)))
-
-		tmuxClient := tmux.NewLocalClient()
-		agentService := agent.NewService(agentRepo, queueRepo, wsService, nil, tmuxClient, agentServiceOptions(database)...)
+		sender := newAgentMessageSender(database)
 
 		resolved, err := findAgent(ctx, agentRepo, agentID)
 		if err != nil {
@@ -104,7 +94,7 @@ Non-idle agents require confirmation (use --force to skip).`,
 			}
 		}
 
-		if err := agentService.SendMessage(ctx, resolved.ID, message, &agent.SendMessageOptions{
+		if err := sender.SendMessage(ctx, resolved.ID, message, &agent.SendMessageOptions{
 			SkipIdleCheck: true,
 		}); err != nil {
 			if errors.Is(err, agent.ErrServiceAgentNotFound) {
