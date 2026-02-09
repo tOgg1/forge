@@ -1,6 +1,9 @@
 //! fmail-tui: terminal UI surface for Forge mail workflows.
 
+use forge_ftui_adapter::input::{translate_input, InputEvent, UiAction};
+use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 use forge_ftui_adapter::style::{ThemeKind, ThemeSpec};
+use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 
 /// Stable crate label used by bootstrap smoke tests.
 pub fn crate_label() -> &'static str {
@@ -13,9 +16,50 @@ pub fn default_theme() -> ThemeSpec {
     ThemeSpec::for_kind(ThemeKind::HighContrast)
 }
 
+/// Build a tiny bootstrap frame via adapter render abstraction.
+#[must_use]
+pub fn bootstrap_frame() -> RenderFrame {
+    let mut frame = RenderFrame::new(
+        FrameSize {
+            width: 20,
+            height: 2,
+        },
+        default_theme(),
+    );
+    frame.draw_text(0, 0, "fmail TUI", TextRole::Accent);
+    frame.draw_text(0, 1, "mailbox: synced", TextRole::Success);
+    frame
+}
+
+/// Input mapping is sourced from the adapter event/input abstraction.
+#[must_use]
+pub fn map_input(event: InputEvent) -> UiAction {
+    translate_input(&event)
+}
+
+/// Mailbox panel primitives sourced from adapter layer.
+#[must_use]
+pub fn mailbox_widgets() -> [WidgetSpec; 3] {
+    [
+        WidgetSpec::fmail_inbox_panel(),
+        WidgetSpec::fmail_message_panel(),
+        WidgetSpec::fmail_compose_panel(),
+    ]
+}
+
+/// Mailbox table columns sourced from adapter layer.
+#[must_use]
+pub fn mailbox_columns() -> [TableColumnSpec; 4] {
+    widgets::fmail_inbox_columns()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{crate_label, default_theme};
+    use super::{
+        bootstrap_frame, crate_label, default_theme, mailbox_columns, mailbox_widgets, map_input,
+    };
+    use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent, UiAction};
+    use forge_ftui_adapter::snapshot::assert_render_frame_snapshot;
     use forge_ftui_adapter::style::{StyleToken, ThemeKind};
 
     #[test]
@@ -28,5 +72,65 @@ mod tests {
         let theme = default_theme();
         assert_eq!(theme.kind, ThemeKind::HighContrast);
         assert_eq!(theme.color(StyleToken::Foreground), 231);
+    }
+
+    #[test]
+    fn uses_adapter_render_abstraction() {
+        let frame = bootstrap_frame();
+        assert_render_frame_snapshot(
+            "fmail_tui_bootstrap_frame",
+            &frame,
+            "fmail TUI           \nmailbox: synced     ",
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn perf_bootstrap_frame_build() {
+        let result = forge_ftui_adapter::perf::measure(10_000, || {
+            let _ = bootstrap_frame();
+        });
+        assert!(result.total.as_nanos() > 0);
+    }
+
+    #[test]
+    fn uses_adapter_input_abstraction() {
+        assert_eq!(
+            map_input(InputEvent::Key(KeyEvent::plain(Key::Char('/')))),
+            UiAction::Search
+        );
+        assert_eq!(
+            map_input(InputEvent::Key(KeyEvent::plain(Key::Escape))),
+            UiAction::Cancel
+        );
+    }
+
+    #[test]
+    fn uses_adapter_widget_primitives_for_fmail_tui() {
+        let widgets = mailbox_widgets();
+        let snapshot = format!(
+            "{}|{}|{}\n{}|{}|{}\n{}|{}|{}",
+            widgets[0].id,
+            widgets[0].title,
+            widgets[0].padding.top,
+            widgets[1].id,
+            widgets[1].title,
+            widgets[1].padding.top,
+            widgets[2].id,
+            widgets[2].title,
+            widgets[2].padding.top,
+        );
+        assert_eq!(
+            snapshot,
+            "fmail.inbox|Inbox|1\nfmail.message|Message|0\nfmail.compose|Compose|0"
+        );
+    }
+
+    #[test]
+    fn uses_adapter_mailbox_column_primitives() {
+        let columns = mailbox_columns();
+        assert_eq!(columns[0].key, "from");
+        assert_eq!(columns[1].title, "Subject");
+        assert_eq!(columns[3].width, 10);
     }
 }

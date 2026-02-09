@@ -1,6 +1,9 @@
 //! forge-tui: terminal user interface surface for Forge operators.
 
+use forge_ftui_adapter::input::{translate_input, InputEvent, UiAction};
+use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 use forge_ftui_adapter::style::{ThemeKind, ThemeSpec};
+use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 
 /// Stable crate label used by bootstrap smoke tests.
 pub fn crate_label() -> &'static str {
@@ -13,9 +16,51 @@ pub fn default_theme() -> ThemeSpec {
     ThemeSpec::for_kind(ThemeKind::Dark)
 }
 
+/// Build a tiny bootstrap frame via adapter render abstraction.
+#[must_use]
+pub fn bootstrap_frame() -> RenderFrame {
+    let mut frame = RenderFrame::new(
+        FrameSize {
+            width: 20,
+            height: 2,
+        },
+        default_theme(),
+    );
+    frame.draw_text(0, 0, "Forge TUI", TextRole::Accent);
+    frame.draw_text(0, 1, "status: ready", TextRole::Primary);
+    frame
+}
+
+/// Loop dashboard panel primitives sourced from adapter layer.
+#[must_use]
+pub fn loop_dashboard_widgets() -> [WidgetSpec; 3] {
+    [
+        WidgetSpec::loop_status_panel(),
+        WidgetSpec::loop_queue_panel(),
+        WidgetSpec::loop_log_panel(),
+    ]
+}
+
+/// Queue table columns sourced from adapter layer.
+#[must_use]
+pub fn loop_queue_columns() -> [TableColumnSpec; 4] {
+    widgets::loop_queue_columns()
+}
+
+/// Input mapping is sourced from the adapter event/input abstraction.
+#[must_use]
+pub fn map_input(event: InputEvent) -> UiAction {
+    translate_input(&event)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{crate_label, default_theme};
+    use super::{
+        bootstrap_frame, crate_label, default_theme, loop_dashboard_widgets, loop_queue_columns,
+        map_input,
+    };
+    use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent, Modifiers, UiAction};
+    use forge_ftui_adapter::snapshot::assert_render_frame_snapshot;
     use forge_ftui_adapter::style::{StyleToken, ThemeKind};
 
     #[test]
@@ -28,5 +73,72 @@ mod tests {
         let theme = default_theme();
         assert_eq!(theme.kind, ThemeKind::Dark);
         assert_eq!(theme.color(StyleToken::Accent), 39);
+    }
+
+    #[test]
+    fn uses_adapter_render_abstraction() {
+        let frame = bootstrap_frame();
+        assert_render_frame_snapshot(
+            "forge_tui_bootstrap_frame",
+            &frame,
+            "Forge TUI           \nstatus: ready       ",
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn perf_bootstrap_frame_build() {
+        let result = forge_ftui_adapter::perf::measure(10_000, || {
+            let _ = bootstrap_frame();
+        });
+        assert!(result.total.as_nanos() > 0);
+    }
+
+    #[test]
+    fn uses_adapter_widget_primitives_for_loop_tui() {
+        let widgets = loop_dashboard_widgets();
+        let snapshot = format!(
+            "{}|{}|{}\n{}|{}|{}\n{}|{}|{}",
+            widgets[0].id,
+            widgets[0].title,
+            widgets[0].padding.top,
+            widgets[1].id,
+            widgets[1].title,
+            widgets[1].padding.top,
+            widgets[2].id,
+            widgets[2].title,
+            widgets[2].padding.top,
+        );
+        assert_eq!(
+            snapshot,
+            "loop.status|Loop Status|1\nloop.queue|Queue|0\nloop.logs|Recent Logs|0"
+        );
+    }
+
+    #[test]
+    fn uses_adapter_queue_column_primitives() {
+        let columns = loop_queue_columns();
+        assert_eq!(columns[0].key, "id");
+        assert_eq!(columns[1].title, "Status");
+        assert_eq!(columns[3].width, 10);
+    }
+
+    #[test]
+    fn uses_adapter_input_abstraction() {
+        assert_eq!(
+            map_input(InputEvent::Key(KeyEvent::plain(Key::Up))),
+            UiAction::MoveUp
+        );
+        assert_eq!(
+            map_input(InputEvent::Key(KeyEvent {
+                key: Key::Char('c'),
+                modifiers: Modifiers {
+                    shift: false,
+                    ctrl: true,
+                    alt: false,
+                },
+            })),
+            UiAction::Compose
+        );
     }
 }
