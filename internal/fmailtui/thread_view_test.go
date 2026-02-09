@@ -234,6 +234,27 @@ func TestThreadViewComposeReplySeed(t *testing.T) {
 	require.Equal(t, "@architect", seed.Target)
 }
 
+func TestThreadViewRenderMetaShowsSelectionAndUnreadCounts(t *testing.T) {
+	now := time.Date(2026, 2, 9, 8, 0, 0, 0, time.UTC)
+	msgs := []fmail.Message{
+		{ID: "20260209-080000-0001", From: "architect", To: "task", Time: now, Body: "first"},
+		{ID: "20260209-080001-0001", From: "coder", To: "task", Time: now.Add(time.Second), Body: "second"},
+	}
+	provider := &stubThreadProvider{
+		topics:  []data.TopicInfo{{Name: "task", LastActivity: msgs[1].Time, MessageCount: len(msgs)}},
+		byTopic: map[string][]fmail.Message{"task": msgs},
+	}
+
+	v := newThreadView("", provider, nil)
+	v.readMarkers["task"] = msgs[0].ID
+	v.applyLoaded(mustLoad(v))
+
+	meta := v.renderMeta(220, themePalette(ThemeDefault))
+	require.Contains(t, meta, "msg:1/2")
+	require.Contains(t, meta, "unread:1")
+	require.Contains(t, meta, "read:")
+}
+
 func mustLoad(v *threadView) threadLoadedMsg {
 	msg, ok := v.loadCmd()().(threadLoadedMsg)
 	if !ok {

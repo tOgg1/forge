@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/tOgg1/forge/internal/fmail"
 	"github.com/tOgg1/forge/internal/fmailtui/data"
 	"github.com/tOgg1/forge/internal/fmailtui/styles"
 )
@@ -65,6 +66,9 @@ func (v *searchView) renderStatsLine(width int, palette styles.Theme) string {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted))
 	n := len(v.results)
 	stats := fmt.Sprintf("%d results", n)
+	if n > 0 {
+		stats = fmt.Sprintf("%s  selected:%d/%d", stats, clampInt(v.selected, 0, n-1)+1, n)
+	}
 	if v.metaLoaded && v.totalTargets > 0 {
 		stats = fmt.Sprintf("%s (searched ~%d messages in %d targets)", stats, v.totalMessages, v.totalTargets)
 	}
@@ -196,7 +200,7 @@ func (v *searchView) renderResults(width, height int, palette styles.Theme) stri
 	lines := make([]string, 0, height*2)
 	resultIndex := -1
 	for _, topic := range topics {
-		header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render("[" + topic + "]")
+		header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render(fmt.Sprintf("[%s]  %d hits", topic, len(itemsByTopic[topic])))
 		lines = append(lines, truncateVis(header, width))
 		list := itemsByTopic[topic]
 		for _, it := range list {
@@ -211,15 +215,38 @@ func (v *searchView) renderResults(width, height int, palette styles.Theme) stri
 			if it.matchText != "" {
 				matchSuffix = fmt.Sprintf(" — %d matches", it.matches)
 			}
+			target := strings.TrimSpace(msg.To)
+			if target == "" {
+				target = topic
+			}
 
 			cursor := " "
 			rowStyle := lipgloss.NewStyle()
 			if resultIndex == v.selected {
 				cursor = "▸"
-				rowStyle = rowStyle.Foreground(lipgloss.Color(palette.Chrome.SelectedItem)).Bold(true)
+				// Background highlight keeps selection readable even with colored agent names.
+				rowStyle = rowStyle.Background(lipgloss.Color(palette.Chrome.SelectedItem)).Bold(true)
 			}
 
-			head := fmt.Sprintf("%s %s (%s)%s", cursor, fromColored, ts.Format("15:04"), matchSuffix)
+			badges := make([]string, 0, 4)
+			if strings.TrimSpace(msg.Priority) == fmail.PriorityHigh {
+				badges = append(badges, lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Priority.High)).Bold(true).Render("[HIGH]"))
+			}
+			if bookmarked[msg.ID] {
+				badges = append(badges, lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Accent)).Bold(true).Render("★"))
+			}
+			if annotated[msg.ID] {
+				badges = append(badges, lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Status.Recent)).Bold(true).Render("✎"))
+			}
+			if marker := strings.TrimSpace(readMarkers[topic]); marker == "" || msg.ID > marker {
+				badges = append(badges, lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Priority.High)).Bold(true).Render("●"))
+			}
+			badgeLine := ""
+			if len(badges) > 0 {
+				badgeLine = " " + strings.Join(badges, " ")
+			}
+
+			head := fmt.Sprintf("%s %s → %s (%s)%s%s", cursor, fromColored, muted.Render(target), ts.Format("15:04"), matchSuffix, badgeLine)
 			lines = append(lines, rowStyle.Render(truncateVis(head, width)))
 
 			if it.r.Prev != nil {

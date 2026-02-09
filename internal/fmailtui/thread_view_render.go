@@ -39,7 +39,18 @@ func (v *threadView) renderMeta(width int, palette styles.Theme) string {
 		mode = "flat"
 	}
 	marker := strings.TrimSpace(v.readMarkers[v.topic])
-	meta := fmt.Sprintf("mode:%s  j/k move  ctrl+d/u page  g/G top/bot  Enter expand/collapse  f toggle  [ ] topic", mode)
+	selected := 0
+	total := len(v.rows)
+	if total > 0 {
+		selected = clampInt(v.selected, 0, total-1) + 1
+	}
+	unread := 0
+	for _, msg := range v.allMsgs {
+		if v.isUnread(msg.ID) {
+			unread++
+		}
+	}
+	meta := fmt.Sprintf("mode:%s  msg:%d/%d  unread:%d  j/k move  ctrl+d/u page  g/G top/bot  Enter expand/collapse  f toggle  [ ] topic", mode, selected, total, unread)
 	if marker != "" {
 		meta = meta + "  read:" + shortID(marker)
 	}
