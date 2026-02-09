@@ -14,13 +14,20 @@ Per-iteration protocol
 1. Register agent:
 - `fmail register "$FMAIL_AGENT"` (ignore if already registered).
 2. Select next task:
-- Prefer highest-priority `in_progress` task in project.
-- Else pick highest-priority `open`/`ready` task in project.
+- Default: pick highest-priority `open`/`ready` task in project.
+- Do NOT pile onto a random `in_progress` task.
+- Only pick `in_progress` if one of:
+  - You already own it (you previously sent progress for it).
+  - It is stale takeover (no update for >=45m).
 - Use:
-  - `sv task list --project prj-afyxck62 --status in_progress --json`
   - `sv task ready --project prj-afyxck62 --json`
+  - `sv task list --project prj-afyxck62 --status in_progress --json`
+  - `fmail log task -n 200` (check recent claim/progress ownership before selecting)
 3. Claim/start:
 - If selected task is `open`, run `sv task start <id>`.
+- Immediately announce ownership:
+  - `fmail send task "claim: <id> by $FMAIL_AGENT"`
+- If `sv task start <id>` fails because task already started, pick a different `open` task (do not continue on that task).
 4. Execute:
 - Read full task body and acceptance criteria.
 - Implement root-cause fix/feature completely.

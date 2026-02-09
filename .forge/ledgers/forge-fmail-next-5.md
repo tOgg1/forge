@@ -84,3 +84,80 @@ Protocol done:
 - `fmail send task "forge-hhp closed"` sent.
 ```
 
+## 2026-02-09T09:19:37Z
+
+- run_id: 6b0c62f3-677e-436e-b28b-2780791d1685
+- loop_name: forge-fmail-next-5
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-next-task.md
+- prompt_override: false
+- started_at: 2026-02-09T08:58:14Z
+- finished_at: 2026-02-09T09:19:37Z
+- exit_code: 0
+
+```
++}
++
++func TestTopicsViewStarTogglePersistsToStateFile(t *testing.T) {
++	root := t.TempDir()
++	statePath := filepath.Join(root, ".fmail", "tui-state.json")
++	require.NoError(t, os.MkdirAll(filepath.Dir(statePath), 0o755))
++	initial := tuiStateFile{
++		ReadMarkers:   map[string]string{"task": "20260209-100000-0001"},
++		StarredTopics: []string{"alerts"},
++	}
++	payload, err := json.Marshal(initial)
++	require.NoError(t, err)
++	require.NoError(t, os.WriteFile(statePath, payload, 0o644))
++
++	v := newTopicsView(root, &stubTopicsProvider{})
++	v.loadState()
++	require.True(t, v.starred["alerts"])
++
++	v.topics = []data.TopicInfo{{Name: "task", LastActivity: time.Now().UTC()}}
++	v.rebuildItems()
++
++	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'*'}})
++	require.Nil(t, cmd)
++	require.True(t, v.starred["task"])
++
++	written, err := os.ReadFile(statePath)
++	require.NoError(t, err)
++
++	var state tuiStateFile
++	require.NoError(t, json.Unmarshal(written, &state))
++	require.Contains(t, state.StarredTopics, "task")
++	require.Equal(t, "20260209-100000-0001", state.ReadMarkers["task"])
++}
+
+tokens used
+198,841
+Iteration complete.
+
+- Task selected: `forge-1p8` (`P0`) in project `prj-afyxck62`.
+- Task status: `closed` (via `sv task close forge-1p8`).
+- fmail sent:
+  - `task`: progress update + close notice.
+  - `@forge-orchestrator`: `forge-1p8: done`.
+
+Implemented/verified in TUI code:
+- Real Topics Browser view wired in `internal/fmailtui/app.go` and `internal/fmailtui/topics_view.go`.
+- Topic list + DM toggle, sort cycle (`s`), filter (`/`), star toggle (`*`), unread markers, preview caching/scroll.
+- Enter routing to thread from topic/DM selection.
+- Thread DM-open regression covered (`internal/fmailtui/thread_view_test.go`).
+- New tests added in `internal/fmailtui/topics_view_test.go` and `internal/fmailtui/app_test.go`.
+
+Validation:
+- Ran full suite successfully with env fix:
+  - `env -u GOROOT go test ./...` → pass.
+
+Loop health command set (single-loop):
+1. Spawn: already running this loop; no new spawn.
+2. Health-check: `sv task show forge-1p8 --json`, `env -u GOROOT go test ./...`, `fmail log @forge-orchestrator -n 20`.
+3. Wind-down: `sv task close <id>`, `fmail send task "<id> closed"`.
+4. Stop criteria: acceptance implemented, tests green, task closed, orchestrator notified.
+```
+

@@ -451,3 +451,71 @@ Committed `b4617c4` — refactored thread view pagination from window-based to l
 - `.forge/ledgers/` and other untracked infrastructure files
 ```
 
+## 2026-02-09T09:11:47Z
+
+- run_id: 7a4fa0fc-e9bd-4739-a0b8-ae9e17b410b5
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T09:06:40Z
+- finished_at: 2026-02-09T09:11:47Z
+- exit_code: 0
+
+```
+Reported blocker. The working tree is actively being modified by another agent and is currently in a non-compiling state:
+
+1. `internal/fmailtui/thread_view.go` references `v.loadState()` which is not defined on `threadView`
+2. `internal/fmailtui/app.go` references `tea.KeyBackspace2` which doesn't exist
+3. Test `TestViewStackAndEnterNavigation` fails due to Esc handling conflict between global handler and topics view
+
+No commit this iteration. Will check again next cycle once the active work stabilizes.
+```
+
+## 2026-02-09T09:19:25Z
+
+- run_id: 03211172-65e6-4591-a197-f31b06062918
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T09:12:47Z
+- finished_at: 2026-02-09T09:19:25Z
+- exit_code: 0
+
+```
+Iteration complete. Created 3 commits:
+
+1. **`9fb2f4b`** `refactor(fmail-tui): extract thread view into sub-files and add shared TUI state` — Split monolithic `thread_view.go` into 6 focused sub-files + shared `tui_state.go`, added DM test.
+
+2. **`4846610`** `feat(fmail-tui): add topic browser view with filtering, sorting, and preview` — Full Topics view with sort cycling, starred topics, activity heat indicators, filtering, unread counts, DM browser, preview pane with lazy caching, real-time subscription. Wired into app with key remapping. Fixed test helper `runCmd` infinite recursion with blocking tick commands.
+
+3. **`fd1f185`** `chore: add forged binary to .gitignore`
+
+All tests pass. No push.
+```
+
+## 2026-02-09T09:21:02Z
+
+- run_id: e8fe88ad-7846-4351-b93b-2e05c64ac96f
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T09:20:25Z
+- finished_at: 2026-02-09T09:21:02Z
+- exit_code: 0
+
+```
+No commit candidate this iteration. The working tree only contains forge infrastructure changes (ledger entries, task snapshots, prompt edits) — no source code modifications to package into a commit.
+```
+
