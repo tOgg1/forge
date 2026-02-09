@@ -25,13 +25,15 @@ Goal: detect drift fast, localize surface, fix or refresh baseline intentionally
   - `normalized/report.json`: raw mismatch/missing/unexpected lists.
   - `normalized/drift-report.json`: machine triage schema (`parity.drift.v1`).
   - `normalized/drift-triage.md`: triage queue template (priority/type/path/owner/root cause/action/tracking).
+  - `normalized/parity-alert-routing.json`: owner route summary (`parity.alert-routing.v1`).
+  - `normalized/parity-alert-routing.md`: CI-ready owner notification summary appended to step summary on drift.
 - Nightly always uploads `parity-nightly-log`; drift uploads `parity-diff`.
 - Baseline snapshot bundle: CI artifact `rust-baseline-snapshot` (job `baseline-snapshot`).
 
 ## Triage format
 
 - Fill every row in `normalized/drift-triage.md` before closing incident:
-  - `Owner`: directly responsible engineer.
+  - `Owner`: prefilled from parity path ownership mapping; reassign if ownership changed.
   - `Root cause`: concise cause statement.
   - `Action`: concrete fix or baseline-refresh action.
   - `Tracking issue`: issue/PR/task link.

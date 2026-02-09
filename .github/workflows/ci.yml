@@ -95,6 +95,14 @@ jobs:
           name: parity-diff
           path: parity-artifacts/
           if-no-files-found: ignore
+      - name: Route parity alerts by owner
+        if: failure()
+        run: |
+          if [ -f parity-artifacts/normalized/parity-alert-routing.md ]; then
+            cat parity-artifacts/normalized/parity-alert-routing.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "parity alert routing artifact missing" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Build parity dashboard artifact
         if: always()
         run: |

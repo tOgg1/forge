@@ -34,6 +34,8 @@ func TestWriteDiffArtifactsSchema(t *testing.T) {
 	assertExists(t, filepath.Join(out, "normalized", "report.json"))
 	assertExists(t, filepath.Join(out, "normalized", "drift-report.json"))
 	assertExists(t, filepath.Join(out, "normalized", "drift-triage.md"))
+	assertExists(t, filepath.Join(out, "normalized", "parity-alert-routing.json"))
+	assertExists(t, filepath.Join(out, "normalized", "parity-alert-routing.md"))
 	assertExists(t, filepath.Join(out, "normalized", "diffs", "b.txt.diff"))
 	assertExists(t, filepath.Join(out, "normalized", "diffs", "extra.txt.unexpected.diff"))
 
@@ -69,6 +71,7 @@ func TestWriteDiffArtifactsSchema(t *testing.T) {
 			Priority  string `json:"priority"`
 			DriftType string `json:"drift_type"`
 			Path      string `json:"path"`
+			Owner     string `json:"owner"`
 		} `json:"items"`
 	}
 	driftBody, err := os.ReadFile(filepath.Join(out, "normalized", "drift-report.json"))
@@ -87,6 +90,9 @@ func TestWriteDiffArtifactsSchema(t *testing.T) {
 	if len(drift.Items) != 2 {
 		t.Fatalf("unexpected drift item count: %d", len(drift.Items))
 	}
+	if drift.Items[0].Owner != "parity-infra" || drift.Items[1].Owner != "parity-infra" {
+		t.Fatalf("expected parity-infra owners, got %+v", drift.Items)
+	}
 
 	mdBody, err := os.ReadFile(filepath.Join(out, "normalized", "drift-triage.md"))
 	if err != nil {
@@ -102,6 +108,60 @@ func TestWriteDiffArtifactsSchema(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("drift triage missing %q", want)
 		}
+	}
+
+	routingBody, err := os.ReadFile(filepath.Join(out, "normalized", "parity-alert-routing.md"))
+	if err != nil {
+		t.Fatalf("read routing md: %v", err)
+	}
+	if !strings.Contains(string(routingBody), "| parity-infra | 2 |") {
+		t.Fatalf("routing markdown missing parity-infra route: %s", routingBody)
+	}
+}
+
+func TestWriteDiffArtifactsAssignsOwnersByPath(t *testing.T) {
+	t.Parallel()
+
+	expected := t.TempDir()
+	actual := t.TempDir()
+	out := t.TempDir()
+
+	mustWriteFile(t, filepath.Join(expected, "forge", "root", "help.txt"), "expected-cli\n")
+	mustWriteFile(t, filepath.Join(actual, "forge", "root", "help.txt"), "actual-cli\n")
+	mustWriteFile(t, filepath.Join(expected, "forged", "proto-wire", "summary.json"), "{\"ok\":true}\n")
+	mustWriteFile(t, filepath.Join(actual, "forged", "proto-wire", "summary.json"), "{\"ok\":false}\n")
+
+	report, err := WriteDiffArtifacts(expected, actual, out)
+	if err != nil {
+		t.Fatalf("write diff artifacts: %v", err)
+	}
+	if !report.HasDrift() {
+		t.Fatalf("expected drift report, got %+v", report)
+	}
+
+	var drift struct {
+		Items []struct {
+			Path  string `json:"path"`
+			Owner string `json:"owner"`
+		} `json:"items"`
+	}
+	driftBody, err := os.ReadFile(filepath.Join(out, "normalized", "drift-report.json"))
+	if err != nil {
+		t.Fatalf("read drift report: %v", err)
+	}
+	if err := json.Unmarshal(driftBody, &drift); err != nil {
+		t.Fatalf("unmarshal drift report: %v", err)
+	}
+
+	ownersByPath := map[string]string{}
+	for _, item := range drift.Items {
+		ownersByPath[item.Path] = item.Owner
+	}
+	if got := ownersByPath["forge/root/help.txt"]; got != "forge-cli" {
+		t.Fatalf("forge/root owner mismatch: got %q", got)
+	}
+	if got := ownersByPath["forged/proto-wire/summary.json"]; got != "forge-daemon" {
+		t.Fatalf("forged/proto-wire owner mismatch: got %q", got)
 	}
 }
 
