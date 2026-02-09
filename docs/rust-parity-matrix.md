@@ -21,7 +21,7 @@ Version: `v0` (2026-02-09)
 | Loop runtime semantics | `internal/loop`, `internal/queue` | `forge-loop` | characterization harness + `docs/rust-runtime-gate.md` | in-progress | runtime gate criteria + CI baseline test wired |
 | Daemon + runner protocol | `internal/forged`, `internal/agent/runner` | `forge-daemon` + `forge-runner` | proto compat tests + `docs/rust-daemon-proto-gate.md` | in-progress | gate criteria + CI baseline test wired |
 | Loop TUI workflows | `internal/looptui` | `forge-tui` | manual + scripted smoke + `docs/rust-loop-tui-gate.md` | in-progress | gate criteria documented; cutover blocked until checklist green |
-| fmail/fmail-tui workflows | `internal/fmail`, `internal/fmailtui` | `fmail-core` + `fmail-tui` | scripted + manual checklist | not-started | |
+| fmail/fmail-tui workflows | `internal/fmail`, `internal/fmailtui` | `fmail-core` + `fmail-tui` | scripted + manual checklist + `docs/rust-fmail-gate.md` | in-progress | gate criteria + CI baseline test wired |
 
 ## Required evidence per gate
 

@@ -69,6 +69,8 @@ jobs:
         run: go test ./internal/parity -run '^TestDaemonProtoGate' -count=1
       - name: Run runtime parity gate baseline test
         run: go test ./internal/parity -run '^TestRuntimeGateLoopQueueSmartStopLedger$' -count=1
+      - name: Run fmail parity gate baseline test
+        run: go test ./internal/parity -run '^TestFmailGateCommandAndTUIBaseline$' -count=1
       - name: Generate parity diff artifacts on drift
         if: failure()
         run: |
