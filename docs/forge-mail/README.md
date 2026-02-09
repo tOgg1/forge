@@ -40,12 +40,13 @@ No setup required. Creates `.fmail/` automatically.
 
 ```
 fmail send <topic|@agent> <message>   Send a message
-fmail log [topic]                     View message history
+fmail log [topic|@agent]              View message history (alias: logs)
+fmail messages                        View all public messages (topics + DMs)
 fmail watch [topic]                   Stream new messages
 fmail who                             List agents
 fmail status [message]                Set your status
 fmail register [name]                 Request a unique agent name
-fmail topics                          List topics
+fmail topics                          List topics (alias: topic)
 fmail gc                              Clean up old messages
 ```
 
@@ -83,4 +84,4 @@ fmail log editing --since 5m
 
 ## Status
 
-**Version 2.1.0-draft** - Under development
+**Version 2.2.0-draft** - Under development

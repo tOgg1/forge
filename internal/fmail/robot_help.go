@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const robotHelpSpecVersion = "2.1.0"
+const robotHelpSpecVersion = "2.2.0"
 
 type robotHelpCommand struct {
 	Usage       string   `json:"usage"`
@@ -50,15 +50,24 @@ func robotHelp(version string) robotHelpPayload {
 			},
 			"log": {
 				Usage: "fmail log [topic|@agent] [-n N] [--since TIME]",
-				Flags: []string{"-n LIMIT", "--since TIME", "--from AGENT", "--json", "-f/--follow", "--allow-other-dm"},
+				Flags: []string{"-n LIMIT", "--since TIME", "--from AGENT", "--json", "-f/--follow"},
 				Examples: []string{
 					"fmail log task -n 5",
 					"fmail log @$FMAIL_AGENT --since 1h",
 				},
 			},
+			"messages": {
+				Usage: "fmail messages [-n N] [--since TIME]",
+				Flags: []string{"-n LIMIT", "--since TIME", "--from AGENT", "--json", "-f/--follow"},
+				Examples: []string{
+					"fmail messages -n 50",
+					"fmail messages --since 30m --json",
+				},
+				Description: "View all public messages across topics and direct messages",
+			},
 			"watch": {
 				Usage: "fmail watch [topic|@agent] [--timeout T] [--count N]",
-				Flags: []string{"--timeout DURATION", "--count N", "--json", "--allow-other-dm"},
+				Flags: []string{"--timeout DURATION", "--count N", "--json"},
 				Examples: []string{
 					"fmail watch task",
 					"fmail watch @$FMAIL_AGENT --count 1 --timeout 2m",

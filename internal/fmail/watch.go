@@ -23,6 +23,7 @@ type watchTargetMode int
 
 const (
 	watchAllTopics watchTargetMode = iota
+	watchAllMessages
 	watchTopic
 	watchDM
 )
@@ -71,10 +72,6 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	target, err := parseWatchTarget(targetArg)
 	if err != nil {
 		return Exitf(ExitCodeFailure, "invalid target %q: %v", targetArg, err)
-	}
-	allowOtherDM, _ := cmd.Flags().GetBool("allow-other-dm")
-	if err := ensureDMReadAccess(runtime, target, allowOtherDM, "watch"); err != nil {
-		return err
 	}
 
 	count, _ := cmd.Flags().GetInt("count")
@@ -434,6 +431,8 @@ func watchTopicRequest(target watchTarget) string {
 	switch target.mode {
 	case watchAllTopics:
 		return "*"
+	case watchAllMessages:
+		return "*"
 	case watchDM:
 		return "@" + target.name
 	case watchTopic:
@@ -488,6 +487,8 @@ func listMessageFiles(store *Store, target watchTarget) ([]messageFile, error) {
 	switch target.mode {
 	case watchAllTopics:
 		return listAllTopicFiles(store)
+	case watchAllMessages:
+		return listAllMessageFiles(store)
 	case watchTopic:
 		return listFilesInDir(store.TopicDir(target.name))
 	case watchDM:
@@ -498,7 +499,25 @@ func listMessageFiles(store *Store, target watchTarget) ([]messageFile, error) {
 }
 
 func listAllTopicFiles(store *Store) ([]messageFile, error) {
-	root := filepath.Join(store.Root, "topics")
+	return listAllSubdirFiles(filepath.Join(store.Root, "topics"))
+}
+
+func listAllMessageFiles(store *Store) ([]messageFile, error) {
+	topicFiles, err := listAllSubdirFiles(filepath.Join(store.Root, "topics"))
+	if err != nil {
+		return nil, err
+	}
+	dmFiles, err := listAllSubdirFiles(filepath.Join(store.Root, "dm"))
+	if err != nil {
+		return nil, err
+	}
+	files := make([]messageFile, 0, len(topicFiles)+len(dmFiles))
+	files = append(files, topicFiles...)
+	files = append(files, dmFiles...)
+	return files, nil
+}
+
+func listAllSubdirFiles(root string) ([]messageFile, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {

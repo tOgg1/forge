@@ -8,8 +8,8 @@ import (
 )
 
 func TestRobotHelpPayloadShape(t *testing.T) {
-	payload := robotHelp("2.1.0")
-	require.Equal(t, "2.1.0", payload.Version)
+	payload := robotHelp("2.2.0")
+	require.Equal(t, "2.2.0", payload.Version)
 
 	data, err := json.Marshal(payload)
 	require.NoError(t, err)
@@ -28,7 +28,7 @@ func TestRobotHelpPayloadShape(t *testing.T) {
 
 	commands, ok := root["commands"].(map[string]any)
 	require.True(t, ok)
-	for _, key := range []string{"send", "log", "watch", "who", "status", "register", "topics", "gc"} {
+	for _, key := range []string{"send", "log", "messages", "watch", "who", "status", "register", "topics", "gc"} {
 		_, ok := commands[key]
 		require.Truef(t, ok, "missing command %q", key)
 	}
@@ -58,5 +58,5 @@ func TestRobotHelpPayloadShape(t *testing.T) {
 func TestNormalizeRobotHelpVersion(t *testing.T) {
 	require.Equal(t, robotHelpSpecVersion, normalizeRobotHelpVersion("dev"))
 	require.Equal(t, robotHelpSpecVersion, normalizeRobotHelpVersion(""))
-	require.Equal(t, "2.1.0", normalizeRobotHelpVersion("v2.1.0"))
+	require.Equal(t, "2.2.0", normalizeRobotHelpVersion("v2.2.0"))
 }

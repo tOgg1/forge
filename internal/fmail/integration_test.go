@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -98,36 +97,55 @@ func TestStandaloneDMInbox(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = runLogCmd(t, runtime, []string{"@bob"}, map[string]string{"json": "true"})
-	require.Error(t, err)
-
-	var exitErr *ExitError
-	require.True(t, errors.As(err, &exitErr))
-	require.Equal(t, ExitCodeFailure, exitErr.Code)
-
-	messages := runLogJSON(t, runtime, []string{"@bob"}, map[string]string{"allow-other-dm": "true"})
+	messages := runLogJSON(t, runtime, []string{"@bob"}, nil)
 	require.Len(t, messages, 1)
 	require.Equal(t, "alice", messages[0].From)
 	require.Equal(t, "@bob", messages[0].To)
 	require.Equal(t, "hi bob", messages[0].Body)
 }
 
-func TestWatchDMInboxRequiresOverride(t *testing.T) {
+func TestWatchDMInboxNoOverrideNeeded(t *testing.T) {
+	t.Setenv(EnvProject, "proj-test")
+	root := t.TempDir()
+	store, err := NewStore(root)
+	require.NoError(t, err)
+	require.NoError(t, store.EnsureRoot())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	target := watchTarget{mode: watchDM, name: "bob"}
+	opts := watchOptions{
+		count:      0,
+		jsonOutput: true,
+		deadline:   time.Now().Add(100 * time.Millisecond),
+	}
+	err = watchStandalone(ctx, store, target, opts, time.Now().UTC(), messageSince{}, io.Discard)
+	require.NoError(t, err)
+}
+
+func TestMessagesCommandIncludesTopicsAndDMs(t *testing.T) {
 	t.Setenv(EnvProject, "proj-test")
 	root := t.TempDir()
 	runtime := &Runtime{Root: root, Agent: "alice"}
 
-	watchCmd := newWatchCmd()
-	watchCmd.SetOut(io.Discard)
-	watchCmd.SetErr(io.Discard)
-	watchCmd.SetContext(context.WithValue(context.Background(), runtimeKey{}, runtime))
+	_, err := sendStandalone(runtime, &Message{
+		From: runtime.Agent,
+		To:   "task",
+		Body: "topic message",
+	})
+	require.NoError(t, err)
+	_, err = sendStandalone(runtime, &Message{
+		From: runtime.Agent,
+		To:   "@bob",
+		Body: "dm message",
+	})
+	require.NoError(t, err)
 
-	err := runWatch(watchCmd, []string{"@bob"})
-	require.Error(t, err)
-
-	var exitErr *ExitError
-	require.True(t, errors.As(err, &exitErr))
-	require.Equal(t, ExitCodeFailure, exitErr.Code)
+	messages := runMessagesJSON(t, runtime, nil)
+	require.Len(t, messages, 2)
+	require.Equal(t, "task", messages[0].To)
+	require.Equal(t, "@bob", messages[1].To)
 }
 
 func TestStandaloneLogSince(t *testing.T) {
@@ -287,6 +305,31 @@ func runLogCmd(t *testing.T, runtime *Runtime, args []string, flags map[string]s
 		require.NoError(t, cmd.Flags().Set(name, value))
 	}
 	err := runLog(cmd, args)
+	return out.String(), err
+}
+
+func runMessagesJSON(t *testing.T, runtime *Runtime, flags map[string]string) []*Message {
+	t.Helper()
+	if flags == nil {
+		flags = map[string]string{}
+	}
+	flags["json"] = "true"
+	out, err := runMessagesCmd(t, runtime, flags)
+	require.NoError(t, err)
+	return parseJSONMessages(t, out)
+}
+
+func runMessagesCmd(t *testing.T, runtime *Runtime, flags map[string]string) (string, error) {
+	t.Helper()
+	cmd := newMessagesCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SetContext(context.WithValue(context.Background(), runtimeKey{}, runtime))
+	for name, value := range flags {
+		require.NoError(t, cmd.Flags().Set(name, value))
+	}
+	err := runMessages(cmd, nil)
 	return out.String(), err
 }
 

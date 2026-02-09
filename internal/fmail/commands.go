@@ -24,16 +24,31 @@ func newSendCmd() *cobra.Command {
 
 func newLogCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "log [topic|@agent]",
-		Short: "View recent messages",
-		Args:  argsMax(1),
-		RunE:  runLog,
+		Use:     "log [topic|@agent]",
+		Aliases: []string{"logs"},
+		Short:   "View recent messages",
+		Args:    argsMax(1),
+		RunE:    runLog,
 	}
 	cmd.Flags().IntP("limit", "n", 20, "Max messages to show")
 	cmd.Flags().String("since", "", "Filter by time window")
 	cmd.Flags().String("from", "", "Filter by sender")
 	cmd.Flags().BoolP("follow", "f", false, "Stream new messages")
-	cmd.Flags().Bool("allow-other-dm", false, "Allow reading another agent's DM inbox")
+	cmd.Flags().Bool("json", false, "Output as JSON")
+	return cmd
+}
+
+func newMessagesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "messages",
+		Short: "View all public messages (topics and direct messages)",
+		Args:  argsMax(0),
+		RunE:  runMessages,
+	}
+	cmd.Flags().IntP("limit", "n", 20, "Max messages to show")
+	cmd.Flags().String("since", "", "Filter by time window")
+	cmd.Flags().String("from", "", "Filter by sender")
+	cmd.Flags().BoolP("follow", "f", false, "Stream new messages")
 	cmd.Flags().Bool("json", false, "Output as JSON")
 	return cmd
 }
@@ -47,7 +62,6 @@ func newWatchCmd() *cobra.Command {
 	}
 	cmd.Flags().Duration("timeout", 0, "Maximum wait time before exiting")
 	cmd.Flags().IntP("count", "c", 0, "Exit after receiving N messages")
-	cmd.Flags().Bool("allow-other-dm", false, "Allow watching another agent's DM inbox")
 	cmd.Flags().Bool("json", false, "Output as JSON")
 	return cmd
 }
@@ -76,10 +90,11 @@ func newStatusCmd() *cobra.Command {
 
 func newTopicsCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "topics",
-		Short: "List topics with activity",
-		Args:  argsMax(0),
-		RunE:  runTopics,
+		Use:     "topics",
+		Aliases: []string{"topic"},
+		Short:   "List topics with activity",
+		Args:    argsMax(0),
+		RunE:    runTopics,
 	}
 	cmd.Flags().Bool("json", false, "Output as JSON")
 	return cmd

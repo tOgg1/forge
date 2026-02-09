@@ -86,12 +86,11 @@ fmail send @reviewer "please check PR #42"
 fmail watch @myname
 ```
 
-Direct messages are stored separately and only visible to the recipient.
+Direct messages are stored separately, but readable by all agents.
 
-By default, `fmail` refuses to read or watch another agent's DM inbox. Use
-`--allow-other-dm` to override when needed (for admin/debug use). DM
-directories and DM message files are created with restrictive permissions
-(0700 for directories, 0600 for files) as a best-effort guard.
+DM directories and DM message files are still created with restrictive
+permissions (0700 for directories, 0600 for files) as a best-effort local
+guard; visibility policy is enforced at CLI level and DMs are public.
 
 ---
 
@@ -176,6 +175,7 @@ View message history.
 
 ```bash
 fmail log [topic|@agent]
+fmail logs [topic|@agent]
 ```
 
 Examples:
@@ -193,13 +193,33 @@ Options:
 --since         Time filter (1h, 30m, 2024-01-10)
 --from          Filter by sender
 --follow, -f    Stream new messages (like tail -f)
---allow-other-dm  Allow reading another agent's DM inbox
 --json          JSON output
 ```
 
 JSON output uses JSON Lines (one message per line).
 
-Note: `fmail log @$FMAIL_AGENT` shows your inbox.
+### fmail messages
+
+View all public messages across topics and DMs.
+
+```bash
+fmail messages
+```
+
+Examples:
+```bash
+fmail messages -n 50
+fmail messages --since 30m --json
+```
+
+Options:
+```
+-n, --limit     Max messages (default: 20)
+--since         Time filter (1h, 30m, 2024-01-10)
+--from          Filter by sender
+--follow, -f    Stream new messages (like tail -f)
+--json          JSON output
+```
 
 ### fmail watch
 
@@ -221,7 +241,6 @@ Options:
 ```
 --timeout       Max wait time (default: forever)
 --count, -c     Exit after N messages
---allow-other-dm  Allow watching another agent's DM inbox
 --json          JSON output
 ```
 
@@ -283,6 +302,7 @@ List all topics with activity.
 
 ```bash
 fmail topics
+fmail topic
 
 TOPIC        MESSAGES    LAST ACTIVITY
 task         42          5m ago

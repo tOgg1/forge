@@ -22,7 +22,7 @@ Single JSON object on stdout:
 ```json
 {
   "name": "fmail",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Agent-to-agent messaging via .fmail/ files",
 
   "setup": "export FMAIL_AGENT=<your-name>",
@@ -38,15 +38,24 @@ Single JSON object on stdout:
     },
     "log": {
       "usage": "fmail log [topic|@agent] [-n N] [--since TIME]",
-      "flags": ["-n LIMIT", "--since TIME", "--from AGENT", "--json", "-f/--follow", "--allow-other-dm"],
+      "flags": ["-n LIMIT", "--since TIME", "--from AGENT", "--json", "-f/--follow"],
       "examples": [
         "fmail log task -n 5",
         "fmail log @$FMAIL_AGENT --since 1h"
       ]
     },
+    "messages": {
+      "usage": "fmail messages [-n N] [--since TIME]",
+      "flags": ["-n LIMIT", "--since TIME", "--from AGENT", "--json", "-f/--follow"],
+      "examples": [
+        "fmail messages -n 50",
+        "fmail messages --since 30m --json"
+      ],
+      "description": "View all public messages across topics and direct messages"
+    },
     "watch": {
       "usage": "fmail watch [topic|@agent] [--timeout T] [--count N]",
-      "flags": ["--timeout DURATION", "--count N", "--json", "--allow-other-dm"],
+      "flags": ["--timeout DURATION", "--count N", "--json"],
       "examples": [
         "fmail watch task",
         "fmail watch @$FMAIL_AGENT --count 1 --timeout 2m"
@@ -135,5 +144,6 @@ fmail --robot-help | jq '.patterns'
 
 ## Version History
 
+- **2.2.0** - Added `messages`; removed DM access override flags
 - **2.1.0** - Simplified format, added status command
 - **2.0.0** - Initial structured format
