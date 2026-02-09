@@ -30,6 +30,19 @@ const (
 	focusFeed
 )
 
+func (f dashboardFocus) label() string {
+	switch f {
+	case focusAgents:
+		return "agents"
+	case focusTopics:
+		return "topics"
+	case focusFeed:
+		return "feed"
+	default:
+		return ""
+	}
+}
+
 type dashboardTickMsg struct{}
 
 type dashboardRefreshMsg struct {
@@ -113,6 +126,13 @@ func (v *dashboardView) Update(msg tea.Msg) tea.Cmd {
 		return v.handleKey(typed)
 	}
 	return nil
+}
+
+func (v *dashboardView) FocusLabel() string {
+	if v == nil {
+		return ""
+	}
+	return v.focus.label()
 }
 
 func (v *dashboardView) View(width, height int, theme Theme) string {

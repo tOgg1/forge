@@ -331,6 +331,15 @@ func (m *Model) breadcrumb() string {
 		}
 		parts = append(parts, label)
 	}
+	if m.activeViewID() == ViewDashboard {
+		if view := m.views[ViewDashboard]; view != nil {
+			if focused, ok := view.(interface{ FocusLabel() string }); ok {
+				if pane := strings.TrimSpace(focused.FocusLabel()); pane != "" {
+					parts = append(parts, pane)
+				}
+			}
+		}
+	}
 	return strings.Join(parts, " > ")
 }
 
@@ -397,6 +406,16 @@ func (m *Model) renderStatusBar() string {
 	if m.status.unread > 0 {
 		notif = fmt.Sprintf("[N:%d]", m.status.unread)
 	}
+	pane := ""
+	if m.activeViewID() == ViewDashboard {
+		if view := m.views[ViewDashboard]; view != nil {
+			if focused, ok := view.(interface{ FocusLabel() string }); ok {
+				if label := strings.TrimSpace(focused.FocusLabel()); label != "" {
+					pane = "pane:" + label
+				}
+			}
+		}
+	}
 	clock := now.Format("15:04")
 
 	segments := make([]string, 0, 6)
@@ -409,6 +428,9 @@ func (m *Model) renderStatusBar() string {
 	}
 	if notif != "" && m.width >= 86 {
 		segments = append(segments, notif)
+	}
+	if pane != "" && m.width >= 96 {
+		segments = append(segments, pane)
 	}
 	segments = append(segments, clock)
 
