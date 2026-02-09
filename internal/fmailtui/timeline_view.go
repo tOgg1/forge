@@ -21,6 +21,9 @@ const (
 	timelineRefreshInterval = 2 * time.Second
 	timelineGapThreshold    = 5 * time.Minute
 	timelineMaxLanes        = 8
+	timelineInitialPageSize = 200
+	timelinePageSize        = 200
+	timelineLoadThreshold   = 6
 )
 
 var timelineZoomLevels = []time.Duration{
@@ -52,8 +55,17 @@ type timelineLoadedMsg struct {
 	now               time.Time
 	messages          []fmail.Message
 	topicParticipants map[string][]string
+	hasOlder          bool
+	mode              timelineLoadMode
 	err               error
 }
+
+type timelineLoadMode int
+
+const (
+	timelineLoadReplace timelineLoadMode = iota
+	timelineLoadOlder
+)
 
 type timelineIncomingMsg struct {
 	msg fmail.Message
@@ -98,6 +110,7 @@ type timelineView struct {
 	agentSort timelineAgentOrder
 	zoomIdx   int
 	windowEnd time.Time
+	hasOlder  bool
 
 	selected   int
 	selectedID string
@@ -121,6 +134,7 @@ type timelineView struct {
 
 	subCh     <-chan fmail.Message
 	subCancel func()
+	loading   bool
 }
 
 var _ composeContextView = (*timelineView)(nil)
@@ -150,7 +164,8 @@ func timelineTickCmd() tea.Cmd {
 
 func (v *timelineView) Init() tea.Cmd {
 	v.startSubscription()
-	return tea.Batch(v.loadCmd(), timelineTickCmd(), v.waitForMessageCmd())
+	v.loading = true
+	return tea.Batch(v.loadWindowCmd(data.MessageFilter{Limit: timelineInitialPageSize}, timelineLoadReplace), timelineTickCmd(), v.waitForMessageCmd())
 }
 
 func (v *timelineView) Close() {
@@ -188,7 +203,8 @@ func (v *timelineView) ComposeReplySeed(dmDirect bool) (composeReplySeed, bool) 
 func (v *timelineView) Update(msg tea.Msg) tea.Cmd {
 	switch typed := msg.(type) {
 	case timelineTickMsg:
-		return tea.Batch(v.loadCmd(), timelineTickCmd())
+		v.now = time.Now().UTC()
+		return timelineTickCmd()
 	case timelineLoadedMsg:
 		v.applyLoaded(typed)
 		return nil
@@ -226,12 +242,19 @@ func (v *timelineView) View(width, height int, theme Theme) string {
 	if strings.TrimSpace(v.filterRaw) != "" {
 		filterLabel = v.filterRaw
 	}
-	head := fmt.Sprintf("%s  %s - %s  zoom:%s  filter:%s  %d/%d",
+	olderLabel := "end"
+	if v.loading {
+		olderLabel = "loading"
+	} else if v.hasOlder {
+		olderLabel = "more"
+	}
+	head := fmt.Sprintf("%s  %s - %s  zoom:%s  filter:%s  older:%s  %d/%d",
 		modeLabel,
 		windowStart.Format("15:04"),
 		windowEnd.Format("15:04"),
 		timelineZoomLabel(v.zoomWindow()),
 		filterLabel,
+		olderLabel,
 		len(v.visible),
 		len(v.all),
 	)
@@ -331,17 +354,17 @@ func (v *timelineView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case "k", "up":
 		v.moveSelection(-1)
-		return nil
+		return v.maybeLoadOlderCmd()
 	case "pgdown", "ctrl+d":
 		v.moveSelection(maxInt(1, v.pageStep()))
 		return nil
 	case "pgup", "ctrl+u":
 		v.moveSelection(-maxInt(1, v.pageStep()))
-		return nil
+		return v.maybeLoadOlderCmd()
 	case "g", "home":
 		v.selected = 0
 		v.rememberSelection()
-		return nil
+		return v.maybeLoadOlderCmd()
 	case "G", "end":
 		if len(v.visible) > 0 {
 			v.selected = len(v.visible) - 1
@@ -586,6 +609,24 @@ func (v *timelineView) moveSelection(delta int) {
 	v.rememberSelection()
 }
 
+func (v *timelineView) maybeLoadOlderCmd() tea.Cmd {
+	if v.provider == nil || v.loading || !v.hasOlder || len(v.visible) == 0 {
+		return nil
+	}
+	if v.selected > timelineLoadThreshold {
+		return nil
+	}
+	oldest := messageTimestamp(v.all[0])
+	if oldest.IsZero() {
+		return nil
+	}
+	v.loading = true
+	return v.loadWindowCmd(data.MessageFilter{
+		Until: oldest.Add(-time.Nanosecond),
+		Limit: timelinePageSize,
+	}, timelineLoadOlder)
+}
+
 func (v *timelineView) rememberSelection() {
 	if len(v.visible) == 0 || v.selected < 0 || v.selected >= len(v.visible) {
 		v.selectedID = ""
@@ -681,32 +722,39 @@ func (v *timelineView) waitForMessageCmd() tea.Cmd {
 	}
 }
 
-func (v *timelineView) loadCmd() tea.Cmd {
+func (v *timelineView) loadWindowCmd(base data.MessageFilter, mode timelineLoadMode) tea.Cmd {
 	provider := v.provider
 	self := v.self
 	return func() tea.Msg {
 		now := time.Now().UTC()
 		if provider == nil {
-			return timelineLoadedMsg{now: now}
+			return timelineLoadedMsg{now: now, mode: mode}
 		}
 
 		merged := make([]fmail.Message, 0, 1024)
 		seen := make(map[string]struct{}, 1024)
 		participants := make(map[string]map[string]struct{})
+		hasOlder := false
 
 		topics, err := provider.Topics()
 		if err != nil {
-			return timelineLoadedMsg{now: now, err: err}
+			return timelineLoadedMsg{now: now, mode: mode, err: err}
 		}
 		for i := range topics {
 			topic := strings.TrimSpace(topics[i].Name)
 			if topic == "" {
 				continue
 			}
-			msgs, err := provider.Messages(topic, data.MessageFilter{})
+
+			opts := base
+			msgs, err := provider.Messages(topic, opts)
 			if err != nil {
-				return timelineLoadedMsg{now: now, err: err}
+				return timelineLoadedMsg{now: now, mode: mode, err: err}
 			}
+			if opts.Limit > 0 && len(msgs) >= opts.Limit {
+				hasOlder = true
+			}
+
 			bucket := participants[topic]
 			if bucket == nil {
 				bucket = make(map[string]struct{}, 8)
@@ -732,9 +780,14 @@ func (v *timelineView) loadCmd() tea.Cmd {
 				if agent == "" {
 					continue
 				}
-				msgs, dmErr := provider.DMs(agent, data.MessageFilter{})
+
+				opts := base
+				msgs, dmErr := provider.DMs(agent, opts)
 				if dmErr != nil {
-					return timelineLoadedMsg{now: now, err: dmErr}
+					return timelineLoadedMsg{now: now, mode: mode, err: dmErr}
+				}
+				if opts.Limit > 0 && len(msgs) >= opts.Limit {
+					hasOlder = true
 				}
 				for _, msg := range msgs {
 					key := timelineDedupKey(msg)
@@ -752,11 +805,14 @@ func (v *timelineView) loadCmd() tea.Cmd {
 			now:               now,
 			messages:          merged,
 			topicParticipants: flattenParticipants(participants),
+			hasOlder:          hasOlder,
+			mode:              mode,
 		}
 	}
 }
 
 func (v *timelineView) applyLoaded(msg timelineLoadedMsg) {
+	v.loading = false
 	v.now = msg.now
 	v.lastErr = msg.err
 	if msg.err != nil {
@@ -765,10 +821,17 @@ func (v *timelineView) applyLoaded(msg timelineLoadedMsg) {
 
 	keepSelection := v.selectedID
 	prevLatest := v.latestTime(v.now)
-	followTail := v.windowEnd.IsZero() || (!prevLatest.IsZero() && !v.windowEnd.Before(prevLatest.Add(-2*time.Second)))
+	followTail := msg.mode == timelineLoadReplace && (v.windowEnd.IsZero() || (!prevLatest.IsZero() && !v.windowEnd.Before(prevLatest.Add(-2*time.Second))))
 
-	v.all = append(v.all[:0], msg.messages...)
-	v.topicParticipants = msg.topicParticipants
+	if msg.mode == timelineLoadReplace {
+		v.all = append(v.all[:0], msg.messages...)
+		v.topicParticipants = msg.topicParticipants
+	} else {
+		v.all = mergeTimelineMessages(v.all, msg.messages)
+		v.topicParticipants = mergeTopicParticipants(v.topicParticipants, msg.topicParticipants)
+	}
+	v.hasOlder = msg.hasOlder
+
 	v.rebuildReplyIndex()
 	v.refreshBookmarks()
 
@@ -1487,6 +1550,48 @@ func flattenParticipants(in map[string]map[string]struct{}) map[string][]string 
 		}
 		sort.Strings(names)
 		out[topic] = names
+	}
+	return out
+}
+
+func mergeTimelineMessages(existing []fmail.Message, incoming []fmail.Message) []fmail.Message {
+	if len(incoming) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{}, len(existing)+len(incoming))
+	merged := make([]fmail.Message, 0, len(existing)+len(incoming))
+	for i := range existing {
+		msg := existing[i]
+		key := timelineDedupKey(msg)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, msg)
+	}
+	for i := range incoming {
+		msg := incoming[i]
+		key := timelineDedupKey(msg)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, msg)
+	}
+	sortMessages(merged)
+	return merged
+}
+
+func mergeTopicParticipants(left map[string][]string, right map[string][]string) map[string][]string {
+	if len(left) == 0 && len(right) == 0 {
+		return map[string][]string{}
+	}
+	out := make(map[string][]string, len(left)+len(right))
+	for topic, participants := range left {
+		out[topic] = append([]string(nil), participants...)
+	}
+	for topic, participants := range right {
+		out[topic] = dedupeSorted(append(out[topic], participants...))
 	}
 	return out
 }

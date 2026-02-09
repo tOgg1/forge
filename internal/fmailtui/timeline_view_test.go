@@ -1,6 +1,7 @@
 package fmailtui
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -17,6 +18,11 @@ type stubTimelineProvider struct {
 	dms     []data.DMConversation
 	byTopic map[string][]fmail.Message
 	byDM    map[string][]fmail.Message
+
+	messageCalls int
+	dmCalls      int
+	messageOpts  []data.MessageFilter
+	dmOpts       []data.MessageFilter
 }
 
 func (s *stubTimelineProvider) Topics() ([]data.TopicInfo, error) {
@@ -26,11 +32,9 @@ func (s *stubTimelineProvider) Topics() ([]data.TopicInfo, error) {
 }
 
 func (s *stubTimelineProvider) Messages(topic string, opts data.MessageFilter) ([]fmail.Message, error) {
-	msgs := append([]fmail.Message(nil), s.byTopic[topic]...)
-	if opts.Limit > 0 && len(msgs) > opts.Limit {
-		msgs = msgs[len(msgs)-opts.Limit:]
-	}
-	return msgs, nil
+	s.messageCalls++
+	s.messageOpts = append(s.messageOpts, opts)
+	return filterTimelineMessages(s.byTopic[topic], opts), nil
 }
 
 func (s *stubTimelineProvider) DMConversations(string) ([]data.DMConversation, error) {
@@ -40,11 +44,9 @@ func (s *stubTimelineProvider) DMConversations(string) ([]data.DMConversation, e
 }
 
 func (s *stubTimelineProvider) DMs(agent string, opts data.MessageFilter) ([]fmail.Message, error) {
-	msgs := append([]fmail.Message(nil), s.byDM[agent]...)
-	if opts.Limit > 0 && len(msgs) > opts.Limit {
-		msgs = msgs[len(msgs)-opts.Limit:]
-	}
-	return msgs, nil
+	s.dmCalls++
+	s.dmOpts = append(s.dmOpts, opts)
+	return filterTimelineMessages(s.byDM[agent], opts), nil
 }
 
 func (s *stubTimelineProvider) Agents() ([]fmail.AgentRecord, error) { return nil, nil }
@@ -80,7 +82,7 @@ func TestTimelineLoadMergesTopicsAndDMsChronologically(t *testing.T) {
 	}
 
 	v := newTimelineView(t.TempDir(), "viewer", provider, nil)
-	msg, ok := v.loadCmd()().(timelineLoadedMsg)
+	msg, ok := v.loadWindowCmd(data.MessageFilter{Limit: timelineInitialPageSize}, timelineLoadReplace)().(timelineLoadedMsg)
 	require.True(t, ok)
 	require.NoError(t, msg.err)
 	v.applyLoaded(msg)
@@ -88,6 +90,72 @@ func TestTimelineLoadMergesTopicsAndDMsChronologically(t *testing.T) {
 	require.Len(t, v.all, 2)
 	require.Equal(t, "20260209-095500-0001", v.all[0].ID)
 	require.Equal(t, "20260209-095700-0001", v.all[1].ID)
+}
+
+func TestTimelineLazyPagingLoadsOlderNearTop(t *testing.T) {
+	now := time.Date(2026, 2, 9, 12, 0, 0, 0, time.UTC)
+	total := timelineInitialPageSize + timelinePageSize + 10
+	msgs := make([]fmail.Message, 0, total)
+	for i := 0; i < total; i++ {
+		ts := now.Add(-time.Duration(total-i) * time.Minute)
+		msgs = append(msgs, fmail.Message{
+			ID:   fmt.Sprintf("%s-%04d", ts.Format("20060102-150405"), i),
+			From: "alice",
+			To:   "task",
+			Time: ts,
+			Body: fmt.Sprintf("msg-%d", i),
+		})
+	}
+
+	provider := &stubTimelineProvider{
+		topics:  []data.TopicInfo{{Name: "task", LastActivity: now}},
+		byTopic: map[string][]fmail.Message{"task": msgs},
+	}
+	v := newTimelineView(t.TempDir(), "viewer", provider, nil)
+	initial, ok := v.loadWindowCmd(data.MessageFilter{Limit: timelineInitialPageSize}, timelineLoadReplace)().(timelineLoadedMsg)
+	require.True(t, ok)
+	require.NoError(t, initial.err)
+	v.applyLoaded(initial)
+
+	require.Len(t, v.all, timelineInitialPageSize)
+	require.True(t, v.hasOlder)
+
+	v.rebuildVisible()
+	v.selected = 0
+	v.rememberSelection()
+
+	cmd := v.handleKey(runeKey('k'))
+	require.NotNil(t, cmd)
+
+	older, ok := cmd().(timelineLoadedMsg)
+	require.True(t, ok)
+	require.NoError(t, older.err)
+	v.applyLoaded(older)
+
+	require.Len(t, v.all, timelineInitialPageSize+timelinePageSize)
+	require.GreaterOrEqual(t, provider.messageCalls, 2)
+	lastOpts := provider.messageOpts[len(provider.messageOpts)-1]
+	require.Equal(t, timelinePageSize, lastOpts.Limit)
+	require.False(t, lastOpts.Until.IsZero())
+}
+
+func TestTimelineTickDoesNotReloadProvider(t *testing.T) {
+	now := time.Date(2026, 2, 9, 12, 0, 0, 0, time.UTC)
+	provider := &stubTimelineProvider{
+		topics: []data.TopicInfo{{Name: "task", LastActivity: now}},
+		byTopic: map[string][]fmail.Message{
+			"task": {{ID: "20260209-115900-0001", From: "alice", To: "task", Time: now.Add(-time.Minute), Body: "x"}},
+		},
+	}
+	v := newTimelineView(t.TempDir(), "viewer", provider, nil)
+	initial, ok := v.loadWindowCmd(data.MessageFilter{Limit: timelineInitialPageSize}, timelineLoadReplace)().(timelineLoadedMsg)
+	require.True(t, ok)
+	require.NoError(t, initial.err)
+	v.applyLoaded(initial)
+
+	before := provider.messageCalls
+	v.Update(timelineTickMsg{})
+	require.Equal(t, before, provider.messageCalls)
 }
 
 func TestTimelineChronologicalRendersGapAndReplyMarker(t *testing.T) {
@@ -164,4 +232,25 @@ func TestTimelineBookmarkToggleUsesStateManager(t *testing.T) {
 
 	require.Nil(t, v.handleKey(runeKey('b')))
 	require.True(t, st.IsBookmarked("20260209-095500-0001"))
+}
+
+func filterTimelineMessages(input []fmail.Message, opts data.MessageFilter) []fmail.Message {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make([]fmail.Message, 0, len(input))
+	for i := range input {
+		msg := input[i]
+		if !opts.Since.IsZero() && msg.Time.Before(opts.Since) {
+			continue
+		}
+		if !opts.Until.IsZero() && msg.Time.After(opts.Until) {
+			continue
+		}
+		out = append(out, msg)
+	}
+	if opts.Limit > 0 && len(out) > opts.Limit {
+		out = out[len(out)-opts.Limit:]
+	}
+	return out
 }
