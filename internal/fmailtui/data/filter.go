@@ -2,6 +2,7 @@ package data
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -65,10 +66,10 @@ func searchMatches(message *fmail.Message, query SearchQuery) (bool, int, int) {
 	if !query.Until.IsZero() && message.Time.After(query.Until) {
 		return false, -1, 0
 	}
-	if from := strings.TrimSpace(query.From); from != "" && !strings.EqualFold(message.From, from) {
+	if from := strings.TrimSpace(query.From); from != "" && !globMatchCI(from, message.From) {
 		return false, -1, 0
 	}
-	if to := strings.TrimSpace(query.To); to != "" && !strings.EqualFold(message.To, to) {
+	if to := strings.TrimSpace(query.To); to != "" && !globMatchCI(to, message.To) {
 		return false, -1, 0
 	}
 	if priority := strings.TrimSpace(query.Priority); priority != "" && !strings.EqualFold(message.Priority, priority) {
@@ -91,6 +92,24 @@ func searchMatches(message *fmail.Message, query SearchQuery) (bool, int, int) {
 		return false, -1, 0
 	}
 	return true, idx, len(text)
+}
+
+func globMatchCI(pattern, value string) bool {
+	pattern = strings.TrimSpace(pattern)
+	value = strings.TrimSpace(value)
+	if pattern == "" {
+		return true
+	}
+	if value == "" {
+		return false
+	}
+	pat := strings.ToLower(pattern)
+	val := strings.ToLower(value)
+	ok, err := filepath.Match(pat, val)
+	if err == nil {
+		return ok
+	}
+	return val == pat
 }
 
 func containsAllTags(actual []string, required []string) bool {

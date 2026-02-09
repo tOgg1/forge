@@ -76,10 +76,15 @@ type SearchQuery struct {
 	Text     string
 	From     string
 	To       string
+	In       string // scope search to a single topic or "@agent"
 	Priority string
 	Tags     []string
 	Since    time.Time
 	Until    time.Time
+	HasReply bool
+	// View-level filters (provider may ignore them).
+	HasBookmark bool
+	IsUnread    bool
 }
 
 type SearchResult struct {
@@ -87,6 +92,8 @@ type SearchResult struct {
 	Topic       string
 	MatchOffset int
 	MatchLength int
+	Prev        *fmail.Message // optional context message before
+	Next        *fmail.Message // optional context message after
 }
 
 type SendRequest struct {

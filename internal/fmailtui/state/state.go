@@ -284,6 +284,59 @@ func (m *Manager) StarredTopics() []string {
 	return append([]string(nil), m.state.StarredTopics...)
 }
 
+func (m *Manager) SavedSearches() []SavedSearch {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]SavedSearch(nil), m.state.SavedSearches...)
+}
+
+func (m *Manager) UpsertSavedSearch(name string, query data.SearchQuery) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+
+	next := make([]SavedSearch, 0, len(m.state.SavedSearches)+1)
+	for _, ss := range m.state.SavedSearches {
+		if strings.EqualFold(strings.TrimSpace(ss.Name), name) {
+			continue
+		}
+		if strings.TrimSpace(ss.Name) == "" {
+			continue
+		}
+		next = append(next, ss)
+	}
+	next = append(next, SavedSearch{Name: name, Query: query})
+	sort.SliceStable(next, func(i, j int) bool {
+		return strings.ToLower(next[i].Name) < strings.ToLower(next[j].Name)
+	})
+	m.state.SavedSearches = next
+	m.markDirtyLocked()
+}
+
+func (m *Manager) DeleteSavedSearch(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	name = strings.TrimSpace(name)
+	if name == "" || len(m.state.SavedSearches) == 0 {
+		return
+	}
+	next := make([]SavedSearch, 0, len(m.state.SavedSearches))
+	for _, ss := range m.state.SavedSearches {
+		if strings.EqualFold(strings.TrimSpace(ss.Name), name) {
+			continue
+		}
+		next = append(next, ss)
+	}
+	if len(next) == len(m.state.SavedSearches) {
+		return
+	}
+	m.state.SavedSearches = next
+	m.markDirtyLocked()
+}
+
 func (m *Manager) SetStarredTopics(topics []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

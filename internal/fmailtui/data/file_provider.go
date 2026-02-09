@@ -234,6 +234,18 @@ func (p *FileProvider) Search(query SearchQuery) ([]SearchResult, error) {
 		return nil, err
 	}
 
+	scope := strings.TrimSpace(query.In)
+	if scope != "" {
+		if strings.HasPrefix(scope, "@") {
+			agent := strings.TrimPrefix(scope, "@")
+			topicNames = nil
+			dmDirs = []string{agent}
+		} else {
+			dmDirs = nil
+			topicNames = []string{scope}
+		}
+	}
+
 	results := make([]SearchResult, 0)
 	for _, topic := range topicNames {
 		messages, err := p.messagesForTopic(topic)
@@ -241,17 +253,43 @@ func (p *FileProvider) Search(query SearchQuery) ([]SearchResult, error) {
 			return nil, err
 		}
 		ranged := sliceMessagesByIDRange(messages, query.Since, query.Until)
+		var hasReplies map[string]struct{}
+		if query.HasReply {
+			hasReplies = make(map[string]struct{}, len(ranged))
+			for i := range ranged {
+				if parent := strings.TrimSpace(ranged[i].ReplyTo); parent != "" {
+					hasReplies[parent] = struct{}{}
+				}
+			}
+		}
 		for i := range ranged {
 			msg := ranged[i]
 			ok, offset, length := searchMatches(&msg, query)
 			if !ok {
 				continue
 			}
+			if hasReplies != nil {
+				if _, ok := hasReplies[strings.TrimSpace(msg.ID)]; !ok {
+					continue
+				}
+			}
+			var prev *fmail.Message
+			var next *fmail.Message
+			if i > 0 {
+				pm := cloneMessage(ranged[i-1])
+				prev = &pm
+			}
+			if i+1 < len(ranged) {
+				nm := cloneMessage(ranged[i+1])
+				next = &nm
+			}
 			results = append(results, SearchResult{
 				Message:     cloneMessage(msg),
 				Topic:       topic,
 				MatchOffset: offset,
 				MatchLength: length,
+				Prev:        prev,
+				Next:        next,
 			})
 		}
 	}
@@ -262,17 +300,43 @@ func (p *FileProvider) Search(query SearchQuery) ([]SearchResult, error) {
 			return nil, err
 		}
 		ranged := sliceMessagesByIDRange(messages, query.Since, query.Until)
+		var hasReplies map[string]struct{}
+		if query.HasReply {
+			hasReplies = make(map[string]struct{}, len(ranged))
+			for i := range ranged {
+				if parent := strings.TrimSpace(ranged[i].ReplyTo); parent != "" {
+					hasReplies[parent] = struct{}{}
+				}
+			}
+		}
 		for i := range ranged {
 			msg := ranged[i]
 			ok, offset, length := searchMatches(&msg, query)
 			if !ok {
 				continue
 			}
+			if hasReplies != nil {
+				if _, ok := hasReplies[strings.TrimSpace(msg.ID)]; !ok {
+					continue
+				}
+			}
+			var prev *fmail.Message
+			var next *fmail.Message
+			if i > 0 {
+				pm := cloneMessage(ranged[i-1])
+				prev = &pm
+			}
+			if i+1 < len(ranged) {
+				nm := cloneMessage(ranged[i+1])
+				next = &nm
+			}
 			results = append(results, SearchResult{
 				Message:     cloneMessage(msg),
 				Topic:       "@" + dirAgent,
 				MatchOffset: offset,
 				MatchLength: length,
+				Prev:        prev,
+				Next:        next,
 			})
 		}
 	}
