@@ -29,6 +29,7 @@ Version: `v0` (2026-02-09)
 - CI required checks green (`parity`, `baseline-snapshot`, `rust-quality`, `rust-coverage`).
 - Drift artifacts available for failures (`parity-diff`).
 - Baseline snapshot artifact published (`rust-baseline-snapshot`).
+- Baseline refresh protocol artifact published (`rust-baseline-refresh-protocol`).
 - Rust coverage policy locked and enforced (`docs/rust-coverage-policy.md`).
 - Release gate checklist completed for final switch (`docs/rust-release-gate-checklist.md`).
 

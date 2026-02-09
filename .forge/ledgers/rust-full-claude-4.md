@@ -197,3 +197,52 @@ The SQL migration files for 001 were already shared between Go and Rust (build.r
 **Validation:** 39/39 tests pass, zero clippy warnings in up.rs, fmt clean
 ```
 
+## 2026-02-09T17:54:36Z
+
+- run_id: 75799a70-acde-4e19-b35e-b5a7a46ac8a1
+- loop_name: rust-full-claude-4
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T17:45:04Z
+- finished_at: 2026-02-09T17:54:36Z
+- exit_code: 0
+
+```
+## Task Summary: forge-n73 (Repo layer: loop_kv repository parity)
+
+**Status: CLOSED**
+
+### What was done
+
+Implemented the `LoopKVRepository` in Rust with full Go behavioral parity.
+
+**Files modified:**
+- `rust/crates/forge-db/Cargo.toml` — added `uuid` dependency (also `rand`/`serde_json` from concurrent work)
+- `rust/crates/forge-db/src/lib.rs` — added:
+  - `LoopKV` model struct (id, loop_id, key, value, created_at, updated_at)
+  - `LoopKVRepository<'a>` with 4 methods: `set`, `get`, `list_by_loop`, `delete`
+  - `DbError::Validation` and `DbError::LoopKVNotFound` variants
+  - `conn()` public accessor on `Db`
+  - Helper functions: `now_rfc3339`, `days_to_civil`, `is_unique_constraint_error`
+- `rust/crates/forge-db/src/loop_repository.rs` — fixed 9 clippy violations from concurrent agent work (derivable Default, redundant closures, expect->match, `from_str`->`parse_state`, manual unwrap_or_default)
+
+**Files created:**
+- `rust/crates/forge-db/tests/loop_kv_repository_test.rs` — 14 integration tests
+
+### Go parity details
+- **Set**: UPDATE-then-INSERT pattern (no upsert), race-condition retry on unique constraint
+- **Get/Delete**: not-found sentinel error matching `ErrLoopKVNotFound`
+- **ListByLoop**: sorted by key, returns empty vec for no entries, loop isolation
+- **Validation**: empty loop_id/key/value rejected; whitespace trimmed from loop_id and key
+- **Timestamps**: RFC3339 format (`YYYY-MM-DDTHH:MM:SSZ`)
+
+### Validation
+- `cargo fmt --check` — PASS
+- `cargo clippy --workspace --all-targets -- -D warnings` — PASS
+- `cargo test --workspace` — PASS (all tests green)
+```
+

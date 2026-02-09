@@ -175,3 +175,44 @@ The `forge run` command Rust port was completed with full wiring, tests, and ora
 **Validation:** 29 total tests pass (16 unit + 13 integration). `cargo fmt --check` and `cargo clippy` clean on msg files. Pre-existing `ps.rs` clippy errors from another agent are not related.
 ```
 
+## 2026-02-09T17:52:18Z
+
+- run_id: c2492566-aff7-43eb-908c-fee0044da2b7
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T17:39:40Z
+- finished_at: 2026-02-09T17:52:18Z
+- exit_code: 0
+
+```
+## Task Summary: `forge-gnc` — Smart-stop: quantitative rule matching (exit/stdout/stderr)
+
+**Status**: Closed
+
+**Deliverables** added to `rust/crates/forge-loop/src/stop_rules.rs`:
+
+**Types:**
+- `QuantStopConfig` — config struct mirroring Go `LoopQuantStopConfig` (cmd, exit_codes, exit_invert, stdout_mode, stderr_mode, stdout_regex, stderr_regex, etc.)
+- `QuantMatchResult` — result struct with `matched: bool` + `reason: String`
+
+**Functions:**
+- `normalize_stream_mode()` — normalizes `"empty"` / `"nonempty"` / `"any"` (case-insensitive, trims whitespace)
+- `match_exit_codes()` — exit code matching with invert support; empty list = disabled (always matches)
+- `matches_stream_mode()` — stream content mode matching (whitespace-only = "empty")
+- `compile_regex()` — regex compilation with empty-pattern passthrough
+- `quant_rule_matches()` — main AND-ed matching function: exit codes → stdout mode → stderr mode → stdout regex → stderr regex, with descriptive failure reasons matching Go output format
+
+**Tests**: 28 new unit tests covering:
+- Exit code matching: empty list, in-list, not-in-list, invert, negative codes
+- Stream mode: normalization (case, whitespace, defaults), empty/nonempty/any matching
+- Regex: match, no-match, invalid pattern, empty ignored
+- Full rule: combined criteria, failure ordering, whitespace-as-empty, timeout exit code
+
+**Validation**: `cargo fmt --check` PASS, `cargo clippy -p forge-loop -- -D warnings` PASS, `cargo test -p forge-loop` 74/74 PASS.
+```
+

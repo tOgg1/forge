@@ -161,3 +161,80 @@ Closed tasks:
 Queue: `sv task ready --project prj-vr0104gr` now empty.
 ```
 
+## 2026-02-09T17:51:11Z
+
+- run_id: f50b907d-1572-4cf2-a015-042cf1c75b8a
+- loop_name: rust-full-codex-2
+- status: success
+- profile: codex2
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T17:02:25Z
+- finished_at: 2026-02-09T17:51:11Z
+- exit_code: 0
+
+```
++        };
++        assert!(quant_rule_matches(&cfg, &make_result(0, "  \t\n  ", "")).matched);
++    }
++
++    #[test]
++    fn rule_timeout_exit_code_minus_one() {
++        let cfg = QuantStopConfig {
++            cmd: "test".to_string(),
++            exit_codes: vec![-1],
++            ..Default::default()
++        };
++        let res = QuantCommandResult {
++            exit_code: -1,
++            stdout: String::new(),
++            stderr: String::new(),
++            timed_out: true,
++            error: Some("command timed out".to_string()),
++        };
++        assert!(quant_rule_matches(&cfg, &res).matched);
++    }
++
++    // -----------------------------------------------------------------------
++    // TempDir helper
++    // -----------------------------------------------------------------------
++
+     struct TempDir {
+         path: PathBuf,
+     }
+
+tokens used
+333,207
+Closed tasks (prj-vr0104gr):
+
+- `forge-4mt` (mem)
+- `forge-szt` (prompt)
+- `forge-1vk` (profile)
+- `forge-43v` (pool)
+- `forge-wv5` (clean)
+- `forge-jbn` (rm)
+- `forge-w7w` (queue)
+- `forge-k3v` (run)
+- `forge-cra` (scale)
+- `forge-zkg` (resume)
+- `forge-ptx` (kill)
+- `forge-4my` (stop)
+- `forge-kmv` (init)
+- `forge-dzc` (msg)
+- `forge-hhs` (logs)
+- `forge-frf` (ps)
+- `forge-k81` (up)
+- `forge-sbp` (hidden internal loop runner cmd via `loop_internal`)
+- `forge-5dc` (root/global flags/error envelope)
+
+Key validations I ran while closing:
+- `cd rust && cargo fmt --check`
+- `cd rust && cargo clippy --workspace --all-targets -- -D warnings`
+- `cd rust && cargo test --workspace`
+- plus targeted `cargo test -p forge-cli --test ...` / `--lib ...::tests` per command family.
+
+Note: `fmail` agent registry update flaked; re-register fixed. Latest working sender: `cool-takanawa`.
+```
+

@@ -315,3 +315,80 @@ i paused per safety rule. pick one:
 2. i abandon `forge-hhs` and move to next open task.
 ```
 
+## 2026-02-09T17:56:54Z
+
+- run_id: 911a61c9-d158-466d-a3be-6b9d04ba6a54
+- loop_name: rust-full-codex-4
+- status: success
+- profile: codex1
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T17:40:16Z
+- finished_at: 2026-02-09T17:56:54Z
+- exit_code: 0
+
+```
++        let start = now_utc("2026-02-09T17:00:00Z");
++        let now = start + ChronoDuration::seconds(5);
++        let reason = loop_limit_reason(0, 0, Duration::from_secs(5), Some(start), now);
++        assert_eq!(reason.as_deref(), Some("max runtime reached (5s)"));
++    }
++
++    #[test]
++    fn loop_limit_reason_none_when_not_reached_or_missing_started_at() {
++        let start = now_utc("2026-02-09T17:00:00Z");
++        let now = start + ChronoDuration::seconds(4);
++        assert_eq!(
++            loop_limit_reason(3, 2, Duration::from_secs(5), Some(start), now),
++            None
++        );
++        assert_eq!(
++            loop_limit_reason(0, 0, Duration::from_secs(5), None, now),
++            None
++        );
++    }
++
++    fn now_utc(value: &str) -> DateTime<Utc> {
++        match DateTime::parse_from_rfc3339(value) {
++            Ok(dt) => dt.with_timezone(&Utc),
++            Err(err) => panic!("invalid test timestamp {value}: {err}"),
++        }
++    }
++}
+
+tokens used
+514,870
+Hi. Strong momentum: pushed multiple Rust parity slices and closed tasks before cross-agent drift.
+
+Closed:
+1. `forge-me9`
+2. `forge-hhs`
+
+Implemented (task-scoped):
+1. `rust/crates/forge-cli/src/logs.rs` parity fixes + tests passing.
+2. `rust/crates/forge-loop/src/queue_interactions.rs`
+3. `rust/crates/forge-loop/src/prompt_composition.rs`
+4. `rust/crates/forge-loop/src/profile_selection.rs`
+5. `rust/crates/forge-loop/src/log_tail.rs`
+6. `rust/crates/forge-loop/src/harness_wrapper.rs`
+7. `rust/crates/forge-loop/src/runtime_limits.rs`
+8. `rust/crates/forge-loop/src/lib.rs` exports for above modules.
+
+Validation executed:
+1. `cd rust && cargo fmt --check`
+2. `cd rust && cargo clippy --workspace --all-targets -- -D warnings`
+3. `cd rust && cargo test --workspace`
+4. Multiple task-scoped `forge-loop`/`forge-cli` clippy+test runs.
+
+Important stop condition hit:
+1. While running, other agents unexpectedly took/closed several same-area tasks (`forge-r46`, `forge-kan`, `forge-hwt`, `forge-fhq`) and changed shared files.
+2. Per policy, I stopped further edits on those slices.
+
+Need your direction:
+1. Continue loop; I will only claim fresh unowned `open` tasks and avoid contested slices.
+2. Reconcile first (snapshot current ownership/status), then continue.
+3. Stop here.
+```
+

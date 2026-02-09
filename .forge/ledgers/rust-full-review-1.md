@@ -211,3 +211,157 @@ Summary:
   - Go parity test attempt blocked by local toolchain mismatch (`go1.25.7` stdlib vs `go1.25.6` tool).
 ```
 
+## 2026-02-09T17:53:10Z
+
+- run_id: f367a7a6-b4da-4e86-8b90-93e203e76e8a
+- loop_name: rust-full-review-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-09T17:49:11Z
+- finished_at: 2026-02-09T17:53:10Z
+- exit_code: 0
+
+```
++ return Err(format!("unsupported queue item type \"{value}\""));
+- assert_eq!(err, "unsupported queue item type 'unknown'");
++ assert_eq!(err, "unsupported queue item type \"unknown\"");
+```
+
+**Summary**
+1. Reviewed task: `forge-xwm` (memory/work injection composition scope).  
+2. Validation run:
+   - `cargo test -p forge-loop -p forge-db` passed.
+   - `cargo test -p forge-loop` passed after fix (87 unit + 3 integration).
+   - `GOTOOLCHAIN=go1.25.7 go test ./internal/loop ./internal/db` passed.
+3. Reported via fmail:
+   - initial issue + follow-up fix to `task`
+   - summary to `@forge-orchestrator` (`issues` then `pass (fixed locally)`).
+file update:
+diff --git a/rust/crates/forge-loop/src/queue_interactions.rs b/rust/crates/forge-loop/src/queue_interactions.rs
+index 794967558d6141320abf25546a9e8bf8ddaabd12..ad17f0bc20aec57ecb820d0776d20f0580d35204
+--- a/rust/crates/forge-loop/src/queue_interactions.rs
++++ b/rust/crates/forge-loop/src/queue_interactions.rs
+@@ -52,7 +52,7 @@
+                 return Ok(plan);
+             }
+             QueueControlItem::Unsupported(value) => {
+-                return Err(format!("unsupported queue item type '{value}'"));
++                return Err(format!("unsupported queue item type \"{value}\""));
+             }
+         }
+     }
+@@ -217,6 +217,6 @@
+             Ok(_) => panic!("expected error"),
+             Err(err) => err,
+         };
+-        assert_eq!(err, "unsupported queue item type 'unknown'");
++        assert_eq!(err, "unsupported queue item type \"unknown\"");
+     }
+ }
+
+tokens used
+98,094
+**Findings**
+1. `medium` parity miss found and fixed: unsupported queue-item error used single quotes, Go uses `%q` (double quotes).  
+   - Fixed in `rust/crates/forge-loop/src/queue_interactions.rs:55`  
+   - Test updated in `rust/crates/forge-loop/src/queue_interactions.rs:220`  
+   - Diff:
+```diff
+- return Err(format!("unsupported queue item type '{value}'"));
++ return Err(format!("unsupported queue item type \"{value}\""));
+- assert_eq!(err, "unsupported queue item type 'unknown'");
++ assert_eq!(err, "unsupported queue item type \"unknown\"");
+```
+
+**Summary**
+1. Reviewed task: `forge-xwm` (memory/work injection composition scope).  
+2. Validation run:
+   - `cargo test -p forge-loop -p forge-db` passed.
+   - `cargo test -p forge-loop` passed after fix (87 unit + 3 integration).
+   - `GOTOOLCHAIN=go1.25.7 go test ./internal/loop ./internal/db` passed.
+3. Reported via fmail:
+   - initial issue + follow-up fix to `task`
+   - summary to `@forge-orchestrator` (`issues` then `pass (fixed locally)`).
+```
+
+## 2026-02-09T17:58:35Z
+
+- run_id: f99c04eb-910d-4a24-969f-a6eaffe0bcaf
+- loop_name: rust-full-review-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-09T17:55:10Z
+- finished_at: 2026-02-09T17:58:35Z
+- exit_code: 0
+
+```
+-    fs::write(ledger_path, content).map_err(|err| err.to_string())
++    let mut options = OpenOptions::new();
++    options.create(true).write(true).truncate(true);
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::OpenOptionsExt;
++        options.mode(0o644);
++    }
++    let mut file = options.open(ledger_path).map_err(|err| err.to_string())?;
++    file.write_all(content.as_bytes())
++        .map_err(|err| err.to_string())
+ }
+ 
+ pub fn append_ledger_entry(
+@@ -110,9 +119,14 @@
+         return Ok(());
+     }
+ 
+-    let mut file = OpenOptions::new()
+-        .create(true)
+-        .append(true)
++    let mut options = OpenOptions::new();
++    options.create(true).append(true);
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::OpenOptionsExt;
++        options.mode(0o644);
++    }
++    let mut file = options
+         .open(&loop_record.ledger_path)
+         .map_err(|err| err.to_string())?;
+ 
+
+tokens used
+88,802
+Hi. One parity bug caught and fixed; ledger writer now matches Go file-mode behavior.
+
+**Findings**
+1. `Medium` (fixed): ledger file create mode parity drift on Unix with `umask 0002`.
+`rust/crates/forge-loop/src/ledger_writer.rs:81`
+`rust/crates/forge-loop/src/ledger_writer.rs:122`
+Fix: explicit `0o644` on create paths via `OpenOptionsExt::mode(0o644)` (create/truncate and create/append).
+
+**Exact Diff Applied**
+1. Replaced `fs::write(...)` create path with `OpenOptions` + `write_all(...)` + Unix `mode(0o644)`.
+2. Replaced append open chain with `OpenOptions` builder + Unix `mode(0o644)` before `.open(...)`.
+
+**Validation**
+1. `cargo test -p forge-loop ledger_writer --manifest-path rust/Cargo.toml` passed (`5` ledger-related tests including scenario).
+2. `go test ./internal/loop/...` blocked by environment mismatch: stdlib compiled with `go1.25.7`, tool is `go1.25.6`.
+
+**Residual Risk**
+1. Full Go parity validation pending toolchain alignment.
+
+**Reporting Sent**
+1. `fmail send task` finding/fix + residual-risk note.
+2. `fmail send @forge-orchestrator "review summary: forge-mjb pass"`.
+
+**Review Doc**
+1. `docs/review/2026-02-09-forge-mjb-ledger-writer-review.md`
+```
+
