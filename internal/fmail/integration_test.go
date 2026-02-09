@@ -232,7 +232,7 @@ func TestConnectedSendWatch(t *testing.T) {
 	skipIfNoNetwork(t)
 
 	t.Setenv(EnvProject, "proj-test")
-	root := t.TempDir()
+	root := shortTempDir(t)
 	runtime := &Runtime{Root: root, Agent: "agent1"}
 
 	store, err := NewStore(root)
@@ -281,6 +281,14 @@ func TestConnectedSendWatch(t *testing.T) {
 	require.Len(t, messages, 1)
 	require.Equal(t, "task", messages[0].To)
 	require.Equal(t, "connected hello", messages[0].Body)
+}
+
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	root, err := os.MkdirTemp("/tmp", "fmail-test-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	return root
 }
 
 func runLogJSON(t *testing.T, runtime *Runtime, args []string, flags map[string]string) []*Message {
