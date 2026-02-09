@@ -12,6 +12,11 @@ Hard guardrails
 - No scale-up before single-loop proof succeeds.
 - No task closure on near-miss.
 
+Harness policy (pinned)
+- Codex dev workers must use `rust-swarm-dev-codex-continuous`.
+- Claude dev workers must use `rust-swarm-dev-claude-single-task` with `--max-iterations 1`.
+- Reject generic dev spawn unless explicitly requested by operator.
+
 Control protocol
 1. Preflight every cycle:
 - `forge --robot-help`
@@ -23,6 +28,9 @@ Control protocol
 - `forge ps`
 - `forge logs --all --since 20m`
 - check task flow (`open -> in_progress -> closed`)
+- confirm harness behavior:
+  - codex loops stay hot on ready queue
+  - claude loops exit after one task
 3. Dogpile checks:
 - `sv task list --project prj-vr0104gr --status in_progress --json`
 - `fmail log task -n 200 | rg 'claim:'`

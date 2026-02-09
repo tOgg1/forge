@@ -5,12 +5,20 @@ Repo: `~/Code/oss--forge/repos/forge`
 
 ## Prompt set
 
-- `.forge/prompts/rust-swarm-dev.md`
+- `.forge/prompts/rust-swarm-dev-codex-continuous.md`
+- `.forge/prompts/rust-swarm-dev-claude-single-task.md`
 - `.forge/prompts/rust-swarm-design-parity.md`
 - `.forge/prompts/rust-swarm-review.md`
 - `.forge/prompts/rust-swarm-stale-auditor.md`
 - `.forge/prompts/rust-swarm-committer.md`
 - `.forge/prompts/rust-swarm-orchestrator.md`
+
+## Harness map (pinned v1)
+
+- Codex dev loops: `rust-swarm-dev-codex-continuous`
+- Claude dev loops: `rust-swarm-dev-claude-single-task`
+- Design/review/stale/committer/orchestrator: existing role prompts
+- Update path later: swap prompt name in spawn commands only; keep project/task policy unchanged
 
 ## Stage 0: preflight
 
@@ -24,13 +32,24 @@ sv task count --project prj-vr0104gr --status in_progress
 
 ## Stage 1: single-loop proof
 
+Run one proof loop for each harness mode.
+
 ```bash
+# codex continuous proof
 forge up \
-  --name rust-dev-proof \
-  --profile <DEV_PROFILE> \
-  --prompt rust-swarm-dev \
+  --name rust-dev-codex-proof \
+  --profile <CODEX_DEV_PROFILE> \
+  --prompt rust-swarm-dev-codex-continuous \
   --max-iterations 1 \
-  --tags rust-rewrite,swarm,proof,dev
+  --tags rust-rewrite,swarm,proof,dev,codex
+
+# claude single-task proof
+forge up \
+  --name rust-dev-claude-proof \
+  --profile <CLAUDE_DEV_PROFILE> \
+  --prompt rust-swarm-dev-claude-single-task \
+  --max-iterations 1 \
+  --tags rust-rewrite,swarm,proof,dev,claude
 ```
 
 Pass condition before scale:
@@ -42,9 +61,13 @@ Pass condition before scale:
 ## Stage 2: controlled ramp
 
 ```bash
-# 2 dev loops first
-forge up --name rust-dev-1 --profile <DEV_PROFILE_1> --prompt rust-swarm-dev --max-iterations 0 --tags rust-rewrite,swarm,dev
-forge up --name rust-dev-2 --profile <DEV_PROFILE_2> --prompt rust-swarm-dev --max-iterations 0 --tags rust-rewrite,swarm,dev
+# codex dev loops (continuous)
+forge up --name rust-dev-codex-1 --profile <CODEX_DEV_PROFILE_1> --prompt rust-swarm-dev-codex-continuous --max-iterations 0 --tags rust-rewrite,swarm,dev,codex
+forge up --name rust-dev-codex-2 --profile <CODEX_DEV_PROFILE_2> --prompt rust-swarm-dev-codex-continuous --max-iterations 0 --tags rust-rewrite,swarm,dev,codex
+
+# claude dev loops (single-task per loop)
+forge up --name rust-dev-claude-1 --profile <CLAUDE_DEV_PROFILE_1> --prompt rust-swarm-dev-claude-single-task --max-iterations 1 --tags rust-rewrite,swarm,dev,claude
+forge up --name rust-dev-claude-2 --profile <CLAUDE_DEV_PROFILE_2> --prompt rust-swarm-dev-claude-single-task --max-iterations 1 --tags rust-rewrite,swarm,dev,claude
 
 # add parity/design + review
 forge up --name rust-design-1 --profile <DESIGN_PROFILE> --prompt rust-swarm-design-parity --max-iterations 0 --tags rust-rewrite,swarm,design
@@ -56,6 +79,14 @@ forge up --name rust-committer-1 --profile <COMMIT_PROFILE> --prompt rust-swarm-
 
 # optional orchestrator loop
 forge up --name rust-orchestrator-1 --profile <ORCH_PROFILE> --prompt rust-swarm-orchestrator --max-iterations 0 --tags rust-rewrite,swarm,orchestrator
+```
+
+Claude respawn pattern (optional):
+
+```bash
+# rerun single-task claude workers when queue remains
+forge up --name rust-dev-claude-1 --profile <CLAUDE_DEV_PROFILE_1> --prompt rust-swarm-dev-claude-single-task --max-iterations 1 --tags rust-rewrite,swarm,dev,claude
+forge up --name rust-dev-claude-2 --profile <CLAUDE_DEV_PROFILE_2> --prompt rust-swarm-dev-claude-single-task --max-iterations 1 --tags rust-rewrite,swarm,dev,claude
 ```
 
 ## Health check command set
@@ -97,4 +128,5 @@ sv task count --project prj-vr0104gr --status in_progress
 - manual operator hold, or
 - `open` task count reaches target and stays stable, and
 - no critical parity blockers remain open, and
-- no stale `in_progress` tasks without owner response.
+- no stale `in_progress` tasks without owner response, and
+- claude single-task workers drained cleanly (no hung loop instances).
