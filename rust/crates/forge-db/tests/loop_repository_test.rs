@@ -1,10 +1,10 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use forge_db::loop_repository::{Loop, LoopRepository, LoopState};
 use forge_db::{Config, Db, DbError};
+use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -18,12 +18,9 @@ fn setup_db() -> (Db, PathBuf) {
 }
 
 fn temp_db_path(prefix: &str) -> PathBuf {
-    let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(value) => value.as_nanos(),
-        Err(err) => panic!("clock before epoch: {err}"),
-    };
     std::env::temp_dir().join(format!(
-        "forge-db-{prefix}-{nanos}-{}.sqlite",
+        "forge-db-{prefix}-{}-{}.sqlite",
+        Uuid::new_v4(),
         std::process::id()
     ))
 }
