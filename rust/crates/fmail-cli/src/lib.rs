@@ -221,6 +221,7 @@ pub mod register;
 pub mod send;
 pub mod status;
 pub mod topics;
+pub mod watch;
 pub mod who;
 
 #[cfg(test)]
@@ -249,6 +250,7 @@ pub fn run_cli_for_test(args: &[&str], backend: &dyn FmailBackend) -> CommandOut
         "send" => send::run_send_for_test(rest, backend),
         "status" => status::run_status_for_test(rest, backend),
         "topics" | "topic" => topics::run_topics_for_test(rest, backend),
+        "watch" => watch::run_watch_for_test(rest, backend),
         "who" => who::run_who_for_test(rest, backend),
         _ => {
             out.stderr = format!("unknown command: {cmd}\n");

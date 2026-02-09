@@ -1,0 +1,10 @@
+Stream messages as they arrive
+
+Usage:
+  fmail watch [topic|@agent] [flags]
+
+Flags:
+  -c, --count int         Exit after receiving N messages
+      --json              Output as JSON
+      --timeout duration  Maximum wait time before exiting
+  -h, --help              Help for watch
