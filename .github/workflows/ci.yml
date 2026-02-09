@@ -100,6 +100,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: rust boundary check
+        run: scripts/rust-boundary-check.sh
       - name: rust fmt
         working-directory: rust
         run: cargo fmt --all --check
@@ -148,11 +150,17 @@ jobs:
             echo "Thresholds: lines ${RUST_COVERAGE_FAIL_UNDER_LINES}%, functions ${RUST_COVERAGE_FAIL_UNDER_FUNCTIONS}%, regions ${RUST_COVERAGE_FAIL_UNDER_REGIONS}%"
             echo ""
             cargo llvm-cov report --summary-only
+            echo ""
+            echo "### Per-crate coverage"
+            echo ""
+            cat coverage/per-crate-summary.txt
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: rust-coverage
-          path: rust/coverage/lcov.info
+          path: |
+            rust/coverage/lcov.info
+            rust/coverage/per-crate-summary.txt
           if-no-files-found: error
 
   build:

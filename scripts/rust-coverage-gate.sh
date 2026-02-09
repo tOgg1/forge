@@ -33,6 +33,10 @@ fi
 
 today="$(date -u +%F)"
 
+mkdir -p coverage
+per_crate_summary_path="coverage/per-crate-summary.txt"
+: > "$per_crate_summary_path"
+
 while IFS= read -r raw_line || [[ -n "${raw_line:-}" ]]; do
   line="$(trim "$raw_line")"
   [[ -z "$line" ]] && continue
@@ -97,11 +101,20 @@ while IFS= read -r raw_line || [[ -n "${raw_line:-}" ]]; do
   if [[ -n "$waiver_row" ]]; then
     IFS=$'\t' read -r _ expires_on approved_by issue_ref reason <<< "$waiver_row"
     echo "waiving $crate >= ${threshold}% until $expires_on (approved_by=$approved_by issue=$issue_ref)"
+    {
+      echo "crate=$crate (WAIVED until $expires_on; approved_by=$approved_by; issue=$issue_ref)"
+      cargo llvm-cov --package "$crate" --summary-only
+      echo ""
+    } | tee -a "$per_crate_summary_path"
     continue
   fi
 
   echo "enforcing $crate >= ${threshold}% line coverage"
-  cargo llvm-cov --package "$crate" --summary-only --fail-under-lines "$threshold"
+  {
+    echo "crate=$crate"
+    cargo llvm-cov --package "$crate" --summary-only --fail-under-lines "$threshold"
+    echo ""
+  } | tee -a "$per_crate_summary_path"
 done < "$threshold_file"
 
 if [[ -s "$tmp_waivers" ]]; then

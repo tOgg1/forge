@@ -19,6 +19,7 @@ func TestRustCoveragePolicyAndWorkflowPinned(t *testing.T) {
 		"`cargo-llvm-cov`",
 		"Machine-readable report format: LCOV",
 		"`rust/coverage/lcov.info`",
+		"`rust/coverage/per-crate-summary.txt`",
 		"CI artifact name: `rust-coverage`",
 		"`cargo llvm-cov report --summary-only`",
 		"`rust/coverage-thresholds.txt`",
@@ -40,9 +41,12 @@ func TestRustCoveragePolicyAndWorkflowPinned(t *testing.T) {
 		"--workspace",
 		"--lcov",
 		"--output-path coverage/lcov.info",
+		"per-crate-summary.txt",
 		"cargo llvm-cov report --summary-only",
 		"name: rust-coverage",
-		"path: rust/coverage/lcov.info",
+		// Path may be a YAML multi-line list.
+		"rust/coverage/lcov.info",
+		"rust/coverage/per-crate-summary.txt",
 		"run: scripts/rust-coverage-gate.sh",
 		"Waivers: rust/coverage-waivers.txt",
 	} {

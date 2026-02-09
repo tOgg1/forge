@@ -14,6 +14,7 @@ Baseline snapshot: `docs/rust-baseline-inventory-v2026-02-09.md`.
 Parity matrix: `docs/rust-parity-matrix.md`.
 Legacy drop freeze: `docs/rust-legacy-drop-list.md`.
 Coverage gate policy: `docs/rust-coverage-policy.md`.
+Crate boundary policy: `docs/rust-crate-boundary-policy.md`.
 
 ## Non-Negotiables
 

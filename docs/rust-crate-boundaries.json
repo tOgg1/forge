@@ -1,0 +1,14 @@
+{
+  "forge-core": 0,
+  "forge-ftui-adapter": 0,
+  "forge-db": 1,
+  "fmail-core": 1,
+  "forge-loop": 2,
+  "forge-daemon": 3,
+  "forge-runner": 3,
+  "forge-cli": 4,
+  "fmail-cli": 4,
+  "forge-tui": 5,
+  "fmail-tui": 5,
+  "forge-parity-stub": 9
+}
