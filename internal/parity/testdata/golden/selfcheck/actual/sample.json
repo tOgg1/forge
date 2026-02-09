@@ -1,0 +1,16 @@
+{
+  "events": [
+    {
+      "kind": "warn",
+      "path": "/Users/trmd/Code/oss--forge/repos/forge/tmp/b.log",
+      "time": "2026-02-09T12:01:02Z",
+      "id": "20260209-120102-9002"
+    },
+    {
+      "kind": "info",
+      "path": "/Users/trmd/Code/oss--forge/repos/forge/tmp/a.log",
+      "time": "2026-02-09T12:01:00Z",
+      "id": "20260209-120100-9001"
+    }
+  ]
+}

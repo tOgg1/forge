@@ -1,0 +1,16 @@
+{
+  "events": [
+    {
+      "id": "20260209-120000-1001",
+      "time": "2026-02-09T12:00:00Z",
+      "path": "/Users/alex/work/repo/tmp/a.log",
+      "kind": "info"
+    },
+    {
+      "id": "20260209-120002-1002",
+      "time": "2026-02-09T12:00:02Z",
+      "path": "/Users/alex/work/repo/tmp/b.log",
+      "kind": "warn"
+    }
+  ]
+}
