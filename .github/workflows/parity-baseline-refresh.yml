@@ -1,0 +1,73 @@
+name: Parity Baseline Refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval_ref:
+        description: "Approval reference (forge-<task>, PR-<id>, or pull URL)"
+        required: true
+        type: string
+      mode:
+        description: "dry-run checks drift; apply regenerates refresh artifacts"
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+      allow_drift:
+        description: "Allow dry-run to pass when drift detected"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  baseline-refresh-dry-run:
+    if: inputs.mode == 'dry-run'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Execute baseline refresh protocol (dry-run)
+        run: |
+          args=()
+          if [ "${{ inputs.allow_drift }}" = "true" ]; then
+            args+=(--allow-drift)
+          fi
+          scripts/rust-baseline-refresh.sh \
+            --approval "${{ inputs.approval_ref }}" \
+            --out-dir build/rust-baseline/refresh \
+            "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baseline-refresh-report
+          path: build/rust-baseline/refresh/baseline-refresh-report.json
+          if-no-files-found: error
+
+  baseline-refresh-apply:
+    if: inputs.mode == 'apply'
+    runs-on: ubuntu-latest
+    environment: parity-baseline-refresh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Execute baseline refresh protocol (apply)
+        run: |
+          scripts/rust-baseline-refresh.sh \
+            --approval "${{ inputs.approval_ref }}" \
+            --apply \
+            --out-dir build/rust-baseline/refresh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baseline-refresh-report
+          path: build/rust-baseline/refresh/
+          if-no-files-found: error

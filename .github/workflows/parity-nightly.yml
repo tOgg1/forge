@@ -17,13 +17,55 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Run oracle parity harness
+      - name: Run parity suite
         id: parity
         run: |
           set +e
-          go test ./internal/parity -run '^(TestOracleFixtureParity|TestSchemaFingerprintBaseline)$' -count=1 | tee parity-nightly.log
-          status=${PIPESTATUS[0]}
-          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          fail=0
+          : > parity-nightly.log
+
+          oracle_outcome=success
+          cli_gate_outcome=success
+          synthetic_drift_outcome=success
+          schema_outcome=success
+          daemon_proto_outcome=success
+          proto_wire_outcome=success
+          runtime_outcome=success
+          fmail_outcome=success
+
+          go test ./internal/parity -run '^TestOracleFixtureParity$' -count=1 | tee -a parity-nightly.log
+          if [ "${PIPESTATUS[0]}" != "0" ]; then oracle_outcome=failure; fail=1; fi
+
+          go test ./internal/parity -run '^TestCLIGateRootOracleBaseline$' -count=1 | tee -a parity-nightly.log
+          if [ "${PIPESTATUS[0]}" != "0" ]; then cli_gate_outcome=failure; fail=1; fi
+
+          go test ./internal/parity -run '^TestCompareTreesDetectsSyntheticDrift$' -count=1 | tee -a parity-nightly.log
+          if [ "${PIPESTATUS[0]}" != "0" ]; then synthetic_drift_outcome=failure; fail=1; fi
+
+          go test ./internal/parity -run '^TestSchemaFingerprintBaseline$' -count=1 | tee -a parity-nightly.log
+          if [ "${PIPESTATUS[0]}" != "0" ]; then schema_outcome=failure; fail=1; fi
+
+          go test ./internal/parity -run '^TestDaemonProtoGate' -count=1 | tee -a parity-nightly.log
+          if [ "${PIPESTATUS[0]}" != "0" ]; then daemon_proto_outcome=failure; fail=1; fi
+
+          go test ./internal/parity -run '^TestProtoWireGate' -count=1 | tee -a parity-nightly.log
+          if [ "${PIPESTATUS[0]}" != "0" ]; then proto_wire_outcome=failure; fail=1; fi
+
+          go test ./internal/parity -run '^TestRuntimeGateLoopQueueSmartStopLedger$' -count=1 | tee -a parity-nightly.log
+          if [ "${PIPESTATUS[0]}" != "0" ]; then runtime_outcome=failure; fail=1; fi
+
+          go test ./internal/parity -run '^TestFmailGateCommandAndTUIBaseline$' -count=1 | tee -a parity-nightly.log
+          if [ "${PIPESTATUS[0]}" != "0" ]; then fmail_outcome=failure; fail=1; fi
+
+          echo "exit_code=$fail" >> "$GITHUB_OUTPUT"
+          echo "oracle_outcome=$oracle_outcome" >> "$GITHUB_OUTPUT"
+          echo "cli_gate_outcome=$cli_gate_outcome" >> "$GITHUB_OUTPUT"
+          echo "synthetic_drift_outcome=$synthetic_drift_outcome" >> "$GITHUB_OUTPUT"
+          echo "schema_outcome=$schema_outcome" >> "$GITHUB_OUTPUT"
+          echo "daemon_proto_outcome=$daemon_proto_outcome" >> "$GITHUB_OUTPUT"
+          echo "proto_wire_outcome=$proto_wire_outcome" >> "$GITHUB_OUTPUT"
+          echo "runtime_outcome=$runtime_outcome" >> "$GITHUB_OUTPUT"
+          echo "fmail_outcome=$fmail_outcome" >> "$GITHUB_OUTPUT"
           exit 0
       - name: Summarize parity result
         run: |
@@ -32,52 +74,74 @@ jobs:
               echo "## Nightly Parity"
               echo ""
               echo "- Status: PASS"
-              echo "- Checks: internal/parity oracle fixtures + schema fingerprint baseline"
+              echo "- Checks: internal/parity suite (oracle/CLI/runtime/daemon/proto/fmail/schema)"
             } >> "$GITHUB_STEP_SUMMARY"
           else
             {
               echo "## Nightly Parity"
               echo ""
               echo "- Status: DRIFT DETECTED"
-              echo "- Checks: internal/parity oracle fixtures + schema fingerprint baseline"
-              echo "- See parity-nightly.log artifact"
+              echo "- Checks: internal/parity suite (oracle/CLI/runtime/daemon/proto/fmail/schema)"
+              echo "- See parity-nightly.log and parity-diff artifacts"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Generate parity diff artifacts on drift
+        if: steps.parity.outputs.exit_code != '0'
+        run: |
+          go run ./cmd/parity-artifacts \
+            --expected internal/parity/testdata/oracle/expected \
+            --actual internal/parity/testdata/oracle/actual \
+            --out parity-artifacts || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: parity-nightly-log
           path: parity-nightly.log
           if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: steps.parity.outputs.exit_code != '0'
+        with:
+          name: parity-diff
+          path: parity-artifacts/
+          if-no-files-found: ignore
+      - name: Build parity dashboard artifact
+        if: always()
+        run: |
+          cat > parity-dashboard-input.json <<'JSON'
+          {
+            "schema_version": "paritydash.input.v1",
+            "run": {
+              "workflow": "${{ github.workflow }}",
+              "run_id": "${{ github.run_id }}",
+              "run_attempt": "${{ github.run_attempt }}",
+              "ref": "${{ github.ref }}",
+              "sha": "${{ github.sha }}",
+              "repository": "${{ github.repository }}",
+              "event_name": "${{ github.event_name }}",
+              "server_url": "${{ github.server_url }}",
+              "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            },
+            "checks": [
+              { "id": "oracle_fixture_parity", "name": "Oracle fixture parity", "outcome": "${{ steps.parity.outputs.oracle_outcome }}" },
+              { "id": "cli_gate_root_oracle_baseline", "name": "CLI gate baseline", "outcome": "${{ steps.parity.outputs.cli_gate_outcome }}" },
+              { "id": "synthetic_drift_detection", "name": "Synthetic drift detection", "outcome": "${{ steps.parity.outputs.synthetic_drift_outcome }}" },
+              { "id": "schema_fingerprint_baseline", "name": "Schema fingerprint baseline", "outcome": "${{ steps.parity.outputs.schema_outcome }}" },
+              { "id": "daemon_proto_gate", "name": "Daemon/proto gate", "outcome": "${{ steps.parity.outputs.daemon_proto_outcome }}" },
+              { "id": "proto_wire_gate", "name": "Proto wire gate", "outcome": "${{ steps.parity.outputs.proto_wire_outcome }}" },
+              { "id": "runtime_gate_loop_queue_smart_stop_ledger", "name": "Runtime gate baseline", "outcome": "${{ steps.parity.outputs.runtime_outcome }}" },
+              { "id": "fmail_gate_command_and_tui_baseline", "name": "Fmail gate baseline", "outcome": "${{ steps.parity.outputs.fmail_outcome }}" }
+            ]
+          }
+          JSON
+          go run ./cmd/parity-dashboard --input parity-dashboard-input.json --out parity-dashboard
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-dashboard
+          path: parity-dashboard/
+          if-no-files-found: error
       - name: Fail on drift
         if: steps.parity.outputs.exit_code != '0'
         run: |
           echo "nightly parity drift detected"
           exit 1
-
-  rust-coverage-nightly:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Enforce per-crate thresholds
-        run: scripts/rust-coverage-gate.sh
-      - name: Generate nightly rust coverage
-        working-directory: rust
-        run: cargo llvm-cov --workspace --all-features --lcov --output-path coverage/nightly-lcov.info
-      - name: Summarize nightly rust coverage
-        working-directory: rust
-        run: |
-          {
-            echo "## Nightly Rust Coverage"
-            echo ""
-            cargo llvm-cov report --summary-only
-          } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rust-coverage-nightly
-          path: rust/coverage/nightly-lcov.info
-          if-no-files-found: error

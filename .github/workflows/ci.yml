@@ -58,22 +58,31 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Run oracle parity harness
+        id: oracle_fixture_parity
         run: go test ./internal/parity -run '^TestOracleFixtureParity$' -count=1
       - name: Run CLI gate baseline test
+        id: cli_gate_root_oracle_baseline
         run: go test ./internal/parity -run '^TestCLIGateRootOracleBaseline$' -count=1
       - name: Run synthetic drift detection test
+        id: synthetic_drift_detection
         run: go test ./internal/parity -run '^TestCompareTreesDetectsSyntheticDrift$' -count=1
       - name: Run schema fingerprint baseline test
+        id: schema_fingerprint_baseline
         run: go test ./internal/parity -run '^TestSchemaFingerprintBaseline$' -count=1
       - name: Run daemon/proto parity gate baseline tests
+        id: daemon_proto_gate
         run: go test ./internal/parity -run '^TestDaemonProtoGate' -count=1
       - name: Run proto wire baseline gate tests
+        id: proto_wire_gate
         run: go test ./internal/parity -run '^TestProtoWireGate' -count=1
       - name: Run runtime parity gate baseline test
+        id: runtime_gate_loop_queue_smart_stop_ledger
         run: go test ./internal/parity -run '^TestRuntimeGateLoopQueueSmartStopLedger$' -count=1
       - name: Run fmail parity gate baseline test
+        id: fmail_gate_command_and_tui_baseline
         run: go test ./internal/parity -run '^TestFmailGateCommandAndTUIBaseline$' -count=1
       - name: Generate parity diff artifacts on drift
+        id: parity_diff_artifacts
         if: failure()
         run: |
           go run ./cmd/parity-artifacts \
@@ -86,6 +95,44 @@ jobs:
           name: parity-diff
           path: parity-artifacts/
           if-no-files-found: ignore
+      - name: Build parity dashboard artifact
+        if: always()
+        run: |
+          cat > parity-dashboard-input.json <<'JSON'
+          {
+            "schema_version": "paritydash.input.v1",
+            "run": {
+              "workflow": "${{ github.workflow }}",
+              "run_id": "${{ github.run_id }}",
+              "run_attempt": "${{ github.run_attempt }}",
+              "ref": "${{ github.ref }}",
+              "sha": "${{ github.sha }}",
+              "repository": "${{ github.repository }}",
+              "event_name": "${{ github.event_name }}",
+              "server_url": "${{ github.server_url }}",
+              "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            },
+            "checks": [
+              { "id": "oracle_fixture_parity", "name": "Oracle fixture parity", "outcome": "${{ steps.oracle_fixture_parity.outcome }}" },
+              { "id": "cli_gate_root_oracle_baseline", "name": "CLI gate baseline", "outcome": "${{ steps.cli_gate_root_oracle_baseline.outcome }}" },
+              { "id": "synthetic_drift_detection", "name": "Synthetic drift detection", "outcome": "${{ steps.synthetic_drift_detection.outcome }}" },
+              { "id": "schema_fingerprint_baseline", "name": "Schema fingerprint baseline", "outcome": "${{ steps.schema_fingerprint_baseline.outcome }}" },
+              { "id": "daemon_proto_gate", "name": "Daemon/proto gate", "outcome": "${{ steps.daemon_proto_gate.outcome }}" },
+              { "id": "proto_wire_gate", "name": "Proto wire gate", "outcome": "${{ steps.proto_wire_gate.outcome }}" },
+              { "id": "runtime_gate_loop_queue_smart_stop_ledger", "name": "Runtime gate baseline", "outcome": "${{ steps.runtime_gate_loop_queue_smart_stop_ledger.outcome }}" },
+              { "id": "fmail_gate_command_and_tui_baseline", "name": "Fmail gate baseline", "outcome": "${{ steps.fmail_gate_command_and_tui_baseline.outcome }}" },
+              { "id": "parity_diff_artifacts", "name": "Parity diff artifacts (on drift)", "outcome": "${{ steps.parity_diff_artifacts.outcome }}" }
+            ]
+          }
+          JSON
+          go run ./cmd/parity-dashboard --input parity-dashboard-input.json --out parity-dashboard
+          cat parity-dashboard/parity-dashboard.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-dashboard
+          path: parity-dashboard/
+          if-no-files-found: error
 
   baseline-snapshot:
     runs-on: ubuntu-latest
@@ -101,6 +148,26 @@ jobs:
         with:
           name: rust-baseline-snapshot
           path: build/rust-baseline/latest/
+          if-no-files-found: error
+
+  baseline-refresh-protocol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Baseline refresh protocol dry-run
+        run: |
+          scripts/rust-baseline-refresh.sh \
+            --approval forge-7sd \
+            --allow-drift \
+            --out-dir build/rust-baseline/protocol
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-baseline-refresh-protocol
+          path: build/rust-baseline/protocol/baseline-refresh-report.json
           if-no-files-found: error
 
   rust-quality:
@@ -177,7 +244,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [lint, test, parity, baseline-snapshot, rust-quality, rust-coverage]
+    needs: [lint, test, parity, baseline-snapshot, baseline-refresh-protocol, rust-quality, rust-coverage]
     steps:
       - uses: actions/checkout@v4
         with:

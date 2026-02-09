@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,8 @@ func TestWriteDiffArtifactsSchema(t *testing.T) {
 	assertExists(t, filepath.Join(out, "expected", "a.txt"))
 	assertExists(t, filepath.Join(out, "actual", "a.txt"))
 	assertExists(t, filepath.Join(out, "normalized", "report.json"))
+	assertExists(t, filepath.Join(out, "normalized", "drift-report.json"))
+	assertExists(t, filepath.Join(out, "normalized", "drift-triage.md"))
 	assertExists(t, filepath.Join(out, "normalized", "diffs", "b.txt.diff"))
 	assertExists(t, filepath.Join(out, "normalized", "diffs", "extra.txt.unexpected.diff"))
 
@@ -51,6 +54,54 @@ func TestWriteDiffArtifactsSchema(t *testing.T) {
 	}
 	if len(manifest.Unexpected) != 1 || manifest.Unexpected[0] != "extra.txt" {
 		t.Fatalf("unexpected unexpected-manifest: %+v", manifest)
+	}
+
+	var drift struct {
+		SchemaVersion string `json:"schema_version"`
+		Summary       struct {
+			Total           int  `json:"total"`
+			MissingExpected int  `json:"missing_expected"`
+			Mismatched      int  `json:"mismatched"`
+			Unexpected      int  `json:"unexpected"`
+			HasDrift        bool `json:"has_drift"`
+		} `json:"summary"`
+		Items []struct {
+			Priority  string `json:"priority"`
+			DriftType string `json:"drift_type"`
+			Path      string `json:"path"`
+		} `json:"items"`
+	}
+	driftBody, err := os.ReadFile(filepath.Join(out, "normalized", "drift-report.json"))
+	if err != nil {
+		t.Fatalf("read drift report: %v", err)
+	}
+	if err := json.Unmarshal(driftBody, &drift); err != nil {
+		t.Fatalf("unmarshal drift report: %v", err)
+	}
+	if drift.SchemaVersion != "parity.drift.v1" {
+		t.Fatalf("unexpected drift schema: %q", drift.SchemaVersion)
+	}
+	if !drift.Summary.HasDrift || drift.Summary.Total != 2 || drift.Summary.Mismatched != 1 || drift.Summary.Unexpected != 1 {
+		t.Fatalf("unexpected drift summary: %+v", drift.Summary)
+	}
+	if len(drift.Items) != 2 {
+		t.Fatalf("unexpected drift item count: %d", len(drift.Items))
+	}
+
+	mdBody, err := os.ReadFile(filepath.Join(out, "normalized", "drift-triage.md"))
+	if err != nil {
+		t.Fatalf("read drift triage: %v", err)
+	}
+	text := string(mdBody)
+	for _, want := range []string{
+		"# Parity Drift Triage",
+		"| Priority | Drift type | Path | Owner | Root cause | Action | Tracking issue |",
+		"`b.txt`",
+		"`extra.txt`",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("drift triage missing %q", want)
+		}
 	}
 }
 
