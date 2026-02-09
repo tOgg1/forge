@@ -1,0 +1,4 @@
+forge
+Usage:
+  forge up --name demo
+  forge ps --json

@@ -49,9 +49,22 @@ jobs:
             coverage.txt
           if-no-files-found: ignore
 
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run oracle parity harness
+        run: go test ./internal/parity -run '^TestOracleFixtureParity$' -count=1
+      - name: Run synthetic drift detection test
+        run: go test ./internal/parity -run '^TestCompareTreesDetectsSyntheticDrift$' -count=1
+
   build:
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, parity]
     steps:
       - uses: actions/checkout@v4
         with:
