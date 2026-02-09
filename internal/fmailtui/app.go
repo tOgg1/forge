@@ -102,6 +102,7 @@ type Model struct {
 	showHelp   bool
 	toast      string
 	toastUntil time.Time
+	spinnerFrame int
 
 	compose composeState
 	quick   quickSendState
@@ -271,6 +272,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case composeSendResultMsg:
 		return m, m.handleComposeSendResult(typed)
+	case spinnerTickMsg:
+		if m.compose.sending || m.quick.sending {
+			m.spinnerFrame++
+			return m, spinnerTickCmd()
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if cmd, handled := m.handleGlobalKey(typed); handled {
 			return m, cmd
