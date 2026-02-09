@@ -1,12 +1,14 @@
 //! forge-loop: loop runtime primitives and orchestration entrypoints.
 
 pub mod harness_wrapper;
+pub mod iteration_result;
 pub mod ledger_writer;
 pub mod log_io;
 pub mod log_tail;
 pub mod profile_selection;
 pub mod prompt_composition;
 pub mod queue_interactions;
+pub mod runner_metadata;
 pub mod runtime_limits;
 pub mod stale_runner;
 pub mod state_machine;

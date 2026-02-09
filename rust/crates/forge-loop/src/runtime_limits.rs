@@ -9,6 +9,7 @@ pub enum RuntimeMetaValue {
     Float(f64),
     Text(String),
     Timestamp(DateTime<Utc>),
+    Object(RuntimeMetadata),
 }
 
 pub type RuntimeMetadata = BTreeMap<String, RuntimeMetaValue>;
@@ -24,7 +25,7 @@ pub fn loop_iteration_count(metadata: Option<&RuntimeMetadata>) -> i32 {
         RuntimeMetaValue::Int(v) => *v as i32,
         RuntimeMetaValue::Float(v) => *v as i32,
         RuntimeMetaValue::Text(v) => v.parse::<i32>().unwrap_or(0),
-        RuntimeMetaValue::Timestamp(_) => 0,
+        RuntimeMetaValue::Timestamp(_) | RuntimeMetaValue::Object(_) => 0,
     }
 }
 
@@ -43,7 +44,7 @@ pub fn loop_started_at(metadata: Option<&RuntimeMetadata>) -> Option<DateTime<Ut
         RuntimeMetaValue::Text(value) => DateTime::parse_from_rfc3339(value)
             .ok()
             .map(|dt| dt.with_timezone(&Utc)),
-        RuntimeMetaValue::Int(_) | RuntimeMetaValue::Float(_) => None,
+        RuntimeMetaValue::Int(_) | RuntimeMetaValue::Float(_) | RuntimeMetaValue::Object(_) => None,
     }
 }
 
