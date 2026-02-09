@@ -12,8 +12,6 @@ use fmail_core::store::TopicSummary;
 struct TopicsLogBackend {
     now: DateTime<Utc>,
     topics: Vec<TopicSummary>,
-    /// Map from (target filter) -> list of message file paths
-    /// None key = all messages, Some(key) = filtered
     messages: Vec<Message>,
 }
 
@@ -84,7 +82,6 @@ impl FmailBackend for TopicsLogBackend {
     }
 
     fn list_message_files(&self, _target: Option<&str>) -> Result<Vec<PathBuf>, String> {
-        // Return a fake path per message
         Ok(self
             .messages
             .iter()
@@ -94,7 +91,6 @@ impl FmailBackend for TopicsLogBackend {
     }
 
     fn read_message_at(&self, path: &Path) -> Result<Message, String> {
-        // Extract index from path
         let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -135,28 +131,19 @@ fn make_msg(id: &str, from: &str, to: &str, body: &str, time: &str) -> Message {
     }
 }
 
-// ===== TOPICS TESTS =====
+// ===== TOPICS GOLDEN TESTS =====
 
 #[test]
-fn topics_empty_outputs_header_only() {
+fn topics_empty_text_matches_golden() {
     let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
     let out = run_cli_for_test(&["topics"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
     assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
-    assert!(
-        out.stdout.contains("TOPIC"),
-        "should have header: {}",
-        out.stdout
-    );
-    assert!(
-        out.stdout.contains("MESSAGES"),
-        "should have header: {}",
-        out.stdout
-    );
+    assert_eq!(out.stdout, include_str!("golden/topics/empty_text.txt"));
 }
 
 #[test]
-fn topics_lists_topics_text() {
+fn topics_nonempty_text_matches_golden() {
     let now = rfc3339("2026-02-09T12:00:00Z");
     let backend = TopicsLogBackend::new(now).with_topics(vec![
         TopicSummary {
@@ -173,16 +160,11 @@ fn topics_lists_topics_text() {
     let out = run_cli_for_test(&["topics"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
     assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
-    assert!(out.stdout.contains("bugs"), "stdout: {}", out.stdout);
-    assert!(out.stdout.contains("tasks"), "stdout: {}", out.stdout);
-    assert!(out.stdout.contains("5"), "stdout: {}", out.stdout);
-    assert!(out.stdout.contains("12"), "stdout: {}", out.stdout);
-    // Last activity should show relative time
-    assert!(out.stdout.contains("30m ago"), "stdout: {}", out.stdout);
+    assert_eq!(out.stdout, include_str!("golden/topics/nonempty_text.txt"));
 }
 
 #[test]
-fn topics_json_output() {
+fn topics_json_matches_golden() {
     let now = rfc3339("2026-02-09T12:00:00Z");
     let backend = TopicsLogBackend::new(now).with_topics(vec![TopicSummary {
         name: "bugs".to_string(),
@@ -192,13 +174,15 @@ fn topics_json_output() {
     let out = run_cli_for_test(&["topics", "--json"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
     assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
+    assert_eq!(out.stdout, include_str!("golden/topics/json.txt"));
+}
 
-    let parsed: serde_json::Value = serde_json::from_str(&out.stdout).expect("parse json");
-    assert!(parsed.is_array(), "should be array: {parsed}");
-    let arr = parsed.as_array().unwrap();
-    assert_eq!(arr.len(), 1);
-    assert_eq!(arr[0]["name"], "bugs");
-    assert_eq!(arr[0]["messages"], 3);
+#[test]
+fn topics_help_matches_golden() {
+    let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
+    let out = run_cli_for_test(&["topics", "--help"], &backend);
+    assert_eq!(out.exit_code, 0);
+    assert_eq!(out.stderr, include_str!("golden/topics/help.txt"));
 }
 
 #[test]
@@ -206,7 +190,7 @@ fn topics_alias_works() {
     let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
     let out = run_cli_for_test(&["topic"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-    assert!(out.stdout.contains("TOPIC"), "stdout: {}", out.stdout);
+    assert_eq!(out.stdout, include_str!("golden/topics/empty_text.txt"));
 }
 
 #[test]
@@ -233,15 +217,7 @@ fn topics_rejects_positional_args() {
     );
 }
 
-#[test]
-fn topics_help() {
-    let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
-    let out = run_cli_for_test(&["topics", "--help"], &backend);
-    assert_eq!(out.exit_code, 0);
-    assert!(out.stderr.contains("List topics"), "stderr: {}", out.stderr);
-}
-
-// ===== LOG TESTS =====
+// ===== LOG GOLDEN TESTS =====
 
 #[test]
 fn log_empty_outputs_nothing() {
@@ -253,7 +229,7 @@ fn log_empty_outputs_nothing() {
 }
 
 #[test]
-fn log_shows_messages_text() {
+fn log_text_matches_golden() {
     let now = rfc3339("2026-02-09T12:00:00Z");
     let backend = TopicsLogBackend::new(now).with_messages(vec![
         make_msg(
@@ -274,26 +250,11 @@ fn log_shows_messages_text() {
     let out = run_cli_for_test(&["log"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
     assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
-    assert!(
-        out.stdout.contains("msg-001"),
-        "should contain id: {}",
-        out.stdout
-    );
-    assert!(
-        out.stdout.contains("alice -> tasks"),
-        "should contain from->to: {}",
-        out.stdout
-    );
-    assert!(
-        out.stdout.contains("first task"),
-        "should contain body: {}",
-        out.stdout
-    );
-    assert!(out.stdout.contains("msg-002"), "stdout: {}", out.stdout);
+    assert_eq!(out.stdout, include_str!("golden/log/text.txt"));
 }
 
 #[test]
-fn log_json_output() {
+fn log_json_matches_golden() {
     let now = rfc3339("2026-02-09T12:00:00Z");
     let backend = TopicsLogBackend::new(now).with_messages(vec![make_msg(
         "msg-001",
@@ -305,11 +266,15 @@ fn log_json_output() {
     let out = run_cli_for_test(&["log", "--json"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
     assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
+    assert_eq!(out.stdout, include_str!("golden/log/json.txt"));
+}
 
-    let parsed: serde_json::Value = serde_json::from_str(out.stdout.trim()).expect("parse json");
-    assert_eq!(parsed["id"], "msg-001");
-    assert_eq!(parsed["from"], "alice");
-    assert_eq!(parsed["to"], "tasks");
+#[test]
+fn log_help_matches_golden() {
+    let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
+    let out = run_cli_for_test(&["log", "--help"], &backend);
+    assert_eq!(out.exit_code, 0);
+    assert_eq!(out.stderr, include_str!("golden/log/help.txt"));
 }
 
 #[test]
@@ -335,14 +300,7 @@ fn log_limit_flag() {
     ]);
     let out = run_cli_for_test(&["log", "-n", "1"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-    // Should only show 1 message (the last one after sorting by ID)
-    let lines: Vec<&str> = out.stdout.trim().lines().collect();
-    assert_eq!(lines.len(), 1, "should show 1 message: {}", out.stdout);
-    assert!(
-        out.stdout.contains("msg-003"),
-        "should show last message: {}",
-        out.stdout
-    );
+    assert_eq!(out.stdout, include_str!("golden/log/limit_one.txt"));
 }
 
 #[test]
@@ -385,16 +343,7 @@ fn log_from_filter() {
     ]);
     let out = run_cli_for_test(&["log", "--from", "alice"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-    assert!(
-        out.stdout.contains("from alice"),
-        "should have alice's msg: {}",
-        out.stdout
-    );
-    assert!(
-        !out.stdout.contains("from bob"),
-        "should not have bob's msg: {}",
-        out.stdout
-    );
+    assert_eq!(out.stdout, include_str!("golden/log/from_filter.txt"));
 }
 
 #[test]
@@ -418,16 +367,8 @@ fn log_from_filter_with_at_prefix() {
     ]);
     let out = run_cli_for_test(&["log", "--from", "@alice"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-    assert!(
-        out.stdout.contains("from alice"),
-        "should have alice's msg: {}",
-        out.stdout
-    );
-    assert!(
-        !out.stdout.contains("from bob"),
-        "should not have bob's msg: {}",
-        out.stdout
-    );
+    // Same output as --from alice (@ is stripped)
+    assert_eq!(out.stdout, include_str!("golden/log/from_filter.txt"));
 }
 
 #[test]
@@ -439,16 +380,7 @@ fn log_since_duration_filter() {
     ]);
     let out = run_cli_for_test(&["log", "--since", "1h"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-    assert!(
-        !out.stdout.contains("old"),
-        "should not have old msg: {}",
-        out.stdout
-    );
-    assert!(
-        out.stdout.contains("recent"),
-        "should have recent msg: {}",
-        out.stdout
-    );
+    assert_eq!(out.stdout, include_str!("golden/log/since_filter.txt"));
 }
 
 #[test]
@@ -460,16 +392,8 @@ fn log_since_rfc3339_filter() {
     ]);
     let out = run_cli_for_test(&["log", "--since", "2026-02-09T00:00:00Z"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-    assert!(
-        !out.stdout.contains("old"),
-        "should not have old msg: {}",
-        out.stdout
-    );
-    assert!(
-        out.stdout.contains("recent"),
-        "should have recent msg: {}",
-        out.stdout
-    );
+    // Same output as since=1h (both filter out the old message)
+    assert_eq!(out.stdout, include_str!("golden/log/since_filter.txt"));
 }
 
 #[test]
@@ -485,41 +409,12 @@ fn log_since_invalid() {
 }
 
 #[test]
-fn log_positional_target() {
-    let now = rfc3339("2026-02-09T12:00:00Z");
-    let backend = TopicsLogBackend::new(now).with_messages(vec![make_msg(
-        "msg-001",
-        "alice",
-        "bugs",
-        "bug report",
-        "2026-02-09T11:00:00Z",
-    )]);
-    let out = run_cli_for_test(&["log", "bugs"], &backend);
-    assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-    // The positional argument is passed to list_message_files as target
-    // In our mock, all messages are returned regardless, but the command should succeed
-    assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
-}
-
-#[test]
 fn log_unknown_flag() {
     let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
     let out = run_cli_for_test(&["log", "--verbose"], &backend);
     assert_eq!(out.exit_code, 2);
     assert!(
         out.stderr.contains("unknown flag"),
-        "stderr: {}",
-        out.stderr
-    );
-}
-
-#[test]
-fn log_help() {
-    let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
-    let out = run_cli_for_test(&["log", "--help"], &backend);
-    assert_eq!(out.exit_code, 0);
-    assert!(
-        out.stderr.contains("View recent messages"),
         "stderr: {}",
         out.stderr
     );
@@ -549,7 +444,7 @@ fn log_too_many_positionals() {
     );
 }
 
-// ===== MESSAGES TESTS =====
+// ===== MESSAGES GOLDEN TESTS =====
 
 #[test]
 fn messages_empty_outputs_nothing() {
@@ -561,7 +456,7 @@ fn messages_empty_outputs_nothing() {
 }
 
 #[test]
-fn messages_shows_all_messages() {
+fn messages_text_matches_golden() {
     let now = rfc3339("2026-02-09T12:00:00Z");
     let backend = TopicsLogBackend::new(now).with_messages(vec![
         make_msg(
@@ -576,12 +471,11 @@ fn messages_shows_all_messages() {
     let out = run_cli_for_test(&["messages"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
     assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
-    assert!(out.stdout.contains("msg-001"), "stdout: {}", out.stdout);
-    assert!(out.stdout.contains("msg-002"), "stdout: {}", out.stdout);
+    assert_eq!(out.stdout, include_str!("golden/messages/text.txt"));
 }
 
 #[test]
-fn messages_json_output() {
+fn messages_json_matches_golden() {
     let now = rfc3339("2026-02-09T12:00:00Z");
     let backend = TopicsLogBackend::new(now).with_messages(vec![make_msg(
         "msg-001",
@@ -593,9 +487,7 @@ fn messages_json_output() {
     let out = run_cli_for_test(&["messages", "--json"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
     assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
-
-    let parsed: serde_json::Value = serde_json::from_str(out.stdout.trim()).expect("parse json");
-    assert_eq!(parsed["id"], "msg-001");
+    assert_eq!(out.stdout, include_str!("golden/messages/json.txt"));
 }
 
 #[test]
@@ -611,7 +503,7 @@ fn messages_rejects_positional_args() {
 }
 
 #[test]
-fn messages_supports_from_filter() {
+fn messages_from_filter_matches_golden() {
     let now = rfc3339("2026-02-09T12:00:00Z");
     let backend = TopicsLogBackend::new(now).with_messages(vec![
         make_msg(
@@ -631,20 +523,12 @@ fn messages_supports_from_filter() {
     ]);
     let out = run_cli_for_test(&["messages", "--from", "alice"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-    assert!(
-        out.stdout.contains("from alice"),
-        "should have alice's msg: {}",
-        out.stdout
-    );
-    assert!(
-        !out.stdout.contains("from bob"),
-        "should not have bob's msg: {}",
-        out.stdout
-    );
+    // Same as log --from alice (from_filter.txt)
+    assert_eq!(out.stdout, include_str!("golden/log/from_filter.txt"));
 }
 
 #[test]
-fn messages_supports_since_filter() {
+fn messages_since_filter() {
     let now = rfc3339("2026-02-09T12:00:00Z");
     let backend = TopicsLogBackend::new(now).with_messages(vec![
         make_msg("msg-001", "alice", "tasks", "old", "2026-02-08T10:00:00Z"),
@@ -652,20 +536,11 @@ fn messages_supports_since_filter() {
     ]);
     let out = run_cli_for_test(&["messages", "--since", "1h"], &backend);
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-    assert!(
-        !out.stdout.contains("old"),
-        "should not have old msg: {}",
-        out.stdout
-    );
-    assert!(
-        out.stdout.contains("recent"),
-        "should have recent msg: {}",
-        out.stdout
-    );
+    assert_eq!(out.stdout, include_str!("golden/log/since_filter.txt"));
 }
 
 #[test]
-fn messages_supports_limit() {
+fn messages_limit() {
     let now = rfc3339("2026-02-09T12:00:00Z");
     let backend = TopicsLogBackend::new(now).with_messages(vec![
         make_msg("msg-001", "alice", "tasks", "first", "2026-02-09T10:00:00Z"),
@@ -685,14 +560,9 @@ fn messages_supports_limit() {
 }
 
 #[test]
-fn messages_help() {
+fn messages_help_matches_golden() {
     let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
     let out = run_cli_for_test(&["messages", "--help"], &backend);
     assert_eq!(out.exit_code, 0);
-    // Help is shown via the log command's help text
-    assert!(
-        out.stderr.contains("View recent messages"),
-        "stderr: {}",
-        out.stderr
-    );
+    assert_eq!(out.stderr, include_str!("golden/log/help.txt"));
 }

@@ -356,15 +356,11 @@ fn send_too_many_args() {
 }
 
 #[test]
-fn send_help_flag() {
+fn send_help_matches_golden() {
     let backend = SendBackend::new(rfc3339("2026-02-09T12:00:00Z"), "alice");
     let out = run_cli_for_test(&["send", "--help"], &backend);
     assert_eq!(out.exit_code, 0);
-    assert!(
-        out.stderr.contains("Send a message"),
-        "stderr: {}",
-        out.stderr
-    );
+    assert_eq!(out.stderr, include_str!("golden/send/help.txt"));
 }
 
 // --- Priority not set leaves field empty ---
