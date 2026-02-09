@@ -117,6 +117,26 @@ func TestManager_GroupRoundTripAndNormalization(t *testing.T) {
 	require.NotContains(t, groups, "empty")
 }
 
+func TestManager_ToggleBookmarkRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".fmail", "tui-state.json")
+	m := New(path)
+	require.NoError(t, m.Load())
+
+	added := m.ToggleBookmark("20260209-101010-0001", "task")
+	require.True(t, added)
+	require.True(t, m.IsBookmarked("20260209-101010-0001"))
+	require.NoError(t, m.SaveNow())
+
+	loaded := New(path)
+	require.NoError(t, loaded.Load())
+	require.True(t, loaded.IsBookmarked("20260209-101010-0001"))
+
+	added = loaded.ToggleBookmark("20260209-101010-0001", "task")
+	require.False(t, added)
+	require.False(t, loaded.IsBookmarked("20260209-101010-0001"))
+}
+
 func TestManager_LayoutPreferencesRoundTripAndNormalize(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, ".fmail", "tui-state.json")

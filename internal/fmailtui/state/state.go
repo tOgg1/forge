@@ -61,14 +61,14 @@ type SavedSearch struct {
 }
 
 type Preferences struct {
-	DefaultLayout        string   `json:"default_layout,omitempty"`          // "single", "split", "dashboard", "zen"
-	Theme                string   `json:"theme,omitempty"`                   // "default", "high-contrast"
-	LayoutSplitRatio     float64  `json:"layout_split_ratio,omitempty"`      // 0.2..0.8
-	LayoutSplitCollapsed bool     `json:"layout_split_collapsed,omitempty"`  // hide left split pane
-	LayoutFocus          int      `json:"layout_focus,omitempty"`            // focused pane index
-	LayoutExpanded       bool     `json:"layout_expanded,omitempty"`         // focused-pane-only mode
-	DashboardGrid        string   `json:"dashboard_grid,omitempty"`          // "2x2","2x1","1x2","1x3","3x1"
-	DashboardViews       []string `json:"dashboard_views,omitempty"`         // up to 4 view IDs
+	DefaultLayout        string   `json:"default_layout,omitempty"`         // "single", "split", "dashboard", "zen"
+	Theme                string   `json:"theme,omitempty"`                  // "default", "high-contrast"
+	LayoutSplitRatio     float64  `json:"layout_split_ratio,omitempty"`     // 0.2..0.8
+	LayoutSplitCollapsed bool     `json:"layout_split_collapsed,omitempty"` // hide left split pane
+	LayoutFocus          int      `json:"layout_focus,omitempty"`           // focused pane index
+	LayoutExpanded       bool     `json:"layout_expanded,omitempty"`        // focused-pane-only mode
+	DashboardGrid        string   `json:"dashboard_grid,omitempty"`         // "2x2","2x1","1x2","1x3","3x1"
+	DashboardViews       []string `json:"dashboard_views,omitempty"`        // up to 4 view IDs
 	LiveTailAuto         bool     `json:"live_tail_auto,omitempty"`
 	RelativeTime         bool     `json:"relative_time,omitempty"`
 	SoundAlerts          bool     `json:"sound_alerts,omitempty"`
@@ -243,6 +243,67 @@ func (m *Manager) SetReadMarkers(markers map[string]string) {
 		m.state.ReadMarkers[target] = marker
 	}
 	m.markDirtyLocked()
+}
+
+func (m *Manager) Bookmarks() []Bookmark {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.state.Bookmarks) == 0 {
+		return nil
+	}
+	return append([]Bookmark(nil), m.state.Bookmarks...)
+}
+
+func (m *Manager) IsBookmarked(messageID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" || len(m.state.Bookmarks) == 0 {
+		return false
+	}
+	for _, bm := range m.state.Bookmarks {
+		if strings.TrimSpace(bm.MessageID) == messageID {
+			return true
+		}
+	}
+	return false
+}
+
+// ToggleBookmark toggles a bookmark for a message.
+// Returns true when the bookmark was added, false when removed/no-op.
+func (m *Manager) ToggleBookmark(messageID, topic string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	messageID = strings.TrimSpace(messageID)
+	topic = strings.TrimSpace(topic)
+	if messageID == "" || topic == "" {
+		return false
+	}
+
+	filtered := make([]Bookmark, 0, len(m.state.Bookmarks))
+	removed := false
+	for _, bm := range m.state.Bookmarks {
+		if strings.TrimSpace(bm.MessageID) == messageID {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, bm)
+	}
+	if removed {
+		m.state.Bookmarks = filtered
+		m.markDirtyLocked()
+		return false
+	}
+
+	next := Bookmark{
+		MessageID: messageID,
+		Topic:     topic,
+		CreatedAt: time.Now().UTC(),
+	}
+	m.state.Bookmarks = append([]Bookmark{next}, filtered...)
+	m.markDirtyLocked()
+	return true
 }
 
 func (m *Manager) Draft(target string) (ComposeDraft, bool) {
