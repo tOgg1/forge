@@ -238,3 +238,234 @@ Validation:
 fmail updates sent to `task` + `@forge-orchestrator`. No in-progress tasks left.
 ```
 
+## 2026-02-09T11:30:28Z
+
+- run_id: 7f2b15ca-a819-4895-ab3c-53a818c3c9b8
+- loop_name: forge-fmail-next-3
+- status: success
+- profile: codex2
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-next-task.md
+- prompt_override: false
+- started_at: 2026-02-09T10:09:08Z
+- finished_at: 2026-02-09T11:30:28Z
+- exit_code: 0
+
+```
+}
+-
+diff --git a/internal/fmailtui/topics_view.go b/internal/fmailtui/topics_view.go
+index 1b617d528cef30fa32e88e9ce20920c00dbd3528..c131c9ab67f03ecc26f622872989d66af8549946
+--- a/internal/fmailtui/topics_view.go
++++ b/internal/fmailtui/topics_view.go
+@@ -254,6 +254,10 @@
+ 		Render(body)
+ }
+ 
++func (v *topicsView) MinSize() (int, int) {
++	return 44, 10
++}
++
+ func (v *topicsView) handleKey(msg tea.KeyMsg) tea.Cmd {
+ 	if v.composeActive {
+ 		switch msg.Type {
+@@ -363,7 +367,7 @@
+ 		if target == "" {
+ 			return pushViewCmd(ViewThread)
+ 		}
+-		return tea.Batch(openThreadCmd(target), pushViewCmd(ViewThread))
++		return tea.Batch(openThreadCmd(target, ""), pushViewCmd(ViewThread))
+ 	case "n":
+ 		target := v.selectedTarget()
+ 		if target == "" {
+@@ -522,7 +526,7 @@
+ 		return lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render("No messages")
+ 	}
+ 
+-	mapper := styles.NewAgentColorMapper()
++	mapper := styles.NewAgentColorMapperWithPalette(palette.AgentPalette)
+ 	lines := make([]string, 0, len(msgs)*3)
+ 	for _, msg := range msgs {
+ 		ts := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render(msg.Time.UTC().Format("15:04"))
+
+tokens used
+713,683
+hi. loop complete; all tasks in `prj-afyxck62` closed.
+
+Closed
+1. `forge-ash` (Graph): view wired on `v`; time range `[ ]` + `h/l`, zoom `+/-`, pan arrows, topic overlay `t`, details `Enter`; compute+unit tests.
+2. `forge-0zs` (Replay): view wired on `R`; play/pause `Space`, speed `1-4`, step `←/→`, seek `Shift+←/→`, marks `m` + `'` jump, export `e`, feed/timeline `t`; persists cursor/speed/mode in tui-state prefs; unit tests.
+
+Also closed epic `forge-erz` (no open tasks left).
+
+Code staged (ready for committer)
+- `internal/fmailtui/replay_view.go`
+- `internal/fmailtui/replay_view_render.go`
+- `internal/fmailtui/replay_view_helpers.go`
+- `internal/fmailtui/replay_view_helpers_test.go`
+- `internal/fmailtui/app.go`
+- `internal/fmailtui/help.go`
+- `internal/fmailtui/status.go`
+- `internal/fmailtui/state/state.go` (prefs fields for replay)
+
+Validation
+- `unset GOROOT GOTOOLDIR && go test ./...` ✅
+
+Working tree left: `.tasks/*` + `.forge/ledgers/*` modified (task bookkeeping), `mise.toml` untracked.
+```
+
+## 2026-02-09T12:12:56Z
+
+- run_id: d84dfe9e-1603-42a6-a986-bc57d067eada
+- loop_name: forge-fmail-next-3
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-next-task.md
+- prompt_override: false
+- started_at: 2026-02-09T12:05:17Z
+- finished_at: 2026-02-09T12:12:56Z
+- exit_code: 0
+
+```
++
++	before := provider.messageCalls
++	v.Update(timelineTickMsg{})
++	require.Equal(t, before, provider.messageCalls)
++}
++
+ func TestTimelineChronologicalRendersGapAndReplyMarker(t *testing.T) {
+ 	now := time.Date(2026, 2, 9, 10, 0, 0, 0, time.UTC)
+ 	v := newTimelineView(t.TempDir(), "viewer", nil, nil)
+@@ -165,3 +233,24 @@
+ 	require.Nil(t, v.handleKey(runeKey('b')))
+ 	require.True(t, st.IsBookmarked("20260209-095500-0001"))
+ }
++
++func filterTimelineMessages(input []fmail.Message, opts data.MessageFilter) []fmail.Message {
++	if len(input) == 0 {
++		return nil
++	}
++	out := make([]fmail.Message, 0, len(input))
++	for i := range input {
++		msg := input[i]
++		if !opts.Since.IsZero() && msg.Time.Before(opts.Since) {
++			continue
++		}
++		if !opts.Until.IsZero() && msg.Time.After(opts.Until) {
++			continue
++		}
++		out = append(out, msg)
++	}
++	if opts.Limit > 0 && len(out) > opts.Limit {
++		out = out[len(out)-opts.Limit:]
++	}
++	return out
++}
+
+tokens used
+98,977
+forge-w6k: `in_progress` (blocked; not closed).
+
+Done:
+- Timeline bounded initial load + lazy older-page fetch near top nav: `internal/fmailtui/timeline_view.go:24`, `internal/fmailtui/timeline_view.go:168`, `internal/fmailtui/timeline_view.go:612`, `internal/fmailtui/timeline_view.go:725`
+- Tick no longer triggers full provider reload: `internal/fmailtui/timeline_view.go:176`
+- Provider bounded reads (`Since/Until/Limit`) + DM conversation narrowed to relevant dirs: `internal/fmailtui/data/file_provider.go:138`, `internal/fmailtui/data/file_provider.go:608`, `internal/fmailtui/data/file_provider.go:700`, `internal/fmailtui/data/file_provider.go:732`
+- Regression tests added:
+  - `internal/fmailtui/timeline_view_test.go:95`
+  - `internal/fmailtui/timeline_view_test.go:142`
+  - `internal/fmailtui/data/file_provider_test.go:133`
+- Task note added: `docs/forge-mail/fmail-tui-first-pass-audit-2026-02-09.md:49`
+
+Validation:
+- `env -u GOROOT -u GOTOOLDIR go test ./internal/fmailtui/data ...` passed.
+- Required `env -u GOROOT -u GOTOOLDIR go test ./...` failed due unrelated existing compile breaks:
+  - `internal/fmailtui/dashboard_view.go:126` `shouldRefresh` undefined
+  - `internal/fmailtui/dashboard_view.go:135` `applyTopicsSnapshot` undefined
+  - `internal/fmailtui/dashboard_view.go:142` `applyIncoming` undefined
+
+Protocol/reporting done:
+- `fmail send task "forge-w6k progress: ... blocked ..."` sent (`20260209-121232-1406`)
+- `fmail send @forge-orchestrator "forge-w6k: blocked ..."` sent (`20260209-121232-1405`)
+- `forge work set forge-w6k --status in_progress --detail "...blocked..."` done.
+```
+
+## 2026-02-09T12:35:00Z
+
+- run_id: 2df58515-36aa-48fe-aec3-fd2f0260f705
+- loop_name: forge-fmail-next-3
+- status: success
+- profile: codex2
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-next-task.md
+- prompt_override: false
+- started_at: 2026-02-09T12:15:56Z
+- finished_at: 2026-02-09T12:35:00Z
+- exit_code: 0
+
+```
++		t.Fatalf("cold load too slow: %s > %s (scale %.2f)", coldDur, coldBudget, scale)
++	}
++
++	// Refresh (cache hit).
++	refreshStart := time.Now()
++	if _, err := provider.Topics(); err != nil {
++		t.Fatalf("Topics(warm): %v", err)
++	}
++	refreshDur := time.Since(refreshStart)
++	t.Logf("refresh (Topics warm): %s (budget %s, scale %.2f)", refreshDur, refreshBudget, scale)
++	if refreshDur > refreshBudget {
++		t.Fatalf("refresh too slow: %s > %s (scale %.2f)", refreshDur, refreshBudget, scale)
++	}
++
++	// Search (warm index).
++	searchWarmStart := time.Now()
++	if _, err := provider.Search(data.SearchQuery{Text: "needle"}); err != nil {
++		t.Fatalf("Search(warm): %v", err)
++	}
++	searchWarmDur := time.Since(searchWarmStart)
++	t.Logf("search warm: %s (budget %s, scale %.2f)", searchWarmDur, searchWarmBudget, scale)
++	if searchWarmDur > searchWarmBudget {
++		t.Fatalf("search warm too slow: %s > %s (scale %.2f)", searchWarmDur, searchWarmBudget, scale)
++	}
++}
++
++func perfBudgetScale() float64 {
++	// Allows running on slower laptops/CI-like VMs without changing code:
++	//   FM_PERF_BUDGET_SCALE=2 make perf-smoke
++	raw := os.Getenv("FM_PERF_BUDGET_SCALE")
++	if raw == "" {
++		return 1
++	}
++	v, err := strconv.ParseFloat(raw, 64)
++	if err != nil || v <= 0 {
++		return 1
++	}
++	return v
++}
++
++func scaleDuration(d time.Duration, scale float64) time.Duration {
++	if scale <= 0 {
++		return d
++	}
++	return time.Duration(float64(d) * scale)
++}
++
+
+tokens used
+249,386
+forge-9h5 closed.
+
+Added perf harness + budgets:
+- `internal/fmailtui/perf/` (opt-in `-tags=perf`): synthetic mailbox, `TestPerfSmokeBudgets`, `BenchmarkPerf_*`
+- `docs/forge-mail/fmail-tui-perf.md` (budgets + runbook)
+- `Makefile`: `perf-smoke`, `perf-bench`
+
+Validation:
+- `env -u GOROOT -u GOTOOLDIR go test ./...`
+- `env -u GOROOT -u GOTOOLDIR go test -tags=perf ./internal/fmailtui/... -run TestPerfSmokeBudgets -count=1`
+```
+

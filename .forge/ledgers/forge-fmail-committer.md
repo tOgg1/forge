@@ -649,3 +649,202 @@ Clean. Only `mise.toml` remains untracked which is unrelated to the project.
 All tests pass. No remaining uncommitted feature code.
 ```
 
+## 2026-02-09T11:32:23Z
+
+- run_id: 7046fb37-9555-41e6-879b-e41085396f9d
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T10:17:07Z
+- finished_at: 2026-02-09T11:32:23Z
+- exit_code: 0
+
+```
+Build passes cleanly. The committer loop is idle with nothing to commit. All 22 commits from the `forge-erz` epic have been successfully packaged. No new tasks or code changes detected.
+```
+
+## 2026-02-09T11:42:41Z
+
+- run_id: 656cae06-6950-42d7-95f8-d96916d0629c
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T11:33:23Z
+- finished_at: 2026-02-09T11:42:41Z
+- exit_code: 0
+
+```
+Committer loop summary:
+
+- **All project work is committed.** Last commit: `d28a163` (Replay view).
+- **No open or in-progress tasks** remain in project `prj-afyxck62`.
+- **No code changes** in working tree (only ledger/task metadata files modified).
+- **Epic `forge-erz` is fully closed** — all subtasks (graph view, replay view) committed.
+- Polled for ~5 minutes with no new work appearing.
+
+The committer loop is standing down. It can be re-invoked when new work lands in the working tree.
+```
+
+## 2026-02-09T11:44:15Z
+
+- run_id: e5421517-4325-403d-a7ef-8d788a2e2302
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T11:43:41Z
+- finished_at: 2026-02-09T11:44:15Z
+- exit_code: 0
+
+```
+Committer loop iteration complete. Status:
+- **No commit candidate** — working tree has only ledger/task metadata changes (`.forge/ledgers/`, `.tasks/`), no source code.
+- **No open or in-progress tasks** in project `prj-afyxck62`.
+- Last commit: `d28a163` (Replay view, epic forge-erz complete).
+- All prior work has been committed. Loop is idle.
+```
+
+## 2026-02-09T11:49:22Z
+
+- run_id: ffc584c7-317d-4ce8-845b-4060462eb8ed
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T11:45:15Z
+- finished_at: 2026-02-09T11:49:22Z
+- exit_code: 0
+
+```
+Committer loop summary:
+- **No commit candidates found** across multiple polling iterations
+- All project tasks are **closed** — no in-progress work
+- Working tree only contains **ledger/metadata diffs** (no code changes)
+- Last code commit: `d28a163` (feat: add Replay view)
+- Epic `forge-erz` is fully committed
+
+The committer loop is standing down. It will need to be re-invoked when new work appears in the project.
+```
+
+## 2026-02-09T11:50:50Z
+
+- run_id: 57b9f13b-a525-4e10-bb45-3642e63811db
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T11:50:22Z
+- finished_at: 2026-02-09T11:50:50Z
+- exit_code: 0
+
+```
+No commit candidate this iteration. The working tree only has ledger/metadata changes — no code to commit. All tasks are closed and all prior work is committed through `d28a163`. Committer loop is idle, standing by for new work.
+```
+
+## 2026-02-09T11:52:17Z
+
+- run_id: a0d04148-4c4d-4ca5-b755-40afebaef76a
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T11:51:50Z
+- finished_at: 2026-02-09T11:52:17Z
+- exit_code: 0
+
+```
+No commit candidate this iteration. The working tree has only ledger/metadata changes — no source code diffs. All prior work has been committed (last: `d28a163` — Replay view). No tasks are in progress. Committer loop standing by.
+```
+
+## 2026-02-09T11:53:42Z
+
+- run_id: 95ed5700-e3c5-482d-b2c6-f7ccd4329fe8
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T11:53:17Z
+- finished_at: 2026-02-09T11:53:42Z
+- exit_code: 0
+
+```
+No commit candidate this iteration. The working tree only contains ledger/metadata changes — no source code diffs. All prior work has been committed (last: `d28a163`). No tasks are in progress. Committer loop is idle and standing by for new work.
+```
+
+## 2026-02-09T11:55:06Z
+
+- run_id: ca0bb361-0c3b-465b-a3a1-795b9f99b457
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T11:54:42Z
+- finished_at: 2026-02-09T11:55:06Z
+- exit_code: 0
+
+```
+No commit candidate this iteration. The working tree has no code changes — only ledger and task metadata diffs. All prior work is committed (last: `d28a163`). No tasks are in progress. Committer loop is idle, standing by for new work to appear.
+```
+
+## 2026-02-09T11:56:32Z
+
+- run_id: 79b09ced-ec50-4744-a50c-f08eec1f44d2
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T11:56:06Z
+- finished_at: 2026-02-09T11:56:32Z
+- exit_code: 0
+
+```
+No commit candidate this iteration. The working tree only contains ledger/metadata changes (`.forge/ledgers/`, `.tasks/`) and an untracked `mise.toml` — no source code to commit. All prior work is committed up through `d28a163`. Committer loop standing by.
+```
+
+## 2026-02-09T11:57:57Z
+
+- run_id: 26a2464a-284a-405c-8dae-c2e5b0db645f
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T11:57:32Z
+- finished_at: 2026-02-09T11:57:57Z
+- exit_code: 0
+
+```
+No commit candidate this iteration. The working tree has only ledger/metadata changes — no source code to commit. All prior work is committed (last: `d28a163`). Standing by for new work to appear.
+```
+

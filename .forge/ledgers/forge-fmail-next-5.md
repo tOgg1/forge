@@ -161,3 +161,80 @@ Loop health command set (single-loop):
 4. Stop criteria: acceptance implemented, tests green, task closed, orchestrator notified.
 ```
 
+## 2026-02-09T10:46:30Z
+
+- run_id: c6099130-55f7-4bbb-aad0-4e576efcaab6
+- loop_name: forge-fmail-next-5
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-next-task.md
+- prompt_override: false
+- started_at: 2026-02-09T10:31:39Z
+- finished_at: 2026-02-09T10:46:30Z
+- exit_code: 0
+
+```
+default:
+ 		return string(id)
+ 	}
+@@ -404,9 +409,13 @@
+ 	}
+ 	agents := fmt.Sprintf("%d agents", agentsCount)
+ 
++	notifUnread := m.status.notificationsUnread
++	if m.notifications != nil {
++		notifUnread = m.notifications.UnreadCount()
++	}
+ 	notif := ""
+-	if m.status.unread > 0 {
+-		notif = fmt.Sprintf("[N:%d]", m.status.unread)
++	if notifUnread > 0 {
++		notif = fmt.Sprintf("[N:%d]", notifUnread)
+ 	}
+ 	pane := ""
+ 	if m.activeViewID() == ViewDashboard {
+@@ -453,7 +462,7 @@
+ 
+ func (s *statusState) applyMetrics(msg statusMetricsMsg) {
+ 	s.agentsRecent = msg.agentsRecent
+-	s.unread = msg.unread
++	s.unreadMessages = msg.unreadMessages
+ }
+ 
+ func (s *statusState) applyProbe(msg statusProbeMsg, now time.Time) {
+
+tokens used
+230,855
+Hi. Strong cycle; one task shipped clean.
+
+`forge-0as` completed + closed.
+
+Implemented:
+- Notification runtime engine + dedupe + action fan-out (`bell/flash/highlight/badge`) in `internal/fmailtui/notifications_center.go`.
+- Persisted notification rules + recent notifications in `tui-state.json` with normalization + manager APIs in `internal/fmailtui/state/state.go`.
+- Notifications panel view (`Ctrl+N`), list actions (`Enter/x/c`), rule CRUD (`n/e/d`), rule test mode (`Ctrl+T`) in `internal/fmailtui/notifications_view.go`.
+- App wiring (`ViewNotify`, global key route, model integration) in `internal/fmailtui/app.go`.
+- Dashboard badge/hint + open route in `internal/fmailtui/dashboard_view.go`.
+- Global footer notification indicator `[N:x]` + view label updates in `internal/fmailtui/status.go`.
+- Header flash generalized for notification alerts in `internal/fmailtui/chrome.go`.
+- Help entries for notifications in `internal/fmailtui/help.go`.
+
+Tests added/updated:
+- `internal/fmailtui/notifications_center_test.go`
+- `internal/fmailtui/state/state_test.go`
+- `internal/fmailtui/app_test.go`
+
+Validation:
+- `go test ./...` fails in this shell due local Go toolchain mismatch (`go1.25.7` stdlib vs `go1.25.6` tool).
+- `env -u GOROOT -u GOTOOLDIR go test ./...` passes full suite.
+
+Protocol updates sent:
+- `fmail send task "claim: forge-0as by forge-fmail-next-5"`
+- `fmail send task "forge-0as progress: ..."`
+- `fmail send @forge-orchestrator "forge-0as: done"`
+- `sv task close forge-0as`
+- `fmail send task "forge-0as closed"`
+```
+
