@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use thiserror::Error;
+use uuid::Uuid;
 
 include!(concat!(env!("OUT_DIR"), "/migrations.rs"));
 
@@ -53,6 +54,10 @@ pub enum DbError {
         version: i32,
         direction: &'static str,
     },
+    #[error("{0}")]
+    Validation(String),
+    #[error("loop kv not found: {0}")]
+    LoopKVNotFound(String),
 }
 
 impl Db {
@@ -239,6 +244,11 @@ impl Db {
         Ok(())
     }
 
+    /// Returns a reference to the underlying SQLite connection.
+    pub fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
     fn current_version(&self) -> Result<i32, DbError> {
         let version: Option<i32> = self
             .conn
@@ -250,6 +260,179 @@ impl Db {
             .optional()?;
         Ok(version.unwrap_or(0))
     }
+}
+
+// ---------------------------------------------------------------------------
+// LoopKV: per-loop key/value memory (prompt-injected)
+// ---------------------------------------------------------------------------
+
+/// A key-value entry scoped to a single loop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopKV {
+    pub id: String,
+    pub loop_id: String,
+    pub key: String,
+    pub value: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Repository for per-loop key/value storage with Go-parity semantics.
+pub struct LoopKVRepository<'a> {
+    db: &'a Db,
+}
+
+impl<'a> LoopKVRepository<'a> {
+    pub fn new(db: &'a Db) -> Self {
+        Self { db }
+    }
+
+    /// Create or update a key-value pair for a loop.
+    ///
+    /// Uses "prefer UPDATE then INSERT" to avoid relying on newer SQLite
+    /// upsert syntax, matching Go behavior exactly.
+    pub fn set(&self, loop_id: &str, key: &str, value: &str) -> Result<(), DbError> {
+        let loop_id = loop_id.trim();
+        let key = key.trim();
+        if loop_id.is_empty() {
+            return Err(DbError::Validation("loopID is required".into()));
+        }
+        if key.is_empty() {
+            return Err(DbError::Validation("key is required".into()));
+        }
+        if value.is_empty() {
+            return Err(DbError::Validation("value is required".into()));
+        }
+
+        let now = now_rfc3339();
+
+        // Attempt UPDATE first.
+        let rows_changed = self.db.conn.execute(
+            "UPDATE loop_kv SET value = ?1, updated_at = ?2 WHERE loop_id = ?3 AND key = ?4",
+            params![value, now, loop_id, key],
+        )?;
+        if rows_changed > 0 {
+            return Ok(());
+        }
+
+        // No existing row — INSERT.
+        let id = Uuid::new_v4().to_string();
+        let insert_result = self.db.conn.execute(
+            "INSERT INTO loop_kv (id, loop_id, key, value, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, loop_id, key, value, now, now],
+        );
+        match insert_result {
+            Ok(_) => Ok(()),
+            Err(ref err) if is_unique_constraint_error(err) => {
+                // Race: key inserted after our UPDATE check; retry UPDATE.
+                self.db.conn.execute(
+                    "UPDATE loop_kv SET value = ?1, updated_at = ?2 \
+                     WHERE loop_id = ?3 AND key = ?4",
+                    params![value, now, loop_id, key],
+                )?;
+                Ok(())
+            }
+            Err(err) => Err(DbError::Open(err)),
+        }
+    }
+
+    /// Retrieve a single key-value pair.
+    pub fn get(&self, loop_id: &str, key: &str) -> Result<LoopKV, DbError> {
+        let row = self
+            .db
+            .conn
+            .query_row(
+                "SELECT id, loop_id, key, value, created_at, updated_at \
+                 FROM loop_kv WHERE loop_id = ?1 AND key = ?2",
+                params![loop_id.trim(), key.trim()],
+                |row| {
+                    Ok(LoopKV {
+                        id: row.get(0)?,
+                        loop_id: row.get(1)?,
+                        key: row.get(2)?,
+                        value: row.get(3)?,
+                        created_at: row.get(4)?,
+                        updated_at: row.get(5)?,
+                    })
+                },
+            )
+            .optional()?;
+        row.ok_or_else(|| DbError::LoopKVNotFound("loop kv not found".into()))
+    }
+
+    /// Retrieve all key-value pairs for a specific loop, sorted by key.
+    pub fn list_by_loop(&self, loop_id: &str) -> Result<Vec<LoopKV>, DbError> {
+        let mut stmt = self.db.conn.prepare(
+            "SELECT id, loop_id, key, value, created_at, updated_at \
+             FROM loop_kv WHERE loop_id = ?1 ORDER BY key",
+        )?;
+        let rows = stmt.query_map(params![loop_id.trim()], |row| {
+            Ok(LoopKV {
+                id: row.get(0)?,
+                loop_id: row.get(1)?,
+                key: row.get(2)?,
+                value: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Delete a key-value pair.
+    pub fn delete(&self, loop_id: &str, key: &str) -> Result<(), DbError> {
+        let rows = self.db.conn.execute(
+            "DELETE FROM loop_kv WHERE loop_id = ?1 AND key = ?2",
+            params![loop_id.trim(), key.trim()],
+        )?;
+        if rows == 0 {
+            return Err(DbError::LoopKVNotFound("loop kv not found".into()));
+        }
+        Ok(())
+    }
+}
+
+fn now_rfc3339() -> String {
+    let now = std::time::SystemTime::now();
+    let duration = match now.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d,
+        Err(_) => std::time::Duration::from_secs(0),
+    };
+    let secs = duration.as_secs();
+
+    let days = secs / 86400;
+    let time_of_day = secs % 86400;
+    let hours = time_of_day / 3600;
+    let minutes = (time_of_day % 3600) / 60;
+    let seconds = time_of_day % 60;
+
+    let (year, month, day) = days_to_civil(days as i64);
+
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
+}
+
+/// Convert days since Unix epoch to (year, month, day) in the Gregorian calendar.
+fn days_to_civil(days: i64) -> (i32, u32, u32) {
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = (yoe as i64 + era * 400) as i32;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
+fn is_unique_constraint_error(err: &rusqlite::Error) -> bool {
+    err.to_string().contains("UNIQUE constraint failed")
 }
 
 fn ensure_parent_dir(path: &Path) -> Result<(), std::io::Error> {
