@@ -22,7 +22,9 @@ func TestRustCoveragePolicyAndWorkflowPinned(t *testing.T) {
 		"CI artifact name: `rust-coverage`",
 		"`cargo llvm-cov report --summary-only`",
 		"`rust/coverage-thresholds.txt`",
+		"`rust/coverage-waivers.txt`",
 		"`scripts/rust-coverage-gate.sh`",
+		"`crate|expires_on|approved_by|issue|reason`",
 	} {
 		if !strings.Contains(policy, want) {
 			t.Fatalf("coverage policy missing %q", want)
@@ -41,6 +43,8 @@ func TestRustCoveragePolicyAndWorkflowPinned(t *testing.T) {
 		"cargo llvm-cov report --summary-only",
 		"name: rust-coverage",
 		"path: rust/coverage/lcov.info",
+		"run: scripts/rust-coverage-gate.sh",
+		"Waivers: rust/coverage-waivers.txt",
 	} {
 		if !strings.Contains(workflow, want) {
 			t.Fatalf("ci workflow drift: missing %q", want)

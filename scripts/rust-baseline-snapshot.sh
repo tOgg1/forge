@@ -12,6 +12,7 @@ mkdir -p "$out_dir"
 env -u GOROOT -u GOTOOLDIR go run ./cmd/forge --help > "$out_dir/forge-help.txt"
 env -u GOROOT -u GOTOOLDIR go run ./cmd/fmail --help > "$out_dir/fmail-help.txt"
 env -u GOROOT -u GOTOOLDIR go run ./cmd/fmail-tui --help > "$out_dir/fmail-tui-help.txt"
+env -u GOROOT -u GOTOOLDIR go run ./cmd/schema-fingerprint --out-dir "$out_dir" >/dev/null
 
 find internal/db/migrations -type f -name '*.sql' | sort > "$out_dir/db-migrations.txt"
 find cmd internal -type f -name '*.go' -print0 | xargs -0 wc -l > "$out_dir/go-loc-summary.txt"
@@ -21,6 +22,7 @@ date -u +"%Y-%m-%dT%H:%M:%SZ" > "$out_dir/generated-at.txt"
 if [[ "$mode" == "--check" ]]; then
   diff -u docs/forge-mail/help/fmail-help.txt "$out_dir/fmail-help.txt"
   diff -u docs/forge-mail/help/fmail-tui-help.txt "$out_dir/fmail-tui-help.txt"
+  diff -u internal/parity/testdata/schema/schema-fingerprint.sha256 "$out_dir/schema-fingerprint.sha256"
 fi
 
 echo "baseline snapshot written to $out_dir"

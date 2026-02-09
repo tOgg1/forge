@@ -17,7 +17,7 @@ Version: `v0` (2026-02-09)
 | Forge CLI help/flags | `cmd/forge`, `internal/cli` | `forge-cli` | parity snapshots + doccheck | not-started | |
 | fmail CLI help/flags | `cmd/fmail`, `internal/fmail` | `fmail-cli` | `docs/forge-mail/help/*` + doccheck | in-progress | command manifest frozen |
 | fmail-tui CLI flags | `cmd/fmail-tui`, `internal/fmailtui` | `fmail-tui` | `docs/forge-mail/help/*` + doccheck | in-progress | flag matrix frozen |
-| DB migrations/schema | `internal/db/migrations` | `forge-db` | schema fingerprint tests | not-started | |
+| DB migrations/schema | `internal/db/migrations` | `forge-db` | schema fingerprint tests | in-progress | baseline files committed in `internal/parity/testdata/schema/*` |
 | Loop runtime semantics | `internal/loop`, `internal/queue` | `forge-loop` | characterization harness | not-started | |
 | Daemon + runner protocol | `internal/forged`, `internal/agent/runner` | `forge-daemon` + `forge-runner` | proto compat tests | not-started | |
 | Loop TUI workflows | `internal/looptui` | `forge-tui` | manual + scripted smoke | not-started | |

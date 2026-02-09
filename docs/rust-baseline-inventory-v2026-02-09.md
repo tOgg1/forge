@@ -25,6 +25,8 @@ Generated baseline bundle (local):
 - `build/rust-baseline/latest/fmail-help.txt`
 - `build/rust-baseline/latest/fmail-tui-help.txt`
 - `build/rust-baseline/latest/db-migrations.txt`
+- `build/rust-baseline/latest/schema-fingerprint.txt`
+- `build/rust-baseline/latest/schema-fingerprint.sha256`
 - `build/rust-baseline/latest/proto-forged-sha256.txt`
 - `build/rust-baseline/latest/go-loc-summary.txt`
 - `build/rust-baseline/latest/generated-at.txt`

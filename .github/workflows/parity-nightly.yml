@@ -21,7 +21,7 @@ jobs:
         id: parity
         run: |
           set +e
-          go test ./internal/parity -run '^TestOracleFixtureParity$' -count=1 | tee parity-nightly.log
+          go test ./internal/parity -run '^(TestOracleFixtureParity|TestSchemaFingerprintBaseline)$' -count=1 | tee parity-nightly.log
           status=${PIPESTATUS[0]}
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
@@ -32,14 +32,14 @@ jobs:
               echo "## Nightly Parity"
               echo ""
               echo "- Status: PASS"
-              echo "- Check: internal/parity oracle fixture parity"
+              echo "- Checks: internal/parity oracle fixtures + schema fingerprint baseline"
             } >> "$GITHUB_STEP_SUMMARY"
           else
             {
               echo "## Nightly Parity"
               echo ""
               echo "- Status: DRIFT DETECTED"
-              echo "- Check: internal/parity oracle fixture parity"
+              echo "- Checks: internal/parity oracle fixtures + schema fingerprint baseline"
               echo "- See parity-nightly.log artifact"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -54,3 +54,30 @@ jobs:
         run: |
           echo "nightly parity drift detected"
           exit 1
+
+  rust-coverage-nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Enforce per-crate thresholds
+        run: scripts/rust-coverage-gate.sh
+      - name: Generate nightly rust coverage
+        working-directory: rust
+        run: cargo llvm-cov --workspace --all-features --lcov --output-path coverage/nightly-lcov.info
+      - name: Summarize nightly rust coverage
+        working-directory: rust
+        run: |
+          {
+            echo "## Nightly Rust Coverage"
+            echo ""
+            cargo llvm-cov report --summary-only
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-coverage-nightly
+          path: rust/coverage/nightly-lcov.info
+          if-no-files-found: error

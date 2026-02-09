@@ -123,7 +123,7 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Enforce per-crate coverage thresholds
+      - name: Enforce per-crate coverage thresholds and waivers
         run: scripts/rust-coverage-gate.sh
       - name: rust coverage
         working-directory: rust
@@ -143,6 +143,7 @@ jobs:
             echo "## Rust Coverage"
             echo ""
             echo "Per-crate thresholds: rust/coverage-thresholds.txt"
+            echo "Waivers: rust/coverage-waivers.txt"
             echo ""
             echo "Thresholds: lines ${RUST_COVERAGE_FAIL_UNDER_LINES}%, functions ${RUST_COVERAGE_FAIL_UNDER_FUNCTIONS}%, regions ${RUST_COVERAGE_FAIL_UNDER_REGIONS}%"
             echo ""

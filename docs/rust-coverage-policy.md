@@ -1,6 +1,6 @@
 # Rust Coverage Policy
 
-Tasks: `forge-wmb`, `forge-n99`, `forge-jhp`
+Tasks: `forge-wmb`, `forge-n99`, `forge-tmk`, `forge-jhp`
 Date: 2026-02-09
 
 ## Tooling decision
@@ -36,16 +36,28 @@ cd rust && cargo llvm-cov --workspace --all-features --html --open
 ## Per-crate thresholds
 
 - Per-crate thresholds are source-controlled in `rust/coverage-thresholds.txt`.
-- Per-crate enforcement: `scripts/rust-coverage-gate.sh` (reads thresholds file, runs `cargo llvm-cov --package <crate> --fail-under-lines <N>`).
+- Per-crate enforcement: `scripts/rust-coverage-gate.sh` (reads thresholds + waivers; runs `cargo llvm-cov --package <crate> --fail-under-lines <N>` when no active waiver exists).
 - New crates must be added to `rust/coverage-thresholds.txt` in the same PR.
+
+## Temporary waiver process
+
+- Waiver registry: `rust/coverage-waivers.txt`.
+- Waiver row format: `crate|expires_on|approved_by|issue|reason`.
+- `expires_on` must be UTC date `YYYY-MM-DD` and cannot be in the past.
+- Waivers are temporary only; remove waiver rows as soon as crate thresholds are met.
+- `scripts/rust-coverage-gate.sh` validates waiver schema, duplicate rows, expiry, and unknown crate references.
+- CI fails if waiver validation fails.
+- Each waiver must have an explicit approval owner and tracking issue/task.
 
 ## Workspace enforcement
 
 - CI job: `.github/workflows/ci.yml` -> `rust-coverage`
+- Nightly coverage publication: `.github/workflows/parity-nightly.yml` -> `rust-coverage-nightly`
 - Global workspace thresholds enforced via `--fail-under-lines`, `--fail-under-functions`, `--fail-under-regions` in CI.
 - CI workflow must install and run `cargo-llvm-cov`.
 - CI workflow must produce LCOV at `rust/coverage/lcov.info`.
 - CI workflow must upload the `rust-coverage` artifact.
+- Nightly workflow must upload `rust-coverage-nightly` artifact (`rust/coverage/nightly-lcov.info`).
 
 ## Coverage gate self-test
 

@@ -1,0 +1,3 @@
+# crate|expires_on|approved_by|issue|reason
+# expires_on format: YYYY-MM-DD (UTC). CI fails on expired waivers.
+# Remove waiver rows as soon as thresholds are met.
