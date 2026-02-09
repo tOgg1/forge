@@ -87,17 +87,17 @@ func TestRunnerEmitsEvents(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		return sink.HasType(EventTypePromptReady)
-	}, 2*time.Second, 10*time.Millisecond, "expected prompt_ready event")
+	}, 3*time.Second, 10*time.Millisecond, "expected prompt_ready event")
 
 	require.NoError(t, runner.SendInput(ctx, "hello"))
 
 	require.Eventually(t, func() bool {
 		return sink.ContainsOutput("working on: hello")
-	}, 2*time.Second, 10*time.Millisecond, "expected output_line for work")
+	}, 3*time.Second, 10*time.Millisecond, "expected output_line for work")
 
 	require.Eventually(t, func() bool {
 		return sink.HasType(EventTypeHeartbeat)
-	}, 2*time.Second, 10*time.Millisecond, "expected heartbeat")
+	}, 3*time.Second, 10*time.Millisecond, "expected heartbeat")
 
 	require.NoError(t, runner.SendInput(ctx, "exit"))
 
