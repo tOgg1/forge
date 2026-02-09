@@ -1,5 +1,7 @@
 //! forge-loop: loop runtime primitives and orchestration entrypoints.
 
+pub mod profile_selection;
+pub mod prompt_composition;
 pub mod queue_interactions;
 pub mod stop_rules;
 

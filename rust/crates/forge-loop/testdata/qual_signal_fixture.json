@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "name": "stop signal",
+      "output": "0",
+      "expected": 0
+    },
+    {
+      "name": "continue signal",
+      "output": "1",
+      "expected": 1
+    },
+    {
+      "name": "stop first token with trailing text",
+      "output": "0 stop now",
+      "expected": 0
+    },
+    {
+      "name": "continue first token with trailing text",
+      "output": "1 continue",
+      "expected": 1
+    },
+    {
+      "name": "empty output invalid",
+      "output": "",
+      "expected": null
+    },
+    {
+      "name": "whitespace output invalid",
+      "output": "   \n\t  ",
+      "expected": null
+    },
+    {
+      "name": "unexpected token invalid",
+      "output": "2",
+      "expected": null
+    },
+    {
+      "name": "word token invalid",
+      "output": "continue",
+      "expected": null
+    }
+  ]
+}

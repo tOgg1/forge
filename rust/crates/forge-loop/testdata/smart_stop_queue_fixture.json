@@ -1,0 +1,92 @@
+{
+  "cases": [
+    {
+      "name": "injects_when_due_without_overrides",
+      "queue_items": [],
+      "pending_steer_messages": 0,
+      "qual_due": true,
+      "single_run": false,
+      "judge_output": "1",
+      "on_invalid": "continue",
+      "expect_inject_qualitative_stop": true,
+      "expect_should_stop": false
+    },
+    {
+      "name": "prompt_override_suppresses_injection",
+      "queue_items": ["next_prompt_override"],
+      "pending_steer_messages": 0,
+      "qual_due": true,
+      "single_run": false,
+      "judge_output": "1",
+      "on_invalid": "continue",
+      "expect_inject_qualitative_stop": false,
+      "expect_should_stop": false
+    },
+    {
+      "name": "pause_before_run_suppresses_injection",
+      "queue_items": ["pause"],
+      "pending_steer_messages": 0,
+      "qual_due": true,
+      "single_run": false,
+      "judge_output": "1",
+      "on_invalid": "continue",
+      "expect_inject_qualitative_stop": false,
+      "expect_should_stop": false
+    },
+    {
+      "name": "pause_after_run_with_message_keeps_injection",
+      "queue_items": ["message_append", "pause"],
+      "pending_steer_messages": 0,
+      "qual_due": true,
+      "single_run": false,
+      "judge_output": "1",
+      "on_invalid": "continue",
+      "expect_inject_qualitative_stop": true,
+      "expect_should_stop": false
+    },
+    {
+      "name": "stop_short_circuits_and_invalid_stop_policy",
+      "queue_items": ["stop_graceful", "message_append"],
+      "pending_steer_messages": 0,
+      "qual_due": true,
+      "single_run": false,
+      "judge_output": "not-a-signal",
+      "on_invalid": "stop",
+      "expect_inject_qualitative_stop": false,
+      "expect_should_stop": true
+    },
+    {
+      "name": "kill_short_circuits_and_invalid_continue_policy",
+      "queue_items": ["kill_now", "next_prompt_override"],
+      "pending_steer_messages": 0,
+      "qual_due": true,
+      "single_run": false,
+      "judge_output": "not-a-signal",
+      "on_invalid": "continue",
+      "expect_inject_qualitative_stop": false,
+      "expect_should_stop": false
+    },
+    {
+      "name": "single_run_never_injects_even_when_due",
+      "queue_items": [],
+      "pending_steer_messages": 0,
+      "qual_due": true,
+      "single_run": true,
+      "judge_output": "0",
+      "on_invalid": "continue",
+      "expect_inject_qualitative_stop": false,
+      "expect_should_stop": true
+    },
+    {
+      "name": "pending_steer_counts_as_message_for_pause",
+      "queue_items": ["pause"],
+      "pending_steer_messages": 1,
+      "qual_due": true,
+      "single_run": false,
+      "judge_output": "0",
+      "on_invalid": "continue",
+      "expect_inject_qualitative_stop": true,
+      "expect_should_stop": true
+    }
+  ]
+}
