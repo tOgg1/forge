@@ -1,5 +1,7 @@
 //! forge-db: SQLite storage + migration engine for Forge.
 
+pub mod loop_repository;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -56,6 +58,10 @@ pub enum DbError {
     },
     #[error("{0}")]
     Validation(String),
+    #[error("loop not found")]
+    LoopNotFound,
+    #[error("loop already exists")]
+    LoopAlreadyExists,
     #[error("loop kv not found: {0}")]
     LoopKVNotFound(String),
 }
