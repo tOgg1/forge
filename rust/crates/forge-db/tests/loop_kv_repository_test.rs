@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use forge_db::{Config, Db, DbError, LoopKVRepository};
@@ -366,12 +367,14 @@ fn timestamps_are_rfc3339_format() {
 // -----------------------------------------------------------------------
 
 fn temp_db_path(prefix: &str) -> PathBuf {
+    static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
     let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_nanos(),
         Err(_) => 0,
     };
+    let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "forge-db-{prefix}-{nanos}-{}.sqlite",
-        std::process::id()
+        "forge-db-{prefix}-{nanos}-{}-{suffix}.sqlite",
+        std::process::id(),
     ))
 }

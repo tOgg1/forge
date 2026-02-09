@@ -1,6 +1,7 @@
 //! forge-db: SQLite storage + migration engine for Forge.
 
 pub mod loop_repository;
+pub mod profile_repository;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -64,6 +65,10 @@ pub enum DbError {
     LoopAlreadyExists,
     #[error("loop kv not found: {0}")]
     LoopKVNotFound(String),
+    #[error("profile not found")]
+    ProfileNotFound,
+    #[error("profile already exists")]
+    ProfileAlreadyExists,
 }
 
 impl Db {
