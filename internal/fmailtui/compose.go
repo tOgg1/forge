@@ -607,13 +607,15 @@ func (m *Model) renderComposeOverlay(width, height int, theme Theme) string {
 		status = "Discard draft? [y] discard  [s] save  [Esc] cancel"
 	}
 
-	lines := []string{
-		head,
-		"",
-		"To: " + to,
-		"Priority: " + priority,
-		"Tags: " + tags,
+	lines := []string{head, ""}
+	if strings.TrimSpace(c.replyTo) != "" && strings.TrimSpace(c.parentLine) != "" {
+		lines = append(lines, "Replying to: "+truncate(c.parentLine, 60), "")
 	}
+	lines = append(lines,
+		"To: "+to,
+		"Priority: "+priority,
+		"Tags: "+tags,
+	)
 	if strings.TrimSpace(c.replyTo) != "" {
 		replyLine := "Reply to: " + c.replyTo
 		if strings.TrimSpace(c.parentLine) != "" {
