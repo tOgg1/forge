@@ -37,6 +37,7 @@ cd rust && cargo llvm-cov --workspace --all-features --html --open
 
 - Per-crate thresholds are source-controlled in `rust/coverage-thresholds.txt`.
 - Per-crate enforcement: `scripts/rust-coverage-gate.sh` (reads thresholds + waivers; runs `cargo llvm-cov --package <crate> --fail-under-lines <N>` when no active waiver exists).
+- Per-crate summary output (for CI artifacts and step summary): `rust/coverage/per-crate-summary.txt`.
 - New crates must be added to `rust/coverage-thresholds.txt` in the same PR.
 
 ## Temporary waiver process
@@ -52,12 +53,12 @@ cd rust && cargo llvm-cov --workspace --all-features --html --open
 ## Workspace enforcement
 
 - CI job: `.github/workflows/ci.yml` -> `rust-coverage`
-- Nightly coverage publication: `.github/workflows/parity-nightly.yml` -> `rust-coverage-nightly`
+- Nightly coverage publication: `.github/workflows/rust-coverage-nightly.yml` -> `rust-coverage-nightly`
 - Global workspace thresholds enforced via `--fail-under-lines`, `--fail-under-functions`, `--fail-under-regions` in CI.
 - CI workflow must install and run `cargo-llvm-cov`.
 - CI workflow must produce LCOV at `rust/coverage/lcov.info`.
 - CI workflow must upload the `rust-coverage` artifact.
-- Nightly workflow must upload `rust-coverage-nightly` artifact (`rust/coverage/nightly-lcov.info`).
+- Nightly workflow must upload `rust-coverage-nightly` artifact (`rust/coverage/lcov.info`).
 
 ## Coverage gate self-test
 

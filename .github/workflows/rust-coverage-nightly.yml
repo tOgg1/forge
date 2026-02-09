@@ -1,0 +1,60 @@
+name: Rust Coverage Nightly
+
+on:
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-coverage:
+    runs-on: ubuntu-latest
+    env:
+      RUST_COVERAGE_FAIL_UNDER_LINES: "100"
+      RUST_COVERAGE_FAIL_UNDER_FUNCTIONS: "100"
+      RUST_COVERAGE_FAIL_UNDER_REGIONS: "100"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Enforce per-crate coverage thresholds and waivers
+        run: scripts/rust-coverage-gate.sh
+      - name: rust coverage
+        working-directory: rust
+        run: |
+          cargo llvm-cov \
+            --workspace \
+            --all-features \
+            --fail-under-lines "${RUST_COVERAGE_FAIL_UNDER_LINES}" \
+            --fail-under-functions "${RUST_COVERAGE_FAIL_UNDER_FUNCTIONS}" \
+            --fail-under-regions "${RUST_COVERAGE_FAIL_UNDER_REGIONS}" \
+            --lcov \
+            --output-path coverage/lcov.info
+      - name: Summarize rust coverage
+        working-directory: rust
+        run: |
+          {
+            echo "## Rust Coverage (Nightly)"
+            echo ""
+            echo "Per-crate thresholds: rust/coverage-thresholds.txt"
+            echo "Waivers: rust/coverage-waivers.txt"
+            echo ""
+            echo "Thresholds: lines ${RUST_COVERAGE_FAIL_UNDER_LINES}%, functions ${RUST_COVERAGE_FAIL_UNDER_FUNCTIONS}%, regions ${RUST_COVERAGE_FAIL_UNDER_REGIONS}%"
+            echo ""
+            cargo llvm-cov report --summary-only
+            echo ""
+            echo "### Per-crate coverage"
+            echo ""
+            cat coverage/per-crate-summary.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-coverage-nightly
+          path: |
+            rust/coverage/lcov.info
+            rust/coverage/per-crate-summary.txt
+          if-no-files-found: error
