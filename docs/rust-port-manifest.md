@@ -129,6 +129,8 @@ Status: **port** for all commands below.
 ## `fmail` command manifest
 
 Status: **port** for all commands below.
+Canonical matrix + snapshot parity checks:
+`docs/rust-fmail-command-manifest.md`.
 
 ### `fmail` commands → `fmail-cli` + `fmail-core`
 

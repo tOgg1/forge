@@ -1,0 +1,25 @@
+fmail sends and receives messages via .fmail/ files.
+
+Usage:
+  fmail [command]
+
+Available Commands:
+  completion  Generate the autocompletion script for the specified shell
+  gc          Remove old messages
+  help        Help about any command
+  init        Initialize a project mailbox
+  log         View recent messages
+  messages    View all public messages (topics and direct messages)
+  register    Request a unique agent name
+  send        Send a message to a topic or agent
+  status      Show or set your status
+  topics      List topics with activity
+  watch       Stream messages as they arrive
+  who         List known agents
+
+Flags:
+  -h, --help         help for fmail
+      --robot-help   Machine-readable help output
+  -v, --version      version for fmail
+
+Use "fmail [command] --help" for more information about a command.

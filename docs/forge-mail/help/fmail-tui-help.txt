@@ -1,0 +1,15 @@
+Bubbletea-based terminal UI for fmail.
+
+Usage:
+  fmail-tui [flags]
+
+Flags:
+      --agent string             sender identity for compose/quick-send (defaults to FMAIL_AGENT)
+      --forged-addr string       forged endpoint (socket path or host:port)
+  -h, --help                     help for fmail-tui
+  -o, --operator                 start in operator console view
+      --poll-interval duration   poll interval for background refresh (default 2s)
+      --project string           fmail project ID override
+      --root string              project root containing .fmail
+      --theme string             theme: default|high-contrast (default "default")
+  -v, --version                  version for fmail-tui
