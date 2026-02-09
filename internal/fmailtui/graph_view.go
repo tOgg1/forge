@@ -142,13 +142,13 @@ func (v *graphView) handleKey(msg tea.KeyMsg) tea.Cmd {
 			v.loading = true
 			return v.loadCmd()
 		}
-	case "h", "left":
+	case "h":
 		if v.windows[v.windowIdx] > 0 {
 			v.windowEnd = v.windowEnd.Add(-v.panStep())
 			v.loading = true
 			return v.loadCmd()
 		}
-	case "l", "right":
+	case "l":
 		if v.windows[v.windowIdx] > 0 {
 			v.windowEnd = v.windowEnd.Add(v.panStep())
 			v.loading = true
@@ -175,6 +175,10 @@ func (v *graphView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		v.panY--
 	case "down":
 		v.panY++
+	case "left":
+		v.panX--
+	case "right":
+		v.panX++
 	case "ctrl+left":
 		v.panX--
 	case "ctrl+right":

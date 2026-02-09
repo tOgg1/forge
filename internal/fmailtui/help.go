@@ -169,11 +169,12 @@ func helpForView(id ViewID) []helpSection {
 			global,
 			{title: "Graph", items: []helpItem{
 				{key: "[ / ]", desc: "adjust time range"},
-				{key: "h/l or ←/→", desc: "pan window"},
+				{key: "h/l", desc: "pan time window"},
 				{key: "t", desc: "toggle topic overlay"},
 				{key: "c", desc: "toggle clustering"},
-				{key: "Arrow keys", desc: "move selection"},
-				{key: "Enter", desc: "toggle details"},
+				{key: "Arrow keys", desc: "pan layout"},
+				{key: "Tab", desc: "next node"},
+				{key: "Enter", desc: "toggle details panel"},
 			}},
 		}
 	case ViewNotify:

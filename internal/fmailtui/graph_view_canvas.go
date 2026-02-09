@@ -38,6 +38,33 @@ func (v *graphView) renderCanvas(width, height int) []string {
 	return out
 }
 
+func (v *graphView) renderOverlayCanvas(width, height int) []string {
+	if height <= 0 {
+		return nil
+	}
+	grid := make([][]rune, height)
+	for y := range grid {
+		row := make([]rune, width)
+		for x := range row {
+			row[x] = ' '
+		}
+		grid[y] = row
+	}
+
+	agentBoxes := v.layoutBoxes(width, height)
+	topicBoxes := v.layoutTopicBoxes(width, height)
+
+	v.drawAgentTopicEdges(grid, agentBoxes, topicBoxes)
+	v.drawTopicLabels(grid, topicBoxes)
+	v.drawBoxes(grid, agentBoxes)
+
+	out := make([]string, 0, height)
+	for y := range grid {
+		out = append(out, string(grid[y]))
+	}
+	return out
+}
+
 func (v *graphView) layoutBoxes(width, height int) []graphBox {
 	nodes := v.snap.Nodes
 	if len(nodes) == 0 {
@@ -95,6 +122,43 @@ func (v *graphView) layoutBoxes(width, height int) []graphBox {
 	return boxes
 }
 
+func (v *graphView) layoutTopicBoxes(width, height int) map[string]graphBox {
+	topics := v.snap.Topics
+	if len(topics) == 0 {
+		return nil
+	}
+
+	baseR := float64(minInt(width, height)) * 0.18
+	baseR += float64(v.zoom) * 1.5
+	if baseR < 3 {
+		baseR = 3
+	}
+
+	cx := float64(width/2 + v.panX)
+	cy := float64(height/2 + v.panY)
+
+	out := make(map[string]graphBox, len(topics))
+	for i := range topics {
+		topic := topics[i]
+		name := strings.TrimSpace(topic.Name)
+		if name == "" {
+			continue
+		}
+		label := fmt.Sprintf("(%s %d)", truncateVis(name, 12), topic.MessageCount)
+		bw := lipglossWidth(label)
+		if bw < 6 {
+			bw = 6
+		}
+		angle := 2 * math.Pi * float64(i) / float64(maxInt(1, len(topics)))
+		x := int(cx+baseR*math.Cos(angle)) - bw/2
+		y := int(cy + baseR*math.Sin(angle))
+		x = clampInt(x, 0, maxInt(0, width-bw))
+		y = clampInt(y, 0, maxInt(0, height-1))
+		out[name] = graphBox{x: x, y: y, w: bw, h: 1}
+	}
+	return out
+}
+
 func (v *graphView) drawBoxes(grid [][]rune, boxes []graphBox) {
 	for i := range boxes {
 		b := boxes[i]
@@ -148,6 +212,46 @@ func (v *graphView) drawEdges(grid [][]rune, boxes []graphBox) {
 
 	for _, e := range edges {
 		v.drawEdge(grid, boxes[e.from], boxes[e.to], e.count)
+	}
+}
+
+func (v *graphView) drawTopicLabels(grid [][]rune, topics map[string]graphBox) {
+	if len(topics) == 0 {
+		return
+	}
+	for _, topic := range v.snap.Topics {
+		name := strings.TrimSpace(topic.Name)
+		b, ok := topics[name]
+		if !ok {
+			continue
+		}
+		label := fmt.Sprintf("(%s %d)", truncateVis(name, 12), topic.MessageCount)
+		drawText(grid, b.x, b.y, truncateVis(label, b.w))
+	}
+}
+
+func (v *graphView) drawAgentTopicEdges(grid [][]rune, agentBoxes []graphBox, topicBoxes map[string]graphBox) {
+	if len(agentBoxes) == 0 || len(topicBoxes) == 0 {
+		return
+	}
+	agentIdx := make(map[string]int, len(v.snap.Nodes))
+	for i := range v.snap.Nodes {
+		agentIdx[v.snap.Nodes[i].Name] = i
+	}
+	edges := make([]graphEdge, 0, len(v.snap.AgentTopicEdges))
+	edges = append(edges, v.snap.AgentTopicEdges...)
+	sort.Slice(edges, func(i, j int) bool { return edges[i].Count > edges[j].Count })
+
+	for _, e := range edges {
+		fi, ok := agentIdx[e.From]
+		if !ok {
+			continue
+		}
+		tb, ok := topicBoxes[e.To]
+		if !ok {
+			continue
+		}
+		v.drawEdge(grid, agentBoxes[fi], tb, e.Count)
 	}
 }
 

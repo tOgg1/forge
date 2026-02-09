@@ -23,9 +23,9 @@ type graphEdge struct {
 }
 
 type graphSnapshot struct {
-	Messages int
-	Nodes    []graphNode
-	Edges    []graphEdge
+	Messages        int
+	Nodes           []graphNode
+	Edges           []graphEdge
 	Topics          []graphTopic
 	AgentTopicEdges []graphEdge
 }
