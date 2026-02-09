@@ -59,12 +59,16 @@ jobs:
           cache: true
       - name: Run oracle parity harness
         run: go test ./internal/parity -run '^TestOracleFixtureParity$' -count=1
+      - name: Run CLI gate baseline test
+        run: go test ./internal/parity -run '^TestCLIGateRootOracleBaseline$' -count=1
       - name: Run synthetic drift detection test
         run: go test ./internal/parity -run '^TestCompareTreesDetectsSyntheticDrift$' -count=1
       - name: Run schema fingerprint baseline test
         run: go test ./internal/parity -run '^TestSchemaFingerprintBaseline$' -count=1
       - name: Run daemon/proto parity gate baseline tests
         run: go test ./internal/parity -run '^TestDaemonProtoGate' -count=1
+      - name: Run runtime parity gate baseline test
+        run: go test ./internal/parity -run '^TestRuntimeGateLoopQueueSmartStopLedger$' -count=1
       - name: Generate parity diff artifacts on drift
         if: failure()
         run: |
