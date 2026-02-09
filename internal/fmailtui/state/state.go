@@ -24,17 +24,17 @@ const (
 )
 
 type TUIState struct {
-	Version       int                `json:"version"`
-	ReadMarkers   map[string]string  `json:"read_markers,omitempty"`   // topic/dm -> last-read message ID
-	Bookmarks     []Bookmark         `json:"bookmarks,omitempty"`      // saved message references
-	Annotations   map[string]string  `json:"annotations,omitempty"`    // message ID -> annotation text
-	Drafts        map[string]ComposeDraft `json:"drafts,omitempty"`    // target -> draft payload
-	StarredTopics []string           `json:"starred_topics,omitempty"` // pinned topic names
-	SavedSearches []SavedSearch      `json:"saved_searches,omitempty"` // named search presets
-	Preferences   Preferences        `json:"preferences,omitempty"`    // UI preferences
-	NotifyRules   []NotificationRule `json:"notify_rules,omitempty"`   // notification configuration
-	LastView      string             `json:"last_view,omitempty"`      // last active view (for session restore)
-	LastTopic     string             `json:"last_topic,omitempty"`     // last viewed topic
+	Version       int                     `json:"version"`
+	ReadMarkers   map[string]string       `json:"read_markers,omitempty"`   // topic/dm -> last-read message ID
+	Bookmarks     []Bookmark              `json:"bookmarks,omitempty"`      // saved message references
+	Annotations   map[string]string       `json:"annotations,omitempty"`    // message ID -> annotation text
+	Drafts        map[string]ComposeDraft `json:"drafts,omitempty"`         // target -> draft payload
+	StarredTopics []string                `json:"starred_topics,omitempty"` // pinned topic names
+	SavedSearches []SavedSearch           `json:"saved_searches,omitempty"` // named search presets
+	Preferences   Preferences             `json:"preferences,omitempty"`    // UI preferences
+	NotifyRules   []NotificationRule      `json:"notify_rules,omitempty"`   // notification configuration
+	LastView      string                  `json:"last_view,omitempty"`      // last active view (for session restore)
+	LastTopic     string                  `json:"last_topic,omitempty"`     // last viewed topic
 }
 
 type ComposeDraft struct {
