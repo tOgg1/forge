@@ -230,3 +230,57 @@ Iteration complete. Three commits landed:
 **Tasks covered**: forge-3kr (mail repository parity), forge-vd2 (context), forge-2cw (hook), forge-vry (status). Remaining untracked dirs (`rust/.cargo-home-loop/`, `rust/target-loop/`) are build artifacts from other agents — not committable.
 ```
 
+## 2026-02-09T18:40:08Z
+
+- run_id: 7daa7c37-c18e-483e-8ea2-fe3b2d849aa9
+- loop_name: rust-full-committer-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T18:37:33Z
+- finished_at: 2026-02-09T18:40:08Z
+- exit_code: 0
+
+```
+Iteration complete. Summary:
+
+| Commit | Message |
+|--------|---------|
+| `da4c938` | `feat(forge-cli): add filesystem context backend with YAML + SQLite persistence` |
+| `f01f891` | `chore: update ledgers and task state` |
+
+**Validation**: `cargo fmt --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace` — all passed before committing.
+
+**Remaining uncommittable changes**: New `lock.rs`, `send.rs`, `template.rs` modules and `lib.rs` wiring from other agents fail clippy (unused imports in `template.rs`, `unwrap_used` in `lock.rs`). These are still in progress — will pick up next iteration when agents fix the warnings.
+```
+
+## 2026-02-09T18:47:25Z
+
+- run_id: fd137d23-f765-4769-aa56-d8e1713483ca
+- loop_name: rust-full-committer-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T18:42:08Z
+- finished_at: 2026-02-09T18:47:25Z
+- exit_code: 0
+
+```
+Iteration complete. Summary:
+
+**Committed:**
+1. `885f33f` **feat(forge-cli): port lock, send, skills, and template commands** — 4 new CLI command modules with backend traits, in-memory test backends, integration tests, and golden file tests. 11 files, +5806 lines.
+2. `12392f0` **feat(parity): add owner-based alert routing for drift reports** — Owner assignment for parity drift paths, CI workflow integration for routing summaries. 5 files, +204 lines.
+
+**Not committed (in-progress / blocked):**
+- `forge-daemon` changes: `pub mod loop_runner;` declared but module file missing — workspace won't compile. Reported as blocker.
+- `lock_command_test.rs` + `golden/lock/`: Untracked, likely in-progress from another agent.
+- Ledger/task state files: Infrastructure bookkeeping, not code.
+```
+

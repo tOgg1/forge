@@ -348,3 +348,49 @@ Ported `forge stop` from Go to Rust with full flag/default/validation/output par
 - Pre-existing `forge-db` migration test failure in workspace unrelated to this change
 ```
 
+## 2026-02-09T18:45:37Z
+
+- run_id: 41f664a1-d7a9-480f-a815-f975f8789765
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:35:16Z
+- finished_at: 2026-02-09T18:45:37Z
+- exit_code: 0
+
+```
+## Task Summary: `forge-9qp` - CLI port: forge skills
+
+**Status:** Closed
+
+### What was done
+
+Ported the `forge skills` CLI command from Go to Rust with full flag/default/validation/output parity.
+
+### Files changed
+
+1. **`rust/crates/forge-cli/src/skills.rs`** (new, ~900 lines) - Complete implementation:
+   - `SkillsBackend` trait with dependency injection for testability
+   - `FilesystemSkillsBackend` (production) and `InMemorySkillsBackend` (testing) implementations
+   - 7 builtin skills embedded at compile time via `include_bytes!()` from `internal/skills/builtin/`
+   - `skills bootstrap` subcommand with `--force/-f`, `--path`, `--all-profiles` flags
+   - `resolve_harness_dest()` - resolves skill install destinations for codex/claude/opencode/pi harnesses
+   - `select_profiles_for_skills()` - filters profiles by default pool config
+   - JSON and human-readable output formats
+   - 24 unit tests covering help, bootstrap, force/skip, custom paths, profile selection, harness resolution, auth_home routing
+
+2. **`rust/crates/forge-cli/src/lib.rs`** - Registered `skills` module, added command dispatch, help text entry, and accessibility test
+
+3. **`rust/crates/forge-cli/tests/send_command_test.rs`** - Fixed pre-existing clippy issue (added `#![allow(clippy::unwrap_used)]`)
+
+### Validation
+
+- `cargo fmt --check` - pass
+- `cargo clippy --workspace --all-targets -- -D warnings` - pass (0 warnings)
+- `cargo test --workspace` - pass (0 failures across all crates)
+```
+

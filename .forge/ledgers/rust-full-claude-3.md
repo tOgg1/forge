@@ -308,3 +308,55 @@ Task **forge-h2m** (Repo layer: loop_queue_items repository parity) is complete 
 - `cargo test -p forge-cli -- status`: 27/27 tests PASS
 ```
 
+## 2026-02-09T18:45:52Z
+
+- run_id: 5e369a75-eba8-4543-af35-08f551391653
+- loop_name: rust-full-claude-3
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:31:00Z
+- finished_at: 2026-02-09T18:45:52Z
+- exit_code: 0
+
+```
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+## Task Summary: `forge-9jm` — CLI port: forge send
+
+**Status:** Closed
+
+### What was done
+
+Implemented the `forge send` Rust CLI command with full parity to the Go implementation.
+
+**Files created:**
+- `rust/crates/forge-cli/src/send.rs` — Command implementation (~500 LOC)
+- `rust/crates/forge-cli/tests/send_command_test.rs` — External integration tests (14 tests)
+- `rust/crates/forge-cli/tests/golden/send/single_human.txt` — Golden file
+- `rust/crates/forge-cli/tests/golden/send/when_idle_human.txt` — Golden file  
+- `rust/crates/forge-cli/tests/golden/send/priority_high_human.txt` — Golden file
+
+**Files modified:**
+- `rust/crates/forge-cli/src/lib.rs` — Added `send` module, dispatch, help entry, accessibility test
+
+### Implementation details
+
+- **Backend trait:** `SendBackend` with 7 methods for agent resolution, context loading, queue operations
+- **InMemorySendBackend** for testing with full in-memory queue management
+- **Flags:** `--priority` (high/normal/low), `--front`, `--when-idle`, `--after`, `--all`, `--json`, `--jsonl`, `--quiet`, `--help`
+- **Agent resolution:** explicit ID → context fallback → single-agent auto-detect
+- **Validation:** flag conflicts (after+front, after+all), priority validation, JSON/JSONL mutual exclusion
+- **Output:** Human-readable with `✓`/`✗` markers + position info; JSON/JSONL with full result array
+
+### Validation results
+
+- `cargo fmt --check` — PASS
+- `cargo clippy -p forge-cli --all-targets -- -D warnings` — PASS
+- `cargo test -p forge-cli` — PASS (42 send-related tests: 28 inline + 14 external)
+```
+

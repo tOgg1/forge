@@ -328,3 +328,53 @@ Task `forge-3kr` is complete. Here's a summary of what was accomplished:
 Note: The workspace-level clippy has pre-existing failures in `forge-cli` (another agent's in-progress `context_command_test.rs` changes) — unrelated to this task.
 ```
 
+## 2026-02-09T18:47:12Z
+
+- run_id: 3968909a-d2e7-43e8-b42e-a617cd39a5ba
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:34:10Z
+- finished_at: 2026-02-09T18:47:12Z
+- exit_code: 0
+
+```
+## Task Summary: forge-j17 — CLI port: forge lock
+
+**Status**: Closed (all acceptance criteria met)
+
+### Deliverables
+
+**New files:**
+- `rust/crates/forge-cli/src/lock.rs` — Full command implementation (~530 lines)
+- `rust/crates/forge-cli/tests/lock_command_test.rs` — 20 integration/golden tests
+- `rust/crates/forge-cli/tests/golden/lock/help.txt` — Golden output for help
+- `rust/crates/forge-cli/tests/golden/lock/status_empty.txt` — Golden output for empty status
+- `rust/crates/forge-cli/tests/golden/lock/check_clear.txt` — Golden output for clear check
+
+**Modified files:**
+- `rust/crates/forge-cli/src/lib.rs` — Added `pub mod lock`, command routing, help text, module test
+
+### Implementation details
+
+- **4 subcommands** with full Go parity: `claim`, `release`, `status`, `check`
+- **`LockBackend` trait** abstracting Agent Mail MCP operations for testability
+- **`InMemoryLockBackend`** for deterministic testing
+- **Output formats**: text (TabWriter tables), JSON (pretty), JSONL (streaming)
+- **Glob pattern matching** (`matches_path_pattern` with bidirectional path/pattern matching)
+- **All flag parity**: `--agent/-a`, `--path/-p`, `--ttl`, `--exclusive`, `--reason`, `--force`, `--lock-id`
+- **54 total tests** (34 unit + 20 integration): all pass
+
+### Validation
+
+```
+cargo fmt -p forge-cli --check     ✓
+cargo clippy -p forge-cli --all-targets -- -D warnings  ✓
+cargo test -p forge-cli            ✓ (all tests pass)
+```
+```
+

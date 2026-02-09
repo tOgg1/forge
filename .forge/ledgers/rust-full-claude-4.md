@@ -412,3 +412,39 @@ Implemented the `LoopKVRepository` in Rust with full Go behavioral parity.
 - Note: `--all-targets` blocked by broken `context_command_test.rs` from another agent (not my code)
 ```
 
+## 2026-02-09T18:45:44Z
+
+- run_id: bcf70358-6362-464d-bf6d-9f1a0dfef47e
+- loop_name: rust-full-claude-4
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:33:58Z
+- finished_at: 2026-02-09T18:45:44Z
+- exit_code: 0
+
+```
+## Task Summary: `forge-rfg` — CLI port: forge template
+
+**Status:** Closed
+
+**Deliverables:**
+- `rust/crates/forge-cli/src/template.rs` — Full Rust implementation of `forge template` command with Go parity
+- Wired into `lib.rs` dispatch (`template` + `tmpl` alias), help text, and module tests
+
+**Implementation details:**
+- `TemplateBackend` trait for testability (filesystem + in-memory backends)
+- 6 subcommands: `ls`/`list`, `show`, `add`, `edit`, `run`, `delete`/`rm`
+- `Template`/`TemplateVar` data models with serde serialization
+- Arg parsing: `--tags`, `--agent`/`-a`, `--var`, `--json`, `--jsonl`, `-h`/`--help`
+- Go parity helpers: `filter_templates`, `find_template_by_name` (case-insensitive), `normalize_template_name`, `parse_template_vars` (comma-separated), `render_template` (Go `{{.Key}}` substitution), `template_source_label`, `indent_block`
+- JSON/JSONL/tabwriter text output modes
+
+**Tests:** 74 unit tests covering all subcommands, output formats, helper functions, error cases, and Go behavior parity
+
+**Validation:** `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` — ALL PASS
+```
+
