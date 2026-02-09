@@ -25,8 +25,8 @@ func (m *Model) renderHeader() string {
 
 	fg := lipgloss.Color(palette.Base.Foreground)
 	bg := lipgloss.Color(palette.Chrome.Header)
-	if m.activeViewID() == ViewLiveTail && !m.flashUntil.IsZero() && now.Before(m.flashUntil) {
-		// Flash: invert-ish colors for high-priority messages in Live Tail.
+	if !m.flashUntil.IsZero() && now.Before(m.flashUntil) {
+		// Flash: invert-ish colors for alerting notifications.
 		fg = lipgloss.Color(palette.Chrome.Header)
 		bg = lipgloss.Color(palette.Base.Foreground)
 	}

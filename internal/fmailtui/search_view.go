@@ -173,7 +173,7 @@ func (v *searchView) View(width, height int, theme Theme) string {
 	innerH := maxInt(1, height-(styles.LayoutInnerPadding*2)-2)
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render("Search")
-	status := "Enter: open  j/k: move  Tab: next  Shift+Tab: prev  s: save  p: saved  Esc: back"
+	status := "Enter: open  j/k: move  Tab: next  Shift+Tab: prev  s: save  Ctrl+P: saved  Esc: back"
 	if v.focus == searchFocusSaved {
 		status = "Saved searches: ←/→ select  Enter load  x delete  Esc back"
 	}
@@ -246,7 +246,7 @@ func (v *searchView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	switch msg.String() {
-	case "p":
+	case "ctrl+p":
 		if len(v.saved) > 0 {
 			v.focus = searchFocusSaved
 			v.savedSelected = clampInt(v.savedSelected, 0, len(v.saved)-1)
@@ -274,6 +274,19 @@ func (v *searchView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		v.focus = searchFocusSavePrompt
 		v.saveName = ""
 		v.saveNameCursor = 0
+		return nil
+	case "b":
+		if v.state == nil || v.selected < 0 || v.selected >= len(v.results) {
+			return nil
+		}
+		res := v.results[v.selected]
+		id := strings.TrimSpace(res.Message.ID)
+		topic := strings.TrimSpace(res.Topic)
+		if id == "" || topic == "" {
+			return nil
+		}
+		v.state.ToggleBookmark(id, topic)
+		v.state.SaveSoon()
 		return nil
 	case "o":
 		return v.openSelected()

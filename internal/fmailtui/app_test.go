@@ -135,6 +135,14 @@ func TestTopicsLocalKeysNotHijackedByGlobalRoutes(t *testing.T) {
 	require.Equal(t, ViewTopics, model.activeViewID()) // DM toggle in Topics view
 }
 
+func TestGlobalCtrlNOpensNotificationsView(t *testing.T) {
+	model := newTestModel(t, Config{})
+	require.Equal(t, ViewDashboard, model.activeViewID())
+
+	model = applyUpdateWithCmd(t, model, tea.KeyMsg{Type: tea.KeyCtrlN})
+	require.Equal(t, ViewNotify, model.activeViewID())
+}
+
 func TestTimelineLocalKeysNotHijackedByGlobalRoutes(t *testing.T) {
 	model := newTestModel(t, Config{})
 	model.layout.SetMode(layout.ModeSingle)

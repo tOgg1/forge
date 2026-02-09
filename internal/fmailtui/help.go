@@ -63,9 +63,11 @@ func helpForView(id ViewID) []helpSection {
 			{key: "Esc", desc: "back"},
 			{key: ":", desc: "quick send"},
 			{key: "n", desc: "new message"},
+			{key: "Ctrl+B", desc: "open bookmarks"},
 			{key: "Ctrl+T", desc: "cycle theme"},
 			{key: "Ctrl+R", desc: "refresh view"},
 			{key: "Ctrl+Z", desc: "toggle zen layout"},
+			{key: "Ctrl+N", desc: "open notifications"},
 			{key: "Tab", desc: "cycle pane focus"},
 			{key: "Ctrl+W h/j/k/l", desc: "move pane focus"},
 			{key: "Ctrl+W +/-", desc: "adjust split ratio"},
@@ -126,6 +128,40 @@ func helpForView(id ViewID) []helpSection {
 				{key: "Enter", desc: "toggle detail popup"},
 				{key: "o", desc: "open selected in thread view"},
 				{key: "b", desc: "toggle bookmark"},
+			}},
+		}
+	case ViewBookmarks:
+		return []helpSection{
+			global,
+			{title: "Bookmarks", items: []helpItem{
+				{key: "j/k", desc: "move selection"},
+				{key: "Enter", desc: "open in thread view"},
+				{key: "e", desc: "edit note"},
+				{key: "d", desc: "delete bookmark"},
+				{key: "x", desc: "export markdown"},
+				{key: "/", desc: "filter"},
+				{key: "s", desc: "cycle sort"},
+			}},
+		}
+	case ViewStats:
+		return []helpSection{
+			global,
+			{title: "Stats", items: []helpItem{
+				{key: "r", desc: "refresh"},
+				{key: "[ / ]", desc: "adjust time range"},
+				{key: "h/l or ←/→", desc: "pan window"},
+			}},
+		}
+	case ViewNotify:
+		return []helpSection{
+			global,
+			{title: "Notifications", items: []helpItem{
+				{key: "j/k", desc: "move selection"},
+				{key: "Tab", desc: "switch notifications/rules"},
+				{key: "Enter", desc: "open in thread view"},
+				{key: "x / c", desc: "dismiss one / clear all"},
+				{key: "n / e / d", desc: "new, edit, delete rule"},
+				{key: "Space", desc: "toggle selected rule"},
 			}},
 		}
 	default:

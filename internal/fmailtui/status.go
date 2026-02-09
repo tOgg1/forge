@@ -28,8 +28,8 @@ type statusIncomingMsg struct {
 }
 
 type statusMetricsMsg struct {
-	agentsRecent int
-	unread       int
+	agentsRecent   int
+	unreadMessages int
 }
 
 type statusProbeMsg struct {
@@ -62,8 +62,9 @@ type statusState struct {
 	msgTimes      []time.Time
 	agentLastSeen map[string]time.Time
 
-	agentsRecent int
-	unread       int
+	agentsRecent        int
+	unreadMessages      int
+	notificationsUnread int
 
 	conn statusConn
 
@@ -293,7 +294,7 @@ func (m *Model) statusMetricsCmd() tea.Cmd {
 			}
 		}
 
-		return statusMetricsMsg{agentsRecent: agentsRecent, unread: unread}
+		return statusMetricsMsg{agentsRecent: agentsRecent, unreadMessages: unread}
 	}
 }
 
@@ -361,6 +362,12 @@ func viewLabel(id ViewID) string {
 		return "Live"
 	case ViewTimeline:
 		return "Timeline"
+	case ViewStats:
+		return "Stats"
+	case ViewBookmarks:
+		return "Bookmarks"
+	case ViewNotify:
+		return "Notifications"
 	default:
 		return string(id)
 	}
@@ -402,9 +409,13 @@ func (m *Model) renderStatusBar() string {
 	}
 	agents := fmt.Sprintf("%d agents", agentsCount)
 
+	notifUnread := m.status.notificationsUnread
+	if m.notifications != nil {
+		notifUnread = m.notifications.UnreadCount()
+	}
 	notif := ""
-	if m.status.unread > 0 {
-		notif = fmt.Sprintf("[N:%d]", m.status.unread)
+	if notifUnread > 0 {
+		notif = fmt.Sprintf("[N:%d]", notifUnread)
 	}
 	pane := ""
 	if m.activeViewID() == ViewDashboard {
@@ -451,7 +462,7 @@ func (m *Model) renderStatusBar() string {
 
 func (s *statusState) applyMetrics(msg statusMetricsMsg) {
 	s.agentsRecent = msg.agentsRecent
-	s.unread = msg.unread
+	s.unreadMessages = msg.unreadMessages
 }
 
 func (s *statusState) applyProbe(msg statusProbeMsg, now time.Time) {

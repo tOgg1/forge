@@ -83,9 +83,9 @@ type SearchQuery struct {
 	Until    time.Time
 	HasReply bool
 	// View-level filters (provider may ignore them).
-	HasBookmark bool
+	HasBookmark   bool
 	HasAnnotation bool
-	IsUnread    bool
+	IsUnread      bool
 }
 
 type SearchResult struct {

@@ -38,6 +38,11 @@ type threadLoadedMsg struct {
 	err    error
 }
 
+type threadExportResultMsg struct {
+	path string
+	err  error
+}
+
 type threadRow struct {
 	msg         fmail.Message
 	hasChildren bool
@@ -89,6 +94,15 @@ type threadView struct {
 	rowCardCache      map[string][]string
 	rowCardCacheTheme string
 	rowCardCacheWidth int
+
+	bookmarkConfirmID string
+
+	editActive   bool
+	editKind     string // "bookmark-note" | "annotation"
+	editTargetID string
+	editInput    string
+	statusLine   string
+	statusErr    bool
 
 	initialized bool
 }
@@ -180,6 +194,15 @@ func (v *threadView) Update(msg tea.Msg) tea.Cmd {
 	case threadLoadedMsg:
 		v.applyLoaded(typed)
 		return nil
+	case threadExportResultMsg:
+		if typed.err != nil {
+			v.statusLine = "export failed: " + typed.err.Error()
+			v.statusErr = true
+			return nil
+		}
+		v.statusLine = "exported: " + typed.path
+		v.statusErr = false
+		return nil
 	case tea.KeyMsg:
 		return v.handleKey(typed)
 	}
@@ -198,14 +221,34 @@ func (v *threadView) View(width, height int, theme Theme) string {
 	header := v.renderHeader(width, palette)
 	meta := v.renderMeta(width, palette)
 
+	reserved := 0
+	if v.editActive {
+		reserved += 4
+	}
+	if strings.TrimSpace(v.statusLine) != "" {
+		reserved++
+	}
+
 	bodyHeight := height - lipgloss.Height(header) - lipgloss.Height(meta)
+	bodyHeight -= reserved
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
 	v.viewportRows = maxInt(1, bodyHeight/4)
 
 	body := v.renderRows(width, bodyHeight, palette)
-	content := lipgloss.JoinVertical(lipgloss.Left, header, meta, body)
+	lines := []string{header, meta, body}
+	if v.editActive {
+		lines = append(lines, v.renderEditPrompt(width, palette))
+	}
+	if strings.TrimSpace(v.statusLine) != "" {
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted))
+		if v.statusErr {
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Priority.High)).Bold(true)
+		}
+		lines = append(lines, style.Render(truncateVis(v.statusLine, width)))
+	}
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	if v.lastErr != nil {
 		errLine := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Priority.High)).Render("data error: " + truncate(v.lastErr.Error(), maxInt(0, width-2)))
 		content = lipgloss.JoinVertical(lipgloss.Left, content, errLine)
@@ -220,33 +263,44 @@ func (v *threadView) MinSize() (int, int) {
 }
 
 func (v *threadView) handleKey(msg tea.KeyMsg) tea.Cmd {
+	if v.editActive {
+		return v.handleEditKey(msg)
+	}
+
 	switch msg.String() {
 	case "esc", "backspace":
 		return popViewCmd()
 	case "j", "down":
+		v.bookmarkConfirmID = ""
 		v.moveSelection(1)
 		return nil
 	case "k", "up":
 		if cmd := v.maybeLoadOlder(); cmd != nil {
 			return cmd
 		}
+		v.bookmarkConfirmID = ""
 		v.moveSelection(-1)
 		return nil
 	case "ctrl+d":
+		v.bookmarkConfirmID = ""
 		v.moveSelection(maxInt(1, v.pageStep()))
 		return nil
 	case "ctrl+u":
+		v.bookmarkConfirmID = ""
 		v.moveSelection(-maxInt(1, v.pageStep()))
 		return nil
 	case "g":
+		v.bookmarkConfirmID = ""
 		v.selected = 0
 		v.top = 0
 		v.advanceReadMarker()
 		return nil
 	case "G", "end":
+		v.bookmarkConfirmID = ""
 		v.jumpBottom()
 		return nil
 	case "f":
+		v.bookmarkConfirmID = ""
 		if v.mode == threadModeThreaded {
 			v.mode = threadModeFlat
 		} else {
@@ -256,13 +310,28 @@ func (v *threadView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		v.rebuildRows(anchor, false)
 		v.ensureVisible()
 		return nil
+	case "b":
+		v.toggleBookmark()
+		return nil
+	case "B":
+		v.openBookmarkNoteEditor()
+		return nil
+	case "a":
+		v.openAnnotationEditor()
+		return nil
+	case "X":
+		return v.exportThreadCmd()
 	case "[":
+		v.bookmarkConfirmID = ""
 		return v.switchTopic(-1)
 	case "]":
+		v.bookmarkConfirmID = ""
 		return v.switchTopic(1)
 	case "enter":
+		v.bookmarkConfirmID = ""
 		return v.handleEnter()
 	}
+	v.bookmarkConfirmID = ""
 	return nil
 }
 

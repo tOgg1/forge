@@ -111,6 +111,11 @@ type timelineView struct {
 	jumpActive bool
 	jumpInput  string
 
+	noteActive      bool
+	noteInput       string
+	noteTargetID    string
+	noteTargetTopic string
+
 	detailOpen bool
 	laneOffset int
 
@@ -239,6 +244,9 @@ func (v *timelineView) View(width, height int, theme Theme) string {
 	if v.jumpActive {
 		lines = append(lines, muted.Render("t jump (time/date): ")+v.jumpInput)
 	}
+	if v.noteActive {
+		lines = append(lines, muted.Render("B bookmark note: ")+v.noteInput)
+	}
 
 	contentHeight := height - len(lines)
 	if contentHeight < 0 {
@@ -267,11 +275,20 @@ func (v *timelineView) View(width, height int, theme Theme) string {
 }
 
 func (v *timelineView) wantsKey(key string) bool {
+	if v.noteActive {
+		switch key {
+		case "ctrl+c":
+			return false
+		default:
+			return true
+		}
+	}
+
 	switch key {
-	case "n", "t", "o", "a", "h", "l", "left", "right", "+", "=", "-", "_", "1", "2", "3", "[", "]":
+	case "n", "t", "o", "a", "h", "l", "left", "right", "+", "=", "-", "_", "1", "2", "3", "[", "]", "b", "B":
 		return true
 	case "esc":
-		return v.filterActive || v.jumpActive || v.detailOpen
+		return v.filterActive || v.jumpActive || v.detailOpen || v.noteActive
 	default:
 		return false
 	}
@@ -284,6 +301,9 @@ func (v *timelineView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if v.jumpActive {
 		return v.handleJumpKey(msg)
 	}
+	if v.noteActive {
+		return v.handleNoteKey(msg)
+	}
 	if v.detailOpen {
 		switch msg.String() {
 		case "enter", "d":
@@ -293,6 +313,9 @@ func (v *timelineView) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return v.openSelectedInThreadCmd()
 		case "b":
 			v.toggleSelectedBookmark()
+			return nil
+		case "B":
+			v.openSelectedBookmarkNote()
 			return nil
 		case "esc":
 			v.detailOpen = false
@@ -385,6 +408,9 @@ func (v *timelineView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "b":
 		v.toggleSelectedBookmark()
 		return nil
+	case "B":
+		v.openSelectedBookmarkNote()
+		return nil
 	case "1":
 		v.applyQuickFilter("to", v.selectedTarget())
 		return nil
@@ -437,6 +463,54 @@ func (v *timelineView) handleJumpKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case tea.KeyRunes:
 		v.jumpInput += string(msg.Runes)
+		return nil
+	}
+	return nil
+}
+
+func (v *timelineView) openSelectedBookmarkNote() {
+	msg, ok := v.selectedMessage()
+	if !ok || v.state == nil {
+		return
+	}
+	id := strings.TrimSpace(msg.ID)
+	if id == "" {
+		return
+	}
+	target := strings.TrimSpace(msg.To)
+	if target == "" {
+		return
+	}
+	v.noteActive = true
+	v.noteTargetID = id
+	v.noteTargetTopic = target
+	v.noteInput = v.state.BookmarkNote(id)
+}
+
+func (v *timelineView) handleNoteKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.Type {
+	case tea.KeyEsc:
+		v.noteActive = false
+		v.noteInput = ""
+		v.noteTargetID = ""
+		v.noteTargetTopic = ""
+		return nil
+	case tea.KeyEnter:
+		if v.state != nil && strings.TrimSpace(v.noteTargetID) != "" && strings.TrimSpace(v.noteTargetTopic) != "" {
+			v.state.UpsertBookmark(v.noteTargetID, v.noteTargetTopic, v.noteInput)
+			v.state.SaveSoon()
+			v.refreshBookmarks()
+		}
+		v.noteActive = false
+		v.noteInput = ""
+		v.noteTargetID = ""
+		v.noteTargetTopic = ""
+		return nil
+	case tea.KeyBackspace, tea.KeyDelete:
+		v.noteInput = trimLastRune(v.noteInput)
+		return nil
+	case tea.KeyRunes:
+		v.noteInput += string(msg.Runes)
 		return nil
 	}
 	return nil

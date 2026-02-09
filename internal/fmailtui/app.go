@@ -41,6 +41,9 @@ const (
 	ViewSearch    ViewID = "search"
 	ViewLiveTail  ViewID = "live-tail"
 	ViewTimeline  ViewID = "timeline"
+	ViewStats     ViewID = "stats"
+	ViewBookmarks ViewID = "bookmarks"
+	ViewNotify    ViewID = "notifications"
 )
 
 var viewSwitchKeys = map[string]ViewID{
@@ -50,6 +53,8 @@ var viewSwitchKeys = map[string]ViewID{
 	"a": ViewAgents,
 	"l": ViewLiveTail,
 	"m": ViewTimeline,
+	"p": ViewStats,
+	"N": ViewNotify,
 	"D": ViewDashboard,
 	"S": ViewSearch,
 }
@@ -66,6 +71,9 @@ var dashboardAssignableViews = []ViewID{
 	ViewThread,
 	ViewSearch,
 	ViewTimeline,
+	ViewStats,
+	ViewBookmarks,
+	ViewNotify,
 }
 
 type Config struct {
@@ -106,6 +114,7 @@ type Model struct {
 	store                *fmail.Store
 	provider             data.MessageProvider
 	tuiState             *state.Manager
+	notifications        *notificationCenter
 	forgedClient         ForgedClient
 	forgedAddr           string
 	forgedErr            error
@@ -247,6 +256,8 @@ func NewModel(cfg Config) (*Model, error) {
 	if normalized.Operator {
 		m.layout.SetMode(layout.ModeSingle)
 	}
+	m.notifications = newNotificationCenter(selfAgent, m.tuiState)
+	m.status.notificationsUnread = m.notifications.UnreadCount()
 	m.restoreLayoutPreferences()
 	m.initViews()
 	return m, nil
@@ -345,7 +356,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	case statusIncomingMsg:
 		m.status.record(typed.msg, time.Now().UTC())
-		return m, m.waitForStatusMsgCmd()
+		cmds := []tea.Cmd{m.waitForStatusMsgCmd()}
+		if m.notifications != nil {
+			if actions, ok := m.notifications.ProcessMessage(typed.msg); ok {
+				m.status.notificationsUnread = m.notifications.UnreadCount()
+				if actions.Bell {
+					cmds = append(cmds, bellCmd())
+				}
+				if actions.Flash {
+					until := time.Now().UTC().Add(500 * time.Millisecond)
+					cmds = append(cmds,
+						func() tea.Msg { return flashHeaderMsg{until: until} },
+						tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg { return liveTailFlashClearMsg{until: until} }),
+					)
+				}
+			}
+		}
+		return m, tea.Batch(cmds...)
 	case statusMetricsMsg:
 		m.status.applyMetrics(typed)
 		return m, nil
@@ -546,6 +573,10 @@ func (m *Model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		m.toast = fmt.Sprintf("theme: %s", m.theme)
 		m.toastUntil = time.Now().UTC().Add(2 * time.Second)
 		return nil, true
+	case "ctrl+b":
+		return pushViewCmd(ViewBookmarks), true
+	case "ctrl+n":
+		return pushViewCmd(ViewNotify), true
 	case "1":
 		return pushViewCmd(ViewDashboard), true
 	case "2":
@@ -987,7 +1018,7 @@ func (m *Model) popView() {
 }
 
 func (m *Model) initViews() {
-	m.views[ViewDashboard] = newDashboardView(m.root, m.projectID, m.provider)
+	m.views[ViewDashboard] = newDashboardView(m.root, m.projectID, m.provider, m.notifications)
 	m.views[ViewTopics] = newTopicsView(m.root, m.provider, m.tuiState)
 	m.views[ViewThread] = newThreadView(m.root, m.provider, m.tuiState)
 	m.views[ViewAgents] = newAgentsView(m.root, m.provider)
@@ -995,6 +1026,9 @@ func (m *Model) initViews() {
 	m.views[ViewSearch] = newSearchView(m.root, m.selfAgent, m.provider, m.tuiState)
 	m.views[ViewLiveTail] = newLiveTailView(m.root, m.selfAgent, m.provider, m.tuiState)
 	m.views[ViewTimeline] = newTimelineView(m.root, m.selfAgent, m.provider, m.tuiState)
+	m.views[ViewStats] = newStatsView(m.root, m.selfAgent, m.provider)
+	m.views[ViewBookmarks] = newBookmarksView(m.root, m.store, m.provider, m.tuiState)
+	m.views[ViewNotify] = newNotificationsView(m.selfAgent, m.provider, m.notifications)
 }
 
 func (c Config) normalize() (Config, error) {

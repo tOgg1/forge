@@ -18,9 +18,9 @@ import (
 const (
 	CurrentVersion = 1
 
-	defaultDebounce = 1 * time.Second
-	maxBookmarks    = 500
-	bookmarkMaxAge  = 30 * 24 * time.Hour
+	defaultDebounce  = 1 * time.Second
+	maxBookmarks     = 500
+	bookmarkMaxAge   = 30 * 24 * time.Hour
 	maxNotifications = 50
 )
 
@@ -1142,7 +1142,11 @@ func normalizeNotification(item Notification) (Notification, bool) {
 		item.Timestamp = item.OccurredAt
 	}
 	if item.Timestamp.IsZero() {
-		item.Timestamp = time.Now().UTC()
+		if parsed, ok := parseMessageIDTimestamp(item.MessageID); ok {
+			item.Timestamp = parsed
+		} else {
+			item.Timestamp = time.Now().UTC()
+		}
 	}
 	item.Timestamp = item.Timestamp.UTC()
 	return item, true
@@ -1153,4 +1157,17 @@ func notificationTimestamp(item Notification) time.Time {
 		return item.Timestamp
 	}
 	return item.OccurredAt
+}
+
+func parseMessageIDTimestamp(id string) (time.Time, bool) {
+	id = strings.TrimSpace(id)
+	const prefixLen = len("20060102-150405")
+	if len(id) < prefixLen {
+		return time.Time{}, false
+	}
+	parsed, err := time.Parse("20060102-150405", id[:prefixLen])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed.UTC(), true
 }

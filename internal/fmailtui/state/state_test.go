@@ -237,14 +237,14 @@ func TestManager_NotificationRulesAndNotificationsRoundTrip(t *testing.T) {
 			Enabled:         true,
 		},
 		{
-			Name:       "auth-watch",
-			Topic:      "task*",
-			From:       "coder-*",
-			To:         "@architect",
-			Tags:       []string{"auth", "auth"},
-			Text:       "refresh.*token",
+			Name:        "auth-watch",
+			Topic:       "task*",
+			From:        "coder-*",
+			To:          "@architect",
+			Tags:        []string{"auth", "auth"},
+			Text:        "refresh.*token",
 			ActionBadge: true,
-			Enabled:    true,
+			Enabled:     true,
 		},
 	})
 

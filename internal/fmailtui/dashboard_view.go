@@ -57,31 +57,33 @@ type dashboardIncomingMsg struct {
 }
 
 type dashboardView struct {
-	root       string
-	projectID  string
-	provider   data.MessageProvider
-	now        time.Time
-	lastErr    error
-	agents     []fmail.AgentRecord
-	topics     []data.TopicInfo
-	hotCounts  map[string]int
-	focus      dashboardFocus
-	agentIdx   int
-	topicIdx   int
-	feed       []fmail.Message
-	feedOffset int // 0 = follow tail; >0 = paused, lines from tail
+	root          string
+	projectID     string
+	provider      data.MessageProvider
+	notifications *notificationCenter
+	now           time.Time
+	lastErr       error
+	agents        []fmail.AgentRecord
+	topics        []data.TopicInfo
+	hotCounts     map[string]int
+	focus         dashboardFocus
+	agentIdx      int
+	topicIdx      int
+	feed          []fmail.Message
+	feedOffset    int // 0 = follow tail; >0 = paused, lines from tail
 
 	subCh     <-chan fmail.Message
 	subCancel func()
 }
 
-func newDashboardView(root, projectID string, provider data.MessageProvider) *dashboardView {
+func newDashboardView(root, projectID string, provider data.MessageProvider, notifications *notificationCenter) *dashboardView {
 	return &dashboardView{
-		root:      root,
-		projectID: projectID,
-		provider:  provider,
-		hotCounts: make(map[string]int),
-		focus:     focusAgents,
+		root:          root,
+		projectID:     projectID,
+		provider:      provider,
+		notifications: notifications,
+		hotCounts:     make(map[string]int),
+		focus:         focusAgents,
 	}
 }
 
@@ -285,7 +287,13 @@ func (v *dashboardView) renderFeedPanel(width, height int, palette styles.Theme,
 	innerW := maxInt(0, width-(styles.LayoutInnerPadding*2)-2)
 	innerH := maxInt(0, height-(styles.LayoutInnerPadding*2)-2)
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render("LIVE FEED")
+	titleText := "LIVE FEED  Ctrl+N"
+	if v.notifications != nil {
+		if unread := v.notifications.UnreadCount(); unread > 0 {
+			titleText = fmt.Sprintf("LIVE FEED  Ctrl+N [%d]", unread)
+		}
+	}
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render(titleText)
 
 	lines := v.renderFeedLines(innerW, innerH-lipgloss.Height(title)-1, palette)
 	content := lipgloss.JoinVertical(lipgloss.Left, title, lines)
@@ -401,6 +409,8 @@ func (v *dashboardView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return pushViewCmd(ViewSearch)
 	case "l":
 		return pushViewCmd(ViewLiveTail)
+	case "ctrl+n":
+		return pushViewCmd(ViewNotify)
 	case "?":
 		// Global help handled by Model.
 		return nil
