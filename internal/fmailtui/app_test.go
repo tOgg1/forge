@@ -130,6 +130,20 @@ func TestConnectForgedOptional(t *testing.T) {
 	}
 }
 
+func TestNewModelForgedDialFailureNonFatal(t *testing.T) {
+	root := t.TempDir()
+	socketPath := filepath.Join(root, "missing.sock")
+
+	model, err := NewModel(Config{
+		Root:       root,
+		ForgedAddr: "unix://" + socketPath,
+	})
+	require.NoError(t, err)
+	require.Nil(t, model.forgedClient)
+	require.Error(t, model.forgedErr)
+	require.NoError(t, model.Close())
+}
+
 func newTestModel(t *testing.T, cfg Config) *Model {
 	t.Helper()
 	if cfg.Root == "" {
