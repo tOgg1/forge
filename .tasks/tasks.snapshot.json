@@ -1,7 +1,28 @@
 {
   "schema_version": "sv.tasks.v1",
-  "generated_at": "2026-02-09T09:32:00.986297Z",
+  "generated_at": "2026-02-09T09:37:57.708396Z",
   "tasks": [
+    {
+      "id": "forge-1p8",
+      "title": "fmail TUI: Topic Browser view",
+      "status": "closed",
+      "priority": "P0",
+      "created_at": "2026-02-09T07:03:41.615139Z",
+      "updated_at": "2026-02-09T09:37:57.695547Z",
+      "created_by": "codex",
+      "updated_by": "forge-fmail-next-3",
+      "body": "Build the Topic Browser — a navigable list of all topics with preview pane.\n\n## Layout\n```\n┌─ Topics ─────────────────────────────────────────────────┐\n│ Filter: _________                                        │\n│                                                          │\n│  TOPIC         MSGS  LAST ACTIVE   AGENTS               │\n│ ▸ task          47   2m ago        architect, coder-1    │\n│   build         23   5m ago        coder-1, tester       │\n│   editing        8   1h ago        coder-1               │\n│   deploy         3   3h ago        deployer              │\n│   review        15   15m ago       reviewer, architect   │\n│   ★ alerts       2   1d ago        monitor               │\n│───────────────────────┬──────────────────────────────────│\n│  Preview: task        │                                  │\n│                       │                                  │\n│  15:34 architect      │  15:33 coder-1                   │\n│  Use sliding window   │  need clarification on           │\n│  for token refresh.   │  token refresh flow              │\n│  Reply in 30min.      │                                  │\n│                       │  15:31 coder-1                   │\n│  15:32 architect      │  on it, ETA 30min                │\n│  run full test suite  │                                  │\n└───────────────────────┴──────────────────────────────────┘\n Enter: open  ★ star  d: DMs  ↑↓ navigate  / filter  Esc back\n```\n\n## Deliverables\n- Topic list (top/left pane):\n  - Sortable columns: topic name, message count, last active, participants\n  - Default sort: last active (most recent first)\n  - Cycle sort with `s` key (name → count → activity → participants)\n  - Starred/pinned topics always at top (persisted in tui-state.json)\n  - Star/unstar with `★` or `*` key\n  - Color-coded activity heat: hot (red/orange for active), warm (yellow), cold (grey for idle)\n  - Activity thresholds configurable but defaults: hot=<5m, warm=<1h, cold=>1h\n  - Fuzzy filter: typing in the filter box narrows the list instantly\n  - Show total unread count per topic (from ReadMarkers in tui-state)\n  - Unread topics shown in bold\n- Preview pane (bottom/right):\n  - Shows last N messages (default 10) from the selected topic\n  - Messages rendered with agent colors and timestamps\n  - Preview updates as cursor moves through topic list\n  - Scrollable within the preview pane\n- Navigation:\n  - Enter on a topic → push to Thread View for that topic\n  - `d` → switch to DM browser (similar layout but for direct messages)\n  - `n` → compose new message to this topic\n  - Esc → back to dashboard\n- DM Browser (toggled with `d`):\n  - Same layout but shows DM conversations instead of topics\n  - Grouped by conversation partner\n  - Show unread count per conversation\n  - Enter → open DM thread\n\n## Technical Notes\n- Use the data provider's Topics() method, refresh on a timer (2s) or on new message events\n- Fuzzy filtering: simple substring match is fine for V1, upgrade to fuzzy scoring later\n- Preview pane reads messages lazily — only fetch when topic is highlighted\n- Cache preview messages to avoid re-reading when navigating back\n- Topic metadata (message count, participants) computed from message scan or cached",
+      "epic": "forge-erz",
+      "project": "prj-afyxck62",
+      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
+      "workspace": "forge",
+      "branch": "main",
+      "started_at": "2026-02-09T08:58:45.879710Z",
+      "started_by": "forge-fmail-next-5",
+      "closed_at": "2026-02-09T09:37:57.695547Z",
+      "closed_by": "forge-fmail-next-3",
+      "comments_count": 0
+    },
     {
       "id": "forge-6jy",
       "title": "fmail TUI: Compose overlay and quick-send bar",
@@ -62,27 +83,6 @@
       "started_by": "forge-fmail-next-3",
       "closed_at": "2026-02-09T09:20:47.618396Z",
       "closed_by": "forge-fmail-next-2",
-      "comments_count": 0
-    },
-    {
-      "id": "forge-1p8",
-      "title": "fmail TUI: Topic Browser view",
-      "status": "closed",
-      "priority": "P0",
-      "created_at": "2026-02-09T07:03:41.615139Z",
-      "updated_at": "2026-02-09T09:19:00.223233Z",
-      "created_by": "codex",
-      "updated_by": "forge-fmail-next-5",
-      "body": "Build the Topic Browser — a navigable list of all topics with preview pane.\n\n## Layout\n```\n┌─ Topics ─────────────────────────────────────────────────┐\n│ Filter: _________                                        │\n│                                                          │\n│  TOPIC         MSGS  LAST ACTIVE   AGENTS               │\n│ ▸ task          47   2m ago        architect, coder-1    │\n│   build         23   5m ago        coder-1, tester       │\n│   editing        8   1h ago        coder-1               │\n│   deploy         3   3h ago        deployer              │\n│   review        15   15m ago       reviewer, architect   │\n│   ★ alerts       2   1d ago        monitor               │\n│───────────────────────┬──────────────────────────────────│\n│  Preview: task        │                                  │\n│                       │                                  │\n│  15:34 architect      │  15:33 coder-1                   │\n│  Use sliding window   │  need clarification on           │\n│  for token refresh.   │  token refresh flow              │\n│  Reply in 30min.      │                                  │\n│                       │  15:31 coder-1                   │\n│  15:32 architect      │  on it, ETA 30min                │\n│  run full test suite  │                                  │\n└───────────────────────┴──────────────────────────────────┘\n Enter: open  ★ star  d: DMs  ↑↓ navigate  / filter  Esc back\n```\n\n## Deliverables\n- Topic list (top/left pane):\n  - Sortable columns: topic name, message count, last active, participants\n  - Default sort: last active (most recent first)\n  - Cycle sort with `s` key (name → count → activity → participants)\n  - Starred/pinned topics always at top (persisted in tui-state.json)\n  - Star/unstar with `★` or `*` key\n  - Color-coded activity heat: hot (red/orange for active), warm (yellow), cold (grey for idle)\n  - Activity thresholds configurable but defaults: hot=<5m, warm=<1h, cold=>1h\n  - Fuzzy filter: typing in the filter box narrows the list instantly\n  - Show total unread count per topic (from ReadMarkers in tui-state)\n  - Unread topics shown in bold\n- Preview pane (bottom/right):\n  - Shows last N messages (default 10) from the selected topic\n  - Messages rendered with agent colors and timestamps\n  - Preview updates as cursor moves through topic list\n  - Scrollable within the preview pane\n- Navigation:\n  - Enter on a topic → push to Thread View for that topic\n  - `d` → switch to DM browser (similar layout but for direct messages)\n  - `n` → compose new message to this topic\n  - Esc → back to dashboard\n- DM Browser (toggled with `d`):\n  - Same layout but shows DM conversations instead of topics\n  - Grouped by conversation partner\n  - Show unread count per conversation\n  - Enter → open DM thread\n\n## Technical Notes\n- Use the data provider's Topics() method, refresh on a timer (2s) or on new message events\n- Fuzzy filtering: simple substring match is fine for V1, upgrade to fuzzy scoring later\n- Preview pane reads messages lazily — only fetch when topic is highlighted\n- Cache preview messages to avoid re-reading when navigating back\n- Topic metadata (message count, participants) computed from message scan or cached",
-      "epic": "forge-erz",
-      "project": "prj-afyxck62",
-      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
-      "workspace": "forge",
-      "branch": "main",
-      "started_at": "2026-02-09T08:58:45.879710Z",
-      "started_by": "forge-fmail-next-5",
-      "closed_at": "2026-02-09T09:19:00.223233Z",
-      "closed_by": "forge-fmail-next-5",
       "comments_count": 0
     },
     {

@@ -591,3 +591,31 @@ No commit this iteration. The working tree changes are incoherent:
 Reported blocker on `task` topic. Waiting for the feature workers (`forge-6jy` / `forge-rsx`) to fix the test compilation errors.
 ```
 
+## 2026-02-09T09:36:44Z
+
+- run_id: 5ec8d338-a8a6-4fe2-b06a-2a62f08a79d7
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T09:31:30Z
+- finished_at: 2026-02-09T09:36:44Z
+- exit_code: 0
+
+```
+Summary of this iteration:
+
+**3 commits created:**
+
+1. **`ff93d79`** `feat(fmail-tui): extract state manager package and add inline compose` — New `state.Manager` package with file locking, debounced writes, legacy migration, bookmarks, drafts. Integrated across app, thread_view, topics_view. Added inline compose in topics view. Moved esc handling to per-view. (11 files, +818/-130)
+
+2. **`1dfe8a0`** `fix(agent/runner): reorder event assertions and increase timeouts` — Reordered event checks in TestRunnerEmitsEvents, increased timeouts to 4-6s. (1 file, +6/-6)
+
+3. **`d9948c1`** `chore: update committer ledger and task events` — Ledger entries and task event updates. (3 files)
+
+**Remaining (not committed):** In-progress compose overlay work (compose.go, data providers, app.go additions) — doesn't compile yet, waiting on feature workers to complete integration.
+```
+
