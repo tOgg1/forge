@@ -1,7 +1,17 @@
 {
   "schema_version": "sv.projects.v1",
-  "generated_at": "2026-02-09T07:12:22.068513Z",
+  "generated_at": "2026-02-09T15:26:13.161320Z",
   "projects": [
+    {
+      "id": "prj-vr0104gr",
+      "name": "rust-rewrite",
+      "description": "TOP PRIORITY: in-repo Rust rewrite with 1:1 parity for all non-legacy Forge surfaces (loops, profiles, pools, fmail, forged, runner, TUIs). Legacy interactive command setup dropped in Rust.",
+      "archived": false,
+      "created_at": "2026-02-09T15:26:13.152087Z",
+      "updated_at": "2026-02-09T15:26:13.152087Z",
+      "created_by": "codex",
+      "updated_by": "codex"
+    },
     {
       "id": "prj-krh6zdh0",
       "name": "grand-vision",
