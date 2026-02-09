@@ -284,7 +284,15 @@ impl Store {
 
             let path = dir.join(format!("{}.json", message.id));
             match write_file_exclusive(&path, data.as_bytes()) {
-                Ok(()) => return Ok(message.id.clone()),
+                Ok(()) => {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let perm = if is_dm { 0o600 } else { 0o644 };
+                        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(perm));
+                    }
+                    return Ok(message.id.clone());
+                }
                 Err(e) if e.contains("already exists") || e.contains("AlreadyExists") => {
                     message.id = generate_message_id(now);
                     continue;
