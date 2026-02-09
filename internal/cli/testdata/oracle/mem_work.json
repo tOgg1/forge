@@ -1,0 +1,161 @@
+{
+  "steps": [
+    {
+      "name": "mem ls (empty)",
+      "stdout": "[]\n",
+      "state": {}
+    },
+    {
+      "name": "mem set blocked_on",
+      "stdout": "{\n  \"key\": \"blocked_on\",\n  \"loop\": \"oracle-loop\",\n  \"ok\": true\n}\n",
+      "state": {
+        "mem_keys": [
+          "blocked_on"
+        ],
+        "mem_snapshot": {
+          "blocked_on": "agent-b"
+        }
+      }
+    },
+    {
+      "name": "mem get blocked_on",
+      "stdout": "{\n  \"created_at\": \"\\u003cTIME\\u003e\",\n  \"id\": \"\\u003cID\\u003e\",\n  \"key\": \"blocked_on\",\n  \"loop_id\": \"\\u003cLOOP_ID\\u003e\",\n  \"updated_at\": \"\\u003cTIME\\u003e\",\n  \"value\": \"agent-b\"\n}\n",
+      "state": {
+        "mem_keys": [
+          "blocked_on"
+        ],
+        "mem_snapshot": {
+          "blocked_on": "agent-b"
+        }
+      }
+    },
+    {
+      "name": "mem ls (1 item)",
+      "stdout": "[\n  {\n    \"created_at\": \"\\u003cTIME\\u003e\",\n    \"id\": \"\\u003cID\\u003e\",\n    \"key\": \"blocked_on\",\n    \"loop_id\": \"\\u003cLOOP_ID\\u003e\",\n    \"updated_at\": \"\\u003cTIME\\u003e\",\n    \"value\": \"agent-b\"\n  }\n]\n",
+      "state": {
+        "mem_keys": [
+          "blocked_on"
+        ],
+        "mem_snapshot": {
+          "blocked_on": "agent-b"
+        }
+      }
+    },
+    {
+      "name": "mem rm blocked_on",
+      "stdout": "{\n  \"key\": \"blocked_on\",\n  \"loop\": \"oracle-loop\",\n  \"ok\": true\n}\n",
+      "state": {}
+    },
+    {
+      "name": "mem ls (empty after rm)",
+      "stdout": "[]\n",
+      "state": {}
+    },
+    {
+      "name": "work current (none)",
+      "stdout": "{\n  \"current\": null\n}\n",
+      "state": {}
+    },
+    {
+      "name": "work set sv-123",
+      "stdout": "{\n  \"agent_id\": \"oracle-agent\",\n  \"created_at\": \"\\u003cTIME\\u003e\",\n  \"detail\": \"port mem/work fixtures\",\n  \"id\": \"\\u003cID\\u003e\",\n  \"is_current\": true,\n  \"loop_id\": \"\\u003cLOOP_ID\\u003e\",\n  \"loop_iteration\": 0,\n  \"status\": \"in_progress\",\n  \"task_id\": \"sv-123\",\n  \"updated_at\": \"\\u003cTIME\\u003e\"\n}\n",
+      "state": {
+        "work_current": {
+          "agent": "oracle-agent",
+          "task": "sv-123",
+          "status": "in_progress",
+          "detail": "port mem/work fixtures",
+          "iter": 0
+        },
+        "work_history": [
+          {
+            "current": true,
+            "agent": "oracle-agent",
+            "task": "sv-123",
+            "status": "in_progress",
+            "detail": "port mem/work fixtures",
+            "iter": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "work current",
+      "stdout": "{\n  \"agent_id\": \"oracle-agent\",\n  \"created_at\": \"\\u003cTIME\\u003e\",\n  \"detail\": \"port mem/work fixtures\",\n  \"id\": \"\\u003cID\\u003e\",\n  \"is_current\": true,\n  \"loop_id\": \"\\u003cLOOP_ID\\u003e\",\n  \"loop_iteration\": 0,\n  \"status\": \"in_progress\",\n  \"task_id\": \"sv-123\",\n  \"updated_at\": \"\\u003cTIME\\u003e\"\n}\n",
+      "state": {
+        "work_current": {
+          "agent": "oracle-agent",
+          "task": "sv-123",
+          "status": "in_progress",
+          "detail": "port mem/work fixtures",
+          "iter": 0
+        },
+        "work_history": [
+          {
+            "current": true,
+            "agent": "oracle-agent",
+            "task": "sv-123",
+            "status": "in_progress",
+            "detail": "port mem/work fixtures",
+            "iter": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "work ls",
+      "stdout": "[\n  {\n    \"agent_id\": \"oracle-agent\",\n    \"created_at\": \"\\u003cTIME\\u003e\",\n    \"detail\": \"port mem/work fixtures\",\n    \"id\": \"\\u003cID\\u003e\",\n    \"is_current\": true,\n    \"loop_id\": \"\\u003cLOOP_ID\\u003e\",\n    \"loop_iteration\": 0,\n    \"status\": \"in_progress\",\n    \"task_id\": \"sv-123\",\n    \"updated_at\": \"\\u003cTIME\\u003e\"\n  }\n]\n",
+      "state": {
+        "work_current": {
+          "agent": "oracle-agent",
+          "task": "sv-123",
+          "status": "in_progress",
+          "detail": "port mem/work fixtures",
+          "iter": 0
+        },
+        "work_history": [
+          {
+            "current": true,
+            "agent": "oracle-agent",
+            "task": "sv-123",
+            "status": "in_progress",
+            "detail": "port mem/work fixtures",
+            "iter": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "work clear",
+      "stdout": "{\n  \"loop\": \"oracle-loop\",\n  \"ok\": true\n}\n",
+      "state": {
+        "work_history": [
+          {
+            "current": false,
+            "agent": "oracle-agent",
+            "task": "sv-123",
+            "status": "in_progress",
+            "detail": "port mem/work fixtures",
+            "iter": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "work current (none after clear)",
+      "stdout": "{\n  \"current\": null\n}\n",
+      "state": {
+        "work_history": [
+          {
+            "current": false,
+            "agent": "oracle-agent",
+            "task": "sv-123",
+            "status": "in_progress",
+            "detail": "port mem/work fixtures",
+            "iter": 0
+          }
+        ]
+      }
+    }
+  ]
+}
