@@ -122,13 +122,16 @@ func (m *Model) handleComposeOverlayKey(msg tea.KeyMsg) tea.Cmd {
 	if m.compose.savePrompt {
 		switch strings.ToLower(msg.String()) {
 		case "y":
+			// Discard.
+			m.persistDraft(false)
+			m.closeComposeOverlay()
+		case "s":
+			// Save draft then close.
 			m.persistDraft(true)
 			m.closeComposeOverlay()
 			m.setToast("Draft saved")
-		case "n":
-			m.persistDraft(false)
-			m.closeComposeOverlay()
-		case "esc", "backspace":
+		case "n", "esc", "backspace":
+			// Cancel discard prompt.
 			m.compose.savePrompt = false
 		}
 		return nil
@@ -342,9 +345,7 @@ func (m *Model) openQuickSendBar() {
 	m.compose.active = false
 	m.compose.err = ""
 	m.quick.active = true
-	if strings.TrimSpace(m.quick.input) == "" {
-		m.quick.input = ":"
-	}
+	m.quick.input = ":"
 	m.quick.err = ""
 	m.quick.sending = false
 	m.quick.historyIndex = -1
@@ -603,7 +604,7 @@ func (m *Model) renderComposeOverlay(width, height int, theme Theme) string {
 		status = "Restore saved draft? [y/N]"
 	}
 	if c.savePrompt {
-		status = "Save draft before closing? [y/N], Esc cancels"
+		status = "Discard draft? [y] discard  [s] save  [Esc] cancel"
 	}
 
 	lines := []string{
@@ -693,6 +694,17 @@ func (m *Model) setToast(text string) {
 	m.toastUntil = time.Now().UTC().Add(2 * time.Second)
 }
 
+func firstNonEmptyLine(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
 func parseQuickSendInput(input string) (target string, body string, ok bool) {
 	trimmed := strings.TrimSpace(input)
 	trimmed = strings.TrimPrefix(trimmed, ":")
@@ -749,6 +761,20 @@ func (m *Model) knownTargets() []string {
 	}
 	seen := map[string]struct{}{}
 	out := make([]string, 0, 16)
+
+	agents, _ := m.provider.Agents()
+	for _, agent := range agents {
+		name := strings.TrimSpace(agent.Name)
+		if name == "" {
+			continue
+		}
+		target := "@" + name
+		if _, ok := seen[target]; ok {
+			continue
+		}
+		seen[target] = struct{}{}
+		out = append(out, target)
+	}
 
 	topics, _ := m.provider.Topics()
 	for _, topic := range topics {

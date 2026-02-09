@@ -120,6 +120,8 @@ type topicsView struct {
 	subCancel func()
 }
 
+var _ composeContextView = (*topicsView)(nil)
+
 func newTopicsView(root string, provider data.MessageProvider, st *tuistate.Manager) *topicsView {
 	self := strings.TrimSpace(os.Getenv("FMAIL_AGENT"))
 	if self == "" {
@@ -140,6 +142,14 @@ func newTopicsView(root string, provider data.MessageProvider, st *tuistate.Mana
 		readMarkers:  make(map[string]string),
 		statePath:    "",
 	}
+}
+
+func (v *topicsView) ComposeTarget() string {
+	return v.selectedTarget()
+}
+
+func (v *topicsView) ComposeReplySeed(_ bool) (composeReplySeed, bool) {
+	return composeReplySeed{}, false
 }
 
 func (v *topicsView) Init() tea.Cmd {
@@ -1049,14 +1059,6 @@ func dmPeerForSelf(self string, msg fmail.Message) string {
 		return strings.TrimSpace(msg.From)
 	}
 	return ""
-}
-
-func (v *topicsView) ComposeTarget() string {
-	return strings.TrimSpace(v.selectedTarget())
-}
-
-func (v *topicsView) ComposeReplySeed(bool) (composeReplySeed, bool) {
-	return composeReplySeed{}, false
 }
 
 func (v *topicsView) sendCmd(target string, body string) tea.Cmd {

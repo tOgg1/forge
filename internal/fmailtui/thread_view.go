@@ -86,6 +86,8 @@ type threadView struct {
 	initialized bool
 }
 
+var _ composeContextView = (*threadView)(nil)
+
 func newThreadView(root string, provider data.MessageProvider, st *tuistate.Manager) *threadView {
 	return &threadView{
 		root:           root,
@@ -98,6 +100,43 @@ func newThreadView(root string, provider data.MessageProvider, st *tuistate.Mana
 		readMarkers:    make(map[string]string),
 		rowIndexByID:   make(map[string]int),
 	}
+}
+
+func (v *threadView) ComposeTarget() string {
+	return strings.TrimSpace(v.topic)
+}
+
+func (v *threadView) ComposeReplySeed(dmDirect bool) (composeReplySeed, bool) {
+	row := v.selectedRow()
+	if row == nil {
+		return composeReplySeed{}, false
+	}
+	id := strings.TrimSpace(row.msg.ID)
+	if id == "" {
+		return composeReplySeed{}, false
+	}
+
+	target := strings.TrimSpace(v.topic)
+	if dmDirect {
+		from := strings.TrimSpace(row.msg.From)
+		if from == "" {
+			return composeReplySeed{}, false
+		}
+		if strings.HasPrefix(from, "@") {
+			target = from
+		} else {
+			target = "@" + from
+		}
+	}
+	if target == "" {
+		return composeReplySeed{}, false
+	}
+
+	return composeReplySeed{
+		Target:     target,
+		ReplyTo:    id,
+		ParentLine: firstNonEmptyLine(messageBodyString(row.msg.Body)),
+	}, true
 }
 
 func (v *threadView) Init() tea.Cmd {
@@ -123,36 +162,6 @@ func (v *threadView) SetTarget(target string) tea.Cmd {
 	v.top = 0
 	v.initialized = false
 	return v.loadCmd()
-}
-
-func (v *threadView) ComposeTarget() string {
-	return strings.TrimSpace(v.topic)
-}
-
-func (v *threadView) ComposeReplySeed(dmDirect bool) (composeReplySeed, bool) {
-	row := v.selectedRow()
-	if row == nil {
-		return composeReplySeed{}, false
-	}
-	target := strings.TrimSpace(v.topic)
-	if target == "" {
-		target = strings.TrimSpace(row.msg.To)
-	}
-	if dmDirect {
-		from := strings.TrimSpace(row.msg.From)
-		if from == "" {
-			return composeReplySeed{}, false
-		}
-		target = "@" + from
-	}
-	if strings.TrimSpace(target) == "" {
-		return composeReplySeed{}, false
-	}
-	return composeReplySeed{
-		Target:     target,
-		ReplyTo:    strings.TrimSpace(row.msg.ID),
-		ParentLine: firstLine(row.msg.Body),
-	}, true
 }
 
 func (v *threadView) Update(msg tea.Msg) tea.Cmd {
