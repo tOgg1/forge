@@ -13,6 +13,7 @@ name = "fmail-tui"
 path = "src/bin/fmail-tui.rs"
 
 [dependencies]
+forge-ftui-adapter = { path = "../forge-ftui-adapter" }
 
 [lints]
 workspace = true
