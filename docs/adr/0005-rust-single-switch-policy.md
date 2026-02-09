@@ -21,6 +21,8 @@ Prerelease parity gates (must all pass before cutover):
 - Nightly parity workflow green with no unresolved drift deltas.
 - Parity matrix evidence recorded for CLI, DB, loop runtime, daemon/runner, and
   fmail/fmail-tui critical flows.
+- Release gate checklist completed with mandatory sign-offs:
+  `docs/rust-release-gate-checklist.md`.
 - Legacy drop list and command manifests frozen (`docs/rust-legacy-drop-list.md`,
   `docs/rust-port-manifest.md`, `docs/rust-fmail-command-manifest.md`).
 
