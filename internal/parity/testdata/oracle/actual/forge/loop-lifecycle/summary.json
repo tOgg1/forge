@@ -1,0 +1,27 @@
+{
+  "clean_removed": 1,
+  "final_loop_count": 0,
+  "kill_action": "kill_now",
+  "kill_state": "stopped",
+  "logs_has_header": true,
+  "logs_has_tail": true,
+  "msg_first_loops": 1,
+  "msg_pending_after_two": 2,
+  "ps_count": 1,
+  "ps_names": [
+    "oracle-main"
+  ],
+  "queue_clear_count": 1,
+  "queue_ls_count": 2,
+  "queue_move_to_back": "back",
+  "queue_rm_removed": true,
+  "resume_resumed": true,
+  "rm_removed": 1,
+  "run_missing_error": true,
+  "scale_current_before": 1,
+  "scale_pause_items": 1,
+  "scale_target": 2,
+  "stop_action": "stop_graceful",
+  "up_created": 1,
+  "up_state": "stopped"
+}

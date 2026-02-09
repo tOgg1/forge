@@ -1,0 +1,316 @@
+{
+  "steps": [
+    {
+      "name": "up",
+      "stdout": "[\n  {\n    \"created_at\": \"\\u003cTIME\\u003e\",\n    \"id\": \"\\u003cID\\u003e\",\n    \"interval_seconds\": 30,\n    \"ledger_path\": \"\\u003cLEDGER_PATH\\u003e\",\n    \"log_path\": \"\\u003cLOG_PATH\\u003e\",\n    \"name\": \"oracle-loop\",\n    \"profile_id\": \"\\u003cPROFILE_ID\\u003e\",\n    \"repo_path\": \"\\u003cREPO_PATH\\u003e\",\n    \"short_id\": \"\\u003cSHORT_ID\\u003e\",\n    \"state\": \"stopped\",\n    \"updated_at\": \"\\u003cTIME\\u003e\"\n  }\n]\n",
+      "state": {
+        "loops": [
+          {
+            "name": "oracle-loop",
+            "state": "stopped",
+            "profile": "oracle-profile-id",
+            "meta": {
+              "runner_instance_id": "\u003cRUNNER_INSTANCE_ID\u003e",
+              "runner_owner": "local"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ps",
+      "stdout": "[\n  {\n    \"created_at\": \"\\u003cTIME\\u003e\",\n    \"id\": \"\\u003cID\\u003e\",\n    \"interval_seconds\": 30,\n    \"ledger_path\": \"\\u003cLEDGER_PATH\\u003e\",\n    \"log_path\": \"\\u003cLOG_PATH\\u003e\",\n    \"metadata\": {\n      \"runner_instance_id\": \"\\u003cRUNNER_INSTANCE_ID\\u003e\",\n      \"runner_owner\": \"local\"\n    },\n    \"name\": \"oracle-loop\",\n    \"profile_id\": \"\\u003cPROFILE_ID\\u003e\",\n    \"repo_path\": \"\\u003cREPO_PATH\\u003e\",\n    \"runner_instance_id\": \"\\u003cRUNNER_INSTANCE_ID\\u003e\",\n    \"runner_owner\": \"local\",\n    \"short_id\": \"\\u003cSHORT_ID\\u003e\",\n    \"state\": \"stopped\",\n    \"updated_at\": \"\\u003cTIME\\u003e\"\n  }\n]\n",
+      "state": {
+        "loops": [
+          {
+            "name": "oracle-loop",
+            "state": "stopped",
+            "profile": "oracle-profile-id",
+            "meta": {
+              "runner_instance_id": "\u003cRUNNER_INSTANCE_ID\u003e",
+              "runner_owner": "local"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "logs",
+      "stdout": "[2025-01-01T00:00:00Z] loop started\n[2025-01-01T00:00:01Z] runner-ok\n[2025-01-01T00:00:02Z] loop stopped\n",
+      "state": {
+        "loops": [
+          {
+            "name": "oracle-loop",
+            "state": "stopped",
+            "profile": "oracle-profile-id",
+            "meta": {
+              "runner_instance_id": "\u003cRUNNER_INSTANCE_ID\u003e",
+              "runner_owner": "local"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "msg",
+      "stdout": "{\n  \"loops\": 1,\n  \"queued\": true\n}\n",
+      "state": {
+        "loops": [
+          {
+            "name": "oracle-loop",
+            "state": "stopped",
+            "profile": "oracle-profile-id",
+            "meta": {
+              "runner_instance_id": "\u003cRUNNER_INSTANCE_ID\u003e",
+              "runner_owner": "local"
+            }
+          }
+        ],
+        "queues": {
+          "oracle-loop": [
+            {
+              "type": "message_append",
+              "status": "pending",
+              "position": 1,
+              "payload": {
+                "text": "hello from oracle"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "queue ls",
+      "stdout": "[\n  {\n    \"attempts\": 0,\n    \"created_at\": \"\\u003cTIME\\u003e\",\n    \"id\": \"\\u003cID\\u003e\",\n    \"loop_id\": \"\\u003cLOOP_ID\\u003e\",\n    \"payload\": {\n      \"text\": \"hello from oracle\"\n    },\n    \"position\": 1,\n    \"status\": \"pending\",\n    \"type\": \"message_append\"\n  }\n]\n",
+      "state": {
+        "loops": [
+          {
+            "name": "oracle-loop",
+            "state": "stopped",
+            "profile": "oracle-profile-id",
+            "meta": {
+              "runner_instance_id": "\u003cRUNNER_INSTANCE_ID\u003e",
+              "runner_owner": "local"
+            }
+          }
+        ],
+        "queues": {
+          "oracle-loop": [
+            {
+              "type": "message_append",
+              "status": "pending",
+              "position": 1,
+              "payload": {
+                "text": "hello from oracle"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "stop",
+      "stdout": "{\n  \"action\": \"stop_graceful\",\n  \"loops\": 1\n}\n",
+      "state": {
+        "loops": [
+          {
+            "name": "oracle-loop",
+            "state": "stopped",
+            "profile": "oracle-profile-id",
+            "meta": {
+              "runner_instance_id": "\u003cRUNNER_INSTANCE_ID\u003e",
+              "runner_owner": "local"
+            }
+          }
+        ],
+        "queues": {
+          "oracle-loop": [
+            {
+              "type": "message_append",
+              "status": "pending",
+              "position": 1,
+              "payload": {
+                "text": "hello from oracle"
+              }
+            },
+            {
+              "type": "stop_graceful",
+              "status": "pending",
+              "position": 2,
+              "payload": {
+                "reason": "operator"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "kill",
+      "stdout": "{\n  \"action\": \"kill_now\",\n  \"loops\": 1\n}\n",
+      "state": {
+        "loops": [
+          {
+            "name": "oracle-loop",
+            "state": "stopped",
+            "profile": "oracle-profile-id",
+            "meta": {
+              "runner_instance_id": "\u003cRUNNER_INSTANCE_ID\u003e",
+              "runner_owner": "local"
+            }
+          }
+        ],
+        "queues": {
+          "oracle-loop": [
+            {
+              "type": "message_append",
+              "status": "pending",
+              "position": 1,
+              "payload": {
+                "text": "hello from oracle"
+              }
+            },
+            {
+              "type": "stop_graceful",
+              "status": "pending",
+              "position": 2,
+              "payload": {
+                "reason": "operator"
+              }
+            },
+            {
+              "type": "kill_now",
+              "status": "pending",
+              "position": 3,
+              "payload": {
+                "reason": "operator"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "resume",
+      "stdout": "{\n  \"loop_id\": \"\\u003cLOOP_ID\\u003e\",\n  \"name\": \"oracle-loop\",\n  \"resumed\": true\n}\n",
+      "state": {
+        "loops": [
+          {
+            "name": "oracle-loop",
+            "state": "stopped",
+            "profile": "oracle-profile-id",
+            "meta": {
+              "runner_instance_id": "\u003cRUNNER_INSTANCE_ID\u003e",
+              "runner_owner": "local"
+            }
+          }
+        ],
+        "queues": {
+          "oracle-loop": [
+            {
+              "type": "message_append",
+              "status": "pending",
+              "position": 1,
+              "payload": {
+                "text": "hello from oracle"
+              }
+            },
+            {
+              "type": "stop_graceful",
+              "status": "pending",
+              "position": 2,
+              "payload": {
+                "reason": "operator"
+              }
+            },
+            {
+              "type": "kill_now",
+              "status": "pending",
+              "position": 3,
+              "payload": {
+                "reason": "operator"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "run",
+      "state": {
+        "loops": [
+          {
+            "name": "oracle-loop",
+            "state": "stopped",
+            "profile": "oracle-profile-id",
+            "meta": {
+              "runner_instance_id": "\u003cRUNNER_INSTANCE_ID\u003e",
+              "runner_owner": "local"
+            }
+          }
+        ],
+        "queues": {
+          "oracle-loop": [
+            {
+              "type": "message_append",
+              "status": "pending",
+              "position": 1,
+              "payload": {
+                "text": "hello from oracle"
+              }
+            },
+            {
+              "type": "kill_now",
+              "status": "pending",
+              "position": 3,
+              "payload": {
+                "reason": "operator"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "rm",
+      "stdout": "{\n  \"loop_id\": \"\\u003cLOOP_ID\\u003e\",\n  \"name\": \"oracle-loop\",\n  \"removed\": 1\n}\n",
+      "state": {
+        "loops": null
+      }
+    },
+    {
+      "name": "clean",
+      "stdout": "{\n  \"loop_id\": \"\\u003cLOOP_ID\\u003e\",\n  \"name\": \"oracle-clean-loop\",\n  \"removed\": 1\n}\n",
+      "state": {
+        "loops": null
+      }
+    },
+    {
+      "name": "scale",
+      "stdout": "{\n  \"current\": 0,\n  \"target\": 2\n}\n",
+      "state": {
+        "loops": [
+          {
+            "name": "oracle-scaled-1",
+            "state": "stopped",
+            "profile": "oracle-profile-id",
+            "meta": {
+              "runner_instance_id": "\u003cRUNNER_INSTANCE_ID\u003e",
+              "runner_owner": "local"
+            }
+          },
+          {
+            "name": "oracle-scaled-2",
+            "state": "stopped",
+            "profile": "oracle-profile-id",
+            "meta": {
+              "runner_instance_id": "\u003cRUNNER_INSTANCE_ID\u003e",
+              "runner_owner": "local"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
