@@ -227,3 +227,38 @@ Ported `forge stop` from Go to Rust with full flag/default/validation/output par
 - Replaced `static mut` + `unsafe` with `OnceLock` in `lib.rs`
 ```
 
+## 2026-02-09T18:00:58Z
+
+- run_id: ae836ef8-c78c-4780-bbcc-d7d02e2c1a01
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T17:46:37Z
+- finished_at: 2026-02-09T18:00:58Z
+- exit_code: 0
+
+```
+## Task Complete: forge-g3p — Repo layer: loops repository parity
+
+**What was done:**
+- Implemented `loop_repository.rs` in `rust/crates/forge-db/src/` with full Go parity:
+  - `Loop` model struct with all 21 fields matching Go `models.Loop`
+  - `LoopState` enum (Running/Sleeping/Waiting/Stopped/Error)
+  - `LoopRepository` with 7 CRUD methods: `create`, `get`, `get_by_name`, `get_by_short_id`, `list`, `update`, `delete`
+  - Short-ID generation (8-char alphanumeric, collision retry up to 10x)
+  - Validation matching Go's `Loop.Validate()` (name, repo_path, short_id format, interval/iteration/runtime bounds)
+  - JSON marshal/unmarshal for tags and metadata fields
+  - RFC3339 timestamp generation
+  - Unique constraint error mapping → `DbError::LoopAlreadyExists`
+  - Not-found error mapping → `DbError::LoopNotFound`
+- Added `LoopNotFound` and `LoopAlreadyExists` variants to `DbError` in `lib.rs`
+- Created `tests/loop_repository_test.rs` integration tests (10 tests)
+- Linter added 29 inline unit tests in the module itself
+
+**Validation:** `cargo fmt --check` PASS, `cargo clippy --workspace --all-targets -- -D warnings` PASS, `cargo test --workspace` PASS (0 failures)
+```
+

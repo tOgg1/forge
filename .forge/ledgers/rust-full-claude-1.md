@@ -216,3 +216,40 @@ The `forge run` command Rust port was completed with full wiring, tests, and ora
 **Validation**: `cargo fmt --check` PASS, `cargo clippy -p forge-loop -- -D warnings` PASS, `cargo test -p forge-loop` 74/74 PASS.
 ```
 
+## 2026-02-09T18:02:57Z
+
+- run_id: 5ad4da35-e951-4430-a8d8-64db4374c311
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T17:53:03Z
+- finished_at: 2026-02-09T18:02:57Z
+- exit_code: 0
+
+```
+## Task Summary: forge-r9z — Repo layer: profiles repository parity
+
+**Status:** CLOSED
+
+**Deliverables:**
+
+1. **`rust/crates/forge-db/src/profile_repository.rs`** — New module implementing full Go parity:
+   - `Profile` struct with all 14 fields (id, name, harness, auth_kind, auth_home, prompt_mode, command_template, model, extra_args, env, max_concurrency, cooldown_until, created_at, updated_at)
+   - `ProfileRepository` with 7 methods: `create`, `get`, `get_by_name`, `list`, `update`, `delete`, `set_cooldown`
+   - `Harness` and `PromptMode` enums with parse/as_str
+   - Validation: name required, command_template required, max_concurrency >= 0, valid harness, valid prompt_mode
+   - JSON serialization for `extra_args` (Vec<String>) and `env` (HashMap<String, String>)
+   - Nullable field handling matching Go's `sql.NullString` behavior
+   - UUID auto-generation, default prompt_mode to "env", RFC3339 timestamps
+
+2. **`rust/crates/forge-db/src/lib.rs`** — Added `pub mod profile_repository`, `DbError::ProfileNotFound`, `DbError::ProfileAlreadyExists`
+
+3. **`rust/crates/forge-db/tests/profile_repository_test.rs`** — 32 integration tests covering full Go parity
+
+**Validation:** `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` — all PASS.
+```
+

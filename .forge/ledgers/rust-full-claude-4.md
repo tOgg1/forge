@@ -246,3 +246,50 @@ Implemented the `LoopKVRepository` in Rust with full Go behavioral parity.
 - `cargo test --workspace` — PASS (all tests green)
 ```
 
+## 2026-02-09T18:01:38Z
+
+- run_id: c8ce3ebe-b3bc-46c1-9cf5-1075b2ac0d83
+- loop_name: rust-full-claude-4
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T17:55:21Z
+- finished_at: 2026-02-09T18:01:38Z
+- exit_code: 0
+
+```
+## Task Summary: `forge-xsv` — Repo layer: pools repository parity
+
+**Status**: Closed (done)
+
+**What was delivered**:
+
+1. **`rust/crates/forge-db/src/pool_repository.rs`** — Full Rust implementation of the pools repository with exact Go behavioral parity:
+   - `Pool` and `PoolMember` model types matching Go `models.Pool` / `models.PoolMember`
+   - `PoolStrategy` enum (`RoundRobin`, `LRU`)
+   - `PoolRepository` with all 11 methods:
+     - `create`, `get`, `get_by_name`, `get_default`, `list`, `update`, `delete`
+     - `set_default` (atomic: clears all defaults then sets target)
+     - `add_member`, `remove_member`, `list_members`
+   - Validation, UUID generation, timestamp handling, metadata JSON serialization
+   - Error mapping: `PoolNotFound`, `PoolAlreadyExists`
+
+2. **`rust/crates/forge-db/src/lib.rs`** — Added `pool_repository` module + `PoolNotFound`/`PoolAlreadyExists` error variants to `DbError`
+
+3. **`rust/crates/forge-db/tests/pool_repository_test.rs`** — 32 integration tests covering:
+   - CRUD operations (create, get, get_by_name, get_default, list, update, delete)
+   - Validation (empty name rejected)
+   - Duplicate detection (pool name, member uniqueness)
+   - Default pool semantics (set_default clears others atomically)
+   - Member operations (add, remove, list, ordering by position+created_at, weight defaults)
+   - Cascade deletes (pool→members, profile→members)
+   - Metadata/null roundtrips
+   - Timestamp refresh on update
+   - Full parity test mirroring Go `TestPoolRepository_CreateDefaultMembers`
+
+**Validation**: `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` — all pass (32/32 pool tests, 0 failures workspace-wide).
+```
+

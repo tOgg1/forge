@@ -315,3 +315,80 @@ Status comms done via `fmail`:
 Both tasks intentionally left `in_progress` per blocked protocol.
 ```
 
+## 2026-02-09T18:04:09Z
+
+- run_id: 2d92cc47-4e67-482f-9c89-943ee40730f6
+- loop_name: rust-full-codex-6
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T17:44:05Z
+- finished_at: 2026-02-09T18:04:09Z
+- exit_code: 0
+
+```
++        // Stderr mode fails (nonempty)
++        let m = quant_rule_matches(&cfg, &make_result(0, "PASS tests", "err"));
++        assert!(!m.matched);
++        assert_eq!(m.reason, "stderr_mode=empty not matched");
++
++        // Stdout regex fails
++        let m = quant_rule_matches(&cfg, &make_result(0, "FAIL tests", ""));
++        assert!(!m.matched);
++        assert_eq!(m.reason, "stdout_regex not matched");
++    }
++
++    #[test]
++    fn rule_whitespace_only_treated_as_empty() {
++        let cfg = QuantStopConfig {
++            cmd: "test".to_string(),
++            stdout_mode: "empty".to_string(),
++            ..Default::default()
++        };
++        assert!(quant_rule_matches(&cfg, &make_result(0, "  \t\n  ", "")).matched);
++    }
++
++    #[test]
++    fn rule_timeout_exit_code_minus_one() {
++        let cfg = QuantStopConfig {
++            cmd: "test".to_string(),
++            exit_codes: vec![-1],
++            ..Default::default()
++        };
++        let res = QuantCommandResult {
++            exit_code: -1,
++            stdout: String::new(),
++            stderr: String::new(),
++            timed_out: true,
++            error: Some("command timed out".to_string()),
++        };
++        assert!(quant_rule_matches(&cfg, &res).matched);
++    }
++
++    // -----------------------------------------------------------------------
++    // TempDir helper
++    // -----------------------------------------------------------------------
++
+     struct TempDir {
+         path: PathBuf,
+     }
+
+tokens used
+441,514
+Hi. strong momentum; ready queue drained.
+
+- Snapshot (`2026-02-09 18:04` local):
+1. `ready`: `0`
+2. `in_progress`: `14`
+3. `open`: `101`
+
+- Protocol comms sent:
+1. `fmail send task "status: no READY tasks in prj-vr0104gr; loop idle"` (`20260209-180400-2857`)
+2. `fmail send @forge-orchestrator "prj-vr0104gr: idle (no ready tasks)"` (`20260209-180400-2858`)
+
+- Loop state: idle (no claimable `ready` tasks).
+```
+

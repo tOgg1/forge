@@ -161,3 +161,234 @@ Hi Tormod. Good loop velocity; queue drained.
 - No push to `main`. No destructive git ops. Worktree still dirty from multi-agent parallel edits.
 ```
 
+## 2026-02-09T18:01:57Z
+
+- run_id: d47d2620-c41e-43cf-baec-b1608f38a7c1
+- loop_name: rust-full-codex-3
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T17:01:17Z
+- finished_at: 2026-02-09T18:01:57Z
+- exit_code: 0
+
+```
++
++drift_detected=false
++if [[ "$mode" == "dry-run" && "$snapshot_status" -ne 0 ]]; then
++  drift_detected=true
++fi
++
++report_path="$out_dir/baseline-refresh-report.json"
++cat >"$report_path" <<EOF
++{
++  "protocol_version": "v1",
++  "approval_ref": "$(json_escape "$approval_ref")",
++  "requested_by": "$(json_escape "$requested_by")",
++  "mode": "$mode",
++  "allow_drift": $([[ "$allow_drift" -eq 1 ]] && echo true || echo false),
++  "drift_detected": $drift_detected,
++  "snapshot_dir": "$(json_escape "$out_dir")",
++  "generated_at": "$generated_at"
++}
++EOF
++
++echo "baseline refresh report: $report_path"
++
++if [[ "$mode" == "dry-run" && "$drift_detected" == "true" && "$allow_drift" -eq 0 ]]; then
++  exit "$snapshot_status"
++fi
++
++if [[ "$mode" == "apply" && "$snapshot_status" -ne 0 ]]; then
++  exit "$snapshot_status"
++fi
++
++exit 0
+
+tokens used
+729,734
+hi. strong pace; 2 tasks closed this loop.
+
+Closed `forge-7sd`:
+- Added baseline refresh protocol script: `scripts/rust-baseline-refresh.sh`
+- Added automation tests: `internal/parity/baseline_refresh_script_test.go`
+- Added manual CI workflow (dry-run/apply + approval env gate): `.github/workflows/parity-baseline-refresh.yml`
+- Wired CI protocol dry-run artifact job: `.github/workflows/ci.yml`
+- Added protocol doc: `docs/rust-baseline-refresh-protocol.md`
+- Updated matrix evidence: `docs/rust-parity-matrix.md`
+
+Validation:
+- `env -u GOROOT -u GOTOOLDIR go test ./internal/parity -run '^TestBaselineRefreshScript' -count=1` PASS
+- `env -u GOROOT -u GOTOOLDIR go test ./internal/parity -run '^TestSchemaFingerprintBaseline$' -count=1` PASS
+- `scripts/rust-baseline-refresh.sh --approval forge-7sd --allow-drift --out-dir build/rust-baseline/protocol-local` PASS
+- Note: full `go test ./internal/parity -count=1` has pre-existing drift fail at `TestProtoWireGateCriticalRPCFixtures` (unrelated to this task).
+
+Closed `forge-mjm` (stale takeover, acceptance already in tree):
+- Verified pin + policy already implemented (`rust/crates/forge-ftui-adapter/Cargo.toml`, `docs/rust-frankentui-pin-policy.md`, `scripts/rust-frankentui-pin-check.sh`)
+- Validation:
+  - `scripts/rust-frankentui-pin-check.sh` PASS
+  - `cd rust && cargo test -p forge-ftui-adapter` PASS
+
+Protocol done:
+- `fmail` claim/progress/close + orchestrator updates sent for both tasks.
+- Queue now: `sv task ready --project prj-vr0104gr --json` => `0` ready tasks.
+- No stale (`>=45m`) `in_progress` candidates right now, so loop stops on policy.
+```
+
+## 2026-02-09T18:03:08Z
+
+- run_id: e651c7d2-3e73-4169-b606-e80d319e258f
+- loop_name: rust-full-codex-3
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T18:02:27Z
+- finished_at: 2026-02-09T18:03:08Z
+- exit_code: 0
+
+```
+succeeded in 51ms:
+{
+  "schema_version": "sv.v1",
+  "command": "task list",
+  "status": "success",
+  "data": {
+    "total": 12,
+    "tasks": [
+      {
+        "id": "forge-jzy",
+        "title": "Repo layer: loop_runs repository parity",
+        "status": "in_progress",
+        "priority": "P0",
+        "created_at": "2026-02-09T15:36:48.418697Z",
+        "updated_at": "2026-02-09T18:02:08.602852Z",
+        "created_by": "codex",
+        "updated_by": "rust-full-claude-2",
+        "body": "Scope:\n- Port loop_runs repository parity with equivalent query/update semantics.\n\nDeliverables:\n- Rust repository API + fixtures matching Go behavior.\n\nAcceptance:\n- Behavioral parity proven for loop_runs repository parity.\n\nTests:\n- Repository unit tests + DB integration tests.",
+        "epic": "forge-180",
+        "project": "prj-vr0104gr",
+        "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
+ succeeded in 52ms:
+2026-02-09T18:02:49Z
+
+thinking
+**Deciding idle status reporting**
+codex
+No `ready`; no stale `in_progress` (latest stale candidate `forge-y93` only ~40m old; threshold 45m). Sending idle status to task channel + orchestrator now.
+exec
+/bin/zsh -lc 'export FMAIL_AGENT="${FORGE_LOOP_NAME:-rust-codex-dev}"; fmail send task "status: no ready tasks in prj-vr0104gr; no stale takeover candidates >=45m; loop idle"' in /Users/trmd/Code/oss--forge/repos/forgeexec
+/bin/zsh -lc 'export FMAIL_AGENT="${FORGE_LOOP_NAME:-rust-codex-dev}"; fmail send @forge-orchestrator "prj-vr0104gr: idle (no ready tasks, no stale in_progress >=45m)"' in /Users/trmd/Code/oss--forge/repos/forge succeeded in 51ms:
+20260209-180300-2843
+ succeeded in 51ms:
+20260209-180300-2842
+
+thinking
+**Summarizing idle state with no tasks**
+codex
+Hi. Queue clean; loop ready for next claim.
+
+- Registered `fmail` agent; took queue snapshot.
+- `sv task ready --project prj-vr0104gr --json`: `0` ready tasks.
+- Checked `in_progress`: none stale enough for takeover (`>=45m`); closest was `forge-y93` at ~40m old at `2026-02-09T18:02:49Z`.
+- Sent status:
+  - `task`: no ready tasks / no stale takeover candidates.
+  - `@forge-orchestrator`: loop idle.
+
+No task claimed, no code edits this pass.
+tokens used
+24,658
+Hi. Queue clean; loop ready for next claim.
+
+- Registered `fmail` agent; took queue snapshot.
+- `sv task ready --project prj-vr0104gr --json`: `0` ready tasks.
+- Checked `in_progress`: none stale enough for takeover (`>=45m`); closest was `forge-y93` at ~40m old at `2026-02-09T18:02:49Z`.
+- Sent status:
+  - `task`: no ready tasks / no stale takeover candidates.
+  - `@forge-orchestrator`: loop idle.
+
+No task claimed, no code edits this pass.
+```
+
+## 2026-02-09T18:04:46Z
+
+- run_id: 27f4e8e9-cd96-4fb0-8231-29ff0c44638d
+- loop_name: rust-full-codex-3
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T18:03:38Z
+- finished_at: 2026-02-09T18:04:46Z
+- exit_code: 0
+
+```
+test log_io::tests::tail_writer_zero_max_uses_default ... ok
+
+thinking
+**Planning status reporting**
+exec
+/bin/zsh -lc 'export FMAIL_AGENT="${FORGE_LOOP_NAME:-rust-codex-dev}"; fmail send task "status: idle (ready=0, no stale takeover >=45m); validation: cd rust && cargo test -p forge-loop PASS (122 unit + 4 scenario + doc-tests)"' in /Users/trmd/Code/oss--forge/repos/forgeexec
+/bin/zsh -lc 'export FMAIL_AGENT="${FORGE_LOOP_NAME:-rust-codex-dev}"; fmail send @forge-orchestrator "prj-vr0104gr idle; cargo test -p forge-loop PASS"' in /Users/trmd/Code/oss--forge/repos/forge succeeded in 51ms:
+20260209-180431-2868
+ succeeded in 51ms:
+20260209-180431-2869
+
+thinking
+**Refining task readiness check**
+codex
+Final poll now; if still `ready=0`, loop run complete/idle per protocol.
+exec
+/bin/zsh -lc 'sv task ready --project prj-vr0104gr --json' in /Users/trmd/Code/oss--forge/repos/forge succeeded in 51ms:
+{
+  "schema_version": "sv.v1",
+  "command": "task ready",
+  "status": "success",
+  "data": {
+    "total": 0,
+    "tasks": []
+  }
+}
+
+thinking
+**Composing final summary message**
+codex
+Hi. Throughput intact; queue clear for now.
+
+- Registered loop identity: `FMAIL_AGENT=rust-full-codex-3` (`fmail register` ok).
+- Snapshot @ `2026-02-09T18:04:04Z`:
+- `sv task ready --project prj-vr0104gr --json` => `total: 0`
+- `sv task list --status in_progress` => 14 tasks, newest updates > `2026-02-09T17:22:56Z` (not stale `>=45m` at snapshot).
+- No claim/start executed (policy-compliant: no ready; no stale takeover candidate).
+- Sent status via `fmail`:
+- `task`: idle/no-ready
+- `@forge-orchestrator`: idle/no-ready
+- Validation run: `cd rust && cargo test -p forge-loop` => PASS (`122` unit + scenario tests + doc-tests).
+- Final poll: `ready=0`.
+
+Loop state: idle; no open/ready work claimable right now.
+tokens used
+28,874
+Hi. Throughput intact; queue clear for now.
+
+- Registered loop identity: `FMAIL_AGENT=rust-full-codex-3` (`fmail register` ok).
+- Snapshot @ `2026-02-09T18:04:04Z`:
+- `sv task ready --project prj-vr0104gr --json` => `total: 0`
+- `sv task list --status in_progress` => 14 tasks, newest updates > `2026-02-09T17:22:56Z` (not stale `>=45m` at snapshot).
+- No claim/start executed (policy-compliant: no ready; no stale takeover candidate).
+- Sent status via `fmail`:
+- `task`: idle/no-ready
+- `@forge-orchestrator`: idle/no-ready
+- Validation run: `cd rust && cargo test -p forge-loop` => PASS (`122` unit + scenario tests + doc-tests).
+- Final poll: `ready=0`.
+
+Loop state: idle; no open/ready work claimable right now.
+```
+

@@ -392,3 +392,80 @@ Need your direction:
 3. Stop here.
 ```
 
+## 2026-02-09T18:01:57Z
+
+- run_id: 3975193d-7693-4abc-8f04-d20fc55b1015
+- loop_name: rust-full-codex-4
+- status: success
+- profile: codex1
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T17:57:24Z
+- finished_at: 2026-02-09T18:01:57Z
+- exit_code: 0
+
+```
++			Priority  string `json:"priority"`
++			DriftType string `json:"drift_type"`
++			Path      string `json:"path"`
++		} `json:"items"`
++	}
++	driftBody, err := os.ReadFile(filepath.Join(out, "normalized", "drift-report.json"))
++	if err != nil {
++		t.Fatalf("read drift report: %v", err)
++	}
++	if err := json.Unmarshal(driftBody, &drift); err != nil {
++		t.Fatalf("unmarshal drift report: %v", err)
++	}
++	if drift.SchemaVersion != "parity.drift.v1" {
++		t.Fatalf("unexpected drift schema: %q", drift.SchemaVersion)
++	}
++	if !drift.Summary.HasDrift || drift.Summary.Total != 2 || drift.Summary.Mismatched != 1 || drift.Summary.Unexpected != 1 {
++		t.Fatalf("unexpected drift summary: %+v", drift.Summary)
++	}
++	if len(drift.Items) != 2 {
++		t.Fatalf("unexpected drift item count: %d", len(drift.Items))
++	}
++
++	mdBody, err := os.ReadFile(filepath.Join(out, "normalized", "drift-triage.md"))
++	if err != nil {
++		t.Fatalf("read drift triage: %v", err)
++	}
++	text := string(mdBody)
++	for _, want := range []string{
++		"# Parity Drift Triage",
++		"| Priority | Drift type | Path | Owner | Root cause | Action | Tracking issue |",
++		"`b.txt`",
++		"`extra.txt`",
++	} {
++		if !strings.Contains(text, want) {
++			t.Fatalf("drift triage missing %q", want)
++		}
++	}
+ }
+ 
+ func assertExists(t *testing.T, path string) {
+
+tokens used
+136,138
+Closed `forge-4ss`. no `ready` tasks left (`sv task ready --project prj-vr0104gr --json` => `total: 0`).
+
+Changes:
+- `internal/parity/artifacts.go`: now writes drift triage artifacts:
+  - `normalized/drift-report.json` (`parity.drift.v1`, structured triage fields)
+  - `normalized/drift-triage.md` (queue/table template for owner/root-cause/action/tracking)
+- `internal/parity/artifacts_test.go`: regression coverage for new files + schema/content checks.
+- `internal/doccheck/parity_regression_playbook_test.go`: doc/workflow contract test for drift triage flow.
+- `docs/parity-regression-playbook.md`: artifact paths + triage fill rules.
+
+Validation run:
+- `env -u GOROOT -u GOTOOLDIR go test ./internal/parity -run '^TestWriteDiffArtifactsSchema$' -count=1` PASS
+- `env -u GOROOT -u GOTOOLDIR go test ./internal/doccheck -run '^TestParityRegressionPlaybookPinsDriftTriageArtifacts$' -count=1` PASS
+- Dry-run: `go run ./cmd/parity-artifacts ...` produced `normalized/drift-report.json` + `normalized/drift-triage.md`.
+
+Protocol updates sent:
+- `fmail` progress, `@forge-orchestrator` done, task closed, idle/no-ready status sent.
+```
+

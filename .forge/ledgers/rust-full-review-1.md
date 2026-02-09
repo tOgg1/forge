@@ -365,3 +365,80 @@ Fix: explicit `0o644` on create paths via `OpenOptionsExt::mode(0o644)` (create/
 1. `docs/review/2026-02-09-forge-mjb-ledger-writer-review.md`
 ```
 
+## 2026-02-09T18:04:18Z
+
+- run_id: dfcb60ee-7b81-4c57-9dba-c7fa0a5f08d0
+- loop_name: rust-full-review-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-09T18:00:35Z
+- finished_at: 2026-02-09T18:04:18Z
+- exit_code: 0
+
+```
++++ b/internal/paritydash/dashboard_test.go
+@@ -39,6 +39,27 @@
+ 	}
+ }
+ 
++func TestBuildFailsWhenOutcomeUnknown(t *testing.T) {
++	now := time.Date(2026, 2, 9, 12, 0, 0, 0, time.UTC)
++
++	d, err := Build(Input{
++		Checks: []InputCheck{
++			{ID: "oracle", Name: "Oracle", Outcome: "success"},
++			{ID: "schema", Name: "Schema", Outcome: ""},
++		},
++	}, now)
++	if err != nil {
++		t.Fatalf("build: %v", err)
++	}
++
++	if d.Summary.Unknown != 1 {
++		t.Fatalf("unknown summary count: %+v", d.Summary)
++	}
++	if d.Summary.Status != "fail" {
++		t.Fatalf("status: %q", d.Summary.Status)
++	}
++}
++
+ func TestWriteFilesWritesJSONAndMarkdown(t *testing.T) {
+ 	now := time.Date(2026, 2, 9, 12, 0, 0, 0, time.UTC)
+ 	d, err := Build(Input{
+@@ -72,4 +93,3 @@
+ 		t.Fatalf("stat md: %v", err)
+ 	}
+ }
+-
+
+tokens used
+110,477
+**Findings**
+1. Medium (fixed): parity dashboard was fail-open for unknown outcomes.  
+`internal/paritydash/dashboard.go:113` now fails summary when `Unknown > 0` (not only `Failed > 0`).  
+Fix landed + regression test added at `internal/paritydash/dashboard_test.go:42`.
+
+**Summary**
+- Reviewed task: `forge-4ss`.
+- Minimal fix applied:
+  - `internal/paritydash/dashboard.go`
+  - `internal/paritydash/dashboard_test.go`
+- Review note written: `docs/review/2026-02-09-forge-4ss-parity-drift-review.md`
+
+**Validation**
+- `env -u GOROOT -u GOTOOLDIR go test ./internal/paritydash -count=1` ✅
+- `env -u GOROOT -u GOTOOLDIR go test ./cmd/parity-dashboard -count=1` ✅
+- `env -u GOROOT -u GOTOOLDIR go test ./internal/parity -run '^(TestWriteDiffArtifactsSchema|TestBaselineRefreshScriptDryRunPass|TestBaselineRefreshScriptDryRunFailAndAllowDrift|TestBaselineRefreshScriptRejectsInvalidApproval)$' -count=1` ✅
+- Full `internal/parity` suite still has pre-existing red: `TestProtoWireGateCriticalRPCFixtures` (fixture drift), not introduced by this patch.
+
+**Loop reporting**
+- Sent task messages + orchestrator summary via `fmail`:
+  - issue/fix report
+  - residual-risk note
+  - `review summary: forge-4ss pass (1 medium issue fixed, residual risk noted)`
+```
+
