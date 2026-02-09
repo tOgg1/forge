@@ -208,6 +208,32 @@ func TestThreadViewLoadDMTargetUsesDMProvider(t *testing.T) {
 	require.Equal(t, 2, v.participantCount("@bob"))
 }
 
+func TestThreadViewComposeReplySeed(t *testing.T) {
+	msgs := []fmail.Message{
+		{ID: "20260209-080000-0001", From: "architect", To: "task", Time: time.Date(2026, 2, 9, 8, 0, 0, 0, time.UTC), Body: "first line\nsecond"},
+	}
+	provider := &stubThreadProvider{
+		topics:  []data.TopicInfo{{Name: "task", LastActivity: msgs[0].Time}},
+		byTopic: map[string][]fmail.Message{"task": msgs},
+	}
+
+	v := newThreadView("", provider, nil)
+	v.lastWidth = 120
+	v.lastHeight = 30
+	v.applyLoaded(mustLoad(v))
+	v.selected = 0
+
+	seed, ok := v.ComposeReplySeed(false)
+	require.True(t, ok)
+	require.Equal(t, "task", seed.Target)
+	require.Equal(t, msgs[0].ID, seed.ReplyTo)
+	require.Equal(t, "first line", seed.ParentLine)
+
+	seed, ok = v.ComposeReplySeed(true)
+	require.True(t, ok)
+	require.Equal(t, "@architect", seed.Target)
+}
+
 func mustLoad(v *threadView) threadLoadedMsg {
 	msg, ok := v.loadCmd()().(threadLoadedMsg)
 	if !ok {

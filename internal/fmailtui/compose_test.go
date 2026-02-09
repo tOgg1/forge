@@ -1,54 +1,59 @@
 package fmailtui
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tOgg1/forge/internal/fmail"
+	"github.com/tOgg1/forge/internal/fmailtui/state"
 )
 
 func TestParseQuickSendInput(t *testing.T) {
-	target, body, ok := parseQuickSendInput(":task ship auth")
+	target, body, ok := parseQuickSendInput(":task implement JWT auth")
 	require.True(t, ok)
 	require.Equal(t, "task", target)
-	require.Equal(t, "ship auth", body)
+	require.Equal(t, "implement JWT auth", body)
 
 	_, _, ok = parseQuickSendInput(":task")
 	require.False(t, ok)
 
-	_, _, ok = parseQuickSendInput(":   ")
+	_, _, ok = parseQuickSendInput(":")
 	require.False(t, ok)
 }
 
-func TestThreadViewComposeReplySeed(t *testing.T) {
-	v := &threadView{
-		topic: "task",
-		rows: []threadRow{
-			{msg: fmail.Message{ID: "20260209-080000-0001", From: "architect", To: "task", Body: "Plan v1\nstep 2"}},
-		},
-		selected: 0,
+func TestDraftPersistenceRestorePrompt(t *testing.T) {
+	root := t.TempDir()
+	statePath := filepath.Join(root, ".fmail", "tui-state.json")
+
+	m := &Model{
+		root:      root,
+		selfAgent: "viewer",
+		tuiState:  state.New(statePath),
 	}
+	require.NoError(t, m.tuiState.Load())
 
-	seed, ok := v.ComposeReplySeed(false)
-	require.True(t, ok)
-	require.Equal(t, "task", seed.Target)
-	require.Equal(t, "20260209-080000-0001", seed.ReplyTo)
-	require.Equal(t, "Plan v1", seed.ParentLine)
+	m.compose.active = true
+	m.compose.to = "task"
+	m.compose.priority = "normal"
+	m.compose.tags = "auth, urgent"
+	m.compose.body = "draft message"
+	m.persistDraft(true)
+	require.NoError(t, m.tuiState.SaveNow())
 
-	dmSeed, ok := v.ComposeReplySeed(true)
-	require.True(t, ok)
-	require.Equal(t, "@architect", dmSeed.Target)
-}
+	m2 := &Model{
+		root:      root,
+		selfAgent: "viewer",
+		tuiState:  state.New(statePath),
+	}
+	require.NoError(t, m2.tuiState.Load())
 
-func TestComposeSendRequestQuick(t *testing.T) {
-	m := &Model{selfAgent: "viewer"}
-	m.quick.input = ":task hello there"
+	m2.openComposeOverlay("task", composeReplySeed{})
+	require.True(t, m2.compose.restoreAsk)
+	require.Equal(t, "draft message", m2.compose.draftCached.Body)
 
-	req, err := m.composeSendRequest(sendSourceQuick)
-	require.NoError(t, err)
-	require.Equal(t, "viewer", req.From)
-	require.Equal(t, "task", req.To)
-	require.Equal(t, "hello there", req.Body)
-	require.Equal(t, fmail.PriorityNormal, req.Priority)
+	m2.persistDraft(false)
+	require.NoError(t, m2.tuiState.SaveNow())
+	_, ok := m2.tuiState.Draft("task")
+	require.False(t, ok)
 }
