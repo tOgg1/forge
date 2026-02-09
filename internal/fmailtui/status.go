@@ -368,6 +368,8 @@ func viewLabel(id ViewID) string {
 		return "Heatmap"
 	case ViewGraph:
 		return "Graph"
+	case ViewReplay:
+		return "Replay"
 	case ViewBookmarks:
 		return "Bookmarks"
 	case ViewNotify:

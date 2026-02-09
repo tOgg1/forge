@@ -74,6 +74,9 @@ type Preferences struct {
 	LiveTailAuto         bool     `json:"live_tail_auto,omitempty"`
 	RelativeTime         bool     `json:"relative_time,omitempty"`
 	SoundAlerts          bool     `json:"sound_alerts,omitempty"`
+	ReplayCursorID       string   `json:"replay_cursor_id,omitempty"`
+	ReplaySpeedIdx       int      `json:"replay_speed_idx,omitempty"`
+	ReplayMode           string   `json:"replay_mode,omitempty"` // "feed" or "timeline"
 	// HighlightPatterns are live-tail keyword highlight regexes.
 	HighlightPatterns []string `json:"highlight_patterns,omitempty"`
 }

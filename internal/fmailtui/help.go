@@ -177,6 +177,21 @@ func helpForView(id ViewID) []helpSection {
 				{key: "Enter", desc: "toggle details panel"},
 			}},
 		}
+	case ViewReplay:
+		return []helpSection{
+			global,
+			{title: "Replay", items: []helpItem{
+				{key: "Space", desc: "play/pause"},
+				{key: "←/→", desc: "skip 1 message"},
+				{key: "Shift+←/→", desc: "seek ±1 minute"},
+				{key: "Home/End", desc: "jump start/end"},
+				{key: "1-4", desc: "speed 1x/5x/10x/50x"},
+				{key: "t", desc: "toggle feed/timeline"},
+				{key: "m", desc: "set mark"},
+				{key: "' + letter", desc: "jump to mark"},
+				{key: "e", desc: "export markdown"},
+			}},
+		}
 	case ViewNotify:
 		return []helpSection{
 			global,
