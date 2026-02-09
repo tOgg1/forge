@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use forge_db::{Config, Db};
@@ -7,6 +8,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 #[test]
 fn migration_006_up_down_parity() {
     let path = temp_db_path("migration-006");
+    let _ = std::fs::remove_file(&path);
 
     let mut db = match Db::open(Config::new(&path)) {
         Ok(value) => value,
@@ -87,9 +89,14 @@ fn object_exists(conn: &Connection, object_type: &str, name: &str) -> bool {
 }
 
 fn temp_db_path(prefix: &str) -> PathBuf {
+    static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
     let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(value) => value.as_nanos(),
         Err(err) => panic!("clock before epoch: {err}"),
     };
-    std::env::temp_dir().join(format!("forge-db-{prefix}-{nanos}.sqlite"))
+    let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "forge-db-{prefix}-{nanos}-{}-{suffix}.sqlite",
+        std::process::id(),
+    ))
 }
