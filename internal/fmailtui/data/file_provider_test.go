@@ -1,6 +1,7 @@
 package data
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -128,6 +129,140 @@ func TestFileProviderTopicsAndSearch(t *testing.T) {
 	require.Len(t, results, 1)
 	require.Equal(t, "task", results[0].Topic)
 	require.Equal(t, "bob", results[0].Message.From)
+}
+
+func TestFileProviderSearchIndexIncrementalTopicInvalidation(t *testing.T) {
+	root := t.TempDir()
+	store, err := fmail.NewStore(root)
+	require.NoError(t, err)
+	require.NoError(t, store.EnsureRoot())
+
+	_, err = store.SaveMessage(&fmail.Message{
+		From: "alice",
+		To:   "task",
+		Body: "task baseline",
+		Time: time.Now().UTC().Add(-2 * time.Minute),
+	})
+	require.NoError(t, err)
+	for i := 0; i < 80; i++ {
+		_, err = store.SaveMessage(&fmail.Message{
+			From: "ops-bot",
+			To:   "ops",
+			Body: fmt.Sprintf("ops noise %d", i),
+			Time: time.Now().UTC().Add(-time.Minute),
+		})
+		require.NoError(t, err)
+	}
+
+	provider, err := NewFileProvider(FileProviderConfig{
+		Root:           root,
+		SearchIndexTTL: time.Hour,
+	})
+	require.NoError(t, err)
+
+	_, err = provider.Search(SearchQuery{Text: "baseline"})
+	require.NoError(t, err)
+	lookups1, _ := provider.messageReadStats()
+
+	newID, err := store.SaveMessage(&fmail.Message{
+		From: "bob",
+		To:   "task",
+		Body: "freshneedle topic",
+		Time: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	provider.invalidateMetadataForPath(store.TopicMessagePath("task", newID))
+
+	results, err := provider.Search(SearchQuery{Text: "freshneedle"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, "task", results[0].Topic)
+	require.Equal(t, "bob", results[0].Message.From)
+
+	lookups2, _ := provider.messageReadStats()
+	require.Greater(t, lookups2, lookups1)
+	// A full rebuild would re-read the heavy ops topic as well.
+	require.Less(t, lookups2-lookups1, int64(15))
+}
+
+func TestFileProviderSearchIndexIncrementalDMInvalidation(t *testing.T) {
+	root := t.TempDir()
+	store, err := fmail.NewStore(root)
+	require.NoError(t, err)
+	require.NoError(t, store.EnsureRoot())
+
+	_, err = store.SaveMessage(&fmail.Message{
+		From: "alice",
+		To:   "@bob",
+		Body: "dm baseline",
+		Time: time.Now().UTC().Add(-2 * time.Minute),
+	})
+	require.NoError(t, err)
+
+	provider, err := NewFileProvider(FileProviderConfig{
+		Root:           root,
+		SelfAgent:      "alice",
+		SearchIndexTTL: time.Hour,
+	})
+	require.NoError(t, err)
+
+	_, err = provider.Search(SearchQuery{Text: "baseline"})
+	require.NoError(t, err)
+
+	newID, err := store.SaveMessage(&fmail.Message{
+		From: "bob",
+		To:   "@alice",
+		Body: "dmfreshterm",
+		Time: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	provider.invalidateMetadataForPath(store.DMMessagePath("alice", newID))
+
+	results, err := provider.Search(SearchQuery{Text: "dmfreshterm"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, "@alice", results[0].Topic)
+	require.Equal(t, "bob", results[0].Message.From)
+}
+
+func TestFileProviderSearchIndexTTLCheckAvoidsFullRebuild(t *testing.T) {
+	root := t.TempDir()
+	store, err := fmail.NewStore(root)
+	require.NoError(t, err)
+	require.NoError(t, store.EnsureRoot())
+
+	_, err = store.SaveMessage(&fmail.Message{
+		From: "alice",
+		To:   "task",
+		Body: "needle once",
+		Time: time.Now().UTC().Add(-2 * time.Minute),
+	})
+	require.NoError(t, err)
+	for i := 0; i < 50; i++ {
+		_, err = store.SaveMessage(&fmail.Message{
+			From: "ops-bot",
+			To:   "ops",
+			Body: fmt.Sprintf("ops warm %d", i),
+			Time: time.Now().UTC().Add(-time.Minute),
+		})
+		require.NoError(t, err)
+	}
+
+	provider, err := NewFileProvider(FileProviderConfig{
+		Root:           root,
+		SearchIndexTTL: 10 * time.Millisecond,
+	})
+	require.NoError(t, err)
+
+	_, err = provider.Search(SearchQuery{Text: "needle"})
+	require.NoError(t, err)
+	lookups1, _ := provider.messageReadStats()
+
+	time.Sleep(25 * time.Millisecond)
+	_, err = provider.Search(SearchQuery{Text: "needle"})
+	require.NoError(t, err)
+	lookups2, _ := provider.messageReadStats()
+	require.Equal(t, lookups1, lookups2)
 }
 
 func TestFileProviderDMsIgnoreUnrelatedCorruptDirectory(t *testing.T) {

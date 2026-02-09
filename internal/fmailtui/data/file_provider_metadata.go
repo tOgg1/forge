@@ -112,9 +112,9 @@ func (p *FileProvider) refreshTopicMetadata(topic string, dir string, dirModTime
 			}
 			return topicMetadataEntry{}, err
 		}
-			// FileProvider messages are append-only (O_EXCL writes). Truncate modTime to
-			// avoid false cache misses on filesystems with coarser/unstable precision.
-			modTime := info.ModTime().UTC().Truncate(time.Second)
+		// FileProvider messages are append-only (O_EXCL writes). Truncate modTime to
+		// avoid false cache misses on filesystems with coarser/unstable precision.
+		modTime := info.ModTime().UTC().Truncate(time.Second)
 		if prev, ok := previous.files[name]; ok && prev.modTime.Equal(modTime) {
 			refreshed.files[name] = prev
 			continue
@@ -291,7 +291,7 @@ func (p *FileProvider) refreshDMDirectoryMetadata(dir string, dirModTime time.Ti
 			}
 			return dmDirMetadataEntry{}, err
 		}
-			modTime := info.ModTime().UTC().Truncate(time.Second)
+		modTime := info.ModTime().UTC().Truncate(time.Second)
 		if prev, ok := previous.files[name]; ok && prev.modTime.Equal(modTime) {
 			refreshed.files[name] = prev
 			continue
