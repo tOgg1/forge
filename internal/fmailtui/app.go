@@ -43,6 +43,7 @@ const (
 	ViewTimeline  ViewID = "timeline"
 	ViewStats     ViewID = "stats"
 	ViewHeatmap   ViewID = "heatmap"
+	ViewGraph     ViewID = "graph"
 	ViewBookmarks ViewID = "bookmarks"
 	ViewNotify    ViewID = "notifications"
 )
@@ -56,6 +57,7 @@ var viewSwitchKeys = map[string]ViewID{
 	"m": ViewTimeline,
 	"p": ViewStats,
 	"H": ViewHeatmap,
+	"v": ViewGraph,
 	"N": ViewNotify,
 	"D": ViewDashboard,
 	"S": ViewSearch,
@@ -75,6 +77,7 @@ var dashboardAssignableViews = []ViewID{
 	ViewTimeline,
 	ViewStats,
 	ViewHeatmap,
+	ViewGraph,
 	ViewBookmarks,
 	ViewNotify,
 }
@@ -1074,6 +1077,7 @@ func (m *Model) initViews() {
 	m.views[ViewTimeline] = newTimelineView(m.root, m.selfAgent, m.provider, m.tuiState)
 	m.views[ViewStats] = newStatsView(m.root, m.selfAgent, m.provider)
 	m.views[ViewHeatmap] = newHeatmapView(m.root, m.selfAgent, m.provider)
+	m.views[ViewGraph] = newGraphView(m.root, m.selfAgent, m.provider)
 	m.views[ViewBookmarks] = newBookmarksView(m.root, m.store, m.provider, m.tuiState)
 	m.views[ViewNotify] = newNotificationsView(m.selfAgent, m.provider, m.notifications)
 }
