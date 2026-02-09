@@ -13,3 +13,6 @@ logs/
 .fmail
 
 forged
+
+# Rust build outputs
+rust/target/

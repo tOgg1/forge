@@ -104,6 +104,14 @@ jobs:
       - name: rust coverage
         working-directory: rust
         run: cargo llvm-cov --workspace --all-features --lcov --output-path coverage/lcov.info
+      - name: Summarize rust coverage
+        working-directory: rust
+        run: |
+          {
+            echo "## Rust Coverage"
+            echo ""
+            cargo llvm-cov report --summary-only
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: rust-coverage
