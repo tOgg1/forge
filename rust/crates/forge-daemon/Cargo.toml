@@ -14,6 +14,7 @@ path = "src/bin/forge-daemon.rs"
 
 [dependencies]
 chrono = "0.4"
+forge-core = { path = "../forge-core" }
 forge-rpc = { path = "../forge-rpc" }
 nix = { version = "0.29", features = ["signal", "resource", "process"] }
 prost-types = "0.13"

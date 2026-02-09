@@ -1,6 +1,8 @@
 //! forge-daemon: Rust daemon surface for Forge.
 
 pub mod agent;
+pub mod bootstrap;
+pub mod events;
 pub mod loop_runner;
 pub mod server;
 pub mod status;

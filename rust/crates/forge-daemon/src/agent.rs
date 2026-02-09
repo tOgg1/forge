@@ -217,6 +217,21 @@ impl AgentManager {
         let agents = read_agents(&self.agents);
         agents.contains_key(agent_id)
     }
+
+    /// Snapshot the transcript for an agent (id is the 0-based entry index).
+    pub fn transcript_snapshot(&self, agent_id: &str) -> Option<Vec<(i64, TranscriptEntry)>> {
+        let agents = read_agents(&self.agents);
+        let info = agents.get(agent_id)?;
+        Some(
+            info.transcript
+                .entries()
+                .iter()
+                .cloned()
+                .enumerate()
+                .map(|(idx, entry)| (idx as i64, entry))
+                .collect(),
+        )
+    }
 }
 
 fn read_agents(
