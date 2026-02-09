@@ -1,0 +1,28 @@
+[
+  {
+    "id": "loop-001",
+    "short_id": "orc01",
+    "name": "oracle-loop",
+    "repo_path": "/repo/alpha",
+    "state": "running",
+    "profile_id": "codex",
+    "pool_id": "default",
+    "runs": 5,
+    "pending_queue": 2,
+    "last_run": "2025-01-01T00:00:00Z",
+    "runner_owner": "local",
+    "runner_instance_id": "inst-001",
+    "runner_pid_alive": true
+  },
+  {
+    "id": "loop-002",
+    "short_id": "beta02",
+    "name": "beta-loop",
+    "repo_path": "/repo/beta",
+    "state": "stopped",
+    "profile_id": "claude",
+    "pool_id": "burst",
+    "runs": 0,
+    "pending_queue": 0
+  }
+]

@@ -1,0 +1,22 @@
+{
+  "pool": {
+    "id": "pool-001",
+    "name": "alpha",
+    "strategy": "round_robin",
+    "is_default": true
+  },
+  "members": [
+    {
+      "profile_id": "profile-001",
+      "profile_name": "profile-a",
+      "harness": "",
+      "auth_kind": ""
+    },
+    {
+      "profile_id": "profile-002",
+      "profile_name": "profile-b",
+      "harness": "",
+      "auth_kind": ""
+    }
+  ]
+}

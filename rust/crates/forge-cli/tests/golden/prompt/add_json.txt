@@ -1,0 +1,4 @@
+{
+  "path": "__REPO__/.forge/prompts/oracle-prompt.md",
+  "prompt": "oracle-prompt"
+}

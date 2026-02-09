@@ -1,0 +1,4 @@
+{
+  "action": "stop_graceful",
+  "loops": 1
+}

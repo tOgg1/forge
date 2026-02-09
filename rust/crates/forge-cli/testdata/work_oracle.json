@@ -1,0 +1,40 @@
+{
+  "steps": [
+    {
+      "name": "work current (none)",
+      "stdout": "{\n  \"current\": null\n}\n",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "work set sv-123",
+      "stdout": "{\n  \"id\": \"work-000001\",\n  \"loop_id\": \"oracle-loop-id\",\n  \"agent_id\": \"oracle-agent\",\n  \"task_id\": \"sv-123\",\n  \"status\": \"in_progress\",\n  \"detail\": \"port mem/work fixtures\",\n  \"loop_iteration\": 0,\n  \"is_current\": true,\n  \"created_at\": \"2026-01-01T00:00:01Z\",\n  \"updated_at\": \"2026-01-01T00:00:01Z\"\n}\n",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "work current",
+      "stdout": "{\n  \"id\": \"work-000001\",\n  \"loop_id\": \"oracle-loop-id\",\n  \"agent_id\": \"oracle-agent\",\n  \"task_id\": \"sv-123\",\n  \"status\": \"in_progress\",\n  \"detail\": \"port mem/work fixtures\",\n  \"loop_iteration\": 0,\n  \"is_current\": true,\n  \"created_at\": \"2026-01-01T00:00:01Z\",\n  \"updated_at\": \"2026-01-01T00:00:01Z\"\n}\n",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "work ls",
+      "stdout": "[\n  {\n    \"id\": \"work-000001\",\n    \"loop_id\": \"oracle-loop-id\",\n    \"agent_id\": \"oracle-agent\",\n    \"task_id\": \"sv-123\",\n    \"status\": \"in_progress\",\n    \"detail\": \"port mem/work fixtures\",\n    \"loop_iteration\": 0,\n    \"is_current\": true,\n    \"created_at\": \"2026-01-01T00:00:01Z\",\n    \"updated_at\": \"2026-01-01T00:00:01Z\"\n  }\n]\n",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "work clear",
+      "stdout": "{\n  \"loop\": \"oracle-loop\",\n  \"ok\": true\n}\n",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "work current (none after clear)",
+      "stdout": "{\n  \"current\": null\n}\n",
+      "stderr": "",
+      "exit_code": 0
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "Version": 1,
+    "Description": "initial schema",
+    "Applied": true,
+    "AppliedAt": "tick-001"
+  },
+  {
+    "Version": 2,
+    "Description": "node connection prefs",
+    "Applied": false,
+    "AppliedAt": ""
+  }
+]

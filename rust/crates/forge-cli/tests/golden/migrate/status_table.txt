@@ -1,0 +1,4 @@
+VERSION  DESCRIPTION            STATUS   APPLIED AT
+-------  -----------            ------   ----------
+1        initial schema         applied  tick-001
+2        node connection prefs  pending  -

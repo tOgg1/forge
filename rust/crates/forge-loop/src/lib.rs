@@ -1,5 +1,8 @@
 //! forge-loop: loop runtime primitives and orchestration entrypoints.
 
+pub mod queue_interactions;
+pub mod stop_rules;
+
 /// Stable crate label used by bootstrap smoke tests.
 pub fn crate_label() -> &'static str {
     "forge-loop"

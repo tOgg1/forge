@@ -1,0 +1,6 @@
+{
+  "id": "pool-001",
+  "name": "alpha",
+  "strategy": "round_robin",
+  "is_default": true
+}

@@ -1,0 +1,28 @@
+{
+  "steps": [
+    {
+      "name": "run by name",
+      "stdout": "",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "run by short id",
+      "stdout": "",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "run unknown loop",
+      "stdout": "",
+      "stderr": "loop 'does-not-exist' not found. Example input: 'alpha' or 'abc001'\n",
+      "exit_code": 1
+    },
+    {
+      "name": "run missing arg",
+      "stdout": "",
+      "stderr": "error: requires exactly 1 argument: <loop>\n",
+      "exit_code": 1
+    }
+  ]
+}

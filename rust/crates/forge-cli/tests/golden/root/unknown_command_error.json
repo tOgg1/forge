@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "ERR_UNKNOWN",
+    "message": "unknown forge command: nonexistent"
+  }
+}

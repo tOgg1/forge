@@ -1,0 +1,21 @@
+[
+  {
+    "id": "profile-001",
+    "name": "alpha",
+    "harness": "codex",
+    "auth_kind": "codex",
+    "auth_home": "/tmp/auth-alpha",
+    "prompt_mode": "env",
+    "command_template": "codex exec",
+    "model": "gpt-5.1",
+    "extra_args": [
+      "--sandbox"
+    ],
+    "env": {
+      "A": "1"
+    },
+    "max_concurrency": 1,
+    "created_at": "2026-01-01T00:00:01Z",
+    "updated_at": "2026-01-01T00:00:02Z"
+  }
+]

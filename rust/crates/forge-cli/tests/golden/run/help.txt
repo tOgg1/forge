@@ -1,0 +1,7 @@
+Run a single loop iteration.
+
+Usage:
+  forge run <loop>
+
+Arguments:
+  <loop>   Loop name, short ID, or full ID

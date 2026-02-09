@@ -1,0 +1,2 @@
+ID     NAME         RUNS  STATE    WAIT_UNTIL  PROFILE  POOL     QUEUE  LAST_RUN              REPO
+orc01  oracle-loop  5     stopped              codex    default  2      2025-01-01T00:00:00Z  /repo/alpha

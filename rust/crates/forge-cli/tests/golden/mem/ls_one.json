@@ -1,0 +1,11 @@
+[
+  {
+    "created_at": "2026-01-01T00:00:01Z",
+    "id": "kv-001",
+    "key": "blocked_on",
+    "loop_id": "loop-123",
+    "updated_at": "2026-01-01T00:00:01Z",
+    "value": "agent-b"
+  }
+]
+

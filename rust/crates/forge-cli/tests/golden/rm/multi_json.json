@@ -1,0 +1,11 @@
+{
+  "removed": 2,
+  "loop_ids": [
+    "loop-001",
+    "loop-002"
+  ],
+  "names": [
+    "alpha",
+    "alpha-sibling"
+  ]
+}
