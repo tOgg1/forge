@@ -288,7 +288,7 @@ impl<'a> LoopRepository<'a> {
                 created_at, updated_at
             FROM loops WHERE id = ?1",
                 params![id],
-                |row| scan_loop(row),
+                scan_loop,
             )
             .optional()?;
 
@@ -309,7 +309,7 @@ impl<'a> LoopRepository<'a> {
                 created_at, updated_at
             FROM loops WHERE name = ?1",
                 params![name],
-                |row| scan_loop(row),
+                scan_loop,
             )
             .optional()?;
 
@@ -330,7 +330,7 @@ impl<'a> LoopRepository<'a> {
                 created_at, updated_at
             FROM loops WHERE short_id = ?1",
                 params![short_id],
-                |row| scan_loop(row),
+                scan_loop,
             )
             .optional()?;
 
@@ -350,7 +350,7 @@ impl<'a> LoopRepository<'a> {
             ORDER BY created_at",
         )?;
 
-        let rows = stmt.query_map([], |row| scan_loop(row))?;
+        let rows = stmt.query_map([], scan_loop)?;
 
         let mut loops = Vec::new();
         for row in rows {
@@ -494,10 +494,7 @@ fn scan_loop(row: &rusqlite::Row) -> rusqlite::Result<Loop> {
     let created_at: String = row.get(19)?;
     let updated_at: String = row.get(20)?;
 
-    let state = match LoopState::parse(&state_str) {
-        Ok(s) => s,
-        Err(_) => LoopState::default(),
-    };
+    let state = LoopState::parse(&state_str).unwrap_or_default();
 
     let tags: Vec<String> = match tags_json {
         Some(ref s) if !s.is_empty() => serde_json::from_str(s).unwrap_or_default(),
@@ -543,21 +540,25 @@ mod tests {
     use super::*;
     use crate::Config;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_db_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
         let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(d) => d.as_nanos(),
             Err(_) => 0,
         };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
-            "forge-db-loop-repo-{tag}-{nanos}-{}.sqlite",
-            std::process::id()
+            "forge-db-loop-repo-{tag}-{nanos}-{}-{suffix}.sqlite",
+            std::process::id(),
         ))
     }
 
     fn open_migrated(tag: &str) -> (Db, PathBuf) {
         let path = temp_db_path(tag);
+        let _ = std::fs::remove_file(&path);
         let mut db = match Db::open(Config::new(&path)) {
             Ok(db) => db,
             Err(e) => panic!("open db: {e}"),
@@ -1182,6 +1183,24 @@ mod tests {
     #[test]
     fn all_fields_roundtrip() {
         let (db, path) = open_migrated("full-roundtrip");
+
+        // Insert prerequisite FK rows so pool_id/profile_id are tested.
+        let conn = db.conn();
+        match conn.execute(
+            "INSERT INTO profiles (id, name, harness, command_template) VALUES (?1, ?2, ?3, ?4)",
+            params!["prof-xyz", "test-profile", "claude", "claude --prompt {{prompt}}"],
+        ) {
+            Ok(_) => {}
+            Err(e) => panic!("insert profile: {e}"),
+        }
+        match conn.execute(
+            "INSERT INTO pools (id, name) VALUES (?1, ?2)",
+            params!["pool-abc", "test-pool"],
+        ) {
+            Ok(_) => {}
+            Err(e) => panic!("insert pool: {e}"),
+        }
+
         let repo = LoopRepository::new(&db);
         let mut l = Loop {
             name: "full-loop".to_string(),

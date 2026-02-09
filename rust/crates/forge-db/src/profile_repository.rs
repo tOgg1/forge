@@ -47,17 +47,12 @@ impl Harness {
 
 /// PromptMode controls how prompts are delivered to a harness.
 /// Mirrors Go `models.PromptMode`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum PromptMode {
+    #[default]
     Env,
     Stdin,
     Path,
-}
-
-impl Default for PromptMode {
-    fn default() -> Self {
-        Self::Env
-    }
 }
 
 impl PromptMode {
