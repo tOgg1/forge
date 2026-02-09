@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tOgg1/forge/internal/db"
 	"github.com/tOgg1/forge/internal/models"
+	"github.com/tOgg1/forge/internal/teammsg"
 )
 
 var (
@@ -81,6 +82,21 @@ var workSetCmd = &cobra.Command{
 		}
 		if err := repo.SetCurrent(context.Background(), state); err != nil {
 			return err
+		}
+
+		// Best-effort: status update broadcast via fmail (noop if not configured).
+		if messenger, err := teammsg.NewFromEnv(""); err == nil {
+			topic := strings.TrimSpace(os.Getenv("FORGE_FMAIL_WORK_TOPIC"))
+			if topic == "" {
+				topic = "task"
+			}
+			line := fmt.Sprintf("%s [%s] %s", state.TaskID, state.Status, strings.TrimSpace(state.AgentID))
+			if strings.TrimSpace(state.Detail) != "" {
+				line += " | " + strings.TrimSpace(state.Detail)
+			}
+			if err := messenger.SendTopic(topic, line); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: fmail work notify failed: %v\n", err)
+			}
 		}
 
 		if IsJSONOutput() || IsJSONLOutput() {

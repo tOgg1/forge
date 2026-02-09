@@ -15,6 +15,7 @@ import (
 	"github.com/tOgg1/forge/internal/models"
 	"github.com/tOgg1/forge/internal/node"
 	"github.com/tOgg1/forge/internal/queue"
+	"github.com/tOgg1/forge/internal/teammsg"
 	"github.com/tOgg1/forge/internal/tmux"
 	"github.com/tOgg1/forge/internal/workspace"
 )
@@ -223,6 +224,21 @@ without specifying an agent ID.`,
 
 		if err := writeQueueResults(message, results, queueOpts); err != nil {
 			return err
+		}
+
+		// Best-effort: mirror enqueued tasks to fmail for team visibility.
+		// Failures should never block queue creation.
+		if messenger, err := teammsg.NewFromEnv(""); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: fmail notify unavailable: %v\n", err)
+		} else {
+			for _, r := range results {
+				if r.Error != "" {
+					continue
+				}
+				if err := messenger.SendTask(r.AgentID, message); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: fmail notify failed (agent %s): %v\n", shortID(r.AgentID), err)
+				}
+			}
 		}
 
 		// Print next steps for successful sends
