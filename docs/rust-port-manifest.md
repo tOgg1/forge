@@ -217,6 +217,7 @@ Canonical matrix + snapshot parity checks:
 ## Drop: legacy command groups
 
 Status: **drop**. All wired via `addLegacyCommand(...)`. Not ported to Rust.
+Canonical drop freeze: `docs/rust-legacy-drop-list.md`.
 
 | Command | Subcommands | Go source | Notes |
 |---------|-------------|-----------|-------|
