@@ -2,6 +2,7 @@
 
 pub mod alert_repository;
 pub mod approval_repository;
+pub mod file_lock_repository;
 pub mod loop_queue_repository;
 pub mod loop_repository;
 pub mod loop_run_repository;
