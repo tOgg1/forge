@@ -469,3 +469,80 @@ hi tormod. loop idle; queue empty.
 - fmail sent: `task` status + `@forge-orchestrator` idle notice (`FMAIL_AGENT=rust-full-codex-5`)
 ```
 
+## 2026-02-09T18:19:21Z
+
+- run_id: c08c2a59-67dc-4b1b-9451-f1ebe315aade
+- loop_name: rust-full-codex-5
+- status: success
+- profile: codex2
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T18:04:42Z
+- finished_at: 2026-02-09T18:19:21Z
+- exit_code: 0
+
+```
++fn get_current_not_found() {
++    let (mut db, path) = setup_db("not-found");
++    let mut repo = LoopWorkStateRepository::new(&mut db);
++    match repo.get_current("missing-loop") {
++        Ok(_) => panic!("expected not found"),
++        Err(DbError::LoopWorkStateNotFound) => {}
++        Err(e) => panic!("unexpected error: {e}"),
++    }
++    let _ = std::fs::remove_file(path);
++}
++
++#[test]
++fn list_by_loop_default_limit_is_200() {
++    let (mut db, path) = setup_db("default-limit");
++    let loop_repo = LoopRepository::new(&db);
++
++    let mut l = make_loop("limit-loop");
++    match loop_repo.create(&mut l) {
++        Ok(()) => {}
++        Err(e) => panic!("create loop: {e}"),
++    }
++
++    let conn = db.conn();
++    for i in 0..205 {
++        let id = format!("ws-{i}");
++        let task_id = format!("task-{i}");
++        if let Err(e) = conn.execute(
++            "INSERT INTO loop_work_state (id, loop_id, agent_id, task_id, status) VALUES (?1, ?2, ?3, ?4, ?5)",
++            rusqlite::params![id, l.id, "agent", task_id, "in_progress"],
++        ) {
++            panic!("insert {i}: {e}");
++        }
++    }
++
++    let mut repo = LoopWorkStateRepository::new(&mut db);
++    let items = match repo.list_by_loop(&l.id, 0) {
++        Ok(v) => v,
++        Err(e) => panic!("list_by_loop: {e}"),
++    };
++    assert_eq!(items.len(), 200);
++
++    let _ = std::fs::remove_file(path);
++}
+
+tokens used
+134,536
+Closed tasks (prj-vr0104gr):
+- `forge-dg1` loop_work_state repo parity
+  - add `rust/crates/forge-db/src/loop_work_state_repository.rs`
+  - add `rust/crates/forge-db/tests/loop_work_state_repository_test.rs`
+  - validation: `cd rust && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` PASS
+- `forge-a73` file_locks repo parity
+  - add `rust/crates/forge-db/tests/file_lock_repository_test.rs`
+  - validation: full rust gate PASS
+- `forge-hjn` events/audit repo parity
+  - validation: `cd rust && cargo test -p forge-db --test event_repository_test` PASS
+- `forge-3kr` mail_threads/messages repo parity
+  - validation: `cd rust && cargo test -p forge-db --test mail_repository_test` PASS
+
+Queue now: `sv task ready --project prj-vr0104gr` => `0`.
+```
+

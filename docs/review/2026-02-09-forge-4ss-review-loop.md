@@ -25,3 +25,38 @@
 
 - Result: **issues found** (2).
 - Residual risk: Go parity validation for touched oracle packages is currently blocked until local Go version mismatch is resolved.
+
+---
+
+## Iteration: `forge-qe5` (repository parity pass)
+
+### Findings
+
+1. **High**: non-atomic port allocation path can race under contention
+   - Rust `allocate` performs `find_available_port` and `INSERT` outside a transaction (`rust/crates/forge-db/src/port_repository.rs:134`).
+   - Go path does both in one DB transaction (`internal/db/port_repository.go:70`).
+   - Risk: duplicate-port race/failed allocation bursts under concurrent allocators.
+   - Fix hint: run select+insert in same transaction (or retry wrapper) to preserve parity semantics.
+
+2. **High**: `set_current` unique-conflict fallback swallows write failures
+   - On unique conflict, fallback `tx.execute(...)` result is discarded and function returns `Ok(())` (`rust/crates/forge-db/src/loop_work_state_repository.rs:204`).
+   - Risk: false-success write path; caller sees success even when fallback update fails.
+   - Fix hint: check fallback update result and return `DbError::Transaction` on failure.
+
+3. **Medium**: unknown loop-run status coerced to `running`
+   - Scanner uses `parse(...).unwrap_or_default()` (`rust/crates/forge-db/src/loop_run_repository.rs:266`), defaulting unknown status to `Running`.
+   - Go scanner preserves raw status text (`internal/db/loop_run_repository.go:218`).
+   - Risk: malformed rows can be misreported as active/running.
+   - Fix hint: preserve unknown status explicitly or return validation error; add malformed-status regression test.
+
+### Validation
+
+- `cargo test -p forge-db` run reached `file_lock_repository_test` failure unrelated to reviewed files; earlier reviewed repository tests in that run passed before failure.
+- Targeted rerun blocked by concurrent workspace churn introducing `event_repository` compile error:
+  - `rust/crates/forge-db/src/event_repository.rs:246` (`Option<String>::flatten()`).
+- `go test ./internal/db/...` blocked by local toolchain mismatch:
+  - stdlib compiled with `go1.25.7`, tool is `go1.25.6`.
+
+### Summary
+
+- Result: **issues found** (3).

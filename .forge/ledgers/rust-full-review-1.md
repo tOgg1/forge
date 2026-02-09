@@ -519,3 +519,80 @@ Summary:
 3. `go test ./internal/loop ./internal/db` blocked by local Go tool mismatch (`go1.25.7` stdlib vs `go1.25.6` tool).
 ```
 
+## 2026-02-09T18:16:17Z
+
+- run_id: 8e9db6cc-f315-40d1-9ccc-c4dd37ac2e92
+- loop_name: rust-full-review-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-09T18:11:35Z
+- finished_at: 2026-02-09T18:16:17Z
+- exit_code: 0
+
+```
++## Iteration: `forge-qe5` (repository parity pass)
++
++### Findings
++
++1. **High**: non-atomic port allocation path can race under contention
++   - Rust `allocate` performs `find_available_port` and `INSERT` outside a transaction (`rust/crates/forge-db/src/port_repository.rs:134`).
++   - Go path does both in one DB transaction (`internal/db/port_repository.go:70`).
++   - Risk: duplicate-port race/failed allocation bursts under concurrent allocators.
++   - Fix hint: run select+insert in same transaction (or retry wrapper) to preserve parity semantics.
++
++2. **High**: `set_current` unique-conflict fallback swallows write failures
++   - On unique conflict, fallback `tx.execute(...)` result is discarded and function returns `Ok(())` (`rust/crates/forge-db/src/loop_work_state_repository.rs:204`).
++   - Risk: false-success write path; caller sees success even when fallback update fails.
++   - Fix hint: check fallback update result and return `DbError::Transaction` on failure.
++
++3. **Medium**: unknown loop-run status coerced to `running`
++   - Scanner uses `parse(...).unwrap_or_default()` (`rust/crates/forge-db/src/loop_run_repository.rs:266`), defaulting unknown status to `Running`.
++   - Go scanner preserves raw status text (`internal/db/loop_run_repository.go:218`).
++   - Risk: malformed rows can be misreported as active/running.
++   - Fix hint: preserve unknown status explicitly or return validation error; add malformed-status regression test.
++
++### Validation
++
++- `cargo test -p forge-db` run reached `file_lock_repository_test` failure unrelated to reviewed files; earlier reviewed repository tests in that run passed before failure.
++- Targeted rerun blocked by concurrent workspace churn introducing `event_repository` compile error:
++  - `rust/crates/forge-db/src/event_repository.rs:246` (`Option<String>::flatten()`).
++- `go test ./internal/db/...` blocked by local toolchain mismatch:
++  - stdlib compiled with `go1.25.7`, tool is `go1.25.6`.
++
++### Summary
++
++- Result: **issues found** (3).
+
+tokens used
+133,963
+**Findings**
+1. High: non-atomic port allocation parity miss. `allocate` does `find_available_port` + `INSERT` outside tx, unlike Go transactional path; race window under contention.  
+`rust/crates/forge-db/src/port_repository.rs:134` (Go ref: `internal/db/port_repository.go:70`)  
+Fix hint: wrap select+insert in one DB transaction (or retry tx).
+
+2. High: `set_current` unique-conflict fallback can false-success. Fallback `tx.execute(...)` result ignored, then returns `Ok(())` even if update fails.  
+`rust/crates/forge-db/src/loop_work_state_repository.rs:204`  
+Fix hint: check fallback execute result; return `DbError::Transaction` on failure.
+
+3. Medium: loop-run status coercion bug. Unknown DB status is coerced to `Running` via `unwrap_or_default`, masking malformed rows/parity behavior.  
+`rust/crates/forge-db/src/loop_run_repository.rs:266` (Go ref: `internal/db/loop_run_repository.go:218`)  
+Fix hint: preserve unknown explicitly or return validation error; add malformed-status regression test.
+
+**Validation**
+- `cargo test -p forge-db`: many reviewed repo tests passed; run failed later in unrelated `file_lock_repository_test`.
+- Targeted rerun then blocked by concurrent churn compile break in `rust/crates/forge-db/src/event_repository.rs:246`.
+- `go test ./internal/db/...` blocked by local Go mismatch (`go1.25.7` stdlib vs `go1.25.6` tool).
+
+**Reporting**
+- Sent to task channel:
+  - `review: forge-qe5 ...` (3 findings)
+- Sent orchestrator summary:
+  - `review summary: forge-qe5 issues`
+- Appended review note:
+  - `docs/review/2026-02-09-forge-4ss-review-loop.md`
+```
+

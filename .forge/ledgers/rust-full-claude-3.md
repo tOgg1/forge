@@ -230,3 +230,43 @@ Task `forge-g3p` (Repo layer: loops repository parity) is complete.
 - Task closed and orchestrator notified
 ```
 
+## 2026-02-09T18:19:07Z
+
+- run_id: 6c7b95be-ff8c-4322-a97f-c32de61f4bce
+- loop_name: rust-full-claude-3
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:01:24Z
+- finished_at: 2026-02-09T18:19:07Z
+- exit_code: 0
+
+```
+Task **forge-h2m** (Repo layer: loop_queue_items repository parity) is complete and closed.
+
+**Summary of deliverables:**
+
+- **File**: `rust/crates/forge-db/src/loop_queue_repository.rs` (~1300 lines)
+- **Enums**: `LoopQueueItemType` (6 variants), `LoopQueueItemStatus` (5 variants) with `parse`/`as_str` 
+- **Struct**: `LoopQueueItem` with 11 fields matching Go model exactly
+- **Validation**: `validate_queue_item()` — type-specific JSON payload validation matching Go `Validate()`
+- **Repository**: `LoopQueueRepository` with 8 methods:
+  - `enqueue` (batch insert with auto-position)
+  - `peek` (returns `QueueEmpty` error)
+  - `dequeue` (peek + mark dispatched)
+  - `list` (ordered by position)
+  - `clear` (pending items only)
+  - `remove` (by ID, returns `QueueItemNotFound`)
+  - `update_status` (with error message + completed_at)
+  - `reorder` (transactional position reassignment)
+- **Tests**: 31/31 passing
+
+**Validation results:**
+- `cargo fmt --check`: PASS
+- `cargo clippy --workspace --all-targets -- -D warnings`: PASS
+- `cargo test -p forge-db --lib loop_queue_repository::tests`: 31/31 PASS
+```
+

@@ -262,3 +262,42 @@ Ported `forge stop` from Go to Rust with full flag/default/validation/output par
 **Validation:** `cargo fmt --check` PASS, `cargo clippy --workspace --all-targets -- -D warnings` PASS, `cargo test --workspace` PASS (0 failures)
 ```
 
+## 2026-02-09T18:19:17Z
+
+- run_id: 3d11f4b4-4ddf-4c35-a392-d33bbc3acc09
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:01:43Z
+- finished_at: 2026-02-09T18:19:17Z
+- exit_code: 0
+
+```
+## Task Summary: forge-jzy — Repo layer: loop_runs repository parity
+
+**Status**: Closed (done)
+
+**Deliverables**:
+
+1. **`rust/crates/forge-db/src/loop_run_repository.rs`** (new file)
+   - `LoopRunStatus` enum: Running, Success, Error, Killed — with `as_str()`/`parse()` for SQL roundtripping
+   - `LoopRun` struct: Full Go parity with all 12 fields (id, loop_id, profile_id, status, prompt_source, prompt_path, prompt_override, started_at, finished_at, exit_code, output_tail, metadata)
+   - `LoopRunRepository`: Create, Get, ListByLoop (DESC order), CountRunningByProfile, CountByLoop, Finish — all matching Go API semantics exactly
+   - `scan_loop_run` row mapper matching Go's `scanLoopRun`
+   - 15 unit tests covering all CRUD ops, status roundtrips, metadata, nullable fields, prompt_override
+
+2. **`rust/crates/forge-db/tests/loop_run_repository_test.rs`** (new file)
+   - 8 integration tests mirroring Go test cases: create+finish, count_by_loop, list ordering, count_running_by_profile, get/finish not found, FK cascade, metadata roundtrip
+
+3. **`rust/crates/forge-db/src/lib.rs`** modifications
+   - Added `pub mod loop_run_repository`
+   - Added `LoopRunNotFound` error variant to `DbError`
+   - Fixed concurrent agent breakage: duplicate mod decls, missing error variants, duplicate usage_repository
+
+**Validation**: `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` → PASS (exit 0, 0 failures)
+```
+
