@@ -1,0 +1,1 @@
+{"id":"evt-002","timestamp":"2026-01-01T00:00:10Z","type":"message.dispatched","entity_type":"queue","entity_id":"queue-1","payload":{"message":"ship"}}

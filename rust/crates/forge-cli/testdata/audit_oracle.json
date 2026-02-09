@@ -1,0 +1,28 @@
+{
+  "steps": [
+    {
+      "name": "audit table",
+      "stdout": "TIME                 TYPE                 ENTITY  ID\n2026-01-01 00:00:00  agent.state_changed  agent   agent-1\n2026-01-01 00:00:10  message.dispatched   queue   queue-1\n2026-01-01 00:00:20  warning              system  core\n2026-01-01 00:00:30  agent.state_changed  agent   agent-2\n",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "audit filtered json",
+      "stdout": "[\n  {\n    \"id\": \"evt-001\",\n    \"timestamp\": \"2026-01-01T00:00:00Z\",\n    \"type\": \"agent.state_changed\",\n    \"entity_type\": \"agent\",\n    \"entity_id\": \"agent-1\",\n    \"payload\": {\n      \"state\": \"running\"\n    },\n    \"metadata\": {\n      \"source\": \"loop\"\n    }\n  },\n  {\n    \"id\": \"evt-004\",\n    \"timestamp\": \"2026-01-01T00:00:30Z\",\n    \"type\": \"agent.state_changed\",\n    \"entity_type\": \"agent\",\n    \"entity_id\": \"agent-2\",\n    \"payload\": {\n      \"state\": \"sleeping\"\n    },\n    \"metadata\": {\n      \"source\": \"daemon\"\n    }\n  }\n]\n",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "audit invalid type+action",
+      "stdout": "",
+      "stderr": "use either --type or --action, not both\n",
+      "exit_code": 1
+    },
+    {
+      "name": "audit unknown flag",
+      "stdout": "",
+      "stderr": "error: unknown argument for audit: '--bogus'\n",
+      "exit_code": 1
+    }
+  ]
+}

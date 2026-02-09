@@ -1,0 +1,5 @@
+TIME                 TYPE                 ENTITY  ID
+2026-01-01 00:00:00  agent.state_changed  agent   agent-1
+2026-01-01 00:00:10  message.dispatched   queue   queue-1
+2026-01-01 00:00:20  warning              system  core
+2026-01-01 00:00:30  agent.state_changed  agent   agent-2

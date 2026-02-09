@@ -1,0 +1,28 @@
+[
+  {
+    "id": "evt-001",
+    "timestamp": "2026-01-01T00:00:00Z",
+    "type": "agent.state_changed",
+    "entity_type": "agent",
+    "entity_id": "agent-1",
+    "payload": {
+      "state": "running"
+    },
+    "metadata": {
+      "source": "loop"
+    }
+  },
+  {
+    "id": "evt-004",
+    "timestamp": "2026-01-01T00:00:30Z",
+    "type": "agent.state_changed",
+    "entity_type": "agent",
+    "entity_id": "agent-2",
+    "payload": {
+      "state": "sleeping"
+    },
+    "metadata": {
+      "source": "daemon"
+    }
+  }
+]

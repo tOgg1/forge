@@ -60,3 +60,23 @@
 ### Summary
 
 - Result: **issues found** (3).
+
+---
+
+## Iteration: `forge-qe5` (mail repository delta)
+
+### Findings
+
+1. No concrete defects found in reviewed delta (`rust/crates/forge-db/src/mail_repository.rs`, `rust/crates/forge-db/tests/mail_repository_test.rs`, `rust/crates/forge-db/src/lib.rs`).
+
+### Validation
+
+- `cargo test -p forge-db --test mail_repository_test` ✅ (3 passed)
+- `cargo test -p forge-db --test migration_006_test` ✅ (1 passed)
+- `go test ./internal/db/...` ❌ blocked by local Go toolchain mismatch:
+  - stdlib compiled with `go1.25.7`, tool is `go1.25.6`.
+
+### Summary
+
+- Result: **pass**.
+- Residual risk: Go parity checks remain blocked by toolchain mismatch; broadcast inbox cross-workspace isolation is not explicitly covered by current Rust tests.

@@ -469,3 +469,80 @@ Protocol updates sent:
 - `fmail` progress, `@forge-orchestrator` done, task closed, idle/no-ready status sent.
 ```
 
+## 2026-02-09T18:21:57Z
+
+- run_id: 8cd0288d-02e5-4deb-b64f-1e32c2181894
+- loop_name: rust-full-codex-4
+- status: success
+- profile: codex1
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T18:02:27Z
+- finished_at: 2026-02-09T18:21:57Z
+- exit_code: 0
+
+```
+-    }
+-
+-    // Delete the account
+-    db.conn()
+-        .execute("DELETE FROM accounts WHERE id = ?1", rusqlite::params![acct])
+-        .unwrap_or_else(|e| panic!("delete account: {e}"));
+-
+-    // Usage record should be gone
+-    let count: i64 = db
+-        .conn()
+-        .query_row("SELECT COUNT(*) FROM usage_records", [], |row| row.get(0))
+-        .unwrap_or_else(|e| panic!("count: {e}"));
+-    assert_eq!(count, 0, "usage records should be cascade-deleted");
++    let err = repo.create(&mut missing_provider);
++    assert!(
++        matches!(err, Err(DbError::InvalidUsageRecord)),
++        "expected InvalidUsageRecord, got {err:?}"
++    );
+ 
+     let _ = std::fs::remove_file(path);
+ }
+
+tokens used
+473,184
+Hi. Good momentum: 2 tasks closed; migration flake isolated + patched.
+
+- Closed: `forge-qxy` (usage records/cache parity), `forge-p6s` (alerts/transcripts/approvals parity).
+- Stale takeover: `forge-h15` (`>=45m`), claim announced via `fmail`.
+- Added/validated:
+  - `rust/crates/forge-db/src/usage_repository.rs`
+  - `rust/crates/forge-db/tests/usage_repository_test.rs`
+  - `rust/crates/forge-db/src/event_repository.rs`
+  - `rust/crates/forge-db/tests/event_repository_test.rs`
+  - `rust/crates/forge-db/tests/mail_repository_test.rs`
+  - migration temp-db uniqueness fix in:
+    - `rust/crates/forge-db/tests/migration_001_test.rs`
+    - `rust/crates/forge-db/tests/migration_002_test.rs`
+    - `rust/crates/forge-db/tests/migration_003_test.rs`
+    - `rust/crates/forge-db/tests/migration_004_test.rs`
+    - `rust/crates/forge-db/tests/migration_007_test.rs`
+    - `rust/crates/forge-db/tests/migration_008_test.rs`
+    - `rust/crates/forge-db/tests/migration_009_test.rs`
+    - `rust/crates/forge-db/tests/migration_011_test.rs`
+    - `rust/crates/forge-db/tests/migration_012_test.rs`
+  - wiring/errors in `rust/crates/forge-db/src/lib.rs`
+
+Validation:
+- Targeted repo suites PASS (`forge-db` usage/event/mail + migration tests).
+- Required full Rust chain currently BLOCKED by unrelated concurrent drift:
+  - `rust/crates/forge-cli/src/audit.rs:788` (`audit_empty_table_reports_no_matches` assertion mismatch).
+  - Also intermittent fmt/test churn from concurrent edits in `forge-cli`.
+
+Task channel/orchestrator updated:
+- `forge-qxy: done`
+- `forge-p6s: done`
+- `forge-h15: blocked` (with file/line blocker context)
+
+Current queue state:
+- `ready`: 0
+- Active hold: `forge-jvd` in_progress (dependency graph), `forge-h15` in_progress (blocked by shared CLI test drift).
+```
+
