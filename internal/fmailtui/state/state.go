@@ -61,10 +61,17 @@ type SavedSearch struct {
 }
 
 type Preferences struct {
-	DefaultLayout string `json:"default_layout,omitempty"` // "single", "split", "dashboard", "zen"
-	LiveTailAuto  bool   `json:"live_tail_auto,omitempty"`
-	RelativeTime  bool   `json:"relative_time,omitempty"`
-	SoundAlerts   bool   `json:"sound_alerts,omitempty"`
+	DefaultLayout        string   `json:"default_layout,omitempty"`          // "single", "split", "dashboard", "zen"
+	Theme                string   `json:"theme,omitempty"`                   // "default", "high-contrast"
+	LayoutSplitRatio     float64  `json:"layout_split_ratio,omitempty"`      // 0.2..0.8
+	LayoutSplitCollapsed bool     `json:"layout_split_collapsed,omitempty"`  // hide left split pane
+	LayoutFocus          int      `json:"layout_focus,omitempty"`            // focused pane index
+	LayoutExpanded       bool     `json:"layout_expanded,omitempty"`         // focused-pane-only mode
+	DashboardGrid        string   `json:"dashboard_grid,omitempty"`          // "2x2","2x1","1x2","1x3","3x1"
+	DashboardViews       []string `json:"dashboard_views,omitempty"`         // up to 4 view IDs
+	LiveTailAuto         bool     `json:"live_tail_auto,omitempty"`
+	RelativeTime         bool     `json:"relative_time,omitempty"`
+	SoundAlerts          bool     `json:"sound_alerts,omitempty"`
 	// HighlightPatterns are live-tail keyword highlight regexes.
 	HighlightPatterns []string `json:"highlight_patterns,omitempty"`
 }
@@ -134,6 +141,38 @@ func (m *Manager) Preferences() Preferences {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return clonePreferences(m.state.Preferences)
+}
+
+func (m *Manager) UpdatePreferences(update func(*Preferences)) {
+	if update == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next := clonePreferences(m.state.Preferences)
+	update(&next)
+	m.state.Preferences = normalizePreferences(next)
+	m.markDirtyLocked()
+}
+
+func (m *Manager) Theme() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return strings.TrimSpace(m.state.Preferences.Theme)
+}
+
+func (m *Manager) SetTheme(theme string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	theme = strings.TrimSpace(theme)
+	if theme == "" {
+		return
+	}
+	if strings.EqualFold(m.state.Preferences.Theme, theme) {
+		return
+	}
+	m.state.Preferences.Theme = theme
+	m.markDirtyLocked()
 }
 
 func (m *Manager) HighlightPatterns() []string {
@@ -582,6 +621,7 @@ func normalizeState(state TUIState, now time.Time) TUIState {
 		}
 		state.Groups = normalized
 	}
+	state.Preferences = normalizePreferences(state.Preferences)
 
 	return state
 }
@@ -671,10 +711,70 @@ func normalizeGroupMembers(members []string) []string {
 
 func clonePreferences(p Preferences) Preferences {
 	out := p
+	if len(p.DashboardViews) > 0 {
+		out.DashboardViews = append([]string(nil), p.DashboardViews...)
+	}
 	if len(p.HighlightPatterns) > 0 {
 		out.HighlightPatterns = append([]string(nil), p.HighlightPatterns...)
 	}
 	return out
+}
+
+func normalizePreferences(p Preferences) Preferences {
+	p.DefaultLayout = strings.TrimSpace(strings.ToLower(p.DefaultLayout))
+	switch p.DefaultLayout {
+	case "", "single", "split", "dashboard", "zen":
+	default:
+		p.DefaultLayout = ""
+	}
+	p.Theme = strings.TrimSpace(strings.ToLower(p.Theme))
+	switch p.Theme {
+	case "", "default", "high-contrast":
+	default:
+		p.Theme = ""
+	}
+	if p.LayoutSplitRatio != 0 {
+		if p.LayoutSplitRatio < 0.2 {
+			p.LayoutSplitRatio = 0.2
+		}
+		if p.LayoutSplitRatio > 0.8 {
+			p.LayoutSplitRatio = 0.8
+		}
+	}
+	if p.LayoutFocus < 0 {
+		p.LayoutFocus = 0
+	}
+	p.DashboardGrid = strings.TrimSpace(strings.ToLower(p.DashboardGrid))
+	switch p.DashboardGrid {
+	case "", "2x2", "2x1", "1x2", "1x3", "3x1":
+	default:
+		p.DashboardGrid = "2x2"
+	}
+	if len(p.DashboardViews) > 0 {
+		out := make([]string, 0, minInt(len(p.DashboardViews), 4))
+		for _, id := range p.DashboardViews {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			out = append(out, id)
+			if len(out) == 4 {
+				break
+			}
+		}
+		p.DashboardViews = out
+	}
+	if len(p.HighlightPatterns) > 0 {
+		p.HighlightPatterns = normalizeStringList(p.HighlightPatterns)
+	}
+	return p
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func normalizeStringList(values []string) []string {
