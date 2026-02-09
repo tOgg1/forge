@@ -125,3 +125,39 @@ func TestBuildThread_FindsRoot(t *testing.T) {
 	}
 }
 
+func TestSummarizeThread_FirstLine(t *testing.T) {
+	base := time.Date(2026, 2, 9, 8, 0, 0, 0, time.UTC)
+	msgs := []fmail.Message{
+		{ID: "20260209-080000-0001", From: "alice", To: "task", Time: base, Body: "hello\nworld"},
+	}
+	th := BuildThread(msgs, "20260209-080000-0001")
+	sum := SummarizeThread(th)
+	if sum.Title != "hello" {
+		t.Fatalf("expected title 'hello', got %q", sum.Title)
+	}
+	if sum.MessageCount != 1 {
+		t.Fatalf("expected message count 1, got %d", sum.MessageCount)
+	}
+	if sum.ParticipantCount != 1 {
+		t.Fatalf("expected participant count 1, got %d", sum.ParticipantCount)
+	}
+	if sum.LastActivity.IsZero() {
+		t.Fatalf("expected last activity set")
+	}
+}
+
+func TestIsCrossTargetReply(t *testing.T) {
+	base := time.Date(2026, 2, 9, 8, 0, 0, 0, time.UTC)
+	msgs := []fmail.Message{
+		{ID: "20260209-080000-0001", From: "alice", To: "task", Time: base, Body: "root"},
+		{ID: "20260209-080001-0001", From: "bob", To: "build", Time: base.Add(1 * time.Second), Body: "reply", ReplyTo: "20260209-080000-0001"},
+	}
+	th := BuildThreads(msgs)[0]
+	nodes := FlattenThread(th)
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(nodes))
+	}
+	if IsCrossTargetReply(nodes[1]) != true {
+		t.Fatalf("expected cross-target reply")
+	}
+}

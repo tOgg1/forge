@@ -1,6 +1,7 @@
 package threading
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +24,13 @@ type ThreadNode struct {
 	Parent   *ThreadNode
 	Children []*ThreadNode
 	Depth    int // nesting level (0 = root, clamped)
+}
+
+type ThreadSummary struct {
+	Title            string
+	ParticipantCount int
+	MessageCount     int
+	LastActivity     time.Time
 }
 
 // BuildThreads takes a flat list of messages and returns threaded conversations.
@@ -124,6 +132,29 @@ func FlattenThread(thread *Thread) []*ThreadNode {
 	}
 	walk(root)
 	return out
+}
+
+// SummarizeThread generates a summary suitable for a thread list:
+// first line of root, participant count, message count, last activity.
+func SummarizeThread(thread *Thread) ThreadSummary {
+	if thread == nil || thread.Root == nil {
+		return ThreadSummary{}
+	}
+	return ThreadSummary{
+		Title:            firstLine(thread.Root.Body),
+		ParticipantCount: len(thread.Agents),
+		MessageCount:     len(thread.Messages),
+		LastActivity:     thread.LastActivity,
+	}
+}
+
+// IsCrossTargetReply reports whether the reply edge crosses targets (topics/DMs).
+// Useful for rendering a "from topic X" (or "@agent") indicator.
+func IsCrossTargetReply(node *ThreadNode) bool {
+	if node == nil || node.Message == nil || node.Parent == nil || node.Parent.Message == nil {
+		return false
+	}
+	return strings.TrimSpace(node.Message.To) != strings.TrimSpace(node.Parent.Message.To)
 }
 
 func indexNodes(messages []fmail.Message) map[string]*ThreadNode {
@@ -267,6 +298,17 @@ func buildThread(root *ThreadNode) *Thread {
 				agents = append(agents, from)
 			}
 		}
+		// For DMs, include the recipient agent as a participant.
+		to := strings.TrimSpace(node.Message.To)
+		if strings.HasPrefix(to, "@") {
+			peer := strings.TrimPrefix(to, "@")
+			if peer != "" {
+				if _, ok := agentsSet[peer]; !ok {
+					agentsSet[peer] = struct{}{}
+					agents = append(agents, peer)
+				}
+			}
+		}
 		if node.Message.Time.After(lastActivity) {
 			lastActivity = node.Message.Time
 		}
@@ -296,4 +338,22 @@ func messageLess(a, b fmail.Message) bool {
 		return a.From < b.From
 	}
 	return a.To < b.To
+}
+
+func firstLine(body any) string {
+	if body == nil {
+		return ""
+	}
+	s, ok := body.(string)
+	if !ok {
+		s = fmt.Sprint(body)
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		s = s[:idx]
+	}
+	return strings.TrimSpace(s)
 }
