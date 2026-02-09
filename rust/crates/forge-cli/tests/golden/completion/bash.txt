@@ -1,0 +1,6 @@
+# bash completion for forge
+__start_forge()
+{
+    :
+}
+complete -F __start_forge forge

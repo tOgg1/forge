@@ -244,5 +244,6 @@ fn temp_db_path(prefix: &str) -> PathBuf {
         Ok(value) => value.as_nanos(),
         Err(err) => panic!("clock before epoch: {err}"),
     };
-    std::env::temp_dir().join(format!("forge-db-{prefix}-{nanos}.sqlite"))
+    let suffix = uuid::Uuid::new_v4();
+    std::env::temp_dir().join(format!("forge-db-{prefix}-{nanos}-{suffix}.sqlite"))
 }

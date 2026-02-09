@@ -2,6 +2,7 @@ use std::env;
 use std::io::Write;
 use std::sync::OnceLock;
 
+pub mod audit;
 pub mod clean;
 pub mod completion;
 pub mod config;
@@ -78,6 +79,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let backend = init::FilesystemInitBackend;
             let forwarded = forward_args(remaining, &flags);
             init::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
+        Some("audit") => {
+            let backend = audit::InMemoryAuditBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            audit::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("kill") => {
             let mut backend = kill::InMemoryKillBackend::default();
@@ -253,6 +259,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  forge <command> [options]")?;
     writeln!(out)?;
     writeln!(out, "Commands:")?;
+    writeln!(out, "  audit     View the Forge audit log")?;
     writeln!(out, "  clean     Remove inactive loops")?;
     writeln!(out, "  completion  Generate shell completion scripts")?;
     writeln!(out, "  config    Manage global configuration")?;
@@ -345,9 +352,9 @@ pub struct RootCommandOutput {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::{
-        clean, completion, config, crate_label, init, kill, logs, loop_internal, mem, migrate,
-        msg, pool, profile, prompt, ps, queue, resume, rm, run, run_for_test, run_with_args,
-        scale, stop, up, work,
+        audit, clean, completion, config, crate_label, init, kill, logs, loop_internal, mem,
+        migrate, msg, pool, profile, prompt, ps, queue, resume, rm, run, run_for_test,
+        run_with_args, scale, stop, up, work,
     };
 
     #[test]
@@ -358,6 +365,11 @@ mod tests {
     #[test]
     fn init_module_is_accessible() {
         let _ = init::FilesystemInitBackend;
+    }
+
+    #[test]
+    fn audit_module_is_accessible() {
+        let _ = audit::InMemoryAuditBackend::default();
     }
 
     #[test]
@@ -479,6 +491,7 @@ mod tests {
             Err(err) => panic!("stdout should be utf-8: {err}"),
         };
         assert!(rendered.contains("Control plane for AI coding agents"));
+        assert!(rendered.contains("audit"));
         assert!(rendered.contains("clean"));
         assert!(rendered.contains("config"));
         assert!(rendered.contains("init"));

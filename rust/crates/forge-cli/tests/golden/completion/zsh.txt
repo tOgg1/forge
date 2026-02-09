@@ -1,0 +1,2 @@
+#compdef forge
+_arguments '*: :->args'
