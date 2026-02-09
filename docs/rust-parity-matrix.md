@@ -20,7 +20,7 @@ Version: `v0` (2026-02-09)
 | DB migrations/schema | `internal/db/migrations` | `forge-db` | schema fingerprint tests | in-progress | baseline files committed in `internal/parity/testdata/schema/*` |
 | Loop runtime semantics | `internal/loop`, `internal/queue` | `forge-loop` | characterization harness + `docs/rust-runtime-gate.md` | in-progress | runtime gate criteria + CI baseline test wired |
 | Daemon + runner protocol | `internal/forged`, `internal/agent/runner` | `forge-daemon` + `forge-runner` | proto compat tests + `docs/rust-daemon-proto-gate.md` | in-progress | gate criteria + CI baseline test wired |
-| Loop TUI workflows | `internal/looptui` | `forge-tui` | manual + scripted smoke + `docs/rust-loop-tui-gate.md` | in-progress | gate criteria documented; cutover blocked until checklist green |
+| Loop TUI workflows | `internal/looptui` | `forge-tui` | manual + scripted smoke + `docs/rust-loop-tui-gate.md` + `docs/rust-loop-tui-checklist.md` | in-progress | gate criteria documented; checklist + smoke script baseline added |
 | fmail/fmail-tui workflows | `internal/fmail`, `internal/fmailtui` | `fmail-core` + `fmail-tui` | scripted + manual checklist + `docs/rust-fmail-gate.md` | in-progress | gate criteria + CI baseline test wired |
 
 ## Required evidence per gate

@@ -1,0 +1,161 @@
+{
+  "steps": [
+    {
+      "name": "send",
+      "stdout": "{\n  \"message\": \"hello from oracle\",\n  \"queued\": true,\n  \"results\": [\n    {\n      \"agent_id\": \"oracle-agent-idle\",\n      \"item_id\": \"\\u003cITEM_ID\\u003e\",\n      \"item_type\": \"message\",\n      \"position\": 1\n    }\n  ]\n}\n",
+      "state": {
+        "queues": {
+          "oracle-agent-idle": [
+            {
+              "type": "message",
+              "status": "pending",
+              "position": 1,
+              "payload": {
+                "text": "hello from oracle"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "send --when-idle",
+      "stdout": "{\n  \"message\": \"continue when ready\",\n  \"queued\": true,\n  \"results\": [\n    {\n      \"agent_id\": \"oracle-agent-idle\",\n      \"item_id\": \"\\u003cITEM_ID\\u003e\",\n      \"item_type\": \"conditional\",\n      \"position\": 2\n    }\n  ]\n}\n",
+      "state": {
+        "queues": {
+          "oracle-agent-idle": [
+            {
+              "type": "message",
+              "status": "pending",
+              "position": 1,
+              "payload": {
+                "text": "hello from oracle"
+              }
+            },
+            {
+              "type": "conditional",
+              "status": "pending",
+              "position": 2,
+              "payload": {
+                "condition_type": "when_idle",
+                "message": "continue when ready"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "send --priority high",
+      "stdout": "{\n  \"message\": \"urgent\",\n  \"queued\": true,\n  \"results\": [\n    {\n      \"agent_id\": \"oracle-agent-idle\",\n      \"item_id\": \"\\u003cITEM_ID\\u003e\",\n      \"item_type\": \"message\",\n      \"position\": 1\n    }\n  ]\n}\n",
+      "state": {
+        "queues": {
+          "oracle-agent-idle": [
+            {
+              "type": "message",
+              "status": "pending",
+              "position": 0,
+              "payload": {
+                "text": "urgent"
+              }
+            },
+            {
+              "type": "message",
+              "status": "pending",
+              "position": 2,
+              "payload": {
+                "text": "hello from oracle"
+              }
+            },
+            {
+              "type": "conditional",
+              "status": "pending",
+              "position": 3,
+              "payload": {
+                "condition_type": "when_idle",
+                "message": "continue when ready"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "send --after",
+      "stdout": "{\n  \"message\": \"after seed\",\n  \"queued\": true,\n  \"results\": [\n    {\n      \"agent_id\": \"oracle-agent-after\",\n      \"item_id\": \"\\u003cITEM_ID\\u003e\",\n      \"item_type\": \"message\",\n      \"position\": 2\n    }\n  ]\n}\n",
+      "state": {
+        "queues": {
+          "oracle-agent-after": [
+            {
+              "type": "message",
+              "status": "pending",
+              "position": 1,
+              "payload": {
+                "text": "seed"
+              }
+            },
+            {
+              "type": "message",
+              "status": "pending",
+              "position": 2,
+              "payload": {
+                "text": "after seed"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "inject busy (no --force)",
+      "error": "agent is working; use --force to inject without confirmation",
+      "state": {
+        "queues": {
+          "oracle-agent-busy": []
+        }
+      }
+    },
+    {
+      "name": "inject idle",
+      "stdout": "{\n  \"agent_id\": \"oracle-agent-idle\",\n  \"agent_state\": \"idle\",\n  \"bypassed_queue\": true,\n  \"injected\": true,\n  \"message\": \"ping\"\n}\n",
+      "state": {
+        "queues": {
+          "oracle-agent-idle": [
+            {
+              "type": "message",
+              "status": "pending",
+              "position": 0,
+              "payload": {
+                "text": "urgent"
+              }
+            },
+            {
+              "type": "message",
+              "status": "pending",
+              "position": 2,
+              "payload": {
+                "text": "hello from oracle"
+              }
+            },
+            {
+              "type": "conditional",
+              "status": "pending",
+              "position": 3,
+              "payload": {
+                "condition_type": "when_idle",
+                "message": "continue when ready"
+              }
+            }
+          ]
+        }
+      },
+      "inject_calls": [
+        {
+          "agent_id": "oracle-agent-idle",
+          "message": "ping",
+          "skip_idle_check": true
+        }
+      ]
+    }
+  ]
+}

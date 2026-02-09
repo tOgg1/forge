@@ -40,8 +40,10 @@ Define strict acceptance criteria for loop TUI parity before Rust cutover.
 ## Evidence + checks
 
 - Manual checklist artifact:
+  - `docs/rust-loop-tui-checklist.md`
   - `docs/rust-release-gate-checklist.md` (loop TUI section).
 - Baseline smoke command:
+  - `scripts/rust-loop-tui-smoke.sh`
   - `env -u GOROOT -u GOTOOLDIR go test ./internal/looptui -count=1`
 - Matrix link:
   - `docs/rust-parity-matrix.md` loop TUI row references this gate doc.
