@@ -305,7 +305,7 @@ func (m *Model) popView() {
 func (m *Model) initViews() {
 	m.views[ViewDashboard] = newDashboardView(m.root, m.projectID, m.provider)
 	m.views[ViewTopics] = newPlaceholderView(ViewTopics, "Topics")
-	m.views[ViewThread] = newPlaceholderView(ViewThread, "Thread")
+	m.views[ViewThread] = newThreadView(m.root, m.provider)
 	m.views[ViewAgents] = newPlaceholderView(ViewAgents, "Agents")
 	m.views[ViewSearch] = newPlaceholderView(ViewSearch, "Search")
 	m.views[ViewLiveTail] = newPlaceholderView(ViewLiveTail, "Live Tail")
