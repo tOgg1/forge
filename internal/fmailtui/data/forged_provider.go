@@ -23,16 +23,30 @@ type ForgedProvider struct {
 	root              string
 	addr              string
 	agent             string
+	projectID         string
+	host              string
 	dialTimeout       time.Duration
 	reconnectInterval time.Duration
 	subscribeBuffer   int
 	fallback          *FileProvider
 }
 
+type forgedBaseRequest struct {
+	Cmd       string `json:"cmd"`
+	ProjectID string `json:"project_id,omitempty"`
+	Agent     string `json:"agent"`
+	Host      string `json:"host,omitempty"`
+	ReqID     string `json:"req_id,omitempty"`
+}
+
 type forgedWatchRequest struct {
-	Cmd   string `json:"cmd"`
+	forgedBaseRequest
 	Topic string `json:"topic,omitempty"`
-	Agent string `json:"agent"`
+	Since string `json:"since,omitempty"`
+}
+
+type forgedRelayRequest struct {
+	forgedBaseRequest
 	Since string `json:"since,omitempty"`
 }
 
@@ -90,10 +104,18 @@ func NewForgedProvider(cfg ForgedProviderConfig) (*ForgedProvider, error) {
 		subscribeBuffer = defaultSubscribeBufferSize
 	}
 
+	projectID, err := readOrDeriveProjectID(root)
+	if err != nil {
+		return nil, err
+	}
+	host, _ := os.Hostname()
+
 	return &ForgedProvider{
 		root:              root,
 		addr:              strings.TrimSpace(cfg.Addr),
 		agent:             agent,
+		projectID:         projectID,
+		host:              host,
 		dialTimeout:       dialTimeout,
 		reconnectInterval: reconnectInterval,
 		subscribeBuffer:   subscribeBuffer,
@@ -201,14 +223,34 @@ func (p *ForgedProvider) streamWatch(ctx context.Context, filter SubscriptionFil
 
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
-	req := forgedWatchRequest{
-		Cmd:   "watch",
-		Topic: watchTopic(filter),
-		Agent: p.agent,
-		Since: watchSince(*lastSeenID, filter.Since),
-	}
-	if err := writeJSONLine(writer, req); err != nil {
-		return err
+	since := watchSince(*lastSeenID, filter.Since)
+	if shouldUseRelay(filter) {
+		req := forgedRelayRequest{
+			forgedBaseRequest: forgedBaseRequest{
+				Cmd:       "relay",
+				ProjectID: p.projectID,
+				Agent:     p.agent,
+				Host:      p.host,
+			},
+			Since: since,
+		}
+		if err := writeJSONLine(writer, req); err != nil {
+			return err
+		}
+	} else {
+		req := forgedWatchRequest{
+			forgedBaseRequest: forgedBaseRequest{
+				Cmd:       "watch",
+				ProjectID: p.projectID,
+				Agent:     p.agent,
+				Host:      p.host,
+			},
+			Topic: watchTopic(filter),
+			Since: since,
+		}
+		if err := writeJSONLine(writer, req); err != nil {
+			return err
+		}
 	}
 
 	ackLine, err := readForgedLine(reader)
@@ -371,4 +413,28 @@ func forgedSocketExists(root string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+func shouldUseRelay(filter SubscriptionFilter) bool {
+	if !filter.IncludeDM {
+		return false
+	}
+	topic := strings.TrimSpace(filter.Topic)
+	return topic == "" || topic == "*"
+}
+
+func readOrDeriveProjectID(root string) (string, error) {
+	path := filepath.Join(root, ".fmail", "project.json")
+	data, err := os.ReadFile(path)
+	if err == nil {
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(data, &payload); err == nil {
+			if id := strings.TrimSpace(payload.ID); id != "" {
+				return id, nil
+			}
+		}
+	}
+	return fmail.DeriveProjectID(root)
 }
