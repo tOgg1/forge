@@ -392,3 +392,80 @@ Hi. Throughput intact; queue clear for now.
 Loop state: idle; no open/ready work claimable right now.
 ```
 
+## 2026-02-09T18:22:09Z
+
+- run_id: fa29bbec-7681-46d8-94ce-e93cc3c99579
+- loop_name: rust-full-codex-3
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T18:05:16Z
+- finished_at: 2026-02-09T18:22:09Z
+- exit_code: 0
+
+```
+assert!(
+@@ -132,7 +132,7 @@
+         .query_row(
+             "SELECT released_at FROM file_locks WHERE id = ?1",
+             params!["lock-active"],
+-            |row| row.get(0),
++            |row| row.get::<_, Option<String>>(0),
+         )
+         .unwrap_or_else(|e| panic!("query active lock: {e}"));
+     assert!(
+@@ -179,7 +179,7 @@
+         .query_row(
+             "SELECT released_at FROM file_locks WHERE id = ?1",
+             params!["lock-expired"],
+-            |row| row.get(0),
++            |row| row.get::<_, Option<String>>(0),
+         )
+         .unwrap_or_else(|e| panic!("query lock: {e}"));
+     assert!(released_at.is_some());
+
+tokens used
+232,132
+**Loop Checkpoint**
+- closed: `forge-p6s` (`approval/alert/transcript` repos + tests)
+- closed: `forge-0kp` (pool_members parity already landed)
+- closed: `forge-a73` (`file_locks` repo parity + tests)
+- closed: `forge-dg1` (loop_work_state parity already landed)
+- closed: `forge-hjn` (events/audit repo parity already landed)
+- closed: `forge-3kr` (mail_threads/messages repo parity already landed)
+
+**Landed work**
+- `rust/crates/forge-db/src/approval_repository.rs`
+- `rust/crates/forge-db/src/alert_repository.rs`
+- `rust/crates/forge-db/src/transcript_repository.rs`
+- `rust/crates/forge-db/src/file_lock_repository.rs`
+- `rust/crates/forge-db/tests/approval_repository_test.rs`
+- `rust/crates/forge-db/tests/alert_repository_test.rs`
+- `rust/crates/forge-db/tests/transcript_repository_test.rs`
+- `rust/crates/forge-db/tests/file_lock_repository_test.rs`
+- `rust/crates/forge-cli/src/completion.rs`
+- `rust/crates/forge-cli/tests/completion_command_test.rs`
+- `rust/crates/forge-cli/tests/golden/completion/bash.txt`
+- `rust/crates/forge-cli/tests/golden/completion/zsh.txt`
+- `rust/crates/forge-cli/tests/golden/completion/fish.txt`
+- `rust/crates/forge-cli/tests/golden/completion/help.txt`
+- wiring: `rust/crates/forge-cli/src/lib.rs`, `rust/crates/forge-db/src/lib.rs`
+
+**Validation**
+- full gate passed for DB slices multiple times:  
+  `cd rust && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
+- completion slice targeted pass:  
+  `cd rust && cargo test -p forge-cli --test completion_command_test`
+
+**Open blockers kept in_progress**
+- `forge-qe5` blocked by dependency graph (`blocked_by: forge-6ye, forge-h15`)
+- `forge-5qy` blocked on unrelated full-gate failure: `rust/crates/forge-cli/src/audit.rs:788` (`audit_empty_table_reports_no_matches`)
+
+**Queue state now**
+- `ready=0`
+- no claimable `ready` items; loop parked on blockers, status sent via `fmail`.
+```
+
