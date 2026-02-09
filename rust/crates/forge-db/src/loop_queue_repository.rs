@@ -1062,8 +1062,10 @@ mod tests {
         assert_eq!(second.id, id_second);
 
         // Queue now empty.
-        let err = repo.dequeue(&lp.id).unwrap_err();
-        assert!(matches!(err, DbError::QueueEmpty));
+        match repo.dequeue(&lp.id) {
+            Err(DbError::QueueEmpty) => {}
+            other => panic!("expected QueueEmpty, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
@@ -1163,8 +1165,10 @@ mod tests {
 
     #[test]
     fn item_type_parse_unknown_fails() {
-        let err = LoopQueueItemType::parse("unknown").unwrap_err();
-        assert!(matches!(err, DbError::Validation(_)));
+        match LoopQueueItemType::parse("unknown") {
+            Err(DbError::Validation(_)) => {}
+            other => panic!("expected Validation, got: {other:?}"),
+        }
     }
 
     #[test]
@@ -1185,8 +1189,10 @@ mod tests {
 
     #[test]
     fn item_status_parse_unknown_fails() {
-        let err = LoopQueueItemStatus::parse("invalid").unwrap_err();
-        assert!(matches!(err, DbError::Validation(_)));
+        match LoopQueueItemStatus::parse("invalid") {
+            Err(DbError::Validation(_)) => {}
+            other => panic!("expected Validation, got: {other:?}"),
+        }
     }
 
     // -----------------------------------------------------------------------
