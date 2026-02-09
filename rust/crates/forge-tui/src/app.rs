@@ -190,15 +190,25 @@ impl LogLayer {
 #[derive(Debug, Clone, Default)]
 pub struct LoopView {
     pub id: String,
+    /// Preferred short id for display; falls back to `id` truncated to 8.
+    pub short_id: String,
     pub name: String,
     pub state: String,
     pub repo_path: String,
     pub runs: usize,
     pub queue_depth: usize,
+    /// RFC3339 UTC timestamp (already formatted), or `None`.
+    pub last_run_at: Option<String>,
+    pub interval_seconds: i64,
+    pub max_runtime_seconds: i64,
+    pub max_iterations: i64,
+    pub last_error: String,
     pub profile_name: String,
     pub profile_harness: String,
     pub profile_auth: String,
+    pub profile_id: String,
     pub pool_name: String,
+    pub pool_id: String,
 }
 
 /// A single run entry. Matches Go's `runView`.
@@ -206,6 +216,9 @@ pub struct LoopView {
 pub struct RunView {
     pub id: String,
     pub status: String,
+    pub exit_code: Option<i32>,
+    /// Preformatted duration (e.g. "12s", "1m0s", "running", "-").
+    pub duration: String,
     pub profile_name: String,
     pub harness: String,
     pub auth_kind: String,
@@ -244,12 +257,46 @@ pub struct WizardValues {
     pub tags: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct WizardState {
     pub step: usize,
     pub field: usize,
     pub values: WizardValues,
     pub error: String,
+}
+
+impl Default for WizardState {
+    fn default() -> Self {
+        Self {
+            step: 1,
+            field: 0,
+            values: WizardValues {
+                count: "1".to_owned(),
+                ..WizardValues::default()
+            },
+            error: String::new(),
+        }
+    }
+}
+
+impl WizardState {
+    /// Create a wizard state pre-populated with config defaults.
+    /// Matches Go `newWizardState(defaultInterval, defaultPrompt, defaultPromptMsg)`.
+    #[must_use]
+    pub fn with_defaults(interval: &str, prompt: &str, prompt_msg: &str) -> Self {
+        Self {
+            step: 1,
+            field: 0,
+            values: WizardValues {
+                count: "1".to_owned(),
+                prompt: prompt.trim().to_owned(),
+                prompt_msg: prompt_msg.trim().to_owned(),
+                interval: interval.trim().to_owned(),
+                ..WizardValues::default()
+            },
+            error: String::new(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +327,149 @@ pub enum ActionKind {
     Kill { loop_id: String },
     Delete { loop_id: String, force: bool },
     Create { wizard: Vec<(String, String)> },
+}
+
+fn wizard_field_count(step: usize) -> usize {
+    match step {
+        1 => 3,
+        2 => 2,
+        3 => 6,
+        _ => 0,
+    }
+}
+
+fn wizard_field_key(step: usize, field: usize) -> Option<&'static str> {
+    match step {
+        1 => match field {
+            0 => Some("name"),
+            1 => Some("name_prefix"),
+            2 => Some("count"),
+            _ => None,
+        },
+        2 => match field {
+            0 => Some("pool"),
+            1 => Some("profile"),
+            _ => None,
+        },
+        3 => match field {
+            0 => Some("prompt"),
+            1 => Some("prompt_msg"),
+            2 => Some("interval"),
+            3 => Some("max_runtime"),
+            4 => Some("max_iterations"),
+            5 => Some("tags"),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn wizard_get<'a>(values: &'a WizardValues, key: &str) -> &'a str {
+    match key {
+        "name" => values.name.as_str(),
+        "name_prefix" => values.name_prefix.as_str(),
+        "count" => values.count.as_str(),
+        "pool" => values.pool.as_str(),
+        "profile" => values.profile.as_str(),
+        "prompt" => values.prompt.as_str(),
+        "prompt_msg" => values.prompt_msg.as_str(),
+        "interval" => values.interval.as_str(),
+        "max_runtime" => values.max_runtime.as_str(),
+        "max_iterations" => values.max_iterations.as_str(),
+        "tags" => values.tags.as_str(),
+        _ => "",
+    }
+}
+
+fn wizard_set(values: &mut WizardValues, key: &str, value: String) {
+    match key {
+        "name" => values.name = value,
+        "name_prefix" => values.name_prefix = value,
+        "count" => values.count = value,
+        "pool" => values.pool = value,
+        "profile" => values.profile = value,
+        "prompt" => values.prompt = value,
+        "prompt_msg" => values.prompt_msg = value,
+        "interval" => values.interval = value,
+        "max_runtime" => values.max_runtime = value,
+        "max_iterations" => values.max_iterations = value,
+        "tags" => values.tags = value,
+        _ => {}
+    }
+}
+
+fn parse_duration_value(raw: &str, field: &str) -> Result<(), String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Ok(());
+    }
+    if value.starts_with('-') {
+        return Err(format!("{field} must be >= 0"));
+    }
+
+    let (number, unit) = if let Some(stripped) = value.strip_suffix("ms") {
+        (stripped, "ms")
+    } else if let Some(stripped) = value.strip_suffix('s') {
+        (stripped, "s")
+    } else if let Some(stripped) = value.strip_suffix('m') {
+        (stripped, "m")
+    } else if let Some(stripped) = value.strip_suffix('h') {
+        (stripped, "h")
+    } else {
+        (value, "s")
+    };
+
+    if number.trim().is_empty() {
+        return Err(format!("invalid {field} {raw:?}"));
+    }
+    if number.trim().parse::<f64>().is_err() {
+        return Err(format!("invalid {field} {raw:?}"));
+    }
+    if unit.is_empty() {
+        return Err(format!("invalid {field} {raw:?}"));
+    }
+    Ok(())
+}
+
+fn validate_wizard_step(step: usize, values: &WizardValues) -> Result<(), String> {
+    match step {
+        1 => {
+            let count_raw = if values.count.trim().is_empty() {
+                "1"
+            } else {
+                values.count.trim()
+            };
+            let count = count_raw
+                .parse::<i64>()
+                .map_err(|_| format!("invalid count {:?}", values.count))?;
+            if count < 1 {
+                return Err("count must be >= 1".to_owned());
+            }
+            if !values.name.trim().is_empty() && !values.count.trim().is_empty() && count > 1 {
+                return Err("name requires count=1".to_owned());
+            }
+        }
+        2 => {
+            if !values.pool.trim().is_empty() && !values.profile.trim().is_empty() {
+                return Err("use either pool or profile, not both".to_owned());
+            }
+        }
+        3 => {
+            parse_duration_value(&values.interval, "interval")?;
+            parse_duration_value(&values.max_runtime, "max runtime")?;
+            if !values.max_iterations.trim().is_empty() {
+                let parsed =
+                    values.max_iterations.trim().parse::<i64>().map_err(|_| {
+                        format!("invalid max-iterations {:?}", values.max_iterations)
+                    })?;
+                if parsed < 0 {
+                    return Err("max-iterations must be >= 0".to_owned());
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +526,11 @@ pub struct App {
     // -- confirm/wizard --
     confirm: Option<ConfirmState>,
     wizard: WizardState,
+
+    // -- wizard defaults (from config) --
+    default_interval: String,
+    default_prompt: String,
+    default_prompt_msg: String,
 
     // -- status bar --
     status_text: String,
@@ -394,6 +589,10 @@ impl App {
 
             confirm: None,
             wizard: WizardState::default(),
+
+            default_interval: String::new(),
+            default_prompt: String::new(),
+            default_prompt_msg: String::new(),
 
             status_text: String::new(),
             status_kind: StatusKind::Info,
@@ -549,6 +748,15 @@ impl App {
     #[must_use]
     pub fn multi_logs(&self) -> &HashMap<String, LogTailView> {
         &self.multi_logs
+    }
+
+    #[must_use]
+    pub fn multi_page(&self) -> usize {
+        self.multi_page
+    }
+
+    pub fn set_layout_idx(&mut self, idx: usize) {
+        self.layout_idx = idx;
     }
 
     // -- data setters (called from refresh/tick) -----------------------------
@@ -960,18 +1168,62 @@ impl App {
 
     // -- wizard helpers ------------------------------------------------------
 
+    pub fn set_wizard_defaults(&mut self, interval: &str, prompt: &str, prompt_msg: &str) {
+        self.default_interval = interval.to_owned();
+        self.default_prompt = prompt.to_owned();
+        self.default_prompt_msg = prompt_msg.to_owned();
+    }
+
     pub fn set_wizard(&mut self, wizard: WizardState) {
         self.wizard = wizard;
     }
 
     pub fn wizard_next_field(&mut self) {
-        self.wizard.field += 1;
+        let field_count = wizard_field_count(self.wizard.step);
+        if field_count == 0 {
+            return;
+        }
+        self.wizard.field = (self.wizard.field + 1) % field_count;
     }
 
     pub fn wizard_prev_field(&mut self) {
-        if self.wizard.field > 0 {
+        let field_count = wizard_field_count(self.wizard.step);
+        if field_count == 0 {
+            return;
+        }
+        if self.wizard.field == 0 {
+            self.wizard.field = field_count - 1;
+        } else {
             self.wizard.field -= 1;
         }
+    }
+
+    fn wizard_pairs(&self) -> Vec<(String, String)> {
+        vec![
+            ("name".to_owned(), self.wizard.values.name.clone()),
+            (
+                "name_prefix".to_owned(),
+                self.wizard.values.name_prefix.clone(),
+            ),
+            ("count".to_owned(), self.wizard.values.count.clone()),
+            ("pool".to_owned(), self.wizard.values.pool.clone()),
+            ("profile".to_owned(), self.wizard.values.profile.clone()),
+            ("prompt".to_owned(), self.wizard.values.prompt.clone()),
+            (
+                "prompt_msg".to_owned(),
+                self.wizard.values.prompt_msg.clone(),
+            ),
+            ("interval".to_owned(), self.wizard.values.interval.clone()),
+            (
+                "max_runtime".to_owned(),
+                self.wizard.values.max_runtime.clone(),
+            ),
+            (
+                "max_iterations".to_owned(),
+                self.wizard.values.max_iterations.clone(),
+            ),
+            ("tags".to_owned(), self.wizard.values.tags.clone()),
+        ]
     }
 
     // -- confirm helpers -----------------------------------------------------
@@ -1170,6 +1422,22 @@ impl App {
                     Command::None
                 }
             }
+            Key::Char('g') => {
+                if self.tab == MainTab::MultiLogs {
+                    self.move_multi_page_to_start();
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('G') => {
+                if self.tab == MainTab::MultiLogs {
+                    self.move_multi_page_to_end();
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
             Key::Char('v') => {
                 if self.tab == MainTab::Logs {
                     self.cycle_log_source(1);
@@ -1220,7 +1488,11 @@ impl App {
             }
             Key::Char('n') => {
                 self.mode = UiMode::Wizard;
-                self.wizard = WizardState::default();
+                self.wizard = WizardState::with_defaults(
+                    &self.default_interval,
+                    &self.default_prompt,
+                    &self.default_prompt_msg,
+                );
                 Command::None
             }
             Key::Char('r') => {
@@ -1451,30 +1723,85 @@ impl App {
                 self.mode = UiMode::Help;
                 Command::None
             }
+            Key::Tab if key.modifiers.shift => {
+                self.wizard_prev_field();
+                Command::None
+            }
             Key::Tab | Key::Down | Key::Char('j') => {
                 self.wizard_next_field();
                 Command::None
             }
-            Key::Char('k') => {
-                if !key.modifiers.shift {
-                    self.wizard_prev_field();
-                }
-                Command::None
-            }
-            Key::Up => {
+            Key::Up | Key::Char('k') => {
                 self.wizard_prev_field();
                 Command::None
             }
             Key::Enter => {
-                // Step-through or submit — handled by host.
+                if self.wizard.step < 4 {
+                    if let Err(err) = validate_wizard_step(self.wizard.step, &self.wizard.values) {
+                        self.wizard.error = err;
+                        return Command::None;
+                    }
+                    self.wizard.step += 1;
+                    self.wizard.field = 0;
+                    self.wizard.error.clear();
+                    return Command::None;
+                }
+                self.run_action(ActionType::Create, "")
+            }
+            Key::Char('b') | Key::Left => {
+                if self.wizard.step > 1 {
+                    self.wizard.step -= 1;
+                    self.wizard.field = 0;
+                    self.wizard.error.clear();
+                }
                 Command::None
             }
             Key::Backspace => {
-                // Text editing in wizard fields — handled by host.
+                if self.wizard.step > 3 {
+                    return Command::None;
+                }
+                let Some(field_key) = wizard_field_key(self.wizard.step, self.wizard.field) else {
+                    return Command::None;
+                };
+                let mut value = wizard_get(&self.wizard.values, field_key).to_owned();
+                value.pop();
+                wizard_set(&mut self.wizard.values, field_key, value);
                 Command::None
             }
-            Key::Char(_) => {
-                // Text entry — handled by host.
+            Key::Char('h') if key.modifiers.ctrl => {
+                if self.wizard.step > 3 {
+                    return Command::None;
+                }
+                let Some(field_key) = wizard_field_key(self.wizard.step, self.wizard.field) else {
+                    return Command::None;
+                };
+                let mut value = wizard_get(&self.wizard.values, field_key).to_owned();
+                value.pop();
+                wizard_set(&mut self.wizard.values, field_key, value);
+                Command::None
+            }
+            Key::Char(' ') => {
+                if self.wizard.step > 3 {
+                    return Command::None;
+                }
+                let Some(field_key) = wizard_field_key(self.wizard.step, self.wizard.field) else {
+                    return Command::None;
+                };
+                let mut value = wizard_get(&self.wizard.values, field_key).to_owned();
+                value.push(' ');
+                wizard_set(&mut self.wizard.values, field_key, value);
+                Command::None
+            }
+            Key::Char(ch) => {
+                if self.wizard.step > 3 {
+                    return Command::None;
+                }
+                let Some(field_key) = wizard_field_key(self.wizard.step, self.wizard.field) else {
+                    return Command::None;
+                };
+                let mut value = wizard_get(&self.wizard.values, field_key).to_owned();
+                value.push(ch);
+                wizard_set(&mut self.wizard.values, field_key, value);
                 Command::None
             }
             _ => Command::None,
@@ -1513,6 +1840,9 @@ impl App {
         self.set_status(StatusKind::Info, msg);
 
         match action {
+            ActionType::Create => Command::RunAction(ActionKind::Create {
+                wizard: self.wizard_pairs(),
+            }),
             ActionType::Resume => Command::RunAction(ActionKind::Resume {
                 loop_id: loop_id.to_owned(),
             }),
@@ -1587,16 +1917,19 @@ impl App {
                 frame.draw_text(0, content_start, truncated, TextRole::Accent);
             }
             UiMode::Wizard => {
-                let wizard_line = format!(
-                    "Create Loop (step {}/4): {}",
-                    self.wizard.step + 1,
-                    if self.wizard.error.is_empty() {
-                        ""
-                    } else {
-                        &self.wizard.error
+                for (idx, line) in self.render_wizard_lines(width).iter().enumerate() {
+                    if idx >= content_height {
+                        break;
                     }
-                );
-                frame.draw_text(0, content_start, &wizard_line, TextRole::Accent);
+                    let role = if idx == 0 {
+                        TextRole::Accent
+                    } else if line.starts_with("Error:") {
+                        TextRole::Danger
+                    } else {
+                        TextRole::Primary
+                    };
+                    frame.draw_text(0, content_start + idx, line, role);
+                }
             }
             _ => {
                 // Delegate to registered view if available.
@@ -1609,13 +1942,23 @@ impl App {
                         theme,
                     );
                     blit_frame(&mut frame, &view_frame, 0, content_start);
-                } else if self.tab == MainTab::Overview {
-                    for (idx, line) in self.render_overview_lines(width).iter().enumerate() {
+                } else if self.mode == UiMode::Main && self.tab == MainTab::Overview {
+                    let lines = crate::overview_tab::overview_pane_lines(
+                        self.selected_view(),
+                        &self.run_history,
+                        self.selected_run,
+                        width,
+                        content_height,
+                    );
+                    for (idx, line) in lines.iter().enumerate() {
                         if idx >= content_height {
                             break;
                         }
-                        frame.draw_text(0, content_start + idx, line, TextRole::Primary);
+                        frame.draw_text(0, content_start + idx, &line.text, line.role);
                     }
+                } else if self.mode == UiMode::Main && self.tab == MainTab::MultiLogs {
+                    let multi_frame = self.render_multi_logs_pane(width, content_height);
+                    blit_frame(&mut frame, &multi_frame, 0, content_start);
                 } else {
                     // Placeholder: show tab label + selection info.
                     let info = format!(
@@ -1665,11 +2008,20 @@ impl App {
 
     fn render_header_text(&self, width: usize) -> String {
         let count_label = format!("{}/{} loops", self.filtered.len(), self.loops.len());
+        let mode_label = match self.mode {
+            UiMode::Wizard => "  mode:New Loop Wizard",
+            UiMode::Filter => "  mode:Filter",
+            UiMode::Help => "  mode:Help",
+            UiMode::Confirm => "  mode:Confirm",
+            UiMode::ExpandedLogs => "  mode:Expanded Logs",
+            UiMode::Main => "",
+        };
         let header = format!(
-            " Forge Loops  [{tab}]  {count}  theme:{theme}",
+            " Forge Loops  [{tab}]  {count}  theme:{theme}{mode}",
             tab = self.tab.label(),
             count = count_label,
             theme = self.palette.name,
+            mode = mode_label,
         );
         if header.len() > width {
             header[..width].to_owned()
@@ -1698,24 +2050,78 @@ impl App {
         }
     }
 
-    fn render_overview_lines(&self, width: usize) -> Vec<String> {
-        let mut lines = Vec::new();
+    fn render_wizard_lines(&self, width: usize) -> Vec<String> {
+        let step = self.wizard.step.clamp(1, 4);
+        let mut lines = vec![
+            format!("New loop wizard (step {step}/4)"),
+            "1) Identity+Count  2) Pool/Profile  3) Prompt+Runtime  4) Review+Submit".to_owned(),
+            String::new(),
+        ];
 
-        if self.filtered.is_empty() {
-            lines.push("No loops found.".to_owned());
-            lines.push("Start one: forge up --count 1".to_owned());
-        } else {
-            lines.push(format!(
-                "Overview  |  visible {}/{}",
-                self.filtered.len(),
-                self.loops.len()
-            ));
-            if let Some(selected) = self.selected_view() {
-                lines.push(format!(
-                    "Selected: {}  state={}  repo={}",
-                    selected.id, selected.state, selected.repo_path
+        match step {
+            1 => {
+                lines.push(self.render_wizard_field("name", &self.wizard.values.name, 0));
+                lines.push(self.render_wizard_field(
+                    "name-prefix",
+                    &self.wizard.values.name_prefix,
+                    1,
                 ));
+                lines.push(self.render_wizard_field("count", &self.wizard.values.count, 2));
             }
+            2 => {
+                lines.push(self.render_wizard_field("pool", &self.wizard.values.pool, 0));
+                lines.push(self.render_wizard_field("profile", &self.wizard.values.profile, 1));
+            }
+            3 => {
+                lines.push(self.render_wizard_field("prompt", &self.wizard.values.prompt, 0));
+                lines.push(self.render_wizard_field(
+                    "prompt-msg",
+                    &self.wizard.values.prompt_msg,
+                    1,
+                ));
+                lines.push(self.render_wizard_field("interval", &self.wizard.values.interval, 2));
+                lines.push(self.render_wizard_field(
+                    "max-runtime",
+                    &self.wizard.values.max_runtime,
+                    3,
+                ));
+                lines.push(self.render_wizard_field(
+                    "max-iterations",
+                    &self.wizard.values.max_iterations,
+                    4,
+                ));
+                lines.push(self.render_wizard_field("tags", &self.wizard.values.tags, 5));
+            }
+            4 => {
+                lines.push("Review:".to_owned());
+                lines.push(format!("  name={:?}", self.wizard.values.name));
+                lines.push(format!(
+                    "  name-prefix={:?}",
+                    self.wizard.values.name_prefix
+                ));
+                lines.push(format!("  count={:?}", self.wizard.values.count));
+                lines.push(format!("  pool={:?}", self.wizard.values.pool));
+                lines.push(format!("  profile={:?}", self.wizard.values.profile));
+                lines.push(format!("  prompt={:?}", self.wizard.values.prompt));
+                lines.push(format!("  prompt-msg={:?}", self.wizard.values.prompt_msg));
+                lines.push(format!("  interval={:?}", self.wizard.values.interval));
+                lines.push(format!(
+                    "  max-runtime={:?}",
+                    self.wizard.values.max_runtime
+                ));
+                lines.push(format!(
+                    "  max-iterations={:?}",
+                    self.wizard.values.max_iterations
+                ));
+                lines.push(format!("  tags={:?}", self.wizard.values.tags));
+            }
+            _ => {}
+        }
+
+        lines.push(String::new());
+        lines.push("tab/down/up navigate fields, enter next/submit, b back, esc cancel".to_owned());
+        if !self.wizard.error.is_empty() {
+            lines.push(format!("Error: {}", self.wizard.error));
         }
 
         lines
@@ -1728,6 +2134,19 @@ impl App {
                 }
             })
             .collect()
+    }
+
+    fn render_wizard_field(&self, label: &str, value: &str, field: usize) -> String {
+        let display = if value.trim().is_empty() {
+            "<empty>"
+        } else {
+            value
+        };
+        if self.wizard.field == field {
+            format!("{label}: {display}_")
+        } else {
+            format!("{label}: {display}")
+        }
     }
 
     fn status_display_text(&self) -> String {
@@ -1775,6 +2194,7 @@ impl App {
             "  space     toggle pin",
             "  c         clear pinned",
             "  ,/.       page left/right",
+            "  g/G       first/last page",
             "",
             "Global:",
             "  ?         toggle help",
@@ -2296,6 +2716,9 @@ mod tests {
         let mut app = App::new("default", 12);
         app.update(key(Key::Char('n')));
         assert_eq!(app.mode(), UiMode::Wizard);
+        assert_eq!(app.wizard().step, 1);
+        assert_eq!(app.wizard().field, 0);
+        assert_eq!(app.wizard().values.count, "1");
     }
 
     #[test]
@@ -2304,6 +2727,482 @@ mod tests {
         app.update(key(Key::Char('n')));
         app.update(key(Key::Escape));
         assert_eq!(app.mode(), UiMode::Main);
+    }
+
+    #[test]
+    fn wizard_tab_wraps_fields_by_step() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        assert_eq!(app.wizard().field, 0);
+        app.update(key(Key::Tab));
+        assert_eq!(app.wizard().field, 1);
+        app.update(key(Key::Tab));
+        assert_eq!(app.wizard().field, 2);
+        app.update(key(Key::Tab));
+        assert_eq!(app.wizard().field, 0);
+    }
+
+    #[test]
+    fn wizard_shift_tab_and_up_move_previous_field() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Tab));
+        assert_eq!(app.wizard().field, 1);
+
+        app.update(InputEvent::Key(KeyEvent {
+            key: Key::Tab,
+            modifiers: Modifiers {
+                shift: true,
+                ctrl: false,
+                alt: false,
+            },
+        }));
+        assert_eq!(app.wizard().field, 0);
+
+        app.update(key(Key::Up));
+        assert_eq!(app.wizard().field, 2);
+    }
+
+    #[test]
+    fn wizard_enter_validates_count_and_stays_on_step() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.wizard.values.count = "0".to_owned();
+
+        let cmd = app.update(key(Key::Enter));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(app.wizard().step, 1);
+        assert!(app.wizard().error.contains("count"));
+    }
+
+    #[test]
+    fn wizard_enter_advances_steps_and_back_goes_previous() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        assert_eq!(app.wizard().step, 1);
+
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 2);
+
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 3);
+
+        app.update(key(Key::Char('b')));
+        assert_eq!(app.wizard().step, 2);
+
+        app.update(key(Key::Left));
+        assert_eq!(app.wizard().step, 1);
+    }
+
+    #[test]
+    fn wizard_text_editing_updates_focused_field() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+
+        app.update(key(Key::Char('x')));
+        app.update(key(Key::Char('y')));
+        assert_eq!(app.wizard().values.name, "xy");
+
+        app.update(key(Key::Backspace));
+        assert_eq!(app.wizard().values.name, "x");
+
+        app.update(key(Key::Char(' ')));
+        assert_eq!(app.wizard().values.name, "x ");
+    }
+
+    #[test]
+    fn wizard_enter_on_review_submits_create_action() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+
+        app.wizard.values.name = "wizard-loop".to_owned();
+        app.wizard.values.count = "1".to_owned();
+        app.wizard.values.interval = "30s".to_owned();
+
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 4);
+
+        let cmd = app.update(key(Key::Enter));
+        match cmd {
+            Command::RunAction(ActionKind::Create { wizard }) => {
+                assert!(wizard
+                    .iter()
+                    .any(|(k, v)| k == "name" && v == "wizard-loop"));
+                assert!(wizard.iter().any(|(k, v)| k == "count" && v == "1"));
+                assert!(wizard.iter().any(|(k, v)| k == "interval" && v == "30s"));
+            }
+            other => panic!("Expected RunAction(Create), got {other:?}"),
+        }
+        assert!(app.action_busy());
+    }
+
+    #[test]
+    fn wizard_with_defaults_populates_fields() {
+        let mut app = App::new("default", 12);
+        app.set_wizard_defaults("30s", "default.md", "run tests");
+        app.update(key(Key::Char('n')));
+        assert_eq!(app.wizard().values.interval, "30s");
+        assert_eq!(app.wizard().values.prompt, "default.md");
+        assert_eq!(app.wizard().values.prompt_msg, "run tests");
+        assert_eq!(app.wizard().values.count, "1");
+        assert!(app.wizard().values.name.is_empty());
+    }
+
+    #[test]
+    fn wizard_q_exits() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        assert_eq!(app.mode(), UiMode::Wizard);
+        app.update(key(Key::Char('q')));
+        assert_eq!(app.mode(), UiMode::Main);
+    }
+
+    #[test]
+    fn wizard_question_mark_opens_help() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Char('?')));
+        assert_eq!(app.mode(), UiMode::Help);
+        assert_eq!(app.help_return, UiMode::Wizard);
+        app.update(key(Key::Escape));
+        assert_eq!(app.mode(), UiMode::Wizard);
+    }
+
+    #[test]
+    fn wizard_j_k_cycle_fields() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        assert_eq!(app.wizard().field, 0);
+        app.update(key(Key::Char('j')));
+        assert_eq!(app.wizard().field, 1);
+        app.update(key(Key::Char('k')));
+        assert_eq!(app.wizard().field, 0);
+        app.update(key(Key::Char('k')));
+        assert_eq!(app.wizard().field, 2);
+    }
+
+    #[test]
+    fn wizard_down_up_cycle_fields() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Down));
+        assert_eq!(app.wizard().field, 1);
+        app.update(key(Key::Up));
+        assert_eq!(app.wizard().field, 0);
+    }
+
+    #[test]
+    fn wizard_ctrl_h_backspaces() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Char('a')));
+        app.update(key(Key::Char('c')));
+        assert_eq!(app.wizard().values.name, "ac");
+        app.update(ctrl_key('h'));
+        assert_eq!(app.wizard().values.name, "a");
+    }
+
+    #[test]
+    fn wizard_back_noop_on_step_1() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        assert_eq!(app.wizard().step, 1);
+        app.update(key(Key::Char('b')));
+        assert_eq!(app.wizard().step, 1);
+        app.update(key(Key::Left));
+        assert_eq!(app.wizard().step, 1);
+    }
+
+    #[test]
+    fn wizard_step4_ignores_text_input() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 4);
+        app.update(key(Key::Char('x')));
+        app.update(key(Key::Char(' ')));
+        app.update(key(Key::Backspace));
+        app.update(ctrl_key('h'));
+        assert!(app.wizard().values.name.is_empty());
+    }
+
+    #[test]
+    fn wizard_enter_clears_error_on_success() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.wizard.values.count = "0".to_owned();
+        app.update(key(Key::Enter));
+        assert!(!app.wizard().error.is_empty());
+        app.wizard.values.count = "1".to_owned();
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 2);
+        assert!(app.wizard().error.is_empty());
+    }
+
+    #[test]
+    fn wizard_escape_clears_error() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.wizard.values.count = "bad".to_owned();
+        app.update(key(Key::Enter));
+        assert!(!app.wizard().error.is_empty());
+        app.update(key(Key::Escape));
+        assert_eq!(app.mode(), UiMode::Main);
+    }
+
+    #[test]
+    fn wizard_validates_name_requires_count_1() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.wizard.values.name = "my-loop".to_owned();
+        app.wizard.values.count = "3".to_owned();
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 1);
+        assert!(app.wizard().error.contains("name requires count=1"));
+    }
+
+    #[test]
+    fn wizard_validates_pool_profile_conflict() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 2);
+        app.wizard.values.pool = "my-pool".to_owned();
+        app.wizard.values.profile = "my-profile".to_owned();
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 2);
+        assert!(app
+            .wizard()
+            .error
+            .contains("use either pool or profile, not both"));
+    }
+
+    #[test]
+    fn wizard_validates_interval_duration() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 3);
+        app.wizard.values.interval = "not-a-duration".to_owned();
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 3);
+        assert!(app.wizard().error.contains("interval"));
+    }
+
+    #[test]
+    fn wizard_validates_max_runtime_duration() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        app.wizard.values.max_runtime = "xyz".to_owned();
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 3);
+        assert!(app.wizard().error.contains("max runtime"));
+    }
+
+    #[test]
+    fn wizard_validates_max_iterations_integer() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        app.wizard.values.max_iterations = "abc".to_owned();
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 3);
+        assert!(app.wizard().error.contains("max-iterations"));
+    }
+
+    #[test]
+    fn wizard_validates_negative_max_iterations() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        app.wizard.values.max_iterations = "-5".to_owned();
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 3);
+        assert!(app.wizard().error.contains("max-iterations"));
+    }
+
+    #[test]
+    fn wizard_empty_limits_are_valid() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        app.wizard.values.interval = String::new();
+        app.wizard.values.max_runtime = String::new();
+        app.wizard.values.max_iterations = String::new();
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 4);
+        assert!(app.wizard().error.is_empty());
+    }
+
+    #[test]
+    fn wizard_valid_durations_pass() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        app.wizard.values.interval = "30s".to_owned();
+        app.wizard.values.max_runtime = "1h".to_owned();
+        app.wizard.values.max_iterations = "100".to_owned();
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 4);
+    }
+
+    #[test]
+    fn wizard_step2_has_2_fields() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 2);
+        assert_eq!(app.wizard().field, 0);
+        app.update(key(Key::Tab));
+        assert_eq!(app.wizard().field, 1);
+        app.update(key(Key::Tab));
+        assert_eq!(app.wizard().field, 0);
+    }
+
+    #[test]
+    fn wizard_step3_has_6_fields() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 3);
+        for i in 0..6 {
+            assert_eq!(app.wizard().field, i);
+            app.update(key(Key::Tab));
+        }
+        assert_eq!(app.wizard().field, 0);
+    }
+
+    #[test]
+    fn wizard_typing_on_step2_edits_pool() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Char('p')));
+        app.update(key(Key::Char('1')));
+        assert_eq!(app.wizard().values.pool, "p1");
+        app.update(key(Key::Tab));
+        app.update(key(Key::Char('x')));
+        assert_eq!(app.wizard().values.profile, "x");
+    }
+
+    #[test]
+    fn wizard_render_step1_snapshot() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.wizard.values.name = "my-loop".to_owned();
+        let lines = app.render_wizard_lines(80);
+        assert!(lines[0].contains("step 1/4"));
+        assert!(lines[1].contains("1) Identity+Count"));
+        let body = lines.join("\n");
+        assert!(body.contains("name: my-loop_"));
+        assert!(body.contains("name-prefix: <empty>"));
+        assert!(body.contains("count: 1"));
+        assert!(body.contains("tab/down/up navigate"));
+    }
+
+    #[test]
+    fn wizard_render_step2_snapshot() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        let lines = app.render_wizard_lines(80);
+        assert!(lines[0].contains("step 2/4"));
+        let body = lines.join("\n");
+        assert!(body.contains("pool: <empty>_"));
+        assert!(body.contains("profile: <empty>"));
+    }
+
+    #[test]
+    fn wizard_render_step3_snapshot() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        let lines = app.render_wizard_lines(80);
+        assert!(lines[0].contains("step 3/4"));
+        let body = lines.join("\n");
+        assert!(body.contains("prompt:"));
+        assert!(body.contains("interval:"));
+        assert!(body.contains("max-runtime:"));
+        assert!(body.contains("max-iterations:"));
+        assert!(body.contains("tags:"));
+    }
+
+    #[test]
+    fn wizard_render_step4_review_snapshot() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.wizard.values.name = "test".to_owned();
+        app.wizard.values.interval = "10s".to_owned();
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        app.update(key(Key::Enter));
+        assert_eq!(app.wizard().step, 4);
+        let lines = app.render_wizard_lines(80);
+        assert!(lines[0].contains("step 4/4"));
+        let body = lines.join("\n");
+        assert!(body.contains("Review:"));
+        assert!(body.contains("name=\"test\""));
+        assert!(body.contains("count=\"1\""));
+        assert!(body.contains("interval=\"10s\""));
+    }
+
+    #[test]
+    fn wizard_render_shows_error() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.wizard.values.count = "0".to_owned();
+        app.update(key(Key::Enter));
+        let lines = app.render_wizard_lines(80);
+        let body = lines.join("\n");
+        assert!(body.contains("Error:"));
+        assert!(body.contains("count"));
+    }
+
+    #[test]
+    fn wizard_render_truncates_long_lines() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.wizard.values.name = "a".repeat(100);
+        let lines = app.render_wizard_lines(50);
+        for line in &lines {
+            assert!(line.len() <= 50, "line too long: {}", line.len());
+        }
+    }
+
+    #[test]
+    fn wizard_render_frame_smoke() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        app.wizard.values.count = "bad".to_owned();
+        app.update(key(Key::Enter));
+        let frame = app.render();
+        let snap = frame.snapshot();
+        assert!(snap.contains("New loop wizard"));
+    }
+
+    #[test]
+    fn wizard_header_shows_mode() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('n')));
+        let frame = app.render();
+        let header = frame.row_text(0);
+        assert!(
+            header.contains("New Loop Wizard") || header.contains("Wizard"),
+            "header: {header}"
+        );
     }
 
     // -- confirm mode --

@@ -11,6 +11,8 @@ pub mod filter;
 pub mod help_overlay;
 pub mod layouts;
 pub mod logs_tab;
+pub mod multi_logs;
+pub mod overview_tab;
 pub mod runs_tab;
 pub mod theme;
 
