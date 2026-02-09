@@ -90,6 +90,23 @@ type composeSendResultMsg struct {
 	err    error
 }
 
+type spinnerTickMsg struct{}
+
+func spinnerTickCmd() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return spinnerTickMsg{} })
+}
+
+func spinnerFrame(frame int) string {
+	frames := []string{"|", "/", "-", "\\"}
+	if len(frames) == 0 {
+		return ""
+	}
+	if frame < 0 {
+		frame = -frame
+	}
+	return frames[frame%len(frames)]
+}
+
 func (m *Model) handleComposerKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	if m.compose.active {
 		return m.handleComposeOverlayKey(msg), true
@@ -373,7 +390,7 @@ func (m *Model) composeSendCmd(source composeSendSource) tea.Cmd {
 		m.quick.err = ""
 	}
 
-	return func() tea.Msg {
+	send := func() tea.Msg {
 		if sender, ok := m.provider.(providerSender); ok {
 			msg, sendErr := sender.Send(req)
 			return composeSendResultMsg{source: source, req: req, msg: msg, err: sendErr}
@@ -382,6 +399,8 @@ func (m *Model) composeSendCmd(source composeSendSource) tea.Cmd {
 		msg, sendErr := m.sendViaStore(req)
 		return composeSendResultMsg{source: source, req: req, msg: msg, err: sendErr}
 	}
+
+	return tea.Batch(send, spinnerTickCmd())
 }
 
 func (m *Model) sendViaStore(req data.SendRequest) (fmail.Message, error) {
@@ -595,7 +614,7 @@ func (m *Model) renderComposeOverlay(width, height int, theme Theme) string {
 
 	status := "[Ctrl+Enter: Send] [Esc: Close] [Tab: Next]"
 	if c.sending {
-		status = "Sending..."
+		status = "Sending... " + spinnerFrame(m.spinnerFrame)
 	}
 	if strings.TrimSpace(c.err) != "" {
 		status = "Send failed: " + c.err
@@ -664,7 +683,7 @@ func (m *Model) renderQuickSendBar(width int, theme Theme) string {
 	}
 	status := ""
 	if m.quick.sending {
-		status = "  Sending..."
+		status = "  Sending... " + spinnerFrame(m.spinnerFrame)
 	}
 	if strings.TrimSpace(m.quick.err) != "" {
 		status = "  error: " + m.quick.err
