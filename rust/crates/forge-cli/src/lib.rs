@@ -3,6 +3,8 @@ use std::io::Write;
 use std::sync::OnceLock;
 
 pub mod clean;
+pub mod completion;
+pub mod config;
 pub mod error_envelope;
 pub mod init;
 pub mod kill;
@@ -96,6 +98,12 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let mut backend = clean::InMemoryLoopBackend::default();
             let forwarded = forward_args(remaining, &flags);
             clean::run_with_backend(&forwarded, &mut backend, stdout, stderr)
+        }
+        Some("completion") => completion::run(remaining, stdout, stderr),
+        Some("config") => {
+            let backend = config::FilesystemConfigBackend;
+            let forwarded = forward_args(remaining, &flags);
+            config::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("migrate") => {
             let forwarded = forward_args(remaining, &flags);
@@ -246,6 +254,8 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out)?;
     writeln!(out, "Commands:")?;
     writeln!(out, "  clean     Remove inactive loops")?;
+    writeln!(out, "  completion  Generate shell completion scripts")?;
+    writeln!(out, "  config    Manage global configuration")?;
     writeln!(out, "  init      Initialize a repo for Forge loops")?;
     writeln!(out, "  kill      Kill loops immediately")?;
     writeln!(out, "  logs      Tail loop logs")?;
@@ -335,8 +345,9 @@ pub struct RootCommandOutput {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::{
-        clean, crate_label, init, kill, logs, loop_internal, mem, migrate, msg, pool, profile,
-        prompt, ps, queue, resume, rm, run, run_for_test, run_with_args, scale, stop, up, work,
+        clean, completion, config, crate_label, init, kill, logs, loop_internal, mem, migrate,
+        msg, pool, profile, prompt, ps, queue, resume, rm, run, run_for_test, run_with_args,
+        scale, stop, up, work,
     };
 
     #[test]
@@ -367,6 +378,17 @@ mod tests {
     #[test]
     fn clean_module_is_accessible() {
         let _ = clean::InMemoryLoopBackend::default();
+    }
+
+    #[test]
+    fn completion_module_is_accessible() {
+        let out = completion::run_for_test(&["completion", "bash"]);
+        assert_eq!(out.exit_code, 0);
+    }
+
+    #[test]
+    fn config_module_is_accessible() {
+        let _ = config::InMemoryConfigBackend::default();
     }
 
     #[test]
@@ -458,6 +480,7 @@ mod tests {
         };
         assert!(rendered.contains("Control plane for AI coding agents"));
         assert!(rendered.contains("clean"));
+        assert!(rendered.contains("config"));
         assert!(rendered.contains("init"));
         assert!(rendered.contains("kill"));
         assert!(rendered.contains("logs"));
