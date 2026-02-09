@@ -40,14 +40,13 @@ const (
 )
 
 var viewSwitchKeys = map[string]ViewID{
-	"d": ViewDashboard,
 	"t": ViewTopics,
 	"r": ViewThread,
 	"a": ViewAgents,
-	"s": ViewSearch,
-	"/": ViewSearch,
 	"l": ViewLiveTail,
 	"m": ViewTimeline,
+	"D": ViewDashboard,
+	"S": ViewSearch,
 }
 
 var defaultEnterRoute = map[ViewID]ViewID{
@@ -278,16 +277,18 @@ func (m *Model) View() string {
 
 func (m *Model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	switch msg.String() {
-	case "q", "ctrl+c":
-		return tea.Quit, true
-	case "?":
-		m.showHelp = !m.showHelp
-		return nil, true
 	case "esc", "backspace":
 		m.popView()
 		if view := m.activeView(); view != nil {
 			return view.Init(), true
 		}
+		return nil, true
+	case "q":
+		return tea.Quit, true
+	case "ctrl+c":
+		return tea.Quit, true
+	case "?":
+		m.showHelp = !m.showHelp
 		return nil, true
 	}
 
@@ -335,7 +336,7 @@ func (m *Model) popView() {
 
 func (m *Model) initViews() {
 	m.views[ViewDashboard] = newDashboardView(m.root, m.projectID, m.provider)
-	m.views[ViewTopics] = newPlaceholderView(ViewTopics, "Topics")
+	m.views[ViewTopics] = newTopicsView(m.root, m.provider)
 	m.views[ViewThread] = newThreadView(m.root, m.provider)
 	m.views[ViewAgents] = newPlaceholderView(ViewAgents, "Agents")
 	m.views[ViewSearch] = newPlaceholderView(ViewSearch, "Search")

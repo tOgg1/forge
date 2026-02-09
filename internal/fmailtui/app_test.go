@@ -73,15 +73,21 @@ func TestViewStackAndEnterNavigation(t *testing.T) {
 	model = applyUpdateWithCmd(t, model, tea.KeyMsg{Type: tea.KeyEnter})
 	require.Equal(t, ViewAgents, model.activeViewID())
 
-	// Jump to Topics, then drill down to Thread.
-	model = applyUpdate(t, model, runeKey('t'))
-	require.Equal(t, ViewTopics, model.activeViewID())
+	// Back to dashboard.
+	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyEsc})
+	require.Equal(t, ViewDashboard, model.activeViewID())
+
+	// Tab to topics focus then Enter should route to thread (even if no topics yet).
+	dash := model.views[ViewDashboard].(*dashboardView)
+	require.Equal(t, focusAgents, dash.focus)
+	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, focusTopics, dash.focus)
 
 	model = applyUpdateWithCmd(t, model, tea.KeyMsg{Type: tea.KeyEnter})
 	require.Equal(t, ViewThread, model.activeViewID())
 
-	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyBackspace})
-	require.Equal(t, ViewTopics, model.activeViewID())
+	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyEsc})
+	require.Equal(t, ViewDashboard, model.activeViewID())
 }
 
 func TestRoutesKeyToActiveView(t *testing.T) {
@@ -96,6 +102,21 @@ func TestRoutesKeyToActiveView(t *testing.T) {
 	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyTab})
 	require.Equal(t, focusTopics, view.focus)
 	require.Equal(t, ViewDashboard, model.activeViewID())
+}
+
+func TestTopicsLocalKeysNotHijackedByGlobalRoutes(t *testing.T) {
+	model := newTestModel(t, Config{})
+	model = applyUpdate(t, model, runeKey('t'))
+	require.Equal(t, ViewTopics, model.activeViewID())
+
+	model = applyUpdate(t, model, runeKey('s'))
+	require.Equal(t, ViewTopics, model.activeViewID()) // sort in Topics view, not Search route
+
+	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	require.Equal(t, ViewTopics, model.activeViewID()) // filter in Topics view
+
+	model = applyUpdate(t, model, runeKey('d'))
+	require.Equal(t, ViewTopics, model.activeViewID()) // DM toggle in Topics view
 }
 
 func TestConnectForgedOptional(t *testing.T) {
@@ -180,12 +201,45 @@ func applyUpdateWithCmd(t *testing.T, model *Model, msg tea.Msg) *Model {
 	if cmd == nil {
 		return out
 	}
-	followUp := cmd()
-	if followUp == nil {
-		return out
+	return runCmd(t, out, cmd)
+}
+
+func runCmd(t *testing.T, model *Model, cmd tea.Cmd) *Model {
+	t.Helper()
+	return runCmdDepth(t, model, cmd, 0)
+}
+
+const maxRunCmdDepth = 8
+
+func runCmdDepth(t *testing.T, model *Model, cmd tea.Cmd, depth int) *Model {
+	t.Helper()
+	if cmd == nil || depth >= maxRunCmdDepth {
+		return model
 	}
-	next, _ = out.Update(followUp)
-	out, ok = next.(*Model)
-	require.True(t, ok)
-	return out
+
+	// Run cmd with a short timeout to skip blocking commands (ticks, channel waits).
+	type result struct{ msg tea.Msg }
+	ch := make(chan result, 1)
+	go func() { ch <- result{cmd()} }()
+	select {
+	case r := <-ch:
+		switch typed := r.msg.(type) {
+		case nil:
+			return model
+		case tea.BatchMsg:
+			out := model
+			for _, sub := range typed {
+				out = runCmdDepth(t, out, sub, depth+1)
+			}
+			return out
+		default:
+			next, nextCmd := model.Update(typed)
+			out, ok := next.(*Model)
+			require.True(t, ok)
+			return runCmdDepth(t, out, nextCmd, depth+1)
+		}
+	case <-time.After(50 * time.Millisecond):
+		// Command is blocking (tick, subscription wait) — skip it.
+		return model
+	}
 }
