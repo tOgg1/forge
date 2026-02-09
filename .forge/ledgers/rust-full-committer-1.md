@@ -302,3 +302,200 @@ Iteration complete. Summary:
 Iteration complete. No commit produced. Reported via fmail. Memory updated to prevent the stash mistake in future iterations.
 ```
 
+## 2026-02-09T19:09:49Z
+
+- run_id: d34f3f08-23e4-4cc6-8798-ea953c021440
+- loop_name: rust-full-committer-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T19:00:04Z
+- finished_at: 2026-02-09T19:09:49Z
+- exit_code: 0
+
+```
+Iteration complete. Summary of commits:
+
+1. **`1704bda`** `feat(forge-cli): port mail, seq, wait, tui, and workflow commands` — 28 files, +9029 lines. Five new CLI command modules with full tests and golden fixtures.
+
+2. **`d63c52e`** `feat(forge-daemon): add forge-rpc crate and daemon modules` — 15 files, +2488 lines. New forge-rpc gRPC crate + six daemon modules (agent, loop-runner, server, status, tmux, transcript).
+
+3. **`5401a53`** `chore: update ledgers and task state` — 10 files. Ledger and task state bookkeeping.
+
+Full validation gate (`cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`) passed before committing.
+```
+
+## 2026-02-09T19:15:43Z
+
+- run_id: 1263ffe5-562d-480f-b4a0-31ce570185fd
+- loop_name: rust-full-committer-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T19:11:49Z
+- finished_at: 2026-02-09T19:15:43Z
+- exit_code: 0
+
+```
+Iteration complete. Summary of commits:
+
+1. **`8765df4`** `feat(forge-core): expand config types with full validation and defaults` — 1 file, +859/-6 lines. Full config model port from Go with 14 unit tests.
+
+2. **`ff6a4c2`** `test(forge-rpc): add proto wire interop tests against Go oracle fixtures` — 2 files, +224 lines. Proto wire encoding/decoding tests against Go oracle fixtures for all 7 RPC types. Fixed clippy `clone_on_copy` warnings.
+
+**Not committed (in-progress / incomplete):**
+- `forge-daemon` changes (server.rs, agent.rs, tmux.rs, events.rs) — compilation errors, references missing functions
+- `forge-runner` scaffolding (Cargo.toml, lib.rs, config.rs, ring.rs, etc.) — compilation errors in ring.rs
+- `forge-cli/doctor.rs` — not checked, likely dependent on uncommitted changes
+- `Cargo.lock` — deferred until dependent Cargo.toml changes are committed
+- Ledger/task state bookkeeping — deferred to next iteration
+```
+
+## 2026-02-09T19:23:54Z
+
+- run_id: 2a5433c6-ebf0-4c03-96b0-f1f5e887e1b2
+- loop_name: rust-full-committer-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T19:17:43Z
+- finished_at: 2026-02-09T19:23:54Z
+- exit_code: 0
+
+```
+Iteration complete. Summary:
+
+**Committed:**
+1. `1948b68` — `feat(forge-cli): port doctor command with diagnostics and JSON/JSONL output` (2 files, 932 insertions)
+2. `407c992` — `feat(forge-daemon): add bootstrap, event streaming, and expanded RPC server` (8 files, 3280 insertions)
+
+**Validation:** Both commits passed `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` with 0 failures (679 forge-cli tests + 124 forge-daemon tests all green).
+
+**Skipped (will retry next iteration):**
+- **fmail-core + fmail-cli**: Actively being modified by other agents — `pub mod register;` was added to fmail-cli without the corresponding file, breaking compilation.
+- **forge-runner**: Missing `sink.rs` module, won't compile.
+- **Workspace Cargo.toml/Cargo.lock**: Contains deps needed by incomplete crates; will bundle with their commits when ready.
+```
+
+## 2026-02-09T19:32:53Z
+
+- run_id: aa0dba92-d79f-4b98-9927-71b364ba090b
+- loop_name: rust-full-committer-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T19:25:54Z
+- finished_at: 2026-02-09T19:32:53Z
+- exit_code: 0
+
+```
+Iteration complete. Summary:
+
+**Committed:**
+1. **`a7bf08f`** `feat(fmail): port register and who commands with core domain modules` — 25 files, +1493 lines. fmail-core domain layer (agent registry, store, project root, name generation, validation) + fmail-cli register/who commands with golden snapshot tests. Validated: fmt, clippy, 20 tests passing (4 store + 8 register + 4 who + 4 core).
+
+2. **`31e9313`** `feat(forge-cli): port explain and export commands with full Go parity` — 3 files, +3344 lines. explain command (agent/queue-item diagnostics) + export command (status/events with filtering). Validated: fmt, clippy, 833 tests passing.
+
+**Skipped (next iteration):**
+- **forge-runner** — actively being modified by codex-b agents (files timestamped 20:25-20:29), clippy issues reported by agents. Will retry when agent signals completion.
+- **Ledgers/tasks** — non-code metadata, not commit candidates.
+```
+
+## 2026-02-09T19:41:18Z
+
+- run_id: 0fccee2c-9186-47ea-b868-9de8218f87b7
+- loop_name: rust-full-committer-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T19:34:53Z
+- finished_at: 2026-02-09T19:41:18Z
+- exit_code: 0
+
+```
+## Iteration Summary
+
+**Committed 2:**
+1. `a99eeab` — `feat(forge-cli): port inject command with full Go parity` (8 files, 1608 insertions)
+2. `e609e48` — `feat(fmail-tui): add view modules for bookmarks, live-tail, notifications, timeline, and state/help` (7 files, 2077 insertions)
+
+**Skipped:**
+- **fmail-core/fmail-cli send command** (forge-vqz) — compile-broken; store.rs references 5 missing functions (`scan_topic_dir`, `list_json_files`, `list_json_files_recursive`). Agent still in progress.
+- **forge-runner** (forge-jvd, forge-erw, forge-np5) — passes validation per-crate but 3+ tasks are still actively in_progress with files modified <15 min ago. Will retry next iteration when agents signal completion.
+```
+
+## 2026-02-09T19:51:18Z
+
+- run_id: ed9ba99c-27e9-49b9-8c64-084391e6dbbd
+- loop_name: rust-full-committer-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T19:43:18Z
+- finished_at: 2026-02-09T19:51:18Z
+- exit_code: 0
+
+```
+Iteration complete. Summary:
+
+**4 commits made:**
+1. `8aeb09a` **feat(fmail-core)**: message, project, and store domain modules with full Go parity (50 tests)
+2. `96371bf` **feat(fmail-cli)**: port send, status, completion, topics, log, init, and gc commands (50+ tests)
+3. `832f060` **feat(fmail-tui)**: heatmap, replay, and search view modules (30 tests)
+4. `4520509` **feat(forge-runner)**: agent runner, config, ring buffer, and event sink modules (15 tests)
+
+**Also fixed** during this iteration: added `#[derive(Debug)]` to `GcArgs` in gc.rs, and `#[allow(clippy::unwrap_used, clippy::expect_used)]` to gc.rs and init.rs test modules (claude-3's in-progress work missing these).
+
+**Skipped** (still in-progress by other agents):
+- `project_gc_test.rs` — has syntax errors (escaped quotes)
+- `init_gc_command_test.rs` — needs fmt pass
+- forge-daemon status changes
+- fmail-tui app.rs / lib.rs new changes
+```
+
+## 2026-02-09T20:01:41Z
+
+- run_id: 55f5e5c4-92f2-4917-b223-491ea17bdc92
+- loop_name: rust-full-committer-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T19:53:18Z
+- finished_at: 2026-02-09T20:01:41Z
+- exit_code: 0
+
+```
+Iteration complete. **5 commits created:**
+
+| Hash | Type | Description |
+|------|------|-------------|
+| `2171bd6` | refactor | forge-daemon: migrate status service to proto-generated types |
+| `526182b` | fix | fmail-core: set file permissions on saved messages (DM 0600, topic 0644) |
+| `6f1344d` | feat | fmail-cli: add watch command for streaming message arrival |
+| `67bef54` | test | fmail: add golden tests and integration tests for CLI commands |
+| `15d2043` | feat | fmail-tui: add app shell with navigation stack and stats view |
+
+**Skipped for next iteration:** forge-tui modules (actions, app, filter, help_overlay, layouts, logs_tab, theme), fmail-tui thread/threading, modified test files — all from agents still in-progress or recently completed.
+```
+

@@ -421,3 +421,191 @@ cargo test -p forge-cli            ✓ (all tests pass)
 - Full workspace gate blocked by unrelated `forge-daemon` compile error (missing `capture_pane` trait impl from another agent's in-progress work)
 ```
 
+## 2026-02-09T19:16:08Z
+
+- run_id: 488d41c6-3784-43e9-a2d0-eb48f56d8c8b
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:07:16Z
+- finished_at: 2026-02-09T19:16:08Z
+- exit_code: 0
+
+```
+## Task Summary: forge-5ns (RPC StreamEvents replay/cursor parity)
+
+**Status:** Closed
+
+**Deliverables:**
+- New file: `rust/crates/forge-daemon/src/events.rs` (~390 lines)
+- Wired into `lib.rs` as `pub mod events`
+- Made `server::datetime_to_timestamp` public for cross-module use
+
+**Implementation (EventBus):**
+- Circular buffer storage (max 1000 events, Go parity)
+- Monotonic ID assignment via AtomicI64
+- `subscribe()` with cursor-based replay + event filtering
+- `unsubscribe()` for cleanup on stream end
+- `publish()` with non-blocking broadcast to mpsc channels (drops on full, Go parity)
+- Event type / agent_id / workspace_id filtering (all optional, Go parity)
+- RwLock poison recovery pattern (matching agent.rs style)
+- 4 convenience publish helpers: agent_state_changed, error, pane_content_changed, resource_violation
+
+**Tests:** 26 tests covering all functionality:
+- Bus basics, monotonic IDs, circular buffer eviction
+- Subscribe with/without cursor, cursor parsing
+- All 3 filter dimensions + combined filters
+- Live broadcasting, multi-subscriber isolation
+- Unsubscribe stops delivery
+- All 4 publish helpers
+- Full subscribe→replay→live integration flow
+
+**Validation:**
+- `cargo fmt -p forge-daemon --check` — PASS
+- `cargo clippy -p forge-daemon --all-targets -- -D warnings` — PASS
+- `cargo test -p forge-daemon` — PASS (124 tests, 0 failures)
+```
+
+## 2026-02-09T19:28:07Z
+
+- run_id: 46cfe0ea-10d4-48d2-93d6-9fdfa0648bd0
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:16:53Z
+- finished_at: 2026-02-09T19:28:07Z
+- exit_code: 0
+
+```
+## Task Summary: forge-hyh (CLI port: forge explain) — DONE
+
+**Takeover from:** rust-full-codex-6 (stale >=45m, no implementation)
+
+**Deliverables:**
+- `rust/crates/forge-cli/src/explain.rs` (~1100 lines) — full Rust implementation with Go parity
+- Wired into `lib.rs` dispatch (`"explain"` command), help text, and module accessibility test
+
+**Implementation:**
+- **ExplainBackend trait** with `InMemoryExplainBackend` for testing
+- **Agent explain:** state detection (all 8 states), block reasons + suggestions per state, queue item counting, account cooldown detection
+- **Queue item explain:** agent state blocking, conditional gates (when_idle, after_cooldown), position-based blocking
+- **Context resolution:** agent context → workspace first agent → error
+- **Output modes:** JSON (pretty), JSONL (compact), human-readable text
+- **Models:** AgentType, AgentState, StateInfo, QueueItemType, QueueItemStatus, ConditionType, ConditionalPayload, AccountRecord, QueueItemRecord
+- **Arg parsing:** `--json`, `--jsonl`, `-h`/`--help`, single positional, `qi_` prefix routing
+
+**Tests:** 55 tests covering parse args, agent explanation logic, queue item explanation logic, helpers (short_id, truncate_string), and 27 integration tests via `run_for_test`
+
+**Validation:** `cargo fmt --check` PASS, `cargo clippy --all-targets -D warnings` PASS, `cargo test -p forge-cli` PASS (801+ tests, 0 failures)
+```
+
+## 2026-02-09T19:38:20Z
+
+- run_id: bacd745e-d0fd-42b5-b582-443cb95cd59b
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:28:52Z
+- finished_at: 2026-02-09T19:38:20Z
+- exit_code: 0
+
+```
+## Task Summary: forge-x2g (CLI port: forge inject)
+
+**Status**: Closed
+
+**What was found**: The `forge inject` command was already fully implemented in Rust with Go parity by a prior agent. The implementation includes:
+- `inject.rs` (~1020 lines) with `InjectBackend` trait + `InMemoryInjectBackend`
+- All flags: `--force/-F`, `--file/-f`, `--stdin`, `--editor`, `--json`, `--jsonl`, `--quiet`, `--help/-h`
+- 8 agent states with `is_ready_for_inject()` (idle/stopped/starting = ready)
+- JSON/JSONL/human output matching Go parity
+- Prefix agent resolution, context + auto-detect fallback
+- 32 unit tests already passing
+
+**What I added**:
+- `inject_command_test.rs` — 14 integration + golden tests
+- 3 golden fixture files (`idle_human.txt`, `force_human.txt`, `help.txt`)
+- Fixed formatting drift from concurrent agents (`cargo fmt`)
+
+**Validation**: `cargo fmt --check` PASS, `cargo clippy --all-targets -- -D warnings` PASS, `cargo test -p forge-cli` PASS (1095 tests, 0 failures)
+```
+
+## 2026-02-09T19:46:18Z
+
+- run_id: 545e3f84-feab-48f7-913a-bbf6658d7d30
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:39:05Z
+- finished_at: 2026-02-09T19:46:18Z
+- exit_code: 0
+
+```
+## Task Summary: `forge-h15` (DB migration parity port - P0) — CLOSED
+
+**Action taken:** Stale takeover from `rust-full-codex-4` (80+ min no updates). All 13 child tasks and both blockers were already closed — validated deliverables and closed the parent.
+
+**Validation results:**
+- `cargo fmt -p forge-db --check` — PASS
+- `cargo clippy -p forge-db --all-targets -- -D warnings` — PASS  
+- `cargo test -p forge-db` — **245 tests, 0 failures**
+
+**Deliverables verified:**
+- Migration runner: `migrate_up`, `migrate_down`, `migrate_to`, `migration_status`, `schema_version`
+- 11 embedded migrations (001-009, 011-012) auto-discovered from Go SQL source via `build.rs`
+- SQL parity tests: embedded SQL == Go source files for all migrations
+- Schema introspection tests: tables, indexes, triggers, columns verified after up/down
+- Transaction parity: `transaction`, `transaction_with_retry` matching Go semantics
+- 15 repository modules with full test coverage
+```
+
+## 2026-02-09T20:00:27Z
+
+- run_id: e1b756da-3686-48c2-8d55-ce1617122eb0
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:47:03Z
+- finished_at: 2026-02-09T20:00:27Z
+- exit_code: 0
+
+```
+## Task Complete: forge-6rf (fmail TUI: stats view parity)
+
+**Files changed:**
+- **New:** `rust/crates/fmail-tui/src/stats.rs` (~770 lines)
+- **Modified:** `rust/crates/fmail-tui/src/lib.rs` (added `pub mod stats` + re-exports)
+- **Fix:** `rust/crates/fmail-tui/src/threading.rs` line 151 (`.as_ref()` fix for concurrent agent's compile error)
+
+**Implementation summary:**
+- `StatsViewModel` — 6 time windows (4h/12h/24h/7d/30d/all-time), navigation, pan, load/add messages
+- `StatsSnapshot` — full Go parity: totals, reply latency (avg/median), thread depth distribution, top-10 agents/topics, sparkline time buckets, 5-tier response latency histogram, busiest/quietest hour
+- `compute_stats` — complete computation engine with filter, top-N, latency buckets, bucket interval selection (13 nice-step candidates), UTC time alignment, union-find threading
+- `render_stats_frame` — dual-panel layout matching Go, sparkline rendering, bar charts
+- `apply_stats_input` — `[/]` window, `←/→` pan, `r` refresh
+
+**Tests:** 29 passing (compute stats basics matching Go `TestComputeStats_Basics`, bucket interval nice steps, format helpers, view-model lifecycle, input handling, render snapshots, threading)
+
+**Validation:** `cargo fmt --check` PASS, `cargo clippy -p fmail-tui --lib` PASS, `cargo test -p fmail-tui --lib stats::tests` 29/29 PASS
+```
+

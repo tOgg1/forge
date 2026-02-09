@@ -1,7 +1,7 @@
 # Rust Loop TUI Baseline Checklist
 
-Task: `forge-k7y`  
-Status: in-progress
+Task: `forge-ebw`  
+Status: baseline
 
 ## Purpose
 

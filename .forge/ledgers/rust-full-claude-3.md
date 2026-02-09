@@ -401,3 +401,205 @@ Implemented three gRPC RPC handlers in the Rust `forge-daemon` crate with full b
 **Validation:** `cargo fmt --check` + `cargo clippy --all-targets -D warnings` + `cargo test -p forge-daemon` all pass.
 ```
 
+## 2026-02-09T19:17:58Z
+
+- run_id: cf14989b-c7e5-4b1a-a77e-52cd53c9feca
+- loop_name: rust-full-claude-3
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:08:11Z
+- finished_at: 2026-02-09T19:17:58Z
+- exit_code: 0
+
+```
+## Task Summary: forge-x05 (CLI port: forge doctor)
+
+**Status: CLOSED**
+
+### What was done
+Ported the Go `forge doctor` command to Rust with full Go parity.
+
+### Files changed
+- **`rust/crates/forge-cli/src/doctor.rs`** (new, ~550 lines) — Full doctor command implementation
+- **`rust/crates/forge-cli/src/lib.rs`** — Added module declaration, dispatch match arm, help text entry, accessibility test
+
+### Implementation
+- `DoctorBackend` trait with `InMemoryDoctorBackend` for testing
+- Data models: `DoctorCheck` (4 statuses: pass/warn/fail/skip), `DoctorSummary`, `DoctorReport`
+- Human output: category-ordered (dependencies > config > database > nodes) with tabwriter, status icons (✓/!/✗/-)
+- JSON/JSONL output via serde with `skip_serializing_if` for absent fields
+- Exit code 1 when any check fails (matching Go behavior)
+- Help text matches Go oracle exactly
+- 30 unit tests covering: arg parsing, human output, JSON/JSONL, summary counting, category ordering, error/detail preference, golden structure
+
+### Validation
+- `cargo fmt -p forge-cli --check` — PASS
+- `cargo clippy -p forge-cli --all-targets -- -D warnings` — PASS
+- `cargo test -p forge-cli` — PASS (679 unit tests + integration tests, 0 failures)
+```
+
+## 2026-02-09T19:28:31Z
+
+- run_id: 636d7ab9-740a-4e9f-85ae-bac4c16a135c
+- loop_name: rust-full-claude-3
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:18:43Z
+- finished_at: 2026-02-09T19:28:31Z
+- exit_code: 0
+
+```
+## Task Summary: forge-dzx (CLI port: forge export) — CLOSED
+
+**Agent:** rust-full-claude-3  
+**Task:** Takeover from rust-full-codex-6 (stale >=45m)
+
+### What was done
+Ported the `forge export` command from Go to Rust with full flag/default/validation/output parity.
+
+### Files changed
+- **`rust/crates/forge-cli/src/export.rs`** (new, ~680 lines) — Full export command implementation
+- **`rust/crates/forge-cli/src/lib.rs`** — Module declaration, dispatch, help text, accessibility test
+
+### Implementation details
+- **ExportBackend trait** + `InMemoryExportBackend` for testing
+- **Two subcommands:**
+  - `status` — nodes/workspaces/agents/queues/alerts with tabwriter human output + JSON/JSONL
+  - `events` — cursor-based pagination (500/page), `--type`/`--agent`/`--since`/`--until` filters, `--watch` validation, JSONL streaming, JSON array collect
+- **Data types:** ExportNode, ExportWorkspace, ExportAgent, ExportQueueItem, ExportAlert, ExportEvent — all with matching Go JSON field names
+- **parse_event_types** with comma-split, trim, empty check (matching Go)
+- **filter_events_by_type** matching Go behavior (skip client-side for ≤1 types)
+- **Subcommand-specific flag validation** (--type/--agent/--until rejected on status)
+- **Help text** for root, status, and events subcommands
+
+### Tests: 67 passing
+- 26 parse_args tests (subcommand routing, flags, errors, help)
+- 6 parse_event_types tests
+- 15 status output tests (human, JSON, JSONL, empty, field structure, golden)
+- 16 events output tests (human, JSON, JSONL, filtering, errors, golden)
+- 3 filter_events_by_type tests
+- 1 accessibility test in lib.rs
+
+### Validation
+- `cargo fmt -p forge-cli --check` PASS
+- `cargo clippy -p forge-cli --all-targets -- -D warnings` PASS  
+- `cargo test -p forge-cli` PASS (801 tests, 0 failures)
+```
+
+## 2026-02-09T19:38:43Z
+
+- run_id: 3961b9e4-5c42-4c6d-ba5e-4aa4ab9bb7c5
+- loop_name: rust-full-claude-3
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:29:16Z
+- finished_at: 2026-02-09T19:38:43Z
+- exit_code: 0
+
+```
+## Task Complete: forge-x2g (CLI port: forge inject)
+
+**Summary of changes:**
+
+1. **Fixed JSON field ordering** — Reordered `InjectResultJson` struct fields alphabetically (`agent_id`, `agent_state`, `bypassed_queue`, `injected`, `message`) to match Go's sorted `map[string]any` output (oracle parity).
+
+2. **Added backend message resolution** — Extended `InjectBackend` trait with `read_file()` and `read_stdin()` methods. Updated `InMemoryInjectBackend` with `file_contents`/`stdin_content` fields and builder methods (`with_file`, `with_stdin`).
+
+3. **Implemented full message source validation** — Ported Go's `resolveMessage()` logic: validates exactly one source provided (inline positional, `--file`, `--stdin`, or `--editor`), returns proper error on conflict (`"choose only one message source"`) or missing (`"message required"`).
+
+4. **Updated golden files** — 6 golden test fixtures aligned with test agent IDs and alphabetical JSON key order.
+
+5. **Added tests** — 9 new unit tests (file/stdin sources, conflicts, errors, JSON ordering) + 6 new integration tests (golden JSON/JSONL assertions, file/stdin tests). Total: **41 unit + 20 integration = 61 inject tests**, all passing within 842+ forge-cli tests.
+
+**Validation:** `cargo fmt --check` + `cargo clippy -- -D warnings` + `cargo test` all PASS.
+```
+
+## 2026-02-09T19:49:39Z
+
+- run_id: e72d7360-6134-47fa-bd47-8fc47e6fa1e2
+- loop_name: rust-full-claude-3
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:39:28Z
+- finished_at: 2026-02-09T19:49:39Z
+- exit_code: 0
+
+```
+## Task Summary: `forge-fby` — fmail core/CLI: project initialization + gc parity
+
+**Status**: CLOSED (all acceptance criteria met, all validations pass)
+
+### What was implemented
+
+Ported `fmail init` and `fmail gc` commands from Go to Rust with full behavioral parity:
+
+**New files:**
+- `fmail-core/src/project.rs` — `Project` struct, `derive_project_id()` (env override → git remote SHA256 → dir name SHA256), `hash_project_id()`, `git_remote_url()` + 4 tests
+- `fmail-cli/src/init.rs` — `--project` flag, idempotent behavior, help text, 12 unit tests
+- `fmail-cli/src/gc.rs` — `--days` (default 7), `--dry-run`, filename timestamp extraction, relative path output, 15 unit tests  
+- `fmail-cli/src/tests_common.rs` — `MockFmailBackend` shared test infrastructure
+
+**Extended files:**
+- `fmail-core/src/store.rs` — `project_file()`, `ensure_project()`, `read_project()`, `write_project()`, `list_gc_files()`, `GcFile` struct, `list_sub_dirs()`, `list_files_with_modtime()` helpers
+- `fmail-cli/src/lib.rs` — `FmailBackend` trait extended with `init_project` + `gc_messages`, `FilesystemFmailBackend` implementation, dispatch entries for `init` and `gc`
+- `fmail-core/Cargo.toml` — added `sha2` + `hex` dependencies
+- 6 existing test backends updated with new trait stubs
+
+### Validation
+- `cargo fmt --check` — PASS
+- `cargo clippy --workspace --all-targets -- -D warnings` — PASS  
+- `cargo test --workspace` — PASS (0 failures)
+```
+
+## 2026-02-09T20:01:54Z
+
+- run_id: 4f98231c-398a-4392-858b-68d2c8058b96
+- loop_name: rust-full-claude-3
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:50:24Z
+- finished_at: 2026-02-09T20:01:54Z
+- exit_code: 0
+
+```
+## Task Complete: forge-4p3 (fmail TUI: thread view parity)
+
+**Deliverables:**
+
+1. **`threading.rs`** (~320 lines) - Threading engine with full Go parity:
+   - `build_threads()` / `build_thread_by_id()` / `flatten_thread()` / `summarize_thread()` / `is_cross_target_reply()`
+   - Types: `ThreadMessage`, `Thread`, `ThreadNode`, `ThreadSummary`
+   - Cycle detection, depth clamping (max 10), chronological sibling ordering, DM participant tracking
+   - 10 unit tests
+
+2. **`thread.rs`** (~1200 lines) - Thread view model + rendering:
+   - `ThreadViewModel` with threaded/flat mode toggle, collapse/expand, read markers, bookmarks (double-confirm removal), annotation editor, topic switching (`[`/`]`), body truncation (50 lines max)
+   - `apply_thread_input()` - full key handling: j/k, g/G, Ctrl+D/U, f (mode), Enter (expand/collapse), b (bookmark), B (note), a (annotation)
+   - `render_thread_frame()` - header, meta line, row cards with box-drawing connectors (├─/└─/│), reply indicators, edit prompt, status line
+   - 22 tests including snapshot test
+
+3. **`lib.rs`** - Module declarations and exports for `thread` and `threading`
+
+**Validation:** `cargo fmt --check` PASS, `cargo clippy --workspace --all-targets -- -D warnings` PASS, `cargo test --workspace` PASS (0 failures, 126 fmail-tui tests)
+```
+

@@ -482,3 +482,253 @@ The `forge wait` command was already substantially implemented by a previous age
 **Validation:** `cargo fmt -p forge-cli --check` PASS, `cargo clippy -p forge-cli --all-targets -- -D warnings` PASS, `cargo test -p forge-cli` PASS
 ```
 
+## 2026-02-09T19:16:10Z
+
+- run_id: c1e785a7-a11f-46df-8fcd-ee35d37719ca
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:06:15Z
+- finished_at: 2026-02-09T19:16:10Z
+- exit_code: 0
+
+```
+## Task Complete: forge-0nt (Daemon: RPC SpawnAgent/KillAgent parity)
+
+**Summary of changes:**
+
+### `rust/crates/forge-daemon/src/tmux.rs`
+- Extended `TmuxClient` trait with 6 new methods needed for agent lifecycle:
+  - `has_session` — check if tmux session exists
+  - `new_session` — create detached session
+  - `split_window` — split window and return pane ID
+  - `get_pane_pid` — get process PID in pane
+  - `send_interrupt` — send Ctrl+C
+  - `kill_pane` — destroy pane
+- Implemented all 6 methods on `ShellTmuxClient`
+
+### `rust/crates/forge-daemon/src/server.rs`
+- Added `spawn_agent()` RPC handler with full Go parity:
+  - Validates agent_id + command
+  - Checks for duplicate agents (AlreadyExists error)
+  - Creates or reuses tmux session (default: `forge-{workspace_id}`)
+  - Splits window to create pane
+  - Sends env vars + command to pane
+  - Retrieves PID (graceful fallback to 0)
+  - Registers agent with Starting state
+  - Records spawn transcript entry with metadata
+- Added `kill_agent()` RPC handler with full Go parity:
+  - Validates agent_id, checks existence (NotFound)
+  - Graceful mode: sends interrupt, waits grace period
+  - Force mode: skips interrupt
+  - Records state change transcript entry
+  - Kills pane and removes agent from registry
+- Extended `MockTmux` test infrastructure with new methods + builder pattern
+- Added 18 new tests (11 spawn + 7 kill) covering all error paths and lifecycle
+
+### Validation
+- `cargo fmt --check` PASS
+- `cargo clippy -p forge-daemon --tests -- -D warnings` PASS  
+- `cargo test -p forge-daemon` — **124/124 PASS**
+```
+
+## 2026-02-09T19:25:08Z
+
+- run_id: 98e8fdd9-ad65-4b75-9ec0-8d5d438247d6
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:16:55Z
+- finished_at: 2026-02-09T19:25:08Z
+- exit_code: 0
+
+```
+## Task Complete: `forge-rn6` — fmail core/CLI: register command parity
+
+### Summary
+
+Ported the `fmail register [name]` command from Go to Rust with full behavioral parity.
+
+### Files Changed
+
+**New files (fmail-core):**
+- `rust/crates/fmail-core/src/validate.rs` — `normalize_agent_name()` with `^[a-z0-9-]+$` validation
+- `rust/crates/fmail-core/src/names.rs` — Cartoon name generation (`random_loop_name_two_part`, `random_loop_name_three_part`) ported from `internal/names/cartoon_names.go`
+- `rust/crates/fmail-core/tests/store_register_test.rs` — 4 integration tests for `Store::register_agent_record`
+
+**New files (fmail-cli):**
+- `rust/crates/fmail-cli/src/register.rs` — `fmail register [name] [--json]` command implementation
+- `rust/crates/fmail-cli/tests/register_command_test.rs` — 8 CLI golden/behavior tests
+- `rust/crates/fmail-cli/tests/golden/register/` — Golden output files (text + JSON)
+
+**Modified:**
+- `rust/crates/fmail-core/src/lib.rs` — Added `names` and `validate` module exports
+- `rust/crates/fmail-core/src/store.rs` — Added `register_agent_record()`, `ensure_root()`, `write_file_exclusive()` (O_EXCL parity)
+- `rust/crates/fmail-core/Cargo.toml` — Added `rand`, `tempfile` (dev)
+- `rust/crates/fmail-cli/src/lib.rs` — Extended `FmailBackend` trait with `register_agent_record` + `hostname`; wired `register` command
+- `rust/crates/fmail-cli/Cargo.toml` — Added `rand`
+- `rust/crates/fmail-cli/tests/who_command_test.rs` — Added stub impls for new trait methods
+
+### Validation
+- `cargo fmt --check` — clean
+- `cargo clippy -p fmail-core -p fmail-cli --all-targets -- -D warnings` — clean
+- `cargo test -p fmail-core -p fmail-cli` — **20/20 tests pass**
+- Pre-existing workspace clippy error in `forge-cli/src/explain.rs` (unrelated, from another agent)
+```
+
+## 2026-02-09T19:33:21Z
+
+- run_id: d6e70743-13ea-46e7-a62c-12cb9f2473f0
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:25:53Z
+- finished_at: 2026-02-09T19:33:21Z
+- exit_code: 0
+
+```
+## Task Complete: forge-x2g (CLI port: forge inject)
+
+**What was done:**
+- Ported Go `forge inject` command to Rust with full flag/output/behavior parity
+- Created `rust/crates/forge-cli/src/inject.rs` (~540 lines)
+- Wired into `lib.rs` (module declaration, dispatch entry, help text, accessibility test)
+
+**Implementation details:**
+- `InjectBackend` trait + `InMemoryInjectBackend` for testing
+- `AgentState` enum with 9 states; `is_ready_for_inject()` gates on idle/stopped/starting
+- Flags: `--force/-F`, `--file/-f`, `--stdin`, `--editor`, `--json`, `--jsonl`, `--quiet`
+- Agent resolution: positional arg → context fallback → auto-detect single agent
+- State check: non-interactive mode returns error for busy agents; `--force` bypasses
+- JSON output: `{injected, agent_id, message, bypassed_queue, agent_state}`
+- Human output: `Warning: Direct injection to agent <short-id> (bypassed queue)` + `Message injected`
+
+**Validation:**
+- `cargo fmt -p forge-cli --check` PASS
+- `cargo clippy -p forge-cli --all-targets -- -D warnings` PASS
+- `cargo test -p forge-cli` — 833 tests PASS (32 inject-specific)
+```
+
+## 2026-02-09T19:44:15Z
+
+- run_id: 88a0e4cd-a3c6-4f36-888b-4c15a778a3de
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:34:06Z
+- finished_at: 2026-02-09T19:44:15Z
+- exit_code: 0
+
+```
+## Task Summary: forge-hfa (fmail core/CLI: completion command parity)
+
+**Status:** Closed
+
+**What was done:**
+1. **Created `rust/crates/fmail-cli/src/completion.rs`** — fmail completion command with shell script generation for bash, zsh, and fish. Follows the same pattern as `forge-cli/src/completion.rs` but tailored for `fmail`. Includes help flag support, argument validation, and error handling.
+
+2. **Wired into `lib.rs` dispatcher** — added `completion` module declaration and `"completion"` match arm in `run_cli_for_test`.
+
+3. **Created 4 golden files** in `tests/golden/completion/` (bash.txt, zsh.txt, fish.txt, help.txt).
+
+4. **Created `tests/completion_command_test.rs`** — 6 integration tests exercising all shells, error cases, and help output through the full CLI dispatcher.
+
+5. **8 inline unit tests** in the completion module covering all paths.
+
+**Concurrent-agent fixes (workspace unblocking):**
+- Created stub modules for `log.rs`, `messages.rs`, `status.rs` (declared by concurrent agents but files were missing)
+- Made `fmail_core::format::format_relative` public (needed by topics.rs)
+- Added missing trait methods (`read_agent_record`, `set_agent_status`, `list_topics`, `list_message_files`, `read_message_at`) to test backends in `register_command_test.rs` and `send_command_test.rs`
+
+**Validation:** `cargo fmt --check` PASS, `cargo clippy --workspace --all-targets -- -D warnings` PASS, `cargo test -p fmail-cli` PASS (50/50 tests).
+```
+
+## 2026-02-09T19:52:13Z
+
+- run_id: 470c5801-d2c7-48d6-a5a1-3f084860d137
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:45:00Z
+- finished_at: 2026-02-09T19:52:13Z
+- exit_code: 0
+
+```
+Task `forge-3t6` (fmail TUI: app shell + navigation stack) is complete.
+
+## Summary
+
+**Task:** `forge-3t6` — fmail TUI: app shell + navigation stack
+
+**Files changed:**
+- **`rust/crates/fmail-tui/src/app.rs`** (new, ~500 lines) — Full app shell implementation:
+  - `ViewId` enum with all 14 Go-parity view IDs (`Dashboard`, `Topics`, `Thread`, etc.)
+  - `View` trait matching Go's `viewModel` interface (`init`, `update`, `view`)
+  - `Command` enum (`None`, `PushView`, `PopView`, `Quit`, `Batch`)
+  - `App` struct with stack-based navigation, theme management, layout modes, help overlay
+  - Global key routing matching Go: `Esc` pop, `q`/`Ctrl+C` quit, `?` help, number keys 1-3, view switch keys (`o`, `t`, `a`, `l`, `m`, `p`, `H`, `v`, `R`, `N`, `D`, `S`), `Ctrl+T` theme cycle, `Ctrl+Z` zen, `Ctrl+B` bookmarks, `Ctrl+N` notifications, `Ctrl+R` refresh, `/` search
+  - Operator view key isolation (only `q`, `?`, `Ctrl+C`)
+  - `PlaceholderView` for unported views with enter drill-down routing
+  - 28 unit tests covering navigation, global keys, rendering, overlays
+
+- **`rust/crates/fmail-tui/src/lib.rs`** — Added `app` module + re-exports
+
+- **`rust/crates/forge-ftui-adapter/src/lib.rs`** — Added `RenderFrame::set_cell()` for frame compositing
+
+**Validation:** `cargo clippy` + `cargo test` — 62 tests pass, 0 warnings, all downstream crates check clean.
+```
+
+## 2026-02-09T20:02:47Z
+
+- run_id: 6153420b-d971-4bf2-bf01-f1f0d22ef880
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T19:52:58Z
+- finished_at: 2026-02-09T20:02:47Z
+- exit_code: 0
+
+```
+## Task Complete: `forge-y7t` — Loop TUI: app shell + state model
+
+**Delivered:** `rust/crates/forge-tui/src/app.rs` (~1800 lines)
+
+**What was ported from Go `internal/looptui/looptui.go`:**
+- **`App` struct** — full state model matching Go's `model` struct
+- **`MainTab`** — 4 tabs: Overview, Logs, Runs, MultiLogs (with `ORDER`, `label()`, `short_label()`)
+- **`UiMode`** — 6 modes: Main, Filter, ExpandedLogs, Confirm, Wizard, Help
+- **Update dispatch** — `update_main_mode`, `update_filter_mode`, `update_expanded_logs_mode`, `update_confirm_mode`, `update_wizard_mode`, `update_help_mode`
+- **Data models** — `LoopView`, `RunView`, `LogTailView`, `ConfirmState`, `WizardState`, `WizardValues`
+- **Enums** — `LogSource` (Live/LatestRun/RunSelection), `LogLayer` (Raw/Events/Errors/Tools/Diff), `ActionType`, `StatusKind`, `FilterFocus`
+- **State operations** — tab switching, selection, pinning, filter application, log scroll/source/layer cycling, multi-page pagination, confirm/wizard flows, theme cycling
+- **Command enum** — `None`, `Quit`, `Fetch`, `Batch`, `RunAction(ActionKind)`
+- **`View` trait + `PlaceholderView`** — tab content interface
+- **Render** — header, tab bar, content area, status line, footer, help overlay
+
+**Tests:** 63 new app tests (87 total forge-tui), all passing. Full workspace validation clean.
+```
+

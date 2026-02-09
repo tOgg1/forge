@@ -238,3 +238,234 @@ choose path:
 3. I park this task and pick another open slice.
 ```
 
+## 2026-02-09T19:16:51Z
+
+- run_id: 9f1cdf4a-22ac-4a8d-b60e-e317f4831697
+- loop_name: rust-full-codex-b
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T18:58:28Z
+- finished_at: 2026-02-09T19:16:51Z
+- exit_code: 0
+
+```
+Closed 1 task; advanced 3; 4 blocked.
+
+1. Closed `forge-qsg`
+- Implemented `CapturePane` + `StreamPaneUpdates` parity in `rust/crates/forge-daemon/src/server.rs`.
+- Added tmux capture support in `rust/crates/forge-daemon/src/tmux.rs`.
+- Added snapshot update hook in `rust/crates/forge-daemon/src/agent.rs`.
+- Validation passed: `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`.
+- Reported + closed via `fmail`/`sv`.
+
+2. Blocked `forge-qag`
+- Dependency graph blocker persisted.
+- Context: `.tasks/tasks.jsonl:862`, `.tasks/tasks.jsonl:872`, `.tasks/tasks.jsonl:883`, `.tasks/tasks.jsonl:886`, `.tasks/tasks.jsonl:888`.
+
+3. Worked `forge-kg9` (blocked)
+- Added mixed Go/Rust proto wire interop matrix test: `rust/crates/forge-rpc/tests/proto_wire_interop_test.rs`.
+- Targeted validation passed: `cargo test -p forge-rpc`.
+- Blocked by concurrent workspace gate drift (fmt/clippy churn outside slice).
+
+4. Worked `forge-5ns` (blocked)
+- Implemented `StreamEvents` replay/cursor/filter helper + tests in `rust/crates/forge-daemon/src/server.rs`.
+- Targeted validation passed: `cargo test -p forge-daemon -p forge-rpc`.
+- Full chain blocked by concurrent workspace/module drift (changed repeatedly during run).
+
+5. Claimed `forge-x93` (blocked)
+- Scope check done; feature not implemented yet.
+- Compose/quick-send gap context: `rust/crates/fmail-tui/src/lib.rs:40`, `rust/crates/fmail-tui/src/lib.rs:46`.
+- Workspace drift blocker context: `rust/crates/fmail-cli/src/lib.rs:37`, `rust/crates/fmail-cli/src/lib.rs:53` (`who` module missing at run time).
+
+fmail/orchestrator updates sent for each claim/progress/blocked/close.
+tokens used
+1,209,462
+Closed 1 task; advanced 3; 4 blocked.
+
+1. Closed `forge-qsg`
+- Implemented `CapturePane` + `StreamPaneUpdates` parity in `rust/crates/forge-daemon/src/server.rs`.
+- Added tmux capture support in `rust/crates/forge-daemon/src/tmux.rs`.
+- Added snapshot update hook in `rust/crates/forge-daemon/src/agent.rs`.
+- Validation passed: `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`.
+- Reported + closed via `fmail`/`sv`.
+
+2. Blocked `forge-qag`
+- Dependency graph blocker persisted.
+- Context: `.tasks/tasks.jsonl:862`, `.tasks/tasks.jsonl:872`, `.tasks/tasks.jsonl:883`, `.tasks/tasks.jsonl:886`, `.tasks/tasks.jsonl:888`.
+
+3. Worked `forge-kg9` (blocked)
+- Added mixed Go/Rust proto wire interop matrix test: `rust/crates/forge-rpc/tests/proto_wire_interop_test.rs`.
+- Targeted validation passed: `cargo test -p forge-rpc`.
+- Blocked by concurrent workspace gate drift (fmt/clippy churn outside slice).
+
+4. Worked `forge-5ns` (blocked)
+- Implemented `StreamEvents` replay/cursor/filter helper + tests in `rust/crates/forge-daemon/src/server.rs`.
+- Targeted validation passed: `cargo test -p forge-daemon -p forge-rpc`.
+- Full chain blocked by concurrent workspace/module drift (changed repeatedly during run).
+
+5. Claimed `forge-x93` (blocked)
+- Scope check done; feature not implemented yet.
+- Compose/quick-send gap context: `rust/crates/fmail-tui/src/lib.rs:40`, `rust/crates/fmail-tui/src/lib.rs:46`.
+- Workspace drift blocker context: `rust/crates/fmail-cli/src/lib.rs:37`, `rust/crates/fmail-cli/src/lib.rs:53` (`who` module missing at run time).
+
+fmail/orchestrator updates sent for each claim/progress/blocked/close.
+```
+
+## 2026-02-09T19:24:37Z
+
+- run_id: 63ed75d7-aba3-49de-8208-cafd4a1f6c3a
+- loop_name: rust-full-codex-b
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T19:17:36Z
+- finished_at: 2026-02-09T19:24:37Z
+- exit_code: 0
+
+```
+-        .expect("emit");
++            timestamp: "2026-01-01T00:00:00Z".to_string(),
++            workspace_id: String::new(),
++            agent_id: String::new(),
++            data: Some(serde_json::json!({ "line": "hello" })),
++        };
++        must(sink.emit(&event));
++        must(sink.close());
+ 
+-        let db = forge_db::Db::open(forge_db::Config::new(&db_path)).expect("open");
+-        let repo = forge_db::event_repository::EventRepository::new(&db);
+-        let page = repo
+-            .query(forge_db::event_repository::EventQuery {
+-                limit: 10,
+-                ..Default::default()
+-            })
+-            .expect("query");
+-        assert_eq!(page.events.len(), 1);
+-        assert_eq!(page.events[0].event_type, "runner.output_line");
+-        assert_eq!(page.events[0].entity_type, "agent");
+-        assert_eq!(page.events[0].entity_id, "agent_1");
+-        assert!(page.events[0].payload.contains("\"line\""));
++        let db = must(Db::open(Config::new(&db_path)));
++        let repo = EventRepository::new(&db);
++        let events = must(repo.list_by_entity("agent", "agent-1", 10));
++        assert_eq!(events.len(), 1);
++        assert_eq!(events[0].event_type, "runner.output_line");
++        assert!(events[0].payload.contains("hello"));
++        assert_eq!(
++            events[0]
++                .metadata
++                .as_ref()
++                .and_then(|m| m.get("workspace_id"))
++                .cloned(),
++            Some("ws-1".to_string())
++        );
+     }
+ }
+
+tokens used
+192,496
+Loop run complete. No `ready` tasks left; loop idle.
+
+Work done:
+- Claimed `forge-kg9`; reran full Rust gate; blocker reported.
+- Stale-takeover + claim `forge-erw` (>=45m).
+- Added missing runner sink module: `rust/crates/forge-runner/src/sink.rs`.
+- Implemented `EventSink` + `NoopSink` + `SocketEventSink` + `DatabaseEventSink`.
+- Added regression tests in `rust/crates/forge-runner/src/sink.rs`.
+
+Validation:
+- Pass: `cd rust && cargo clippy -p forge-runner --all-targets -- -D warnings && cargo test -p forge-runner`
+- Fail (full gate): `cd rust && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
+- Current blocker context: `rust/crates/forge-cli/src/explain.rs:443` (`needless_borrow`), `rust/crates/forge-cli/src/explain.rs:1050` (`dead_code`).
+
+Comms sent:
+- `task` channel: claims/takeover/progress/blockers/idle status.
+- `@forge-orchestrator`: `forge-kg9: blocked`, `forge-erw: blocked`, final idle ping.
+
+No task closed this pass (strict close gate unmet).
+```
+
+## 2026-02-09T19:44:56Z
+
+- run_id: 41efb104-aea3-43b6-861d-2275e08360ea
+- loop_name: rust-full-codex-b
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T19:25:22Z
+- finished_at: 2026-02-09T19:44:56Z
+- exit_code: 0
+
+```
++        let frame = render_timeline_frame(&view, 48, 4, ThemeSpec::default());
++        assert!(frame.snapshot().contains(">15:31:00"));
++    }
++
++    #[test]
++    fn timeline_snapshot_chronological() {
++        let mut view = TimelineViewModel::new();
++        view.push(TimelineMessage::new(
++            "1",
++            "15:30:00",
++            "architect",
++            "task",
++            "implement jwt auth",
++        ));
++        view.push(TimelineMessage::new(
++            "2",
++            "15:30:04",
++            "coder-1",
++            "@architect",
++            "need clarification",
++        ));
++        view.set_filter_from_input("text:clarification");
++
++        let frame = render_timeline_frame(&view, 56, 4, ThemeSpec::default());
++        assert_render_frame_snapshot(
++            "fmail_tui_timeline_frame",
++            &frame,
++            "TIMELINE  filter:text:clarification  1/2                \n>15:30:04 [DM] coder-1 -> @architect  need clarification\n                                                        \n                                                        ",
++        );
++    }
++}
+
+tokens used
+197,317
+hi. strong throughput; four closures landed.
+
+- closed: `forge-w1f`, `forge-rd8`, `forge-jg2`, `forge-fyx`
+- implemented/validated parity slices:
+  - `rust/crates/fmail-tui/src/live_tail.rs`
+  - `rust/crates/fmail-tui/src/notifications.rs`
+  - `rust/crates/fmail-tui/src/timeline.rs`
+  - `rust/crates/fmail-tui/src/state_help.rs`
+- full chain passed once and used for close:
+  - `cd rust && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
+
+continued loop; claimed + progressed more slices, local crate gates green, blocked on concurrent workspace drift:
+- `forge-egs` bookmarks parity
+- `forge-dz6` search parity
+- `forge-849` heatmap parity
+- `forge-7a3` replay parity
+
+current new files from this latest stretch:
+- `rust/crates/fmail-tui/src/search.rs`
+- `rust/crates/fmail-tui/src/heatmap.rs`
+- `rust/crates/fmail-tui/src/replay.rs`
+- `rust/crates/fmail-tui/src/lib.rs`
+- `docs/forge-mail/rust-fmail-tui-parity-slices-2026-02-09.md`
+
+latest blocker sent on `fmail`/orchestrator:
+- workspace gate failing from concurrent `fmail-cli` test formatting/trait drift (`rust/crates/fmail-cli/tests/status_command_test.rs` and other `fmail-cli` test backend impls).
+```
+
