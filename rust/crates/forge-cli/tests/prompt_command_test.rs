@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use forge_cli::prompt::{run_for_test, CommandOutput, PromptBackend, PromptBackendError};
+use uuid::Uuid;
 
 #[derive(Debug)]
 struct TestPromptBackend {
@@ -126,8 +127,9 @@ impl TempRepo {
             Ok(value) => value.as_nanos(),
             Err(err) => panic!("clock should be after unix epoch: {err}"),
         };
+        let suffix = Uuid::new_v4();
         let path = std::env::temp_dir().join(format!(
-            "forge-cli-prompt-test-{}-{nanos}",
+            "forge-cli-prompt-test-{}-{nanos}-{suffix}",
             std::process::id()
         ));
         if let Err(err) = fs::create_dir_all(&path) {

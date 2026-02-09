@@ -11,6 +11,7 @@ pub mod error_envelope;
 pub mod hook;
 pub mod init;
 pub mod kill;
+pub mod lock;
 pub mod logs;
 pub mod loop_internal;
 pub mod mem;
@@ -26,9 +27,10 @@ pub mod rm;
 pub mod run;
 pub mod scale;
 pub mod send;
+pub mod skills;
 pub mod status;
-pub mod template;
 pub mod stop;
+pub mod template;
 pub mod up;
 pub mod work;
 
@@ -99,6 +101,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let mut backend = kill::InMemoryKillBackend::default();
             let forwarded = forward_args(remaining, &flags);
             kill::run_with_backend(&forwarded, &mut backend, stdout, stderr)
+        }
+        Some("lock") => {
+            let backend = lock::InMemoryLockBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            lock::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("loop") => {
             let mut backend = loop_internal::InMemoryLoopInternalBackend::default();
@@ -214,6 +221,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let forwarded = forward_args(remaining, &flags);
             send::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
+        Some("skills") => {
+            let backend = skills::InMemorySkillsBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            skills::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
         Some("status") => {
             let backend = status::InMemoryStatusBackend::default();
             let forwarded = forward_args(remaining, &flags);
@@ -302,6 +314,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  hook      Manage event hooks")?;
     writeln!(out, "  init      Initialize a repo for Forge loops")?;
     writeln!(out, "  kill      Kill loops immediately")?;
+    writeln!(out, "  lock      Manage advisory file locks")?;
     writeln!(out, "  logs      Tail loop logs")?;
     writeln!(out, "  migrate   Database migration command family")?;
     writeln!(out, "  mem       Loop memory command family")?;
@@ -316,8 +329,10 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  run       Run a single loop iteration")?;
     writeln!(out, "  scale     Scale loops to target count")?;
     writeln!(out, "  send      Queue a message for an agent")?;
+    writeln!(out, "  skills    Manage workspace skills")?;
     writeln!(out, "  status    Show fleet status summary")?;
     writeln!(out, "  stop      Stop loops after current iteration")?;
+    writeln!(out, "  template  Manage message templates")?;
     writeln!(out, "  up        Start loop(s) for a repo")?;
     writeln!(out, "  use       Set current workspace or agent context")?;
     writeln!(out, "  work      Loop work-context command family")?;
@@ -392,9 +407,9 @@ pub struct RootCommandOutput {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::{
-        audit, clean, completion, config, context, crate_label, hook, init, kill, logs,
+        audit, clean, completion, config, context, crate_label, hook, init, kill, lock, logs,
         loop_internal, mem, migrate, msg, pool, profile, prompt, ps, queue, resume, rm, run,
-        run_for_test, run_with_args, scale, status, stop, up, work,
+        run_for_test, run_with_args, scale, send, skills, status, stop, template, up, work,
     };
 
     #[test]
@@ -425,6 +440,11 @@ mod tests {
     #[test]
     fn kill_module_is_accessible() {
         let _ = kill::InMemoryKillBackend::default();
+    }
+
+    #[test]
+    fn lock_module_is_accessible() {
+        let _ = lock::InMemoryLockBackend::default();
     }
 
     #[test]
@@ -519,8 +539,30 @@ mod tests {
     }
 
     #[test]
+    fn send_module_is_accessible() {
+        let _ = send::InMemorySendBackend::default();
+    }
+
+    #[test]
+    fn skills_module_is_accessible() {
+        let _ = skills::InMemorySkillsBackend::default();
+    }
+
+    #[test]
     fn status_module_is_accessible() {
         let _ = status::InMemoryStatusBackend::default();
+    }
+
+    #[test]
+    fn template_module_is_accessible() {
+        let _ = template::Template {
+            name: "demo".to_string(),
+            description: String::new(),
+            message: "hello".to_string(),
+            variables: Vec::new(),
+            tags: Vec::new(),
+            source: String::new(),
+        };
     }
 
     #[test]
@@ -552,6 +594,7 @@ mod tests {
         assert!(rendered.contains("hook"));
         assert!(rendered.contains("init"));
         assert!(rendered.contains("kill"));
+        assert!(rendered.contains("lock"));
         assert!(rendered.contains("logs"));
         assert!(rendered.contains("msg"));
         assert!(rendered.contains("pool"));
@@ -563,6 +606,7 @@ mod tests {
         assert!(rendered.contains("rm"));
         assert!(rendered.contains("run"));
         assert!(rendered.contains("scale"));
+        assert!(rendered.contains("send"));
         assert!(rendered.contains("status"));
         assert!(rendered.contains("stop"));
         assert!(rendered.contains("up"));

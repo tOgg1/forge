@@ -81,6 +81,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -150,9 +151,12 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 name = "forge-cli"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "forge-db",
+ "rusqlite",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tabwriter",
  "uuid",
 ]
