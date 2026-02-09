@@ -37,6 +37,7 @@ GOBIN ?= $(shell go env GOPATH)/bin
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 .PHONY: all build build-cli build-daemon build-runner build-fmail clean test lint fmt vet tidy install install-local install-system uninstall dev help proto proto-lint
+.PHONY: perf-smoke perf-bench
 
 # Default target
 all: build
@@ -169,6 +170,18 @@ test-coverage:
 # Run short tests only
 test-short:
 	$(GOTEST) -v -short ./...
+
+## Perf targets (gated; opt-in via build tags)
+
+# Perf smoke: runs fast-ish budget checks on a synthetic fmail mailbox.
+perf-smoke:
+	@echo "Running fmail TUI perf smoke (tags=perf)..."
+	@env -u GOROOT -u GOTOOLDIR $(GOTEST) -tags=perf ./internal/fmailtui/... -run TestPerfSmokeBudgets -count=1
+
+# Perf benchmarks: captures baseline numbers for hot paths (provider/search).
+perf-bench:
+	@echo "Running fmail TUI perf benchmarks (tags=perf)..."
+	@env -u GOROOT -u GOTOOLDIR $(GOTEST) -tags=perf ./internal/fmailtui/... -run '^$$' -bench Perf -benchmem -count=1
 
 ## Code quality targets
 
