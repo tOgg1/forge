@@ -9,6 +9,8 @@ Rewrite Forge to Rust, in-repo, with near 1:1 behavior parity.
 Use FrankenTUI (`frankentui`) for TUI layers.
 Use rewrite window to remove legacy code safely.
 
+Companion manifest: `docs/rust-port-manifest.md`.
+
 ## Non-Negotiables
 
 - Functional parity first. No accidental behavior drift.
