@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/tOgg1/forge/internal/fmail"
 	"github.com/tOgg1/forge/internal/fmailtui/data"
@@ -34,6 +35,7 @@ const (
 	ViewThread    ViewID = "thread"
 	ViewAgents    ViewID = "agents"
 	ViewSearch    ViewID = "search"
+	ViewLiveTail  ViewID = "live-tail"
 	ViewTimeline  ViewID = "timeline"
 )
 
@@ -43,7 +45,9 @@ var viewSwitchKeys = map[string]ViewID{
 	"r": ViewThread,
 	"a": ViewAgents,
 	"s": ViewSearch,
-	"l": ViewTimeline,
+	"/": ViewSearch,
+	"l": ViewLiveTail,
+	"m": ViewTimeline,
 }
 
 var defaultEnterRoute = map[ViewID]ViewID{
@@ -86,6 +90,7 @@ type Model struct {
 	store        *fmail.Store
 	provider     data.MessageProvider
 	forgedClient ForgedClient
+	forgedErr    error
 	theme        Theme
 	pollInterval time.Duration
 
@@ -150,18 +155,15 @@ func NewModel(cfg Config) (*Model, error) {
 		return nil, fmt.Errorf("ensure project: %w", err)
 	}
 
-	provider, err := data.NewHybridProvider(data.HybridProviderConfig{
-		Root:              root,
-		ReconnectInterval: 2 * time.Second,
-		SubscribeBuffer:   512,
-	})
+	provider, err := buildProvider(root, normalized.ForgedAddr)
 	if err != nil {
 		return nil, fmt.Errorf("init data provider: %w", err)
 	}
 
 	forgedClient, err := connectForged(normalized.ForgedAddr)
 	if err != nil {
-		return nil, fmt.Errorf("connect forged: %w", err)
+		// Non-fatal: dashboard can still run in polling mode.
+		forgedClient = nil
 	}
 
 	m := &Model{
@@ -170,6 +172,7 @@ func NewModel(cfg Config) (*Model, error) {
 		store:        store,
 		provider:     provider,
 		forgedClient: forgedClient,
+		forgedErr:    err,
 		theme:        Theme(normalized.Theme),
 		pollInterval: normalized.PollInterval,
 		viewStack:    []ViewID{ViewDashboard},
@@ -235,25 +238,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) View() string {
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("fmail tui  project=%s  root=%s\n", m.projectID, m.root))
-	b.WriteString(fmt.Sprintf("view=%s  size=%dx%d  theme=%s\n", m.activeViewID(), m.width, m.height, m.theme))
-	if m.forgedClient != nil {
-		b.WriteString(fmt.Sprintf("forged=%s  poll=%s\n", m.forgedClient.Addr(), m.pollInterval))
-	} else {
-		b.WriteString(fmt.Sprintf("forged=offline  poll=%s\n", m.pollInterval))
-	}
-
-	if m.showHelp {
-		b.WriteString("keys: q/ctrl+c quit, ? help, esc/backspace back, d/t/r/a/s/l switch view\n\n")
-	}
-
 	if active := m.activeView(); active != nil {
-		b.WriteString(active.View(m.width, m.height, m.theme))
-		return b.String()
+		header := m.renderHeader()
+		footer := m.renderFooter()
+		contentHeight := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
+		if contentHeight < 0 {
+			contentHeight = 0
+		}
+		body := active.View(m.width, contentHeight, m.theme)
+		return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 	}
-	b.WriteString("no active view")
-	return b.String()
+	return "no active view"
 }
 
 func (m *Model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool) {
@@ -308,11 +303,12 @@ func (m *Model) popView() {
 }
 
 func (m *Model) initViews() {
-	m.views[ViewDashboard] = newDashboardView(m.provider, m.projectID, m.root)
+	m.views[ViewDashboard] = newDashboardView(m.root, m.projectID, m.provider)
 	m.views[ViewTopics] = newPlaceholderView(ViewTopics, "Topics")
 	m.views[ViewThread] = newPlaceholderView(ViewThread, "Thread")
 	m.views[ViewAgents] = newPlaceholderView(ViewAgents, "Agents")
 	m.views[ViewSearch] = newPlaceholderView(ViewSearch, "Search")
+	m.views[ViewLiveTail] = newPlaceholderView(ViewLiveTail, "Live Tail")
 	m.views[ViewTimeline] = newPlaceholderView(ViewTimeline, "Timeline")
 }
 
