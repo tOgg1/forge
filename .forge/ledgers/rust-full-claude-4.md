@@ -293,3 +293,48 @@ Implemented the `LoopKVRepository` in Rust with full Go behavioral parity.
 **Validation**: `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` — all pass (32/32 pool tests, 0 failures workspace-wide).
 ```
 
+## 2026-02-09T18:13:40Z
+
+- run_id: ce64d61b-ad00-4c75-8fac-3bcfa6ea4e72
+- loop_name: rust-full-claude-4
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:02:23Z
+- finished_at: 2026-02-09T18:13:40Z
+- exit_code: 0
+
+```
+## Task Summary: forge-k0d (Repo layer: port_allocations repository parity)
+
+**Status**: Closed
+
+**Deliverables**:
+
+1. **`rust/crates/forge-db/src/port_repository.rs`** (new, ~280 lines)
+   - `PortAllocation` model struct with Go parity (id, port, node_id, agent_id, reason, allocated_at)
+   - `PortRepository` struct with configurable port range (default 17000-17999)
+   - Full Go API parity:
+     - `allocate()` — finds next available port via gap-scan
+     - `allocate_specific()` — allocates exact port with range validation
+     - `release()` — deletes allocation, returns error if not found
+     - `release_by_agent()` — bulk release for agent, returns count
+     - `get_by_agent()` — most recent allocation for agent
+     - `get_by_node_and_port()` — exact lookup
+     - `list_active_by_node()` — all allocations for node, ordered by port
+     - `count_active_by_node()` — count query
+     - `is_port_available()` — availability check
+     - `cleanup_expired()` — orphan cleanup via agents subquery
+
+2. **`rust/crates/forge-db/src/lib.rs`** — added `pub mod port_repository;` + 3 error variants:
+   - `NoAvailablePorts`, `PortAlreadyAllocated`, `PortNotAllocated`
+
+3. **`rust/crates/forge-db/tests/port_repository_test.rs`** (new, 13 tests)
+   - All Go test scenarios ported: allocate, allocate_multiple, allocate_specific, release+reuse, release_by_agent, list_active, is_available, count, cleanup_expired (with CASCADE), custom_range+exhaust, node_isolation, get_by_node_and_port, not_found
+
+**Validation**: `cargo fmt --check` PASS, `cargo clippy --workspace --all-targets -- -D warnings` PASS, 13/13 tests PASS.
+```
+
