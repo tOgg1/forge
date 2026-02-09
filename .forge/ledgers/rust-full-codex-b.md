@@ -469,3 +469,80 @@ latest blocker sent on `fmail`/orchestrator:
 - workspace gate failing from concurrent `fmail-cli` test formatting/trait drift (`rust/crates/fmail-cli/tests/status_command_test.rs` and other `fmail-cli` test backend impls).
 ```
 
+## 2026-02-09T20:10:31Z
+
+- run_id: 130c89d7-4ae3-475b-af3b-2a01ab11aa2d
+- loop_name: rust-full-codex-b
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T19:45:41Z
+- finished_at: 2026-02-09T20:10:31Z
+- exit_code: 0
+
+```
+-
+-/// Render overview pane content as text lines.
+-///
+-/// Stub implementation matching the call signature in `app.rs`.
+-/// The real implementation will be provided by the overview tab parity task.
+-#[must_use]
+-pub fn overview_pane_lines(
+-    selected: Option<&LoopView>,
+-    run_history: &[RunView],
+-    _selected_run: usize,
+-    width: usize,
+-    _height: usize,
+-) -> Vec<String> {
+-    let mut lines = Vec::new();
+-    match selected {
+-        Some(view) => {
+-            lines.push(format!(
+-                "Overview  |  {}  state={}  runs={}",
+-                view.id,
+-                view.state,
+-                run_history.len()
+-            ));
+-        }
+-        None => {
+-            lines.push("No loops found.".to_owned());
+-            lines.push("Start one: forge up --count 1".to_owned());
+-        }
+-    }
+-    lines
+-        .into_iter()
+-        .map(|l| {
+-            if l.len() > width {
+-                l[..width].to_owned()
+-            } else {
+-                l
+-            }
+-        })
+-        .collect()
+-}
+
+tokens used
+474,033
+hi. momentum maintained; parity slice landed.
+
+- Claimed `forge-67p`; implemented wizard parity in `rust/crates/forge-tui/src/app.rs`:
+`step/field flow`, `enter validation`, `b/left back`, field editing, create payload command, richer wizard render, regression tests.
+- Added overview helper `rust/crates/forge-tui/src/overview_tab.rs` (app compile path expected it).
+- Sent task + orchestrator progress/blocker updates via `fmail`.
+
+Validation:
+- `cd rust && cargo fmt -p forge-tui --check` PASS
+- `cd rust && cargo clippy -p forge-tui --all-targets -- -D warnings` PASS
+- `cd rust && cargo test -p forge-tui` PASS
+- Full required chain failed:
+`cd rust && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
+blocked at `rust/crates/fmail-tui/src/topics.rs:773` (`clippy::unnecessary_map_or`), active `in_progress` task `forge-41g` (not stale, not mine).
+
+Queue state:
+- `sv task ready --project prj-vr0104gr --json` => `ready=0`
+- Loop status sent: idle/blocked to `@forge-orchestrator`.
+```
+

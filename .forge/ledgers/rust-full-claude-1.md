@@ -609,3 +609,39 @@ cargo test -p forge-cli            ✓ (all tests pass)
 **Validation:** `cargo fmt --check` PASS, `cargo clippy -p fmail-tui --lib` PASS, `cargo test -p fmail-tui --lib stats::tests` 29/29 PASS
 ```
 
+## 2026-02-09T20:11:55Z
+
+- run_id: 17697ec5-c792-43f5-b867-bbf737f71a0a
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T20:01:12Z
+- finished_at: 2026-02-09T20:11:55Z
+- exit_code: 0
+
+```
+## Task Summary: `forge-8w0` — Loop TUI: runs tab parity
+
+**Status**: Closed
+
+**Files created/modified**:
+- `rust/crates/forge-tui/src/runs_tab.rs` (new, ~270 lines) — runs tab view-model and rendering
+- `rust/crates/forge-tui/src/lib.rs` — added `runs_tab` and `overview_tab` module declarations
+- `rust/crates/forge-tui/src/app.rs` — added `multi_page()` accessor (unblocking concurrent `multi_logs` module)
+- `rust/crates/forge-tui/src/overview_tab.rs` — fixed clippy `needless_update` lint from concurrent agent
+
+**Deliverables**:
+- `RunEntry` struct with display-ready fields matching Go `runView`
+- `RunsTabState` view-model for rendering
+- `render_runs_pane()` matching Go `renderRunsPane` layout (header, hints, run list with selection, overflow indicator, selected run output with scroll)
+- Helper functions with Go parity: `short_run_id`, `display_name`, `truncate_line`, `format_line_window`, `run_output_lines`
+
+**Tests**: 16 passing — helper functions, empty/populated rendering, selection, scrolling, truncation, snapshot baseline
+
+**Validation**: `cargo fmt --check` PASS, `cargo clippy -D warnings` PASS, `cargo test` 16/16 PASS
+```
+
