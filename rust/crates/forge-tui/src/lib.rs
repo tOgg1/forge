@@ -5,6 +5,15 @@ use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 use forge_ftui_adapter::style::{ThemeKind, ThemeSpec};
 use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 
+pub mod actions;
+pub mod app;
+pub mod filter;
+pub mod help_overlay;
+pub mod layouts;
+pub mod logs_tab;
+pub mod runs_tab;
+pub mod theme;
+
 /// Stable crate label used by bootstrap smoke tests.
 pub fn crate_label() -> &'static str {
     "forge-tui"
