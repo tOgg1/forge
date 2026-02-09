@@ -1,0 +1,1795 @@
+use std::io::Write;
+
+use serde::Serialize;
+
+// ---------------------------------------------------------------------------
+// Domain types
+// ---------------------------------------------------------------------------
+
+/// Agent type matching Go's `models.AgentType`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentType {
+    OpenCode,
+    ClaudeCode,
+    Codex,
+    Gemini,
+    Generic,
+}
+
+impl AgentType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::OpenCode => "opencode",
+            Self::ClaudeCode => "claude-code",
+            Self::Codex => "codex",
+            Self::Gemini => "gemini",
+            Self::Generic => "generic",
+        }
+    }
+}
+
+/// Agent state matching Go's `models.AgentState`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentState {
+    Working,
+    Idle,
+    AwaitingApproval,
+    RateLimited,
+    Error,
+    Paused,
+    Starting,
+    Stopped,
+}
+
+impl AgentState {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::Idle => "idle",
+            Self::AwaitingApproval => "awaiting_approval",
+            Self::RateLimited => "rate_limited",
+            Self::Error => "error",
+            Self::Paused => "paused",
+            Self::Starting => "starting",
+            Self::Stopped => "stopped",
+        }
+    }
+
+    fn is_blocked(&self) -> bool {
+        matches!(
+            self,
+            Self::AwaitingApproval | Self::RateLimited | Self::Error
+        )
+    }
+}
+
+/// State information associated with an agent.
+#[derive(Debug, Clone, Default)]
+pub struct StateInfo {
+    pub reason: String,
+    pub confidence: String,
+}
+
+/// Queue item type matching Go's `models.QueueItemType`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueueItemType {
+    Message,
+    Pause,
+    Conditional,
+}
+
+impl QueueItemType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Message => "message",
+            Self::Pause => "pause",
+            Self::Conditional => "conditional",
+        }
+    }
+}
+
+/// Queue item status matching Go's `models.QueueItemStatus`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueueItemStatus {
+    Pending,
+    Dispatched,
+    Completed,
+    Failed,
+    Skipped,
+}
+
+impl QueueItemStatus {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Dispatched => "dispatched",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+/// Condition type for conditional queue items.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConditionType {
+    WhenIdle,
+    AfterCooldown,
+    AfterPrevious,
+    Custom,
+}
+
+impl ConditionType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::WhenIdle => "when_idle",
+            Self::AfterCooldown => "after_cooldown",
+            Self::AfterPrevious => "after_previous",
+            Self::Custom => "custom",
+        }
+    }
+}
+
+/// Conditional payload attached to a conditional queue item.
+#[derive(Debug, Clone)]
+pub struct ConditionalPayload {
+    pub condition_type: ConditionType,
+    pub expression: String,
+    pub message: String,
+}
+
+/// A full agent record for explain.
+#[derive(Debug, Clone)]
+pub struct AgentRecord {
+    pub id: String,
+    pub agent_type: AgentType,
+    pub state: AgentState,
+    pub state_info: StateInfo,
+    pub last_activity: Option<String>,
+    pub paused_until: Option<String>,
+    pub account_id: String,
+}
+
+/// Account record for cooldown information.
+#[derive(Debug, Clone)]
+pub struct AccountRecord {
+    pub profile_name: String,
+    pub cooldown_until: Option<String>,
+    pub is_in_cooldown: bool,
+}
+
+/// A queue item record for explain.
+#[derive(Debug, Clone)]
+pub struct QueueItemRecord {
+    pub id: String,
+    pub agent_id: String,
+    pub item_type: QueueItemType,
+    pub status: QueueItemStatus,
+    pub position: i32,
+    pub created_at: String,
+    pub content: Option<String>,
+    pub condition: Option<ConditionalPayload>,
+}
+
+// ---------------------------------------------------------------------------
+// Backend trait
+// ---------------------------------------------------------------------------
+
+/// Backend trait for fetching explain data.
+pub trait ExplainBackend {
+    /// Resolve an agent by ID or prefix.
+    fn resolve_agent(&self, target: &str) -> Result<AgentRecord, String>;
+
+    /// Load the current agent context from `forge use`.
+    fn load_agent_context(&self) -> Result<Option<String>, String>;
+
+    /// Load the current workspace context and return the first agent if any.
+    fn load_workspace_first_agent(&self) -> Result<Option<String>, String>;
+
+    /// List queue items for an agent.
+    fn list_queue(&self, agent_id: &str) -> Result<Vec<QueueItemRecord>, String>;
+
+    /// Get a queue item by ID.
+    fn get_queue_item(&self, item_id: &str) -> Result<QueueItemRecord, String>;
+
+    /// Get account info for an agent (if it has an account).
+    fn get_account(&self, account_id: &str) -> Result<Option<AccountRecord>, String>;
+}
+
+// ---------------------------------------------------------------------------
+// In-memory test backend
+// ---------------------------------------------------------------------------
+
+/// In-memory backend for testing.
+#[derive(Debug, Default)]
+pub struct InMemoryExplainBackend {
+    pub agents: Vec<AgentRecord>,
+    pub queue_items: Vec<QueueItemRecord>,
+    pub accounts: Vec<(String, AccountRecord)>,
+    pub context_agent_id: Option<String>,
+    pub workspace_first_agent_id: Option<String>,
+}
+
+impl ExplainBackend for InMemoryExplainBackend {
+    fn resolve_agent(&self, target: &str) -> Result<AgentRecord, String> {
+        // Try exact match first
+        if let Some(agent) = self.agents.iter().find(|a| a.id == target) {
+            return Ok(agent.clone());
+        }
+        // Try prefix match
+        let matches: Vec<&AgentRecord> = self
+            .agents
+            .iter()
+            .filter(|a| a.id.starts_with(target))
+            .collect();
+        match matches.len() {
+            1 => Ok(matches[0].clone()),
+            0 => Err(format!("agent '{target}' not found")),
+            _ => Err(format!("agent '{target}' is ambiguous")),
+        }
+    }
+
+    fn load_agent_context(&self) -> Result<Option<String>, String> {
+        Ok(self.context_agent_id.clone())
+    }
+
+    fn load_workspace_first_agent(&self) -> Result<Option<String>, String> {
+        Ok(self.workspace_first_agent_id.clone())
+    }
+
+    fn list_queue(&self, agent_id: &str) -> Result<Vec<QueueItemRecord>, String> {
+        Ok(self
+            .queue_items
+            .iter()
+            .filter(|qi| qi.agent_id == agent_id)
+            .cloned()
+            .collect())
+    }
+
+    fn get_queue_item(&self, item_id: &str) -> Result<QueueItemRecord, String> {
+        self.queue_items
+            .iter()
+            .find(|qi| qi.id == item_id)
+            .cloned()
+            .ok_or_else(|| format!("queue item not found: {item_id}"))
+    }
+
+    fn get_account(&self, account_id: &str) -> Result<Option<AccountRecord>, String> {
+        Ok(self
+            .accounts
+            .iter()
+            .find(|(id, _)| id == account_id)
+            .map(|(_, acct)| acct.clone()))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CLI entry points
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+}
+
+pub fn run_for_test(args: &[&str], backend: &dyn ExplainBackend) -> CommandOutput {
+    let owned_args: Vec<String> = args.iter().map(|a| (*a).to_string()).collect();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let exit_code = run_with_backend(&owned_args, backend, &mut stdout, &mut stderr);
+    CommandOutput {
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        exit_code,
+    }
+}
+
+pub fn run_with_backend(
+    args: &[String],
+    backend: &dyn ExplainBackend,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
+    match execute(args, backend, stdout) {
+        Ok(()) => 0,
+        Err(message) => {
+            let _ = writeln!(stderr, "{message}");
+            1
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Parsed arguments
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedArgs {
+    target: Option<String>,
+    json: bool,
+    jsonl: bool,
+}
+
+fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
+    let mut index = 0usize;
+    if args.get(index).is_some_and(|t| t == "explain") {
+        index += 1;
+    }
+
+    let mut json = false;
+    let mut jsonl = false;
+    let mut target: Option<String> = None;
+
+    while let Some(token) = args.get(index) {
+        match token.as_str() {
+            "-h" | "--help" | "help" => {
+                return Err(HELP_TEXT.to_string());
+            }
+            "--json" => {
+                json = true;
+                index += 1;
+            }
+            "--jsonl" => {
+                jsonl = true;
+                index += 1;
+            }
+            flag if flag.starts_with('-') => {
+                return Err(format!("error: unknown argument for explain: '{flag}'"));
+            }
+            positional => {
+                if target.is_some() {
+                    return Err("error: explain takes at most one positional argument".to_string());
+                }
+                target = Some(positional.to_string());
+                index += 1;
+            }
+        }
+    }
+
+    if json && jsonl {
+        return Err("error: --json and --jsonl cannot be used together".to_string());
+    }
+
+    Ok(ParsedArgs {
+        target,
+        json,
+        jsonl,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Core logic
+// ---------------------------------------------------------------------------
+
+fn execute(
+    args: &[String],
+    backend: &dyn ExplainBackend,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    let parsed = parse_args(args)?;
+
+    let target = match parsed.target.as_ref() {
+        Some(t) => t.clone(),
+        None => resolve_context_target(backend)?,
+    };
+
+    // If target starts with "qi_", explain as queue item
+    if target.starts_with("qi_") {
+        return explain_queue_item(&target, backend, &parsed, stdout);
+    }
+
+    explain_agent(&target, backend, &parsed, stdout)
+}
+
+fn resolve_context_target(backend: &dyn ExplainBackend) -> Result<String, String> {
+    // Try agent context first
+    if let Some(agent_id) = backend.load_agent_context()? {
+        if !agent_id.is_empty() {
+            return Ok(agent_id);
+        }
+    }
+    // Try workspace context and get first agent
+    if let Some(agent_id) = backend.load_workspace_first_agent()? {
+        if !agent_id.is_empty() {
+            return Ok(agent_id);
+        }
+    }
+    Err(
+        "no agent specified and no context set (use 'forge use <agent>' or provide agent ID)"
+            .to_string(),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Agent explanation
+// ---------------------------------------------------------------------------
+
+fn explain_agent(
+    target: &str,
+    backend: &dyn ExplainBackend,
+    parsed: &ParsedArgs,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    let agent = backend.resolve_agent(target)?;
+    let queue_items = backend.list_queue(&agent.id)?;
+
+    let mut explanation = build_agent_explanation(&agent, &queue_items);
+
+    // Get account info if available
+    if !agent.account_id.is_empty() {
+        if let Some(account) = backend.get_account(&agent.account_id)? {
+            let acct_status = AccountExplanation {
+                profile_name: account.profile_name,
+                cooldown_until: account.cooldown_until,
+                is_in_cooldown: account.is_in_cooldown,
+            };
+            if acct_status.is_in_cooldown {
+                explanation
+                    .block_reasons
+                    .push("account cooldown active".to_string());
+            }
+            explanation.account_status = Some(acct_status);
+        }
+    }
+
+    if parsed.json || parsed.jsonl {
+        return write_agent_json(&explanation, parsed, stdout);
+    }
+
+    write_agent_explanation_human(&explanation, stdout)
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AgentExplanationJson<'a> {
+    agent_id: &'a str,
+    #[serde(rename = "type")]
+    agent_type: &'a str,
+    state: &'a str,
+    state_info: StateInfoJson<'a>,
+    is_blocked: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    block_reasons: &'a Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    suggestions: &'a Vec<String>,
+    queue_status: QueueExplanationJson,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account_status: Option<AccountExplanationJson<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_activity: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    paused_until: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct StateInfoJson<'a> {
+    #[serde(skip_serializing_if = "str::is_empty")]
+    reason: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    confidence: &'a str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct QueueExplanationJson {
+    total_items: i32,
+    pending_items: i32,
+    blocked_items: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AccountExplanationJson<'a> {
+    #[serde(skip_serializing_if = "str::is_empty")]
+    profile_name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cooldown_until: Option<&'a str>,
+    is_in_cooldown: bool,
+}
+
+struct AgentExplanation {
+    agent_id: String,
+    agent_type: AgentType,
+    state: AgentState,
+    state_info: StateInfo,
+    is_blocked: bool,
+    block_reasons: Vec<String>,
+    suggestions: Vec<String>,
+    queue_status: QueueExplanation,
+    account_status: Option<AccountExplanation>,
+    last_activity: Option<String>,
+    paused_until: Option<String>,
+}
+
+struct QueueExplanation {
+    total_items: i32,
+    pending_items: i32,
+    blocked_items: i32,
+}
+
+struct AccountExplanation {
+    profile_name: String,
+    cooldown_until: Option<String>,
+    is_in_cooldown: bool,
+}
+
+fn build_agent_explanation(
+    agent: &AgentRecord,
+    queue_items: &[QueueItemRecord],
+) -> AgentExplanation {
+    let is_blocked = agent.state.is_blocked() || agent.state == AgentState::Paused;
+
+    let mut explanation = AgentExplanation {
+        agent_id: agent.id.clone(),
+        agent_type: agent.agent_type.clone(),
+        state: agent.state.clone(),
+        state_info: agent.state_info.clone(),
+        is_blocked,
+        block_reasons: Vec::new(),
+        suggestions: Vec::new(),
+        queue_status: QueueExplanation {
+            total_items: 0,
+            pending_items: 0,
+            blocked_items: 0,
+        },
+        account_status: None,
+        last_activity: agent.last_activity.clone(),
+        paused_until: agent.paused_until.clone(),
+    };
+
+    // Count queue items
+    for item in queue_items {
+        explanation.queue_status.total_items += 1;
+        if item.status == QueueItemStatus::Pending {
+            explanation.queue_status.pending_items += 1;
+        }
+    }
+
+    let short = short_id(&agent.id);
+
+    // Determine block reasons and suggestions
+    match agent.state {
+        AgentState::AwaitingApproval => {
+            explanation
+                .block_reasons
+                .push("waiting for user approval".to_string());
+            explanation.suggestions.push(format!(
+                "Approve pending request: forge agent approve {short}"
+            ));
+        }
+        AgentState::RateLimited => {
+            explanation
+                .block_reasons
+                .push("rate limited by provider".to_string());
+            explanation
+                .suggestions
+                .push("Wait for rate limit to expire".to_string());
+            explanation.suggestions.push(format!(
+                "Switch to different account: forge agent rotate {short}"
+            ));
+        }
+        AgentState::Error => {
+            explanation
+                .block_reasons
+                .push("agent encountered an error".to_string());
+            if !agent.state_info.reason.is_empty() {
+                explanation
+                    .block_reasons
+                    .push(agent.state_info.reason.clone());
+            }
+            explanation
+                .suggestions
+                .push(format!("Check agent status: forge agent status {short}"));
+            explanation
+                .suggestions
+                .push(format!("Restart agent: forge agent restart {short}"));
+        }
+        AgentState::Paused => {
+            explanation
+                .block_reasons
+                .push("agent is paused".to_string());
+            if agent.paused_until.is_some() {
+                explanation
+                    .block_reasons
+                    .push("will resume when pause expires".to_string());
+            }
+            explanation
+                .suggestions
+                .push(format!("Resume agent: forge agent resume {short}"));
+        }
+        AgentState::Working => {
+            explanation.suggestions.push(format!(
+                "Wait for completion: forge wait --agent {short} --until idle"
+            ));
+            explanation.suggestions.push(format!(
+                "Queue a message: forge send {short} \"your message\""
+            ));
+        }
+        AgentState::Idle => {
+            if explanation.queue_status.pending_items > 0 {
+                explanation.suggestions.push(
+                    "Queue items are pending - scheduler will dispatch next item".to_string(),
+                );
+            } else {
+                explanation.suggestions.push(format!(
+                    "Send a message: forge send {short} \"your prompt\""
+                ));
+            }
+        }
+        AgentState::Starting | AgentState::Stopped => {}
+    }
+
+    explanation
+}
+
+fn write_agent_explanation_human(
+    e: &AgentExplanation,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    let state_display = format_agent_state(&e.state);
+
+    if e.is_blocked {
+        writeln!(
+            stdout,
+            "Agent {} is {} (BLOCKED)",
+            short_id(&e.agent_id),
+            state_display
+        )
+        .map_err(|err| err.to_string())?;
+    } else {
+        writeln!(
+            stdout,
+            "Agent {} is {}",
+            short_id(&e.agent_id),
+            state_display
+        )
+        .map_err(|err| err.to_string())?;
+    }
+    writeln!(stdout).map_err(|err| err.to_string())?;
+
+    // State details
+    writeln!(stdout, "Type: {}", e.agent_type.as_str()).map_err(|err| err.to_string())?;
+    if !e.state_info.reason.is_empty() {
+        writeln!(stdout, "Reason: {}", e.state_info.reason).map_err(|err| err.to_string())?;
+    }
+    if !e.state_info.confidence.is_empty() {
+        writeln!(stdout, "Confidence: {}", e.state_info.confidence)
+            .map_err(|err| err.to_string())?;
+    }
+    writeln!(stdout).map_err(|err| err.to_string())?;
+
+    // Block reasons
+    if !e.block_reasons.is_empty() {
+        writeln!(stdout, "Block Reasons:").map_err(|err| err.to_string())?;
+        for reason in &e.block_reasons {
+            writeln!(stdout, "  - {reason}").map_err(|err| err.to_string())?;
+        }
+        writeln!(stdout).map_err(|err| err.to_string())?;
+    }
+
+    // Queue status
+    writeln!(stdout, "Queue Status:").map_err(|err| err.to_string())?;
+    writeln!(stdout, "  Total items: {}", e.queue_status.total_items)
+        .map_err(|err| err.to_string())?;
+    writeln!(stdout, "  Pending: {}", e.queue_status.pending_items)
+        .map_err(|err| err.to_string())?;
+    writeln!(stdout).map_err(|err| err.to_string())?;
+
+    // Account status
+    if let Some(acct) = &e.account_status {
+        writeln!(stdout, "Account Status:").map_err(|err| err.to_string())?;
+        if !acct.profile_name.is_empty() {
+            writeln!(stdout, "  Profile: {}", acct.profile_name).map_err(|err| err.to_string())?;
+        }
+        if acct.is_in_cooldown {
+            if let Some(until) = &acct.cooldown_until {
+                writeln!(stdout, "  Cooldown: active (ends at {until})")
+                    .map_err(|err| err.to_string())?;
+            } else {
+                writeln!(stdout, "  Cooldown: active").map_err(|err| err.to_string())?;
+            }
+        } else {
+            writeln!(stdout, "  Cooldown: none").map_err(|err| err.to_string())?;
+        }
+        writeln!(stdout).map_err(|err| err.to_string())?;
+    }
+
+    // Suggestions
+    if !e.suggestions.is_empty() {
+        writeln!(stdout, "Suggestions:").map_err(|err| err.to_string())?;
+        for (i, suggestion) in e.suggestions.iter().enumerate() {
+            writeln!(stdout, "  {}. {suggestion}", i + 1).map_err(|err| err.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+fn write_json<T: Serialize>(value: &T, jsonl: bool, stdout: &mut dyn Write) -> Result<(), String> {
+    if jsonl {
+        serde_json::to_writer(&mut *stdout, value).map_err(|err| err.to_string())?;
+    } else {
+        serde_json::to_writer_pretty(&mut *stdout, value).map_err(|err| err.to_string())?;
+    }
+    writeln!(stdout).map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+impl AgentExplanation {
+    fn to_json(&self) -> AgentExplanationJson<'_> {
+        AgentExplanationJson {
+            agent_id: &self.agent_id,
+            agent_type: self.agent_type.as_str(),
+            state: self.state.as_str(),
+            state_info: StateInfoJson {
+                reason: &self.state_info.reason,
+                confidence: &self.state_info.confidence,
+            },
+            is_blocked: self.is_blocked,
+            block_reasons: &self.block_reasons,
+            suggestions: &self.suggestions,
+            queue_status: QueueExplanationJson {
+                total_items: self.queue_status.total_items,
+                pending_items: self.queue_status.pending_items,
+                blocked_items: self.queue_status.blocked_items,
+            },
+            account_status: self
+                .account_status
+                .as_ref()
+                .map(|acct| AccountExplanationJson {
+                    profile_name: &acct.profile_name,
+                    cooldown_until: acct.cooldown_until.as_deref(),
+                    is_in_cooldown: acct.is_in_cooldown,
+                }),
+            last_activity: self.last_activity.as_deref(),
+            paused_until: self.paused_until.as_deref(),
+        }
+    }
+}
+
+// Override write_json for AgentExplanation to use the conversion
+fn write_agent_json(
+    explanation: &AgentExplanation,
+    parsed: &ParsedArgs,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    let json_val = explanation.to_json();
+    write_json(&json_val, parsed.jsonl, stdout)
+}
+
+// ---------------------------------------------------------------------------
+// Queue item explanation
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+struct QueueItemExplanationJson<'a> {
+    item_id: &'a str,
+    agent_id: &'a str,
+    #[serde(rename = "type")]
+    item_type: &'a str,
+    status: &'a str,
+    position: i32,
+    is_blocked: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    block_reasons: &'a Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    suggestions: &'a Vec<String>,
+    agent_state: &'a str,
+    created_at: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    condition: Option<ConditionJson<'a>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ConditionJson<'a> {
+    condition_type: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    expression: &'a str,
+}
+
+struct QueueItemExplanation {
+    item_id: String,
+    agent_id: String,
+    item_type: QueueItemType,
+    status: QueueItemStatus,
+    position: i32,
+    is_blocked: bool,
+    block_reasons: Vec<String>,
+    suggestions: Vec<String>,
+    agent_state: AgentState,
+    created_at: String,
+    content: Option<String>,
+    condition: Option<ConditionalPayload>,
+}
+
+impl QueueItemExplanation {
+    fn to_json(&self) -> QueueItemExplanationJson<'_> {
+        QueueItemExplanationJson {
+            item_id: &self.item_id,
+            agent_id: &self.agent_id,
+            item_type: self.item_type.as_str(),
+            status: self.status.as_str(),
+            position: self.position,
+            is_blocked: self.is_blocked,
+            block_reasons: &self.block_reasons,
+            suggestions: &self.suggestions,
+            agent_state: self.agent_state.as_str(),
+            created_at: &self.created_at,
+            content: self.content.as_deref(),
+            condition: self.condition.as_ref().map(|c| ConditionJson {
+                condition_type: c.condition_type.as_str(),
+                expression: &c.expression,
+            }),
+        }
+    }
+}
+
+fn explain_queue_item(
+    item_id: &str,
+    backend: &dyn ExplainBackend,
+    parsed: &ParsedArgs,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    let item = backend.get_queue_item(item_id)?;
+    let agent = backend.resolve_agent(&item.agent_id)?;
+
+    let explanation = build_queue_item_explanation(&item, &agent);
+
+    if parsed.json || parsed.jsonl {
+        let json_val = explanation.to_json();
+        return write_json(&json_val, parsed.jsonl, stdout);
+    }
+
+    write_queue_item_explanation_human(&explanation, stdout)
+}
+
+fn build_queue_item_explanation(
+    item: &QueueItemRecord,
+    agent: &AgentRecord,
+) -> QueueItemExplanation {
+    let mut explanation = QueueItemExplanation {
+        item_id: item.id.clone(),
+        agent_id: item.agent_id.clone(),
+        item_type: item.item_type.clone(),
+        status: item.status.clone(),
+        position: item.position,
+        is_blocked: false,
+        block_reasons: Vec::new(),
+        suggestions: Vec::new(),
+        agent_state: agent.state.clone(),
+        created_at: item.created_at.clone(),
+        content: item.content.clone(),
+        condition: item.condition.clone(),
+    };
+
+    if item.status == QueueItemStatus::Pending {
+        let short = short_id(&agent.id);
+
+        match agent.state {
+            AgentState::Working => {
+                explanation.is_blocked = true;
+                explanation
+                    .block_reasons
+                    .push("agent is currently working".to_string());
+                explanation
+                    .suggestions
+                    .push("Wait for agent to become idle".to_string());
+                explanation
+                    .suggestions
+                    .push(format!("forge wait --agent {short} --until idle"));
+            }
+            AgentState::AwaitingApproval => {
+                explanation.is_blocked = true;
+                explanation
+                    .block_reasons
+                    .push("agent is waiting for approval".to_string());
+                explanation.suggestions.push(format!(
+                    "Approve pending request: forge agent approve {short}"
+                ));
+            }
+            AgentState::Paused => {
+                explanation.is_blocked = true;
+                explanation
+                    .block_reasons
+                    .push("agent is paused".to_string());
+                if agent.paused_until.is_some() {
+                    explanation
+                        .block_reasons
+                        .push("will resume when pause expires".to_string());
+                }
+                explanation
+                    .suggestions
+                    .push(format!("Resume agent: forge agent resume {short}"));
+            }
+            AgentState::Error | AgentState::Stopped => {
+                explanation.is_blocked = true;
+                explanation
+                    .block_reasons
+                    .push(format!("agent is in {} state", agent.state.as_str()));
+                explanation
+                    .suggestions
+                    .push(format!("Check agent status: forge agent status {short}"));
+                explanation
+                    .suggestions
+                    .push(format!("Restart agent: forge agent restart {short}"));
+            }
+            AgentState::RateLimited => {
+                explanation.is_blocked = true;
+                explanation
+                    .block_reasons
+                    .push("agent is rate limited".to_string());
+                explanation
+                    .suggestions
+                    .push("Wait for rate limit to expire".to_string());
+                explanation
+                    .suggestions
+                    .push(format!("Rotate account: forge agent rotate {short}"));
+            }
+            AgentState::Idle | AgentState::Starting => {}
+        }
+
+        // Check conditional gates
+        if item.item_type == QueueItemType::Conditional {
+            if let Some(condition) = &item.condition {
+                match condition.condition_type {
+                    ConditionType::WhenIdle => {
+                        if agent.state != AgentState::Idle {
+                            explanation.is_blocked = true;
+                            explanation
+                                .block_reasons
+                                .push("conditional: waiting for agent to be idle".to_string());
+                        }
+                    }
+                    ConditionType::AfterCooldown => {
+                        explanation.is_blocked = true;
+                        explanation
+                            .block_reasons
+                            .push("conditional: waiting for cooldown to expire".to_string());
+                    }
+                    ConditionType::AfterPrevious | ConditionType::Custom => {}
+                }
+            }
+        }
+
+        // Position-based blocking
+        if item.position > 1 && !explanation.is_blocked {
+            explanation.block_reasons.push(format!(
+                "waiting for {} items ahead in queue",
+                item.position - 1
+            ));
+        }
+    }
+
+    explanation
+}
+
+fn write_queue_item_explanation_human(
+    e: &QueueItemExplanation,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    let status_display = if e.is_blocked {
+        format!("{} (BLOCKED)", e.status.as_str())
+    } else {
+        e.status.as_str().to_string()
+    };
+    writeln!(stdout, "Queue Item {} is {}", e.item_id, status_display)
+        .map_err(|err| err.to_string())?;
+    writeln!(stdout).map_err(|err| err.to_string())?;
+
+    // Details
+    writeln!(stdout, "Type: {}", e.item_type.as_str()).map_err(|err| err.to_string())?;
+    writeln!(stdout, "Position: {}", e.position).map_err(|err| err.to_string())?;
+    writeln!(
+        stdout,
+        "Agent: {} ({})",
+        short_id(&e.agent_id),
+        format_agent_state(&e.agent_state)
+    )
+    .map_err(|err| err.to_string())?;
+    writeln!(stdout, "Created: {}", e.created_at).map_err(|err| err.to_string())?;
+    if let Some(content) = &e.content {
+        writeln!(stdout, "Content: {content}").map_err(|err| err.to_string())?;
+    }
+    writeln!(stdout).map_err(|err| err.to_string())?;
+
+    // Condition details
+    if let Some(condition) = &e.condition {
+        writeln!(stdout, "Condition:").map_err(|err| err.to_string())?;
+        writeln!(stdout, "  Type: {}", condition.condition_type.as_str())
+            .map_err(|err| err.to_string())?;
+        if !condition.expression.is_empty() {
+            writeln!(stdout, "  Expression: {}", condition.expression)
+                .map_err(|err| err.to_string())?;
+        }
+        writeln!(stdout).map_err(|err| err.to_string())?;
+    }
+
+    // Block reasons
+    if !e.block_reasons.is_empty() {
+        writeln!(stdout, "Block Reasons:").map_err(|err| err.to_string())?;
+        for reason in &e.block_reasons {
+            writeln!(stdout, "  - {reason}").map_err(|err| err.to_string())?;
+        }
+        writeln!(stdout).map_err(|err| err.to_string())?;
+    }
+
+    // Suggestions
+    if !e.suggestions.is_empty() {
+        writeln!(stdout, "Suggestions:").map_err(|err| err.to_string())?;
+        for (i, suggestion) in e.suggestions.iter().enumerate() {
+            writeln!(stdout, "  {}. {suggestion}", i + 1).map_err(|err| err.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn short_id(id: &str) -> &str {
+    const LIMIT: usize = 8;
+    if id.len() <= LIMIT {
+        id
+    } else {
+        &id[..LIMIT]
+    }
+}
+
+fn format_agent_state(state: &AgentState) -> &'static str {
+    state.as_str()
+}
+
+#[allow(dead_code)]
+fn truncate_string(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else if max_len < 3 {
+        s[..max_len].to_string()
+    } else {
+        format!("{}...", &s[..max_len - 3])
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Help text
+// ---------------------------------------------------------------------------
+
+const HELP_TEXT: &str = "\
+Explain agent or queue item status
+
+Show a human-readable explanation of why an agent or queue item is in its current state.
+
+If no argument is given, explains the agent from the current context (set with 'forge use').
+
+Usage:
+  forge explain [agent-id|queue-item-id] [flags]
+
+Examples:
+  forge explain abc123        # Explain agent status
+  forge explain qi_789        # Explain queue item status
+  forge explain               # Explain context agent
+
+Flags:
+  -h, --help    help for explain";
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn make_agent(id: &str, state: AgentState) -> AgentRecord {
+        AgentRecord {
+            id: id.to_string(),
+            agent_type: AgentType::OpenCode,
+            state,
+            state_info: StateInfo::default(),
+            last_activity: None,
+            paused_until: None,
+            account_id: String::new(),
+        }
+    }
+
+    fn make_queue_item(id: &str, agent_id: &str, status: QueueItemStatus) -> QueueItemRecord {
+        QueueItemRecord {
+            id: id.to_string(),
+            agent_id: agent_id.to_string(),
+            item_type: QueueItemType::Message,
+            status,
+            position: 1,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            content: None,
+            condition: None,
+        }
+    }
+
+    // --- parse_args tests ---
+
+    fn s(val: &str) -> String {
+        val.to_string()
+    }
+
+    #[test]
+    fn parse_no_args() {
+        let args = vec![s("explain")];
+        let parsed = parse_args(&args).unwrap();
+        assert!(parsed.target.is_none());
+        assert!(!parsed.json);
+        assert!(!parsed.jsonl);
+    }
+
+    #[test]
+    fn parse_with_target() {
+        let args = vec![s("explain"), s("agent_123")];
+        let parsed = parse_args(&args).unwrap();
+        assert_eq!(parsed.target.as_deref(), Some("agent_123"));
+    }
+
+    #[test]
+    fn parse_json_flag() {
+        let args = vec![s("explain"), s("--json"), s("agent_123")];
+        let parsed = parse_args(&args).unwrap();
+        assert!(parsed.json);
+        assert_eq!(parsed.target.as_deref(), Some("agent_123"));
+    }
+
+    #[test]
+    fn parse_jsonl_flag() {
+        let args = vec![s("explain"), s("--jsonl")];
+        let parsed = parse_args(&args).unwrap();
+        assert!(parsed.jsonl);
+    }
+
+    #[test]
+    fn parse_rejects_json_and_jsonl() {
+        let args = vec![s("explain"), s("--json"), s("--jsonl")];
+        let err = parse_args(&args).unwrap_err();
+        assert!(err.contains("--json and --jsonl cannot be used together"));
+    }
+
+    #[test]
+    fn parse_rejects_unknown_flags() {
+        let args = vec![s("explain"), s("--bogus")];
+        let err = parse_args(&args).unwrap_err();
+        assert!(err.contains("unknown argument for explain"));
+    }
+
+    #[test]
+    fn parse_rejects_multiple_positional() {
+        let args = vec![s("explain"), s("arg1"), s("arg2")];
+        let err = parse_args(&args).unwrap_err();
+        assert!(err.contains("at most one positional argument"));
+    }
+
+    #[test]
+    fn parse_help_flag() {
+        let args = vec![s("explain"), s("--help")];
+        let err = parse_args(&args).unwrap_err();
+        assert!(err.contains("Explain agent or queue item status"));
+    }
+
+    #[test]
+    fn parse_short_help_flag() {
+        let args = vec![s("explain"), s("-h")];
+        let err = parse_args(&args).unwrap_err();
+        assert!(err.contains("Explain agent or queue item status"));
+    }
+
+    // --- build_agent_explanation tests ---
+
+    #[test]
+    fn agent_explanation_idle() {
+        let agent = make_agent("agent_123", AgentState::Idle);
+        let explanation = build_agent_explanation(&agent, &[]);
+
+        assert_eq!(explanation.agent_id, "agent_123");
+        assert_eq!(explanation.state, AgentState::Idle);
+        assert!(!explanation.is_blocked);
+        assert!(!explanation.suggestions.is_empty());
+    }
+
+    #[test]
+    fn agent_explanation_idle_with_pending_queue() {
+        let agent = make_agent("agent_123", AgentState::Idle);
+        let items = vec![
+            make_queue_item("qi_1", "agent_123", QueueItemStatus::Pending),
+            make_queue_item("qi_2", "agent_123", QueueItemStatus::Pending),
+        ];
+        let explanation = build_agent_explanation(&agent, &items);
+
+        assert_eq!(explanation.queue_status.total_items, 2);
+        assert_eq!(explanation.queue_status.pending_items, 2);
+        assert!(
+            explanation.suggestions[0].contains("scheduler will dispatch"),
+            "got: {}",
+            explanation.suggestions[0]
+        );
+    }
+
+    #[test]
+    fn agent_explanation_awaiting_approval() {
+        let agent = make_agent("agent_123", AgentState::AwaitingApproval);
+        let explanation = build_agent_explanation(&agent, &[]);
+
+        assert!(explanation.is_blocked);
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("approval")));
+        assert!(explanation
+            .suggestions
+            .iter()
+            .any(|s| s.contains("approve")));
+    }
+
+    #[test]
+    fn agent_explanation_rate_limited() {
+        let agent = make_agent("agent_123", AgentState::RateLimited);
+        let explanation = build_agent_explanation(&agent, &[]);
+
+        assert!(explanation.is_blocked);
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("rate limited")));
+        assert!(explanation
+            .suggestions
+            .iter()
+            .any(|s| s.contains("rate limit")));
+        assert!(explanation.suggestions.iter().any(|s| s.contains("rotate")));
+    }
+
+    #[test]
+    fn agent_explanation_error() {
+        let mut agent = make_agent("agent_123", AgentState::Error);
+        agent.state_info.reason = "connection timeout".to_string();
+        let explanation = build_agent_explanation(&agent, &[]);
+
+        assert!(explanation.is_blocked);
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("error")));
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("connection timeout")));
+        assert!(explanation.suggestions.iter().any(|s| s.contains("status")));
+        assert!(explanation
+            .suggestions
+            .iter()
+            .any(|s| s.contains("restart")));
+    }
+
+    #[test]
+    fn agent_explanation_paused() {
+        let mut agent = make_agent("agent_123", AgentState::Paused);
+        agent.paused_until = Some("2026-01-01T01:00:00Z".to_string());
+        let explanation = build_agent_explanation(&agent, &[]);
+
+        assert!(explanation.is_blocked);
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("paused")));
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("resume")));
+        assert!(explanation.suggestions.iter().any(|s| s.contains("resume")));
+    }
+
+    #[test]
+    fn agent_explanation_working() {
+        let agent = make_agent("agent_123", AgentState::Working);
+        let explanation = build_agent_explanation(&agent, &[]);
+
+        assert!(!explanation.is_blocked);
+        assert!(explanation.suggestions.iter().any(|s| s.contains("wait")));
+        assert!(explanation.suggestions.iter().any(|s| s.contains("send")));
+    }
+
+    #[test]
+    fn agent_explanation_with_mixed_queue() {
+        let agent = make_agent("agent_123", AgentState::Idle);
+        let items = vec![
+            make_queue_item("qi_1", "agent_123", QueueItemStatus::Pending),
+            make_queue_item("qi_2", "agent_123", QueueItemStatus::Completed),
+            make_queue_item("qi_3", "agent_123", QueueItemStatus::Pending),
+        ];
+        let explanation = build_agent_explanation(&agent, &items);
+
+        assert_eq!(explanation.queue_status.total_items, 3);
+        assert_eq!(explanation.queue_status.pending_items, 2);
+    }
+
+    // --- build_queue_item_explanation tests ---
+
+    #[test]
+    fn queue_item_pending_agent_working() {
+        let item = make_queue_item("qi_123", "agent_123", QueueItemStatus::Pending);
+        let agent = make_agent("agent_123", AgentState::Working);
+        let explanation = build_queue_item_explanation(&item, &agent);
+
+        assert!(explanation.is_blocked);
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("currently working")));
+    }
+
+    #[test]
+    fn queue_item_pending_agent_idle_first_position() {
+        let item = make_queue_item("qi_123", "agent_123", QueueItemStatus::Pending);
+        let agent = make_agent("agent_123", AgentState::Idle);
+        let explanation = build_queue_item_explanation(&item, &agent);
+
+        assert!(!explanation.is_blocked);
+    }
+
+    #[test]
+    fn queue_item_pending_agent_idle_later_position() {
+        let mut item = make_queue_item("qi_123", "agent_123", QueueItemStatus::Pending);
+        item.position = 3;
+        let agent = make_agent("agent_123", AgentState::Idle);
+        let explanation = build_queue_item_explanation(&item, &agent);
+
+        // Position-based blocking (not marked as is_blocked, but has block_reasons)
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("waiting for 2 items ahead")));
+    }
+
+    #[test]
+    fn queue_item_pending_agent_error() {
+        let item = make_queue_item("qi_123", "agent_123", QueueItemStatus::Pending);
+        let agent = make_agent("agent_123", AgentState::Error);
+        let explanation = build_queue_item_explanation(&item, &agent);
+
+        assert!(explanation.is_blocked);
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("error state")));
+    }
+
+    #[test]
+    fn queue_item_pending_agent_paused() {
+        let mut agent = make_agent("agent_123", AgentState::Paused);
+        agent.paused_until = Some("2026-01-01T01:00:00Z".to_string());
+        let item = make_queue_item("qi_123", "agent_123", QueueItemStatus::Pending);
+        let explanation = build_queue_item_explanation(&item, &agent);
+
+        assert!(explanation.is_blocked);
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("paused")));
+    }
+
+    #[test]
+    fn queue_item_conditional_when_idle_agent_working() {
+        let mut item = make_queue_item("qi_123", "agent_123", QueueItemStatus::Pending);
+        item.item_type = QueueItemType::Conditional;
+        item.condition = Some(ConditionalPayload {
+            condition_type: ConditionType::WhenIdle,
+            expression: String::new(),
+            message: "do something".to_string(),
+        });
+        let agent = make_agent("agent_123", AgentState::Working);
+        let explanation = build_queue_item_explanation(&item, &agent);
+
+        assert!(explanation.is_blocked);
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("conditional: waiting for agent to be idle")));
+    }
+
+    #[test]
+    fn queue_item_conditional_after_cooldown() {
+        let mut item = make_queue_item("qi_123", "agent_123", QueueItemStatus::Pending);
+        item.item_type = QueueItemType::Conditional;
+        item.condition = Some(ConditionalPayload {
+            condition_type: ConditionType::AfterCooldown,
+            expression: String::new(),
+            message: "do something".to_string(),
+        });
+        let agent = make_agent("agent_123", AgentState::Idle);
+        let explanation = build_queue_item_explanation(&item, &agent);
+
+        assert!(explanation.is_blocked);
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("cooldown to expire")));
+    }
+
+    #[test]
+    fn queue_item_completed_not_blocked() {
+        let item = make_queue_item("qi_123", "agent_123", QueueItemStatus::Completed);
+        let agent = make_agent("agent_123", AgentState::Working);
+        let explanation = build_queue_item_explanation(&item, &agent);
+
+        assert!(!explanation.is_blocked);
+        assert!(explanation.block_reasons.is_empty());
+    }
+
+    #[test]
+    fn queue_item_agent_rate_limited() {
+        let item = make_queue_item("qi_123", "agent_123", QueueItemStatus::Pending);
+        let agent = make_agent("agent_123", AgentState::RateLimited);
+        let explanation = build_queue_item_explanation(&item, &agent);
+
+        assert!(explanation.is_blocked);
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("rate limited")));
+        assert!(explanation.suggestions.iter().any(|s| s.contains("Rotate")));
+    }
+
+    #[test]
+    fn queue_item_agent_awaiting_approval() {
+        let item = make_queue_item("qi_123", "agent_123", QueueItemStatus::Pending);
+        let agent = make_agent("agent_123", AgentState::AwaitingApproval);
+        let explanation = build_queue_item_explanation(&item, &agent);
+
+        assert!(explanation.is_blocked);
+        assert!(explanation
+            .block_reasons
+            .iter()
+            .any(|r| r.contains("approval")));
+    }
+
+    // --- short_id tests ---
+
+    #[test]
+    fn short_id_short_input() {
+        assert_eq!(short_id("abc"), "abc");
+    }
+
+    #[test]
+    fn short_id_exact_limit() {
+        assert_eq!(short_id("12345678"), "12345678");
+    }
+
+    #[test]
+    fn short_id_long_input() {
+        assert_eq!(short_id("123456789abcdef"), "12345678");
+    }
+
+    // --- truncate_string tests ---
+
+    #[test]
+    fn truncate_short_string() {
+        assert_eq!(truncate_string("short", 10), "short");
+    }
+
+    #[test]
+    fn truncate_long_string() {
+        assert_eq!(truncate_string("this is a longer string", 10), "this is...");
+    }
+
+    #[test]
+    fn truncate_exact_length() {
+        assert_eq!(truncate_string("exact", 5), "exact");
+    }
+
+    #[test]
+    fn truncate_empty_string() {
+        assert_eq!(truncate_string("", 10), "");
+    }
+
+    // --- integration tests via run_for_test ---
+
+    #[test]
+    fn explain_agent_human_output() {
+        let backend = InMemoryExplainBackend {
+            agents: vec![make_agent("agent_12345678", AgentState::Idle)],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "agent_12345678"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stderr.is_empty());
+        assert!(out.stdout.contains("Agent agent_12 is idle"));
+        assert!(out.stdout.contains("Type: opencode"));
+        assert!(out.stdout.contains("Queue Status:"));
+        assert!(out.stdout.contains("Suggestions:"));
+    }
+
+    #[test]
+    fn explain_agent_blocked_output() {
+        let backend = InMemoryExplainBackend {
+            agents: vec![make_agent("agent_12345678", AgentState::AwaitingApproval)],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "agent_12345678"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stdout.contains("BLOCKED"));
+        assert!(out.stdout.contains("Block Reasons:"));
+        assert!(out.stdout.contains("approval"));
+    }
+
+    #[test]
+    fn explain_agent_json_output() {
+        let backend = InMemoryExplainBackend {
+            agents: vec![make_agent("agent_12345678", AgentState::Idle)],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "--json", "agent_12345678"], &backend);
+        assert_eq!(out.exit_code, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(parsed["agent_id"], "agent_12345678");
+        assert_eq!(parsed["state"], "idle");
+        assert_eq!(parsed["type"], "opencode");
+        assert!(!parsed["is_blocked"].as_bool().unwrap());
+        assert!(parsed["queue_status"]["total_items"].as_i64().is_some());
+    }
+
+    #[test]
+    fn explain_agent_jsonl_output() {
+        let backend = InMemoryExplainBackend {
+            agents: vec![make_agent("agent_12345678", AgentState::Idle)],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "--jsonl", "agent_12345678"], &backend);
+        assert_eq!(out.exit_code, 0);
+        let lines: Vec<&str> = out.stdout.trim().split('\n').collect();
+        assert_eq!(lines.len(), 1);
+        let parsed: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(parsed["agent_id"], "agent_12345678");
+    }
+
+    #[test]
+    fn explain_agent_with_account() {
+        let backend = InMemoryExplainBackend {
+            agents: vec![{
+                let mut a = make_agent("agent_12345678", AgentState::Idle);
+                a.account_id = "acct_1".to_string();
+                a
+            }],
+            accounts: vec![(
+                "acct_1".to_string(),
+                AccountRecord {
+                    profile_name: "main-profile".to_string(),
+                    cooldown_until: None,
+                    is_in_cooldown: false,
+                },
+            )],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "agent_12345678"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stdout.contains("Account Status:"));
+        assert!(out.stdout.contains("Profile: main-profile"));
+        assert!(out.stdout.contains("Cooldown: none"));
+    }
+
+    #[test]
+    fn explain_agent_with_cooldown() {
+        let backend = InMemoryExplainBackend {
+            agents: vec![{
+                let mut a = make_agent("agent_12345678", AgentState::Idle);
+                a.account_id = "acct_1".to_string();
+                a
+            }],
+            accounts: vec![(
+                "acct_1".to_string(),
+                AccountRecord {
+                    profile_name: "main-profile".to_string(),
+                    cooldown_until: Some("2026-01-01T01:00:00Z".to_string()),
+                    is_in_cooldown: true,
+                },
+            )],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "agent_12345678"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stdout.contains("Cooldown: active"));
+        assert!(out.stdout.contains("account cooldown active"));
+    }
+
+    #[test]
+    fn explain_queue_item_human_output() {
+        let agent = make_agent("agent_12345678", AgentState::Working);
+        let mut item = make_queue_item("qi_789", "agent_12345678", QueueItemStatus::Pending);
+        item.content = Some("hello world".to_string());
+        let backend = InMemoryExplainBackend {
+            agents: vec![agent],
+            queue_items: vec![item],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "qi_789"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out
+            .stdout
+            .contains("Queue Item qi_789 is pending (BLOCKED)"));
+        assert!(out.stdout.contains("Type: message"));
+        assert!(out.stdout.contains("Content: hello world"));
+        assert!(out.stdout.contains("currently working"));
+    }
+
+    #[test]
+    fn explain_queue_item_json_output() {
+        let agent = make_agent("agent_12345678", AgentState::Idle);
+        let item = make_queue_item("qi_789", "agent_12345678", QueueItemStatus::Pending);
+        let backend = InMemoryExplainBackend {
+            agents: vec![agent],
+            queue_items: vec![item],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "--json", "qi_789"], &backend);
+        assert_eq!(out.exit_code, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(parsed["item_id"], "qi_789");
+        assert_eq!(parsed["type"], "message");
+        assert_eq!(parsed["status"], "pending");
+        assert_eq!(parsed["agent_state"], "idle");
+    }
+
+    #[test]
+    fn explain_queue_item_with_condition() {
+        let agent = make_agent("agent_12345678", AgentState::Working);
+        let mut item = make_queue_item("qi_789", "agent_12345678", QueueItemStatus::Pending);
+        item.item_type = QueueItemType::Conditional;
+        item.condition = Some(ConditionalPayload {
+            condition_type: ConditionType::WhenIdle,
+            expression: String::new(),
+            message: "run when idle".to_string(),
+        });
+        let backend = InMemoryExplainBackend {
+            agents: vec![agent],
+            queue_items: vec![item],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "qi_789"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stdout.contains("Condition:"));
+        assert!(out.stdout.contains("Type: when_idle"));
+        assert!(out
+            .stdout
+            .contains("conditional: waiting for agent to be idle"));
+    }
+
+    #[test]
+    fn explain_context_agent() {
+        let backend = InMemoryExplainBackend {
+            agents: vec![make_agent("agent_12345678", AgentState::Idle)],
+            context_agent_id: Some("agent_12345678".to_string()),
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stdout.contains("Agent agent_12 is idle"));
+    }
+
+    #[test]
+    fn explain_workspace_first_agent() {
+        let backend = InMemoryExplainBackend {
+            agents: vec![make_agent("agent_12345678", AgentState::Working)],
+            workspace_first_agent_id: Some("agent_12345678".to_string()),
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stdout.contains("Agent agent_12 is working"));
+    }
+
+    #[test]
+    fn explain_no_context_errors() {
+        let backend = InMemoryExplainBackend::default();
+        let out = run_for_test(&["explain"], &backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("no agent specified"));
+    }
+
+    #[test]
+    fn explain_agent_not_found_errors() {
+        let backend = InMemoryExplainBackend::default();
+        let out = run_for_test(&["explain", "nonexistent"], &backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("not found"));
+    }
+
+    #[test]
+    fn explain_queue_item_not_found_errors() {
+        let backend = InMemoryExplainBackend::default();
+        let out = run_for_test(&["explain", "qi_nonexistent"], &backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("not found"));
+    }
+
+    #[test]
+    fn explain_help_output() {
+        let backend = InMemoryExplainBackend::default();
+        let out = run_for_test(&["explain", "--help"], &backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("Explain agent or queue item status"));
+        assert!(out.stderr.contains("forge explain"));
+    }
+
+    #[test]
+    fn explain_agent_error_with_reason_json() {
+        let mut agent = make_agent("agent_12345678", AgentState::Error);
+        agent.state_info.reason = "connection timeout".to_string();
+        agent.state_info.confidence = "high".to_string();
+        let backend = InMemoryExplainBackend {
+            agents: vec![agent],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "--json", "agent_12345678"], &backend);
+        assert_eq!(out.exit_code, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert!(parsed["is_blocked"].as_bool().unwrap());
+        assert_eq!(parsed["state_info"]["reason"], "connection timeout");
+        assert_eq!(parsed["state_info"]["confidence"], "high");
+    }
+
+    #[test]
+    fn explain_agent_paused_with_time() {
+        let mut agent = make_agent("agent_12345678", AgentState::Paused);
+        agent.paused_until = Some("2026-01-01T01:00:00Z".to_string());
+        let backend = InMemoryExplainBackend {
+            agents: vec![agent],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "agent_12345678"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stdout.contains("BLOCKED"));
+        assert!(out.stdout.contains("paused"));
+        assert!(out.stdout.contains("resume"));
+    }
+
+    #[test]
+    fn explain_agent_prefix_match() {
+        let backend = InMemoryExplainBackend {
+            agents: vec![make_agent("agent_12345678abcdef", AgentState::Idle)],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "agent_12"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stdout.contains("is idle"));
+    }
+
+    #[test]
+    fn explain_agent_json_omits_empty_fields() {
+        let agent = make_agent("agent_12345678", AgentState::Idle);
+        let backend = InMemoryExplainBackend {
+            agents: vec![agent],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "--json", "agent_12345678"], &backend);
+        assert_eq!(out.exit_code, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        // Empty block_reasons and suggestions should be omitted
+        assert!(parsed.get("block_reasons").is_none());
+        assert!(parsed.get("account_status").is_none());
+        assert!(parsed.get("last_activity").is_none());
+        assert!(parsed.get("paused_until").is_none());
+    }
+
+    #[test]
+    fn explain_queue_item_json_omits_empty_fields() {
+        let agent = make_agent("agent_12345678", AgentState::Idle);
+        let item = make_queue_item("qi_789", "agent_12345678", QueueItemStatus::Pending);
+        let backend = InMemoryExplainBackend {
+            agents: vec![agent],
+            queue_items: vec![item],
+            ..Default::default()
+        };
+        let out = run_for_test(&["explain", "--json", "qi_789"], &backend);
+        assert_eq!(out.exit_code, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        // No content or condition
+        assert!(parsed.get("content").is_none());
+        assert!(parsed.get("condition").is_none());
+    }
+}

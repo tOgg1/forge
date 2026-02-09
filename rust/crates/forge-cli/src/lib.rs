@@ -10,8 +10,10 @@ pub mod context;
 pub mod doctor;
 pub mod error_envelope;
 pub mod explain;
+pub mod export;
 pub mod hook;
 pub mod init;
+pub mod inject;
 pub mod kill;
 pub mod lock;
 pub mod logs;
@@ -94,6 +96,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let forwarded = forward_args(remaining, &flags);
             hook::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
+        Some("inject") => {
+            let mut backend = inject::InMemoryInjectBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            inject::run_with_backend(&forwarded, &mut backend, stdout, stderr)
+        }
         Some("init") => {
             let backend = init::FilesystemInitBackend;
             let forwarded = forward_args(remaining, &flags);
@@ -149,6 +156,16 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let backend = doctor::InMemoryDoctorBackend::default();
             let forwarded = forward_args(remaining, &flags);
             doctor::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
+        Some("explain") => {
+            let backend = explain::InMemoryExplainBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            explain::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
+        Some("export") => {
+            let backend = export::InMemoryExportBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            export::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("migrate") => {
             let forwarded = forward_args(remaining, &flags);
@@ -349,7 +366,10 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  context   Show current context")?;
     writeln!(out, "  config    Manage global configuration")?;
     writeln!(out, "  doctor    Run environment diagnostics")?;
+    writeln!(out, "  explain   Explain agent or queue item status")?;
+    writeln!(out, "  export    Export Forge data")?;
     writeln!(out, "  hook      Manage event hooks")?;
+    writeln!(out, "  inject    Inject message directly into agent")?;
     writeln!(out, "  init      Initialize a repo for Forge loops")?;
     writeln!(out, "  kill      Kill loops immediately")?;
     writeln!(out, "  lock      Manage advisory file locks")?;
@@ -448,10 +468,10 @@ pub struct RootCommandOutput {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::{
-        audit, clean, completion, config, context, crate_label, doctor, hook, init, kill, lock,
-        logs, loop_internal, mail, mem, migrate, msg, pool, profile, prompt, ps, queue, resume, rm,
-        run, run_for_test, run_with_args, scale, send, seq, skills, status, stop, template, tui,
-        up, wait, work, workflow,
+        audit, clean, completion, config, context, crate_label, doctor, explain, export, hook,
+        init, inject, kill, lock, logs, loop_internal, mail, mem, migrate, msg, pool, profile,
+        prompt, ps, queue, resume, rm, run, run_for_test, run_with_args, scale, send, seq, skills,
+        status, stop, template, tui, up, wait, work, workflow,
     };
 
     #[test]
@@ -470,8 +490,23 @@ mod tests {
     }
 
     #[test]
+    fn explain_module_is_accessible() {
+        let _ = explain::InMemoryExplainBackend::default();
+    }
+
+    #[test]
+    fn export_module_is_accessible() {
+        let _ = export::InMemoryExportBackend::default();
+    }
+
+    #[test]
     fn hook_module_is_accessible() {
         let _ = hook::InMemoryHookBackend::default();
+    }
+
+    #[test]
+    fn inject_module_is_accessible() {
+        let _ = inject::InMemoryInjectBackend::default();
     }
 
     #[test]
@@ -664,7 +699,10 @@ mod tests {
         assert!(rendered.contains("clean"));
         assert!(rendered.contains("config"));
         assert!(rendered.contains("doctor"));
+        assert!(rendered.contains("explain"));
+        assert!(rendered.contains("export"));
         assert!(rendered.contains("hook"));
+        assert!(rendered.contains("inject"));
         assert!(rendered.contains("init"));
         assert!(rendered.contains("kill"));
         assert!(rendered.contains("lock"));
