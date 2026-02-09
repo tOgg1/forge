@@ -24,6 +24,8 @@ func TestRustFmailGateSpecPinned(t *testing.T) {
 		"fmail-tui",
 		"Command surface parity (`fmail`)",
 		"TUI CLI parity (`fmail-tui`)",
+		"docs/rust-fmail-tui-checklist.md",
+		"scripts/rust-fmail-tui-smoke.sh",
 		"TestFmailGateCommandAndTUIBaseline",
 	} {
 		if !strings.Contains(gateDoc, want) {
@@ -33,6 +35,9 @@ func TestRustFmailGateSpecPinned(t *testing.T) {
 
 	if !strings.Contains(matrix, "docs/rust-fmail-gate.md") {
 		t.Fatalf("rust parity matrix missing fmail gate doc reference")
+	}
+	if !strings.Contains(matrix, "docs/rust-fmail-tui-checklist.md") {
+		t.Fatalf("rust parity matrix missing fmail TUI checklist reference")
 	}
 
 	if !strings.Contains(workflow, "TestFmailGateCommandAndTUIBaseline") {

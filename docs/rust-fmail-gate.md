@@ -41,6 +41,9 @@ Define strict, testable criteria for `fmail` CLI and `fmail-tui` parity before R
   - message open/read/ack,
   - compose/send (topic + DM),
   - topic browsing and watch-style live updates.
+- Baseline checklist + smoke probes:
+  - `docs/rust-fmail-tui-checklist.md`
+  - `scripts/rust-fmail-tui-smoke.sh`
 - Any divergence requires explicit parity exception and owner sign-off.
 
 4. Cutover rule
@@ -56,4 +59,7 @@ Define strict, testable criteria for `fmail` CLI and `fmail-tui` parity before R
 
 - Green CI run for fmail gate baseline test.
 - Parity matrix fmail workflow row references this gate doc.
+- fmail TUI checklist + smoke run output attached:
+  - `docs/rust-fmail-tui-checklist.md`
+  - `build/rust-fmail-tui-smoke.txt`
 - Release checklist includes fmail/fmail-tui workflow sign-off.

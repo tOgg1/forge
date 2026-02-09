@@ -17,11 +17,12 @@ Version: `v0` (2026-02-09)
 | Forge CLI help/flags | `cmd/forge`, `internal/cli` | `forge-cli` | parity snapshots + doccheck + `docs/rust-cli-gate.md` | in-progress | CLI gate criteria + CI baseline test wired |
 | fmail CLI help/flags | `cmd/fmail`, `internal/fmail` | `fmail-cli` | `docs/forge-mail/help/*` + doccheck | in-progress | command manifest frozen |
 | fmail-tui CLI flags | `cmd/fmail-tui`, `internal/fmailtui` | `fmail-tui` | `docs/forge-mail/help/*` + doccheck | in-progress | flag matrix frozen |
+| Config helper command families (`profile`/`pool`/`prompt`/`template`/`seq`) | `internal/cli/{profile,pool,prompt,template,sequence}` | `forge-cli` | `docs/forge/help/forge-{profile,pool,prompt,template,seq}-help.txt` + `internal/doccheck/forge_helper_family_snapshot_test.go` | in-progress | CRUD/list/show/run/edit surfaces locked via helper-family snapshots |
 | DB migrations/schema | `internal/db/migrations` | `forge-db` | schema fingerprint tests | in-progress | baseline files committed in `internal/parity/testdata/schema/*` |
 | Loop runtime semantics | `internal/loop`, `internal/queue` | `forge-loop` | characterization harness + `docs/rust-runtime-gate.md` | in-progress | runtime gate criteria + CI baseline test wired |
 | Daemon + runner protocol | `internal/forged`, `internal/agent/runner` | `forge-daemon` + `forge-runner` | proto compat tests + `docs/rust-daemon-proto-gate.md` | in-progress | gate criteria + CI baseline test wired |
 | Loop TUI workflows | `internal/looptui` | `forge-tui` | manual + scripted smoke + `docs/rust-loop-tui-gate.md` + `docs/rust-loop-tui-checklist.md` | in-progress | gate criteria documented; checklist + smoke script baseline added |
-| fmail/fmail-tui workflows | `internal/fmail`, `internal/fmailtui` | `fmail-core` + `fmail-tui` | scripted + manual checklist + `docs/rust-fmail-gate.md` | in-progress | gate criteria + CI baseline test wired |
+| fmail/fmail-tui workflows | `internal/fmail`, `internal/fmailtui` | `fmail-core` + `fmail-tui` | scripted + manual checklist + `docs/rust-fmail-gate.md` + `docs/rust-fmail-tui-checklist.md` | in-progress | gate criteria + CI baseline test wired; checklist + smoke script baseline added |
 
 ## Required evidence per gate
 
