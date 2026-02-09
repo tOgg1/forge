@@ -1188,7 +1188,12 @@ mod tests {
         let conn = db.conn();
         match conn.execute(
             "INSERT INTO profiles (id, name, harness, command_template) VALUES (?1, ?2, ?3, ?4)",
-            params!["prof-xyz", "test-profile", "claude", "claude --prompt {{prompt}}"],
+            params![
+                "prof-xyz",
+                "test-profile",
+                "claude",
+                "claude --prompt {{prompt}}"
+            ],
         ) {
             Ok(_) => {}
             Err(e) => panic!("insert profile: {e}"),
