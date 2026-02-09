@@ -19,3 +19,4 @@ Each ADR follows a simple template:
 - 0002-control-plane-topology.md
 - 0003-approval-policy-defaults.md
 - 0004-transcript-retention.md
+- 0005-rust-single-switch-policy.md

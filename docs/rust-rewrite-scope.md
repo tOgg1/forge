@@ -10,6 +10,7 @@ Use FrankenTUI (`frankentui`) for TUI layers.
 Use rewrite window to remove legacy code safely.
 
 Companion manifest: `docs/rust-port-manifest.md`.
+Baseline snapshot: `docs/rust-baseline-inventory-v2026-02-09.md`.
 
 ## Non-Negotiables
 
