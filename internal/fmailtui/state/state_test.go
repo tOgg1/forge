@@ -116,3 +116,48 @@ func TestManager_GroupRoundTripAndNormalization(t *testing.T) {
 	require.Equal(t, []string{"@coder-1", "@designer"}, groups["frontend"])
 	require.NotContains(t, groups, "empty")
 }
+
+func TestManager_LayoutPreferencesRoundTripAndNormalize(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".fmail", "tui-state.json")
+	m := New(path)
+	require.NoError(t, m.Load())
+
+	m.UpdatePreferences(func(p *Preferences) {
+		p.DefaultLayout = "DASHBOARD"
+		p.LayoutSplitRatio = 9
+		p.LayoutSplitCollapsed = true
+		p.LayoutFocus = -4
+		p.LayoutExpanded = true
+		p.DashboardGrid = "5x5"
+		p.DashboardViews = []string{"topics", "thread", "agents", "live-tail", "overflow"}
+	})
+	require.NoError(t, m.SaveNow())
+
+	reloaded := New(path)
+	require.NoError(t, reloaded.Load())
+	p := reloaded.Preferences()
+	require.Equal(t, "dashboard", p.DefaultLayout)
+	require.Equal(t, 0.8, p.LayoutSplitRatio)
+	require.True(t, p.LayoutSplitCollapsed)
+	require.Equal(t, 0, p.LayoutFocus)
+	require.True(t, p.LayoutExpanded)
+	require.Equal(t, "2x2", p.DashboardGrid)
+	require.Equal(t, []string{"topics", "thread", "agents", "live-tail"}, p.DashboardViews)
+}
+
+func TestManager_ThemePreferenceRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".fmail", "tui-state.json")
+	m := New(path)
+	require.NoError(t, m.Load())
+
+	require.Equal(t, "", m.Theme())
+	m.SetTheme("high-contrast")
+	require.NoError(t, m.SaveNow())
+
+	loaded := New(path)
+	require.NoError(t, loaded.Load())
+	require.Equal(t, "high-contrast", loaded.Theme())
+	require.Equal(t, "high-contrast", loaded.Preferences().Theme)
+}

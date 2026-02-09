@@ -2,7 +2,12 @@ package styles
 
 // HighContrastTheme favors legibility on low-quality terminals.
 var HighContrastTheme = Theme{
-	Name: "high-contrast",
+	Name:        "high-contrast",
+	BorderStyle: "double",
+	AgentPalette: []string{
+		"51", "45", "39", "33", "87", "81", "75", "69",
+		"226", "220", "214", "203", "196", "201", "159", "195",
+	},
 	Base: BaseColors{
 		Background: "16",
 		Foreground: "231",

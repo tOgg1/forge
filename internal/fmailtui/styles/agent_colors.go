@@ -28,8 +28,17 @@ type AgentColorMapper struct {
 
 // NewAgentColorMapper returns a deterministic mapper with default palette.
 func NewAgentColorMapper() *AgentColorMapper {
-	paletteCopy := make([]string, len(AgentColorPalette))
-	copy(paletteCopy, AgentColorPalette)
+	return NewAgentColorMapperWithPalette(nil)
+}
+
+// NewAgentColorMapperWithPalette returns a mapper using the provided ANSI-256 palette.
+// If palette is empty, AgentColorPalette is used.
+func NewAgentColorMapperWithPalette(palette []string) *AgentColorMapper {
+	if len(palette) == 0 {
+		palette = AgentColorPalette
+	}
+	paletteCopy := make([]string, len(palette))
+	copy(paletteCopy, palette)
 
 	return &AgentColorMapper{
 		palette:    paletteCopy,

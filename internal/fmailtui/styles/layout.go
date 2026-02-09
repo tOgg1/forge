@@ -84,7 +84,7 @@ func narrowColumns(totalWidth int) ColumnWidths {
 // PanelStyle returns a focused/unfocused border style for panes.
 func PanelStyle(theme Theme, focused bool) lipgloss.Style {
 	return lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
+		BorderStyle(panelBorderStyle(theme)).
 		BorderForeground(lipgloss.Color(panelBorderColor(theme, focused))).
 		Padding(LayoutInnerPadding).
 		MarginBottom(LayoutPanelMargin)
@@ -100,6 +100,19 @@ func panelBorderColor(theme Theme, focused bool) string {
 		return theme.Borders.ActivePane
 	}
 	return theme.Borders.InactivePane
+}
+
+func panelBorderStyle(theme Theme) lipgloss.Border {
+	switch theme.BorderStyle {
+	case "double":
+		return lipgloss.DoubleBorder()
+	case "sharp":
+		return lipgloss.NormalBorder()
+	case "hidden":
+		return lipgloss.HiddenBorder()
+	default:
+		return lipgloss.RoundedBorder()
+	}
 }
 
 func clampInt(v, lo, hi int) int {

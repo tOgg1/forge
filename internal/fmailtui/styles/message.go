@@ -28,7 +28,7 @@ type MessageStyles struct {
 // NewMessageStyles builds a reusable style set for messages.
 func NewMessageStyles(theme Theme, mapper *AgentColorMapper) MessageStyles {
 	if mapper == nil {
-		mapper = NewAgentColorMapper()
+		mapper = NewAgentColorMapperWithPalette(theme.AgentPalette)
 	}
 
 	return MessageStyles{
