@@ -39,6 +39,27 @@ func TestBuildSummarizesOutcomes(t *testing.T) {
 	}
 }
 
+func TestBuildFailsWhenOutcomeUnknown(t *testing.T) {
+	now := time.Date(2026, 2, 9, 12, 0, 0, 0, time.UTC)
+
+	d, err := Build(Input{
+		Checks: []InputCheck{
+			{ID: "oracle", Name: "Oracle", Outcome: "success"},
+			{ID: "schema", Name: "Schema", Outcome: ""},
+		},
+	}, now)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	if d.Summary.Unknown != 1 {
+		t.Fatalf("unknown summary count: %+v", d.Summary)
+	}
+	if d.Summary.Status != "fail" {
+		t.Fatalf("status: %q", d.Summary.Status)
+	}
+}
+
 func TestWriteFilesWritesJSONAndMarkdown(t *testing.T) {
 	now := time.Date(2026, 2, 9, 12, 0, 0, 0, time.UTC)
 	d, err := Build(Input{
@@ -72,4 +93,3 @@ func TestWriteFilesWritesJSONAndMarkdown(t *testing.T) {
 		t.Fatalf("stat md: %v", err)
 	}
 }
-

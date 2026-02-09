@@ -110,7 +110,8 @@ func Build(input Input, now time.Time) (Dashboard, error) {
 		}
 	}
 
-	if d.Summary.Failed > 0 {
+	// Fail closed: unknown outcomes mean we cannot trust parity status.
+	if d.Summary.Failed > 0 || d.Summary.Unknown > 0 {
 		d.Summary.Status = "fail"
 	} else {
 		d.Summary.Status = "pass"
@@ -163,4 +164,3 @@ func WriteFiles(outDir string, d Dashboard, writeMarkdown bool) error {
 
 	return nil
 }
-
