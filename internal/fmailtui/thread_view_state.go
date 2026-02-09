@@ -26,6 +26,36 @@ func (v *threadView) loadState() {
 		}
 		v.readMarkers[target] = marker
 	}
+
+	// Bookmarks + annotations used for rendering affordances.
+	if v.bookmarkedIDs == nil {
+		v.bookmarkedIDs = make(map[string]bool)
+	}
+	for k := range v.bookmarkedIDs {
+		delete(v.bookmarkedIDs, k)
+	}
+	for _, bm := range snap.Bookmarks {
+		id := strings.TrimSpace(bm.MessageID)
+		if id == "" {
+			continue
+		}
+		v.bookmarkedIDs[id] = true
+	}
+
+	if v.annotations == nil {
+		v.annotations = make(map[string]string)
+	}
+	for k := range v.annotations {
+		delete(v.annotations, k)
+	}
+	for id, note := range snap.Annotations {
+		id = strings.TrimSpace(id)
+		note = strings.TrimSpace(note)
+		if id == "" || note == "" {
+			continue
+		}
+		v.annotations[id] = note
+	}
 }
 
 func (v *threadView) persistReadMarker(target, marker string) {

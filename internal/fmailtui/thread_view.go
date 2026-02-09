@@ -67,12 +67,15 @@ type threadView struct {
 	limit        int
 	total        int
 	allMsgs      []fmail.Message
+	msgByID      map[string]fmail.Message
 	rows         []threadRow
 	rowIndexByID map[string]int
 
 	collapsed      map[string]bool
 	expandedBodies map[string]bool
 	readMarkers    map[string]string
+	bookmarkedIDs  map[string]bool
+	annotations    map[string]string
 
 	selected int
 	top      int
@@ -82,6 +85,10 @@ type threadView struct {
 	viewportRows int
 	pendingNew   int
 	newestID     string
+
+	rowCardCache      map[string][]string
+	rowCardCacheTheme string
+	rowCardCacheWidth int
 
 	initialized bool
 }
@@ -98,6 +105,8 @@ func newThreadView(root string, provider data.MessageProvider, st *tuistate.Mana
 		collapsed:      make(map[string]bool),
 		expandedBodies: make(map[string]bool),
 		readMarkers:    make(map[string]string),
+		bookmarkedIDs:  make(map[string]bool),
+		annotations:    make(map[string]string),
 		rowIndexByID:   make(map[string]int),
 	}
 }
@@ -204,6 +213,10 @@ func (v *threadView) View(width, height int, theme Theme) string {
 
 	base := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Foreground)).Background(lipgloss.Color(palette.Base.Background))
 	return base.Render(content)
+}
+
+func (v *threadView) MinSize() (int, int) {
+	return 40, 10
 }
 
 func (v *threadView) handleKey(msg tea.KeyMsg) tea.Cmd {
@@ -381,6 +394,23 @@ func threadTickCmd() tea.Cmd {
 func (v *threadView) rebuildRows(anchorID string, preferBottom bool) {
 	msgs := v.allMsgs
 	rows := make([]threadRow, 0, len(msgs))
+
+	// Rebuild msg index + clear render cache (connectors/collapse state change).
+	if v.msgByID == nil {
+		v.msgByID = make(map[string]fmail.Message, len(msgs))
+	} else {
+		for k := range v.msgByID {
+			delete(v.msgByID, k)
+		}
+	}
+	for i := range msgs {
+		if id := strings.TrimSpace(msgs[i].ID); id != "" {
+			v.msgByID[id] = msgs[i]
+		}
+	}
+	v.rowCardCache = nil
+	v.rowCardCacheTheme = ""
+	v.rowCardCacheWidth = 0
 
 	if v.mode == threadModeFlat {
 		sorted := append([]fmail.Message(nil), msgs...)

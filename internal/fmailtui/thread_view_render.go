@@ -58,7 +58,7 @@ func (v *threadView) renderRows(width, height int, palette styles.Theme) string 
 	start := clampInt(v.top, 0, maxInt(0, len(v.rows)-1))
 	remaining := height
 	out := make([]string, 0, height)
-	mapper := styles.NewAgentColorMapper()
+	mapper := styles.NewAgentColorMapperWithPalette(palette.AgentPalette)
 	msgStyles := styles.NewMessageStyles(palette, mapper)
 
 	for i := start; i < len(v.rows) && remaining > 0; i++ {
@@ -90,6 +90,19 @@ func (v *threadView) renderRows(width, height int, palette styles.Theme) string 
 }
 
 func (v *threadView) renderRowCard(row threadRow, width int, selected bool, unread bool, palette styles.Theme, mapper *styles.AgentColorMapper, msgStyles styles.MessageStyles) []string {
+	id := strings.TrimSpace(row.msg.ID)
+	if id != "" {
+		if v.rowCardCache == nil || v.rowCardCacheTheme != palette.Name || v.rowCardCacheWidth != width {
+			v.rowCardCache = make(map[string][]string, 256)
+			v.rowCardCacheTheme = palette.Name
+			v.rowCardCacheWidth = width
+		}
+		key := fmt.Sprintf("%s|%d|%t|%t|%s", id, width, selected, unread, palette.Name)
+		if cached, ok := v.rowCardCache[key]; ok {
+			return cached
+		}
+	}
+
 	agentColor := mapper.ColorCode(row.msg.From)
 	borderColor := agentColor
 	if selected {
@@ -101,7 +114,7 @@ func (v *threadView) renderRowCard(row threadRow, width int, selected bool, unre
 		timeLabel = row.msg.Time.UTC().Format(time.RFC3339)
 	}
 
-	agentName := mapper.Foreground(row.msg.From).Render(strings.TrimSpace(row.msg.From))
+	agentName := mapper.Foreground(row.msg.From).Render(mapper.Plain(row.msg.From))
 	indent := row.connector
 	if row.overflow {
 		indent = indent + "... "
@@ -111,17 +124,45 @@ func (v *threadView) renderRowCard(row threadRow, width int, selected bool, unre
 		unreadDot = msgStyles.RenderUnreadIndicator(true) + " "
 	}
 
-	header := fmt.Sprintf("%s%s (%s)", indent+unreadDot+agentName, "", timeLabel)
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted))
+	headerParts := []string{
+		indent + unreadDot + agentName,
+		muted.Render("· " + timeLabel),
+	}
+	if badge := msgStyles.RenderPriorityBadge(row.msg.Priority); badge != "" {
+		headerParts = append(headerParts, badge)
+	}
+	if v.bookmarkedIDs != nil && v.bookmarkedIDs[id] {
+		headerParts = append(headerParts, lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Accent)).Bold(true).Render("★"))
+	}
+	header := strings.Join(headerParts, " ")
 	content := []string{header}
 
 	bodyWidth := maxInt(10, width-8-lipgloss.Width(indent))
+	bodyPrefix := strings.Repeat(" ", lipgloss.Width(indent))
+
+	if row.replyTo != "" {
+		replyTarget := shortID(row.replyTo)
+		if v.msgByID != nil {
+			if parent, ok := v.msgByID[row.replyTo]; ok {
+				if from := strings.TrimSpace(parent.From); from != "" {
+					replyTarget = mapper.Plain(from)
+				}
+			}
+		}
+		replyLine := "↩ replying to " + replyTarget
+		if row.crossTarget != "" {
+			replyLine += " from " + row.crossTarget
+		}
+		content = append(content, bodyPrefix+muted.Render(replyLine))
+	}
+
 	bodyLines := renderBodyLines(messageBodyString(row.msg.Body), bodyWidth, palette)
 	if row.truncated {
 		limit := minInt(threadMaxBodyLines, len(bodyLines))
 		bodyLines = bodyLines[:limit]
 	}
 
-	bodyPrefix := strings.Repeat(" ", lipgloss.Width(indent))
 	for _, line := range bodyLines {
 		content = append(content, bodyPrefix+line)
 	}
@@ -130,22 +171,28 @@ func (v *threadView) renderRowCard(row threadRow, width int, selected bool, unre
 	}
 
 	footerParts := make([]string, 0, 4)
-	if badge := msgStyles.RenderPriorityBadge(row.msg.Priority); badge != "" {
-		footerParts = append(footerParts, badge)
-	}
 	if tags := msgStyles.RenderTagPills(row.msg.Tags); tags != "" {
 		footerParts = append(footerParts, tags)
-	}
-	if row.replyTo != "" {
-		reply := "↩ " + shortID(row.replyTo)
-		if row.crossTarget != "" {
-			reply = reply + " from " + row.crossTarget
-		}
-		footerParts = append(footerParts, reply)
 	}
 	if len(footerParts) > 0 {
 		content = append(content, bodyPrefix+strings.Join(footerParts, "  "))
 	}
+
+	if v.annotations != nil {
+		if note := strings.TrimSpace(v.annotations[id]); note != "" {
+			noteStyle := lipgloss.NewStyle().
+				BorderLeft(true).
+				BorderStyle(lipgloss.Border{Left: "▌"}).
+				BorderForeground(lipgloss.Color(palette.Base.Accent)).
+				Foreground(lipgloss.Color(palette.Base.Foreground)).
+				Background(lipgloss.Color(palette.Borders.Divider)).
+				PaddingLeft(1)
+			for _, nl := range wrapLines("NOTE: "+note, maxInt(10, bodyWidth-2)) {
+				content = append(content, bodyPrefix+noteStyle.Render(nl))
+			}
+		}
+	}
+
 	if selected {
 		details := fmt.Sprintf("id:%s", row.msg.ID)
 		if host := strings.TrimSpace(row.msg.Host); host != "" {
@@ -155,9 +202,22 @@ func (v *threadView) renderRowCard(row threadRow, width int, selected bool, unre
 	}
 
 	card := strings.Join(content, "\n")
-	cardStyle := lipgloss.NewStyle().BorderLeft(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color(borderColor)).PaddingLeft(1)
-	if selected {
-		cardStyle = cardStyle.Bold(true)
+	left := "││"
+	if unread {
+		left = "┃┃"
 	}
-	return strings.Split(cardStyle.Width(maxInt(0, width)).Render(card), "\n")
+	if selected {
+		left = "║║"
+	}
+	cardStyle := lipgloss.NewStyle().
+		BorderLeft(true).
+		BorderStyle(lipgloss.Border{Left: left}).
+		BorderForeground(lipgloss.Color(borderColor)).
+		PaddingLeft(1)
+	rendered := strings.Split(cardStyle.Width(maxInt(0, width)).Render(card), "\n")
+	if id != "" && v.rowCardCache != nil {
+		key := fmt.Sprintf("%s|%d|%t|%t|%s", id, width, selected, unread, palette.Name)
+		v.rowCardCache[key] = append([]string(nil), rendered...)
+	}
+	return rendered
 }
