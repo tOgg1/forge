@@ -3,6 +3,7 @@ package fmailtui
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,11 +22,14 @@ type stubTopicsProvider struct {
 	byTopic map[string][]fmail.Message
 	byDM    map[string][]fmail.Message
 
-	topicCalls map[string]int
-	dmCalls    map[string]int
+	topicsCalls int
+	dmsCalls    int
+	topicCalls  map[string]int
+	dmCalls     map[string]int
 }
 
 func (s *stubTopicsProvider) Topics() ([]data.TopicInfo, error) {
+	s.topicsCalls++
 	out := make([]data.TopicInfo, len(s.topics))
 	copy(out, s.topics)
 	return out, nil
@@ -45,6 +49,7 @@ func (s *stubTopicsProvider) Messages(topic string, opts data.MessageFilter) ([]
 }
 
 func (s *stubTopicsProvider) DMConversations(string) ([]data.DMConversation, error) {
+	s.dmsCalls++
 	out := make([]data.DMConversation, len(s.dms))
 	copy(out, s.dms)
 	return out, nil
@@ -101,7 +106,7 @@ func TestTopicsViewRebuildItemsHonorsStarFilterAndSort(t *testing.T) {
 	require.Equal(t, "build", v.items[1].label)
 }
 
-func TestTopicsViewLoadCmdComputesUnreadFromReadMarkers(t *testing.T) {
+func TestTopicsViewApplyLoadedComputesUnreadFromReadMarkers(t *testing.T) {
 	now := time.Date(2026, 2, 9, 11, 0, 0, 0, time.UTC)
 	provider := &stubTopicsProvider{
 		topics: []data.TopicInfo{
@@ -134,11 +139,12 @@ func TestTopicsViewLoadCmdComputesUnreadFromReadMarkers(t *testing.T) {
 	msg, ok := v.loadCmd()().(topicsLoadedMsg)
 	require.True(t, ok)
 	require.NoError(t, msg.err)
-	require.Equal(t, 1, msg.unreadByTop["task"])
-	require.Equal(t, 1, msg.unreadByDM["bob"])
+	v.applyLoaded(msg)
+	require.Equal(t, 1, v.unreadByTop["task"])
+	require.Equal(t, 1, v.unreadByDM["bob"])
 }
 
-func TestTopicsViewLoadCmdDefaultsUnreadToAllWithoutMarker(t *testing.T) {
+func TestTopicsViewApplyLoadedDefaultsUnreadToAllWithoutMarker(t *testing.T) {
 	now := time.Date(2026, 2, 9, 11, 0, 0, 0, time.UTC)
 	provider := &stubTopicsProvider{
 		topics: []data.TopicInfo{
@@ -167,8 +173,173 @@ func TestTopicsViewLoadCmdDefaultsUnreadToAllWithoutMarker(t *testing.T) {
 	msg, ok := v.loadCmd()().(topicsLoadedMsg)
 	require.True(t, ok)
 	require.NoError(t, msg.err)
-	require.Equal(t, 2, msg.unreadByTop["task"])
-	require.Equal(t, 2, msg.unreadByDM["bob"])
+	v.applyLoaded(msg)
+	require.Equal(t, 2, v.unreadByTop["task"])
+	require.Equal(t, 2, v.unreadByDM["bob"])
+}
+
+func TestTopicsViewApplyLoadedSkipsFullUnreadRescanWhenCountsUnchanged(t *testing.T) {
+	now := time.Date(2026, 2, 9, 11, 0, 0, 0, time.UTC)
+	provider := &stubTopicsProvider{
+		topics: []data.TopicInfo{{Name: "task", MessageCount: 2, LastActivity: now}},
+		dms:    []data.DMConversation{{Agent: "bob", MessageCount: 2, LastActivity: now}},
+		byTopic: map[string][]fmail.Message{
+			"task": {
+				{ID: "20260209-100000-0001", From: "alice", To: "task", Time: now.Add(-2 * time.Minute), Body: "old"},
+				{ID: "20260209-101000-0001", From: "alice", To: "task", Time: now.Add(-time.Minute), Body: "new"},
+			},
+		},
+		byDM: map[string][]fmail.Message{
+			"bob": {
+				{ID: "20260209-100000-0001", From: "bob", To: "@viewer", Time: now.Add(-2 * time.Minute), Body: "old"},
+				{ID: "20260209-101000-0001", From: "bob", To: "@viewer", Time: now.Add(-time.Minute), Body: "new"},
+			},
+		},
+	}
+	v := newTopicsView(t.TempDir(), provider, nil)
+	v.self = "viewer"
+
+	first, ok := v.loadCmd()().(topicsLoadedMsg)
+	require.True(t, ok)
+	v.applyLoaded(first)
+
+	provider.topicCalls = make(map[string]int)
+	provider.dmCalls = make(map[string]int)
+
+	second, ok := v.loadCmd()().(topicsLoadedMsg)
+	require.True(t, ok)
+	v.applyLoaded(second)
+
+	require.Empty(t, provider.topicCalls)
+	require.Empty(t, provider.dmCalls)
+	require.Equal(t, 2, v.unreadByTop["task"])
+	require.Equal(t, 2, v.unreadByDM["bob"])
+}
+
+func TestTopicsViewApplyIncomingUpdatesUnreadIncrementally(t *testing.T) {
+	now := time.Date(2026, 2, 9, 11, 0, 0, 0, time.UTC)
+	v := newTopicsView(t.TempDir(), &stubTopicsProvider{}, nil)
+	v.self = "viewer"
+	v.topics = []data.TopicInfo{{Name: "task", MessageCount: 1, LastActivity: now.Add(-time.Minute), Participants: []string{"alice"}}}
+	v.dms = []data.DMConversation{{Agent: "bob", MessageCount: 1, LastActivity: now.Add(-time.Minute)}}
+	v.unreadByTop["task"] = 1
+	v.unreadByDM["bob"] = 1
+	v.readMarkers = map[string]string{
+		"task": "20260209-100500-0001",
+		"@bob": "20260209-100500-0001",
+	}
+
+	v.applyIncoming(fmail.Message{
+		ID:   "20260209-101500-0001",
+		From: "alice",
+		To:   "task",
+		Time: now,
+		Body: "new topic msg",
+	})
+	require.Equal(t, 2, v.unreadByTop["task"])
+	require.Equal(t, 2, v.topics[0].MessageCount)
+
+	v.applyIncoming(fmail.Message{
+		ID:   "20260209-101600-0001",
+		From: "bob",
+		To:   "@viewer",
+		Time: now.Add(30 * time.Second),
+		Body: "new dm msg",
+	})
+	require.Equal(t, 2, v.unreadByDM["bob"])
+	require.Equal(t, 2, v.dms[0].MessageCount)
+}
+
+func TestTopicsViewShouldRefreshDebouncesTicks(t *testing.T) {
+	v := newTopicsView(t.TempDir(), &stubTopicsProvider{}, nil)
+	base := time.Date(2026, 2, 9, 11, 0, 0, 0, time.UTC)
+	v.lastLoad = base
+
+	require.False(t, v.shouldRefresh(base.Add(5*time.Second)))
+	require.True(t, v.shouldRefresh(base.Add(topicsMetadataRefresh)))
+}
+
+func TestTopicsViewRenderListPanelShowsKeyLegendAndFilteredEmptyState(t *testing.T) {
+	now := time.Date(2026, 2, 9, 11, 0, 0, 0, time.UTC)
+	v := newTopicsView(t.TempDir(), &stubTopicsProvider{}, nil)
+	v.now = now
+	v.topics = []data.TopicInfo{
+		{Name: "task", MessageCount: 2, LastActivity: now},
+	}
+	v.filter = "zzz"
+	v.rebuildItems()
+
+	rendered := v.renderListPanel(96, 14, themePalette(ThemeDefault))
+	require.True(t, strings.Contains(rendered, "j/k move"))
+	require.True(t, strings.Contains(rendered, "No matches for"))
+}
+
+func TestChangedMarkerKeysReturnsOnlyChangedKeys(t *testing.T) {
+	prev := map[string]string{
+		"task": "a",
+		"@bob": "b",
+	}
+	next := map[string]string{
+		"task": "a",
+		"@bob": "c",
+	}
+	changed := changedMarkerKeys(prev, next)
+	require.Len(t, changed, 1)
+	require.Equal(t, "@bob", changed[0])
+}
+
+func TestTopicsViewRecomputeUnreadTargetsCmdOnlyScansSelectedTargets(t *testing.T) {
+	now := time.Date(2026, 2, 9, 11, 0, 0, 0, time.UTC)
+	provider := &stubTopicsProvider{
+		byTopic: map[string][]fmail.Message{
+			"task": {
+				{ID: "20260209-100000-0001", From: "alice", To: "task", Time: now.Add(-2 * time.Minute), Body: "old"},
+				{ID: "20260209-101000-0001", From: "alice", To: "task", Time: now.Add(-time.Minute), Body: "new"},
+			},
+			"build": {
+				{ID: "20260209-100000-0002", From: "alice", To: "build", Time: now.Add(-2 * time.Minute), Body: "old"},
+				{ID: "20260209-101000-0002", From: "alice", To: "build", Time: now.Add(-time.Minute), Body: "new"},
+			},
+		},
+		byDM: map[string][]fmail.Message{
+			"bob": {
+				{ID: "20260209-100000-0001", From: "bob", To: "@viewer", Time: now.Add(-2 * time.Minute), Body: "old"},
+				{ID: "20260209-101000-0001", From: "bob", To: "@viewer", Time: now.Add(-time.Minute), Body: "new"},
+			},
+			"cara": {
+				{ID: "20260209-100000-0001", From: "cara", To: "@viewer", Time: now.Add(-2 * time.Minute), Body: "old"},
+				{ID: "20260209-101000-0001", From: "cara", To: "@viewer", Time: now.Add(-time.Minute), Body: "new"},
+			},
+		},
+	}
+
+	v := newTopicsView(t.TempDir(), provider, nil)
+	v.self = "viewer"
+	v.topics = []data.TopicInfo{
+		{Name: "task", MessageCount: 2, LastActivity: now},
+		{Name: "build", MessageCount: 2, LastActivity: now},
+	}
+	v.dms = []data.DMConversation{
+		{Agent: "bob", MessageCount: 2, LastActivity: now},
+		{Agent: "cara", MessageCount: 2, LastActivity: now},
+	}
+	v.readMarkers = map[string]string{
+		"task": "20260209-100000-0001",
+		"@bob": "20260209-100000-0001",
+	}
+
+	cmd := v.recomputeUnreadTargetsCmd([]string{"task", "@bob"})
+	require.NotNil(t, cmd)
+	msg, ok := cmd().(topicsUnreadSnapshotMsg)
+	require.True(t, ok)
+	require.NoError(t, msg.err)
+	require.Equal(t, 1, msg.unreadByTop["task"])
+	require.Equal(t, 1, msg.unreadByDM["bob"])
+
+	require.Equal(t, 1, provider.topicCalls["task"])
+	require.Equal(t, 0, provider.topicCalls["build"])
+	require.Equal(t, 1, provider.dmCalls["bob"])
+	require.Equal(t, 0, provider.dmCalls["cara"])
 }
 
 func TestTopicsViewPreviewLoadsLazilyAndCaches(t *testing.T) {

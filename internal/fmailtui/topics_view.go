@@ -18,6 +18,7 @@ import (
 
 const (
 	topicsRefreshInterval = 2 * time.Second
+	topicsMetadataRefresh = 10 * time.Second
 	topicsPreviewLimit    = 10
 	topicsHotThreshold    = 5 * time.Minute
 	topicsWarmThreshold   = time.Hour
@@ -40,7 +41,9 @@ const (
 	topicSortParticipants
 )
 
-type topicsTickMsg struct{}
+type topicsTickMsg struct {
+	now time.Time
+}
 
 type topicsLoadedMsg struct {
 	now          time.Time
@@ -57,6 +60,12 @@ type topicsPreviewLoadedMsg struct {
 	target string
 	msgs   []fmail.Message
 	err    error
+}
+
+type topicsUnreadSnapshotMsg struct {
+	unreadByTop map[string]int
+	unreadByDM  map[string]int
+	err         error
 }
 
 type topicsIncomingMsg struct {
@@ -118,6 +127,8 @@ type topicsView struct {
 
 	subCh     <-chan fmail.Message
 	subCancel func()
+
+	lastLoad time.Time
 }
 
 var _ composeContextView = (*topicsView)(nil)
@@ -170,18 +181,44 @@ func (v *topicsView) Update(msg tea.Msg) tea.Cmd {
 	switch typed := msg.(type) {
 	case topicsTickMsg:
 		// Refresh read markers/starred topics in case another view updated the state file.
+		prevMarkers := cloneStringMap(v.readMarkers)
 		v.loadState()
-		return tea.Batch(v.loadCmd(), topicsTickCmd())
+		cmds := []tea.Cmd{topicsTickCmd()}
+		if !stringMapEqual(prevMarkers, v.readMarkers) {
+			cmds = append(cmds, v.recomputeUnreadTargetsCmd(changedMarkerKeys(prevMarkers, v.readMarkers)))
+		}
+		if v.shouldRefresh(typed.now) {
+			cmds = append(cmds, v.loadCmd())
+		}
+		return tea.Batch(cmds...)
 	case topicsLoadedMsg:
 		v.applyLoaded(typed)
 		return v.ensurePreviewCmd()
 	case topicsPreviewLoadedMsg:
 		v.applyPreview(typed)
 		return nil
+	case topicsUnreadSnapshotMsg:
+		if typed.err != nil {
+			v.lastErr = typed.err
+			return nil
+		}
+		if v.unreadByTop == nil {
+			v.unreadByTop = make(map[string]int)
+		}
+		for key, value := range typed.unreadByTop {
+			v.unreadByTop[key] = value
+		}
+		if v.unreadByDM == nil {
+			v.unreadByDM = make(map[string]int)
+		}
+		for key, value := range typed.unreadByDM {
+			v.unreadByDM[key] = value
+		}
+		v.rebuildItems()
+		return nil
 	case topicsIncomingMsg:
 		v.applyIncoming(typed.msg)
-		v.loadState()
-		return tea.Batch(v.loadCmd(), v.waitForMessageCmd())
+		return tea.Batch(v.waitForMessageCmd(), v.ensurePreviewCmd())
 	case topicsSentMsg:
 		v.composeSending = false
 		v.composeErr = typed.err
@@ -389,6 +426,9 @@ func (v *topicsView) renderListPanel(width, height int, palette styles.Theme) st
 	innerW := maxInt(0, width-(styles.LayoutInnerPadding*2)-2)
 	innerH := maxInt(1, height-(styles.LayoutInnerPadding*2)-2)
 
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb))
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted))
+
 	title := "Topics"
 	if v.mode == topicsModeDM {
 		title = "DM Browser"
@@ -398,27 +438,34 @@ func (v *topicsView) renderListPanel(width, height int, palette styles.Theme) st
 	if v.filterActive {
 		filterSuffix = "_"
 	}
-	titleLine := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).
-		Render(fmt.Sprintf("%s  sort:%s  d:toggle  s:sort  *:star  Enter:open", title, sortLabel))
-	filterLine := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(palette.Base.Muted)).
-		Render("Filter: " + v.filter + filterSuffix + "  (/ to edit)")
+	titleLine := titleStyle.Render(title) + muted.Render(truncateVis(fmt.Sprintf("  (%d)  sort:%s", len(v.items), sortLabel), maxInt(0, innerW-lipgloss.Width(title))))
 
-	header := "TOPIC                MSGS  LAST ACTIVE  AGENTS               UNRD"
+	hints := "j/k move  Enter open  / filter  d toggle  s sort  n compose  Esc back"
+	if v.mode == topicsModeTopics {
+		hints = "j/k move  Enter open  / filter  d toggle  s sort  * star  n compose  Esc back"
+	}
+	keyLine := muted.Render(truncateVis(hints, innerW))
+
+	filterLabel := "Filter: " + v.filter + filterSuffix + "  (/ to edit)"
+	filterStyle := muted
+	if v.filterActive {
+		filterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Accent)).Bold(true)
+	}
+	filterLine := filterStyle.Render(truncateVis(filterLabel, innerW))
+
+	header := "TOPIC                H  MSGS  LAST ACTIVE  AGENTS               UNRD"
 	if v.mode == topicsModeDM {
-		header = "DM                   MSGS  LAST ACTIVE  UNRD"
+		header = "DM                   H  MSGS  LAST ACTIVE  UNRD"
 	}
 	header = lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(palette.Base.Muted)).
 		Render(truncateVis(header, innerW))
 
-	used := lipgloss.Height(titleLine) + lipgloss.Height(filterLine) + lipgloss.Height(header) + 1
+	used := lipgloss.Height(titleLine) + lipgloss.Height(keyLine) + lipgloss.Height(filterLine) + lipgloss.Height(header) + 1
 	rowsH := maxInt(1, innerH-used)
 	rows := v.renderRows(innerW, rowsH, palette)
-	content := lipgloss.JoinVertical(lipgloss.Left, titleLine, filterLine, header, rows)
+	content := lipgloss.JoinVertical(lipgloss.Left, titleLine, keyLine, filterLine, header, rows)
 	return panel.Width(width).Height(height).Render(content)
 }
 
@@ -430,6 +477,9 @@ func (v *topicsView) renderRows(width, maxRows int, palette styles.Theme) string
 		empty := "No topics"
 		if v.mode == topicsModeDM {
 			empty = "No DM conversations"
+		}
+		if strings.TrimSpace(v.filter) != "" {
+			empty = fmt.Sprintf("No matches for %q", strings.TrimSpace(v.filter))
 		}
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render(empty)
 	}
@@ -453,23 +503,24 @@ func (v *topicsView) renderRows(width, maxRows int, palette styles.Theme) string
 		}
 
 		lastActive := relativeTime(item.lastActivity, v.now)
+		heat := v.activityHeatRune(item.lastActivity, palette)
 		line := ""
 		if v.mode == topicsModeTopics {
 			star := " "
 			if v.starred[item.label] {
 				star = "★"
 			}
-			heat := v.activityHeatRune(item.lastActivity, palette)
 			participants := truncate(strings.Join(item.participants, ", "), 20)
-			line = fmt.Sprintf("%s%s %s %-20s %4d  %-11s %-20s %4d", cursor, star, heat, truncate(item.label, 20), item.messageCount, lastActive, participants, item.unread)
+			line = fmt.Sprintf("%s%s %-20s %s %4d  %-11s %-20s %4d", cursor, star, truncate(item.label, 20), heat, item.messageCount, lastActive, participants, item.unread)
 		} else {
-			line = fmt.Sprintf("%s  %-20s %4d  %-11s %4d", cursor, truncate(item.target, 20), item.messageCount, lastActive, item.unread)
+			line = fmt.Sprintf("%s  %-20s %s %4d  %-11s %4d", cursor, truncate(item.target, 20), heat, item.messageCount, lastActive, item.unread)
 		}
 
 		line = truncateVis(line, width)
 		rowStyle := unreadStyle
 		if idx == v.selected {
-			rowStyle = rowStyle.Foreground(lipgloss.Color(palette.Chrome.SelectedItem)).Bold(true)
+			// Highlight the whole row; cursor-only selection gets lost in dense lists.
+			rowStyle = rowStyle.Background(lipgloss.Color(palette.Chrome.SelectedItem)).Bold(true)
 		}
 		lines = append(lines, rowStyle.Render(line))
 	}
@@ -482,25 +533,30 @@ func (v *topicsView) renderPreviewPanel(width, height int, palette styles.Theme)
 	innerW := maxInt(0, width-(styles.LayoutInnerPadding*2)-2)
 	innerH := maxInt(1, height-(styles.LayoutInnerPadding*2)-2)
 
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb))
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted))
+
 	target := v.selectedTarget()
 	title := "Preview"
 	if target != "" {
 		title = "Preview: " + target
 	}
-	titleLine := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).
-		Render(truncateVis(title, innerW))
-	meta := "ctrl+u/d scroll preview  n new"
+	titleLine := titleStyle.Render(truncateVis(title, innerW))
+	meta := "ctrl+u/d scroll  Enter open  n compose  Esc back"
 	if v.composeActive {
-		meta = "To " + target + ": " + v.composeBody + "_" + "  (Enter send, Esc cancel)"
+		draft := truncateVis(firstLine(v.composeBody), maxInt(0, innerW-24))
+		meta = fmt.Sprintf("Compose to %s: %s_", target, draft)
+		meta = meta + "  (Enter send, Esc cancel)"
 		if v.composeSending {
 			meta = "Sending..."
 		} else if v.composeErr != nil {
 			meta = "Send failed: " + v.composeErr.Error()
 		}
 	}
-	metaLine := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render(truncateVis(meta, innerW))
+	metaLine := muted.Render(truncateVis(meta, innerW))
+	if v.composeErr != nil {
+		metaLine = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Priority.High)).Bold(true).Render(truncateVis(meta, innerW))
+	}
 
 	used := lipgloss.Height(titleLine) + lipgloss.Height(metaLine) + 1
 	bodyH := maxInt(1, innerH-used)
@@ -560,7 +616,6 @@ func (v *topicsView) loadCmd() tea.Cmd {
 		}
 	}
 
-	readMarkers := cloneStringMap(v.readMarkers)
 	self := v.self
 	return func() tea.Msg {
 		now := time.Now().UTC()
@@ -574,37 +629,20 @@ func (v *topicsView) loadCmd() tea.Cmd {
 			return topicsLoadedMsg{now: now, topics: topics, err: err}
 		}
 
-		unreadByTop := make(map[string]int, len(topics))
 		topicUpdated := make(map[string]time.Time, len(topics))
 		for _, topic := range topics {
 			topicUpdated[topic.Name] = topic.LastActivity
-			marker := readMarkerForTarget(readMarkers, topic.Name)
-			count, err := unreadCountForTopic(v.provider, topic.Name, marker, topic.MessageCount)
-			if err != nil {
-				return topicsLoadedMsg{now: now, topics: topics, dms: dms, err: err}
-			}
-			unreadByTop[topic.Name] = count
 		}
 
-		unreadByDM := make(map[string]int, len(dms))
 		dmUpdated := make(map[string]time.Time, len(dms))
 		for _, conv := range dms {
 			dmUpdated["@"+conv.Agent] = conv.LastActivity
-			target := "@" + conv.Agent
-			marker := readMarkerForTarget(readMarkers, target)
-			count, err := unreadCountForDM(v.provider, self, conv.Agent, marker)
-			if err != nil {
-				return topicsLoadedMsg{now: now, topics: topics, dms: dms, unreadByTop: unreadByTop, err: err}
-			}
-			unreadByDM[conv.Agent] = count
 		}
 
 		return topicsLoadedMsg{
 			now:          now,
 			topics:       topics,
 			dms:          dms,
-			unreadByTop:  unreadByTop,
-			unreadByDM:   unreadByDM,
 			topicUpdated: topicUpdated,
 			dmUpdated:    dmUpdated,
 		}
@@ -612,8 +650,8 @@ func (v *topicsView) loadCmd() tea.Cmd {
 }
 
 func topicsTickCmd() tea.Cmd {
-	return tea.Tick(topicsRefreshInterval, func(time.Time) tea.Msg {
-		return topicsTickMsg{}
+	return tea.Tick(topicsRefreshInterval, func(ts time.Time) tea.Msg {
+		return topicsTickMsg{now: ts.UTC()}
 	})
 }
 
@@ -656,21 +694,25 @@ func (v *topicsView) applyLoaded(msg topicsLoadedMsg) {
 	if msg.err != nil {
 		return
 	}
+	v.lastLoad = msg.now
 
 	prevTarget := v.selectedTarget()
 	prevTopicUpdated := make(map[string]time.Time, len(v.topics))
 	prevDMUpdated := make(map[string]time.Time, len(v.dms))
+	prevTopicCount := make(map[string]int, len(v.topics))
+	prevDMCount := make(map[string]int, len(v.dms))
 	for _, topic := range v.topics {
 		prevTopicUpdated[topic.Name] = topic.LastActivity
+		prevTopicCount[topic.Name] = topic.MessageCount
 	}
 	for _, conv := range v.dms {
 		prevDMUpdated["@"+conv.Agent] = conv.LastActivity
+		prevDMCount[conv.Agent] = conv.MessageCount
 	}
 
 	v.topics = append([]data.TopicInfo(nil), msg.topics...)
 	v.dms = append([]data.DMConversation(nil), msg.dms...)
-	v.unreadByTop = msg.unreadByTop
-	v.unreadByDM = msg.unreadByDM
+	v.syncUnreadFromMetadata(prevTopicCount, prevDMCount)
 
 	for key, old := range prevTopicUpdated {
 		next, ok := msg.topicUpdated[key]
@@ -741,12 +783,29 @@ func (v *topicsView) applyIncoming(msg fmail.Message) {
 			return
 		}
 		cacheTarget = "@" + peer
+		v.bumpDMConversation(peer, msg)
+		if !strings.EqualFold(strings.TrimSpace(msg.From), strings.TrimSpace(v.self)) {
+			marker := readMarkerForTarget(v.readMarkers, cacheTarget)
+			if marker == "" || strings.TrimSpace(msg.ID) > marker {
+				v.unreadByDM[peer] = v.unreadByDM[peer] + 1
+			}
+		}
+	} else {
+		v.bumpTopic(target, msg)
+		if !strings.EqualFold(strings.TrimSpace(msg.From), strings.TrimSpace(v.self)) {
+			marker := readMarkerForTarget(v.readMarkers, target)
+			if marker == "" || strings.TrimSpace(msg.ID) > marker {
+				v.unreadByTop[target] = v.unreadByTop[target] + 1
+			}
+		}
 	}
 
 	v.previewCache[cacheTarget] = append(v.previewCache[cacheTarget], msg)
 	if len(v.previewCache[cacheTarget]) > topicsPreviewLimit {
 		v.previewCache[cacheTarget] = v.previewCache[cacheTarget][len(v.previewCache[cacheTarget])-topicsPreviewLimit:]
 	}
+	v.now = time.Now().UTC()
+	v.rebuildItems()
 }
 
 func (v *topicsView) rebuildItems() {
@@ -933,6 +992,200 @@ func (v *topicsView) saveState() error {
 	return nil
 }
 
+func (v *topicsView) shouldRefresh(now time.Time) bool {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if v.lastLoad.IsZero() {
+		return true
+	}
+	return now.Sub(v.lastLoad) >= topicsMetadataRefresh
+}
+
+func (v *topicsView) recomputeUnreadCmd() tea.Cmd {
+	if v.provider == nil {
+		return nil
+	}
+	return v.recomputeUnreadTargetsCmd(changedMarkerKeys(nil, v.readMarkers))
+}
+
+func (v *topicsView) recomputeUnreadTargetsCmd(targets []string) tea.Cmd {
+	if v.provider == nil {
+		return nil
+	}
+	targets = normalizeMarkerTargets(targets)
+	if len(targets) == 0 {
+		return nil
+	}
+	readMarkers := cloneStringMap(v.readMarkers)
+	self := v.self
+	return func() tea.Msg {
+		outTop := make(map[string]int)
+		outDM := make(map[string]int)
+
+		topicTotals := make(map[string]int, len(v.topics))
+		for _, topic := range v.topics {
+			topicTotals[topic.Name] = topic.MessageCount
+		}
+
+		for _, target := range targets {
+			target = strings.TrimSpace(target)
+			if target == "" {
+				continue
+			}
+			isDM := strings.HasPrefix(target, "@")
+			if !isDM {
+				for _, conv := range v.dms {
+					if conv.Agent == target {
+						isDM = true
+						target = "@" + target
+						break
+					}
+				}
+			}
+
+			if isDM {
+				peer := strings.TrimPrefix(target, "@")
+				if peer == "" {
+					continue
+				}
+				marker := readMarkerForTarget(readMarkers, target)
+				count, err := unreadCountForDM(v.provider, self, peer, marker)
+				if err != nil {
+					return topicsUnreadSnapshotMsg{err: err}
+				}
+				outDM[peer] = count
+				continue
+			}
+
+			total := topicTotals[target]
+			marker := readMarkerForTarget(readMarkers, target)
+			count, err := unreadCountForTopic(v.provider, target, marker, total)
+			if err != nil {
+				return topicsUnreadSnapshotMsg{err: err}
+			}
+			outTop[target] = count
+		}
+
+		return topicsUnreadSnapshotMsg{unreadByTop: outTop, unreadByDM: outDM}
+	}
+}
+
+func (v *topicsView) syncUnreadFromMetadata(prevTopicCount map[string]int, prevDMCount map[string]int) {
+	if v.unreadByTop == nil {
+		v.unreadByTop = make(map[string]int)
+	}
+	if v.unreadByDM == nil {
+		v.unreadByDM = make(map[string]int)
+	}
+
+	nextTop := make(map[string]int, len(v.topics))
+	for _, topic := range v.topics {
+		name := topic.Name
+		prevUnread := maxInt(0, v.unreadByTop[name])
+		prevCount, had := prevTopicCount[name]
+		if !had || topic.MessageCount < prevCount {
+			marker := readMarkerForTarget(v.readMarkers, name)
+			count, err := unreadCountForTopic(v.provider, name, marker, topic.MessageCount)
+			if err != nil {
+				v.lastErr = err
+				count = prevUnread
+			}
+			nextTop[name] = maxInt(0, count)
+			continue
+		}
+		if topic.MessageCount > prevCount {
+			nextTop[name] = prevUnread + (topic.MessageCount - prevCount)
+			continue
+		}
+		nextTop[name] = prevUnread
+	}
+
+	nextDM := make(map[string]int, len(v.dms))
+	for _, conv := range v.dms {
+		peer := conv.Agent
+		prevUnread := maxInt(0, v.unreadByDM[peer])
+		prevCount, had := prevDMCount[peer]
+		if !had || conv.MessageCount < prevCount {
+			marker := readMarkerForTarget(v.readMarkers, "@"+peer)
+			count, err := unreadCountForDM(v.provider, v.self, peer, marker)
+			if err != nil {
+				v.lastErr = err
+				count = prevUnread
+			}
+			nextDM[peer] = maxInt(0, count)
+			continue
+		}
+		if conv.MessageCount > prevCount {
+			// Incremental: assume new messages are unread. (Exact unread needs message bodies.)
+			nextDM[peer] = prevUnread + (conv.MessageCount - prevCount)
+			continue
+		}
+		nextDM[peer] = prevUnread
+	}
+
+	v.unreadByTop = nextTop
+	v.unreadByDM = nextDM
+}
+
+func (v *topicsView) bumpTopic(name string, msg fmail.Message) {
+	for i := range v.topics {
+		if v.topics[i].Name != name {
+			continue
+		}
+		v.topics[i].MessageCount++
+		if msg.Time.After(v.topics[i].LastActivity) {
+			v.topics[i].LastActivity = msg.Time.UTC()
+		}
+		if from := strings.TrimSpace(msg.From); from != "" && !containsStringFold(v.topics[i].Participants, from) {
+			v.topics[i].Participants = append(v.topics[i].Participants, from)
+		}
+		return
+	}
+
+	info := data.TopicInfo{
+		Name:         name,
+		MessageCount: 1,
+		LastActivity: msg.Time.UTC(),
+	}
+	if from := strings.TrimSpace(msg.From); from != "" {
+		info.Participants = []string{from}
+	}
+	v.topics = append(v.topics, info)
+}
+
+func (v *topicsView) bumpDMConversation(peer string, msg fmail.Message) {
+	for i := range v.dms {
+		if v.dms[i].Agent != peer {
+			continue
+		}
+		v.dms[i].MessageCount++
+		if msg.Time.After(v.dms[i].LastActivity) {
+			v.dms[i].LastActivity = msg.Time.UTC()
+		}
+		return
+	}
+
+	v.dms = append(v.dms, data.DMConversation{
+		Agent:        peer,
+		MessageCount: 1,
+		LastActivity: msg.Time.UTC(),
+	})
+}
+
+func containsStringFold(items []string, needle string) bool {
+	needle = strings.TrimSpace(needle)
+	if needle == "" {
+		return false
+	}
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item), needle) {
+			return true
+		}
+	}
+	return false
+}
+
 func unreadCountForTopic(provider data.MessageProvider, topic string, marker string, total int) (int, error) {
 	marker = strings.TrimSpace(marker)
 	if marker == "" {
@@ -1007,6 +1260,60 @@ func cloneStringMap(src map[string]string) map[string]string {
 		dst[key] = value
 	}
 	return dst
+}
+
+func stringMapEqual(left map[string]string, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func changedMarkerKeys(prev map[string]string, next map[string]string) []string {
+	seen := make(map[string]bool, len(prev)+len(next))
+	out := make([]string, 0, minInt(8, len(next)))
+
+	for key, value := range next {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		seen[key] = true
+		if strings.TrimSpace(prev[key]) != strings.TrimSpace(value) {
+			out = append(out, key)
+		}
+	}
+	for key := range prev {
+		key = strings.TrimSpace(key)
+		if key == "" || seen[key] {
+			continue
+		}
+		// Marker removed.
+		out = append(out, key)
+	}
+	return out
+}
+
+func normalizeMarkerTargets(targets []string) []string {
+	if len(targets) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(targets))
+	out := make([]string, 0, len(targets))
+	for _, target := range targets {
+		target = strings.TrimSpace(target)
+		if target == "" || seen[target] {
+			continue
+		}
+		seen[target] = true
+		out = append(out, target)
+	}
+	return out
 }
 
 func sortedStarred(starred map[string]bool) []string {

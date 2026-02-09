@@ -18,6 +18,7 @@ import (
 
 const (
 	dashboardRefreshInterval = 2 * time.Second
+	dashboardMetadataRefresh = 10 * time.Second
 	dashboardHotWindow       = 5 * time.Minute
 	dashboardFeedLimit       = 500
 )
@@ -43,7 +44,9 @@ func (f dashboardFocus) label() string {
 	}
 }
 
-type dashboardTickMsg struct{}
+type dashboardTickMsg struct {
+	now time.Time
+}
 
 type dashboardRefreshMsg struct {
 	now    time.Time
@@ -54,6 +57,12 @@ type dashboardRefreshMsg struct {
 
 type dashboardIncomingMsg struct {
 	msg fmail.Message
+}
+
+type dashboardHotEvent struct {
+	topic string
+	at    time.Time
+	count int
 }
 
 type dashboardView struct {
@@ -71,6 +80,9 @@ type dashboardView struct {
 	topicIdx      int
 	feed          []fmail.Message
 	feedOffset    int // 0 = follow tail; >0 = paused, lines from tail
+	hotEvents     []dashboardHotEvent
+	topicCounts   map[string]int
+	lastRefresh   time.Time
 
 	subCh     <-chan fmail.Message
 	subCancel func()
@@ -83,6 +95,7 @@ func newDashboardView(root, projectID string, provider data.MessageProvider, not
 		provider:      provider,
 		notifications: notifications,
 		hotCounts:     make(map[string]int),
+		topicCounts:   make(map[string]int),
 		focus:         focusAgents,
 	}
 }
@@ -109,21 +122,25 @@ func (v *dashboardView) Init() tea.Cmd {
 func (v *dashboardView) Update(msg tea.Msg) tea.Cmd {
 	switch typed := msg.(type) {
 	case dashboardTickMsg:
-		return tea.Batch(v.refreshCmd(), dashboardTickCmd())
+		cmds := []tea.Cmd{dashboardTickCmd()}
+		if v.shouldRefresh(typed.now) {
+			cmds = append(cmds, v.refreshCmd())
+		}
+		return tea.Batch(cmds...)
 	case dashboardRefreshMsg:
 		v.now = typed.now
 		v.lastErr = typed.err
 		if typed.err == nil {
 			v.agents = typed.agents
-			v.topics = typed.topics
-			v.computeHotCounts()
+			v.applyTopicsSnapshot(typed.topics, typed.now)
 			v.clampSelection()
+			v.lastRefresh = typed.now
 		}
 		return nil
 	case dashboardIncomingMsg:
 		v.appendFeed(typed.msg)
-		// Auto-refresh after new messages, but avoid spamming.
-		return tea.Batch(v.waitForMessageCmd(), v.refreshCmd())
+		v.applyIncoming(typed.msg)
+		return v.waitForMessageCmd()
 	case tea.KeyMsg:
 		return v.handleKey(typed)
 	}
@@ -237,7 +254,7 @@ func (v *dashboardView) renderAgents(width int, palette styles.Theme) (string, s
 		lines = append(lines, truncateVis(line, width))
 	}
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render(fmt.Sprintf("AGENTS (%d online)", onlineCount))
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render(fmt.Sprintf("AGENTS (%d online)  Enter:open", onlineCount))
 	return title, strings.Join(lines, "\n")
 }
 
@@ -278,7 +295,7 @@ func (v *dashboardView) renderTopics(width int, palette styles.Theme) (string, s
 		}
 	}
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render("TOPICS (hot)")
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render("TOPICS (hot)  Enter:thread")
 	return title, strings.Join(lines, "\n")
 }
 
@@ -287,10 +304,15 @@ func (v *dashboardView) renderFeedPanel(width, height int, palette styles.Theme,
 	innerW := maxInt(0, width-(styles.LayoutInnerPadding*2)-2)
 	innerH := maxInt(0, height-(styles.LayoutInnerPadding*2)-2)
 
-	titleText := "LIVE FEED  Ctrl+N"
+	feedState := "follow"
+	if v.feedOffset > 0 {
+		feedState = fmt.Sprintf("paused:%d", v.feedOffset)
+	}
+	titleText := "LIVE FEED [" + feedState + "]  Enter:thread  Ctrl+N"
 	if v.notifications != nil {
 		if unread := v.notifications.UnreadCount(); unread > 0 {
 			titleText = fmt.Sprintf("LIVE FEED  Ctrl+N [%d]", unread)
+			titleText = fmt.Sprintf("%s [%s]  Enter:thread", titleText, feedState)
 		}
 	}
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render(titleText)
@@ -318,17 +340,31 @@ func (v *dashboardView) renderFeedLines(width, maxLines int, palette styles.Them
 	for i := start; i < end; i++ {
 		msg := v.feed[i]
 		ts := msg.Time.UTC()
-		tsStr := ts.Format("15:04")
+		tsStr := ts.Format("15:04:05")
 		from := mapper.Foreground(msg.From).Render(msg.From)
 		target := strings.TrimSpace(msg.To)
+		if target == "" {
+			target = "(unknown)"
+		}
 		body := truncate(firstLine(msg.Body), maxInt(0, width-2))
+		if body == "" {
+			body = "(empty)"
+		}
 
-		line := fmt.Sprintf("%s %s \u2192 %s  %s", mutedStyle(palette).Render(tsStr), from, target, body)
+		priority := ""
+		switch strings.ToLower(strings.TrimSpace(msg.Priority)) {
+		case strings.ToLower(fmail.PriorityHigh):
+			priority = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Priority.High)).Bold(true).Render("[HIGH] ")
+		case strings.ToLower(fmail.PriorityLow):
+			priority = mutedStyle(palette).Render("[low] ")
+		}
+
+		line := fmt.Sprintf("%s %s \u2192 %s  %s%s", mutedStyle(palette).Render(tsStr), from, mutedStyle(palette).Render(target), priority, body)
 		out = append(out, truncateVis(line, width))
 	}
 
 	if v.feedOffset > 0 {
-		out = append(out, mutedStyle(palette).Render(fmt.Sprintf("PAUSED (%d)", v.feedOffset)))
+		out = append(out, mutedStyle(palette).Render(fmt.Sprintf("PAUSED (%d)  j/k scroll  G resume", v.feedOffset)))
 	}
 	return strings.Join(out, "\n")
 }
@@ -439,8 +475,8 @@ func (v *dashboardView) refreshCmd() tea.Cmd {
 }
 
 func dashboardTickCmd() tea.Cmd {
-	return tea.Tick(dashboardRefreshInterval, func(time.Time) tea.Msg {
-		return dashboardTickMsg{}
+	return tea.Tick(dashboardRefreshInterval, func(ts time.Time) tea.Msg {
+		return dashboardTickMsg{now: ts.UTC()}
 	})
 }
 
@@ -473,41 +509,105 @@ func (v *dashboardView) appendFeed(msg fmail.Message) {
 	}
 }
 
-func (v *dashboardView) computeHotCounts() {
-	now := v.now
+func (v *dashboardView) shouldRefresh(now time.Time) bool {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	windowStart := now.Add(-dashboardHotWindow)
-	next := make(map[string]int, len(v.topics))
-
-	// Only compute for the most active topics to keep refresh cheap.
-	topics := append([]data.TopicInfo(nil), v.topics...)
-	sort.SliceStable(topics, func(i, j int) bool {
-		if !topics[i].LastActivity.Equal(topics[j].LastActivity) {
-			return topics[i].LastActivity.After(topics[j].LastActivity)
-		}
-		return topics[i].Name < topics[j].Name
-	})
-	if len(topics) > 10 {
-		topics = topics[:10]
+	if v.lastRefresh.IsZero() {
+		return true
 	}
+	return now.Sub(v.lastRefresh) >= dashboardMetadataRefresh
+}
 
+func (v *dashboardView) applyIncoming(msg fmail.Message) {
+	target := strings.TrimSpace(msg.To)
+	if target == "" || strings.HasPrefix(target, "@") {
+		return
+	}
+	ts := msg.Time.UTC()
+	if ts.IsZero() {
+		ts = time.Now().UTC()
+	}
+	v.addHotEvent(target, ts, 1)
+	v.bumpTopic(target, ts)
+}
+
+func (v *dashboardView) applyTopicsSnapshot(topics []data.TopicInfo, now time.Time) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	nextCounts := make(map[string]int, len(topics))
 	for _, topic := range topics {
-		msgs, err := v.provider.Messages(topic.Name, data.MessageFilter{Since: windowStart})
-		if err != nil {
+		name := strings.TrimSpace(topic.Name)
+		if name == "" {
 			continue
 		}
-		count := 0
-		for i := range msgs {
-			if msgs[i].Time.After(windowStart) {
-				count++
-			}
+		nextCounts[name] = maxInt(0, topic.MessageCount)
+		if prev, ok := v.topicCounts[name]; ok && topic.MessageCount > prev {
+			v.addHotEvent(name, topic.LastActivity, topic.MessageCount-prev)
+		} else if !ok && topic.MessageCount > 0 && topic.LastActivity.After(now.Add(-dashboardHotWindow)) {
+			v.addHotEvent(name, topic.LastActivity, 1)
 		}
-		next[topic.Name] = count
 	}
+	v.topicCounts = nextCounts
+	v.topics = append([]data.TopicInfo(nil), topics...)
+	v.pruneHotEvents(now)
+}
 
+func (v *dashboardView) addHotEvent(topic string, ts time.Time, count int) {
+	if count <= 0 {
+		return
+	}
+	if ts.IsZero() {
+		ts = time.Now().UTC()
+	}
+	v.hotEvents = append(v.hotEvents, dashboardHotEvent{
+		topic: topic,
+		at:    ts.UTC(),
+		count: count,
+	})
+	v.pruneHotEvents(ts)
+}
+
+func (v *dashboardView) pruneHotEvents(now time.Time) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if len(v.hotEvents) == 0 {
+		v.hotCounts = map[string]int{}
+		return
+	}
+	cutoff := now.Add(-dashboardHotWindow)
+	kept := make([]dashboardHotEvent, 0, len(v.hotEvents))
+	next := make(map[string]int, len(v.hotCounts))
+	for _, ev := range v.hotEvents {
+		if ev.at.Before(cutoff) {
+			continue
+		}
+		kept = append(kept, ev)
+		next[ev.topic] += ev.count
+	}
+	v.hotEvents = kept
 	v.hotCounts = next
+}
+
+func (v *dashboardView) bumpTopic(name string, ts time.Time) {
+	v.topicCounts[name] = v.topicCounts[name] + 1
+	for i := range v.topics {
+		if v.topics[i].Name != name {
+			continue
+		}
+		v.topics[i].MessageCount++
+		if ts.After(v.topics[i].LastActivity) {
+			v.topics[i].LastActivity = ts
+		}
+		return
+	}
+	v.topics = append(v.topics, data.TopicInfo{
+		Name:         name,
+		MessageCount: 1,
+		LastActivity: ts,
+	})
 }
 
 func (v *dashboardView) clampSelection() {
