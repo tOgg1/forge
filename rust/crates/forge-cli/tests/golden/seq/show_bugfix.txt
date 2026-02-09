@@ -1,0 +1,14 @@
+Sequence: bugfix
+Source: builtin
+Description: Standard bug fix workflow
+Tags: bug
+
+Steps:
+  1. [message] Find and fix the bug described in issue {{.issue_id}}.
+  2. [pause 30s] Wait for initial analysis
+  3. [conditional:idle] Run the tests and report results.
+  4. [pause 30s] Wait for tests to finish
+  5. [message] Commit the fix with a clear summary.
+
+Variables:
+- issue_id: Issue identifier or URL (required)

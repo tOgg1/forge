@@ -1,0 +1,20 @@
+Create, edit, and run reusable multi-step sequences.
+
+Usage:
+  forge seq <command> [options]
+
+Aliases:
+  seq, sequence
+
+Commands:
+  ls          List sequences
+  show        Show sequence details
+  add         Create a new sequence
+  edit        Edit an existing sequence
+  run         Queue a sequence
+  delete      Delete a user sequence
+
+Flags:
+      --tags string   filter by tags (comma-separated or repeatable) (ls only)
+  -a, --agent string  agent ID or prefix (run only)
+      --var string    sequence variable key=value (run only)

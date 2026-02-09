@@ -1,0 +1,25 @@
+Wait for a condition to be met
+
+Usage:
+  forge wait [flags]
+
+Flags:
+  -u, --until string       condition to wait for (required)
+  -a, --agent string       agent to wait for
+  -w, --workspace string   workspace to wait for
+  -t, --timeout duration   maximum wait time (default: 30m)
+      --poll-interval dur  check interval (default: 2s)
+  -q, --quiet              no output, just wait
+  -h, --help               help for wait
+
+Valid conditions:
+  idle           Agent is in idle state
+  queue-empty    Agent's queue has no pending items
+  cooldown-over  Account's cooldown period has expired
+  ready          Agent is idle, queue empty, and no cooldown
+  all-idle       All agents in workspace are idle
+  any-idle       At least one agent in workspace is idle
+
+Exit codes:
+  0: Condition met
+  1: Timeout reached

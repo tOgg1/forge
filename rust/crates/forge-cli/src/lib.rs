@@ -14,6 +14,7 @@ pub mod kill;
 pub mod lock;
 pub mod logs;
 pub mod loop_internal;
+pub mod mail;
 pub mod mem;
 pub mod migrate;
 pub mod msg;
@@ -27,12 +28,16 @@ pub mod rm;
 pub mod run;
 pub mod scale;
 pub mod send;
+pub mod seq;
 pub mod skills;
 pub mod status;
 pub mod stop;
 pub mod template;
+pub mod tui;
 pub mod up;
+pub mod wait;
 pub mod work;
+pub mod workflow;
 
 use error_envelope::{handle_cli_error, parse_global_flags, GlobalFlags};
 
@@ -171,6 +176,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             }
             queue::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
+        Some("mail") => {
+            let backend = mail::InMemoryMailBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            mail::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
         Some("mem") => {
             let mut backend = mem::InMemoryMemBackend::default();
             let forwarded = forward_args(remaining, &flags);
@@ -221,6 +231,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let forwarded = forward_args(remaining, &flags);
             send::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
+        Some("seq") | Some("sequence") => {
+            let mut backend = seq::InMemorySeqBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            seq::run_with_backend(&forwarded, &mut backend, stdout, stderr)
+        }
         Some("skills") => {
             let backend = skills::InMemorySkillsBackend::default();
             let forwarded = forward_args(remaining, &flags);
@@ -236,6 +251,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let forwarded = forward_args(remaining, &flags);
             template::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
+        Some("tui") | Some("ui") => {
+            let backend = tui::InMemoryTuiBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            tui::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
         Some("stop") => {
             let mut backend = stop::InMemoryStopBackend::default();
             let forwarded = forward_args(remaining, &flags);
@@ -245,6 +265,16 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let mut backend = up::InMemoryUpBackend::default();
             let forwarded = forward_args(remaining, &flags);
             up::run_with_backend(&forwarded, &mut backend, stdout, stderr)
+        }
+        Some("wait") => {
+            let backend = wait::InMemoryWaitBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            wait::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
+        Some("workflow") | Some("wf") => {
+            let backend = workflow::InMemoryWorkflowBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            workflow::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some(other) => {
             let message = format!("unknown forge command: {other}");
@@ -316,6 +346,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  kill      Kill loops immediately")?;
     writeln!(out, "  lock      Manage advisory file locks")?;
     writeln!(out, "  logs      Tail loop logs")?;
+    writeln!(out, "  mail      Forge Mail messaging")?;
     writeln!(out, "  migrate   Database migration command family")?;
     writeln!(out, "  mem       Loop memory command family")?;
     writeln!(out, "  msg       Queue a message for loop(s)")?;
@@ -333,9 +364,11 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  status    Show fleet status summary")?;
     writeln!(out, "  stop      Stop loops after current iteration")?;
     writeln!(out, "  template  Manage message templates")?;
+    writeln!(out, "  tui       Launch the Forge TUI")?;
     writeln!(out, "  up        Start loop(s) for a repo")?;
     writeln!(out, "  use       Set current workspace or agent context")?;
     writeln!(out, "  work      Loop work-context command family")?;
+    writeln!(out, "  workflow  Manage workflows")?;
     writeln!(out)?;
     writeln!(out, "Global Flags:")?;
     writeln!(
@@ -408,8 +441,9 @@ pub struct RootCommandOutput {
 mod tests {
     use super::{
         audit, clean, completion, config, context, crate_label, hook, init, kill, lock, logs,
-        loop_internal, mem, migrate, msg, pool, profile, prompt, ps, queue, resume, rm, run,
-        run_for_test, run_with_args, scale, send, skills, status, stop, template, up, work,
+        loop_internal, mail, mem, migrate, msg, pool, profile, prompt, ps, queue, resume, rm, run,
+        run_for_test, run_with_args, scale, send, seq, skills, status, stop, template, tui, up,
+        wait, work, workflow,
     };
 
     #[test]
@@ -450,6 +484,11 @@ mod tests {
     #[test]
     fn logs_module_is_accessible() {
         let _ = logs::InMemoryLogsBackend::default();
+    }
+
+    #[test]
+    fn mail_module_is_accessible() {
+        let _ = mail::InMemoryMailBackend::default();
     }
 
     #[test]
@@ -576,6 +615,26 @@ mod tests {
     }
 
     #[test]
+    fn seq_module_is_accessible() {
+        let _ = seq::InMemorySeqBackend::default();
+    }
+
+    #[test]
+    fn tui_module_is_accessible() {
+        let _ = tui::InMemoryTuiBackend::default();
+    }
+
+    #[test]
+    fn wait_module_is_accessible() {
+        let _ = wait::InMemoryWaitBackend::default();
+    }
+
+    #[test]
+    fn workflow_module_is_accessible() {
+        let _ = workflow::InMemoryWorkflowBackend::default();
+    }
+
+    #[test]
     fn root_help_renders_when_no_command() {
         let args: Vec<String> = Vec::new();
         let mut stdout = Vec::new();
@@ -596,6 +655,7 @@ mod tests {
         assert!(rendered.contains("kill"));
         assert!(rendered.contains("lock"));
         assert!(rendered.contains("logs"));
+        assert!(rendered.contains("mail"));
         assert!(rendered.contains("msg"));
         assert!(rendered.contains("pool"));
         assert!(rendered.contains("profile"));
@@ -609,9 +669,11 @@ mod tests {
         assert!(rendered.contains("send"));
         assert!(rendered.contains("status"));
         assert!(rendered.contains("stop"));
+        assert!(rendered.contains("tui"));
         assert!(rendered.contains("up"));
         assert!(rendered.contains("use"));
         assert!(rendered.contains("work"));
+        assert!(rendered.contains("workflow"));
         assert!(rendered.contains("Global Flags:"));
         assert!(rendered.contains("--json"));
         assert!(rendered.contains("--version"));

@@ -1,0 +1,1 @@
+{"error":{"code":"ERR_PREFLIGHT","message":"TUI requires an interactive terminal","hint":"Run without --non-interactive and with a TTY, or use CLI subcommands","next_step":"forge --help"}}

@@ -1,0 +1,12 @@
+Launch the Forge TUI
+
+Launch the Forge terminal user interface (TUI).
+
+Usage:
+  forge tui [flags]
+
+Aliases:
+  tui, ui
+
+Flags:
+  -h, --help   help for tui

@@ -1,0 +1,5 @@
+NAME         STEPS  DESCRIPTION                              SOURCE
+bugfix       5      Standard bug fix workflow                builtin
+deploy       1      Deploy to staging                        user
+review-loop  2      Review, address feedback, and re-review  project
+misc         1                                               file

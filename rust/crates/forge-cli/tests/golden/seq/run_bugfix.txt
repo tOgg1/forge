@@ -1,0 +1,6 @@
+Queued sequence "bugfix" (5 steps) for agent agent_ab
+  Step 1: message -> queued
+  Step 2: pause 30s -> queued
+  Step 3: conditional:idle -> queued
+  Step 4: pause 30s -> queued
+  Step 5: message -> queued
