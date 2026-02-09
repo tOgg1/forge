@@ -169,6 +169,8 @@ Canonical matrix + snapshot parity checks:
 
 ## Include: subsystem packages (Rust parity targets)
 
+Canonical include matrix: `docs/rust-package-include-matrix.md`.
+
 ### Core/runtime/data → `forge-core`, `forge-db`, `forge-loop`
 
 | Go package | Target Rust crate | Notes |
