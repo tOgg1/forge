@@ -50,6 +50,15 @@ type forgedRelayRequest struct {
 	Since string `json:"since,omitempty"`
 }
 
+type forgedSendRequest struct {
+	forgedBaseRequest
+	To       string          `json:"to"`
+	Body     json.RawMessage `json:"body"`
+	ReplyTo  string          `json:"reply_to,omitempty"`
+	Priority string          `json:"priority,omitempty"`
+	Tags     []string        `json:"tags,omitempty"`
+}
+
 type forgedError struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
@@ -58,6 +67,12 @@ type forgedError struct {
 
 type forgedWatchAck struct {
 	OK    bool         `json:"ok"`
+	Error *forgedError `json:"error,omitempty"`
+}
+
+type forgedSendAck struct {
+	OK    bool         `json:"ok"`
+	ID    string       `json:"id,omitempty"`
 	Error *forgedError `json:"error,omitempty"`
 }
 
@@ -145,6 +160,65 @@ func (p *ForgedProvider) Agents() ([]fmail.AgentRecord, error) {
 
 func (p *ForgedProvider) Search(query SearchQuery) ([]SearchResult, error) {
 	return p.fallback.Search(query)
+}
+
+func (p *ForgedProvider) Send(req SendRequest) (fmail.Message, error) {
+	msg, err := normalizeSendRequest(req, p.agent)
+	if err != nil {
+		return fmail.Message{}, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), p.dialTimeout)
+	defer cancel()
+	conn, err := p.dial(ctx)
+	if err != nil {
+		return p.fallback.Send(req)
+	}
+	defer conn.Close()
+
+	body, err := json.Marshal(msg.Body)
+	if err != nil {
+		return fmail.Message{}, err
+	}
+
+	writer := bufio.NewWriter(conn)
+	reader := bufio.NewReader(conn)
+	sendReq := forgedSendRequest{
+		forgedBaseRequest: forgedBaseRequest{
+			Cmd:       "send",
+			ProjectID: p.projectID,
+			Agent:     msg.From,
+			Host:      p.host,
+			ReqID:     fmt.Sprintf("tui-send-%d", time.Now().UTC().UnixNano()),
+		},
+		To:       msg.To,
+		Body:     body,
+		ReplyTo:  msg.ReplyTo,
+		Priority: msg.Priority,
+		Tags:     msg.Tags,
+	}
+	if err := writeJSONLine(writer, sendReq); err != nil {
+		return p.fallback.Send(req)
+	}
+
+	line, err := readForgedLine(reader)
+	if err != nil {
+		return p.fallback.Send(req)
+	}
+	var ack forgedSendAck
+	if err := json.Unmarshal(line, &ack); err != nil {
+		return p.fallback.Send(req)
+	}
+	if !ack.OK {
+		if ack.Error != nil && strings.TrimSpace(ack.Error.Message) != "" {
+			return fmail.Message{}, fmt.Errorf("forged send rejected: %s", ack.Error.Message)
+		}
+		return fmail.Message{}, fmt.Errorf("forged send rejected")
+	}
+	if strings.TrimSpace(ack.ID) != "" {
+		msg.ID = strings.TrimSpace(ack.ID)
+	}
+	return msg, nil
 }
 
 func (p *ForgedProvider) Subscribe(filter SubscriptionFilter) (<-chan fmail.Message, func()) {

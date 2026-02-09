@@ -125,6 +125,36 @@ func (v *threadView) SetTarget(target string) tea.Cmd {
 	return v.loadCmd()
 }
 
+func (v *threadView) ComposeTarget() string {
+	return strings.TrimSpace(v.topic)
+}
+
+func (v *threadView) ComposeReplySeed(dmDirect bool) (composeReplySeed, bool) {
+	row := v.selectedRow()
+	if row == nil {
+		return composeReplySeed{}, false
+	}
+	target := strings.TrimSpace(v.topic)
+	if target == "" {
+		target = strings.TrimSpace(row.msg.To)
+	}
+	if dmDirect {
+		from := strings.TrimSpace(row.msg.From)
+		if from == "" {
+			return composeReplySeed{}, false
+		}
+		target = "@" + from
+	}
+	if strings.TrimSpace(target) == "" {
+		return composeReplySeed{}, false
+	}
+	return composeReplySeed{
+		Target:     target,
+		ReplyTo:    strings.TrimSpace(row.msg.ID),
+		ParentLine: firstLine(row.msg.Body),
+	}, true
+}
+
 func (v *threadView) Update(msg tea.Msg) tea.Cmd {
 	switch typed := msg.(type) {
 	case threadTickMsg:

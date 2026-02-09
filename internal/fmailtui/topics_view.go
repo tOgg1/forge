@@ -1051,6 +1051,14 @@ func dmPeerForSelf(self string, msg fmail.Message) string {
 	return ""
 }
 
+func (v *topicsView) ComposeTarget() string {
+	return strings.TrimSpace(v.selectedTarget())
+}
+
+func (v *topicsView) ComposeReplySeed(bool) (composeReplySeed, bool) {
+	return composeReplySeed{}, false
+}
+
 func (v *topicsView) sendCmd(target string, body string) tea.Cmd {
 	root := strings.TrimSpace(v.root)
 	self := strings.TrimSpace(v.self)
@@ -1063,14 +1071,24 @@ func (v *topicsView) sendCmd(target string, body string) tea.Cmd {
 	}
 
 	return func() tea.Msg {
+		if sender, ok := v.provider.(providerSender); ok {
+			msg, err := sender.Send(data.SendRequest{
+				From:     self,
+				To:       target,
+				Body:     body,
+				Priority: fmail.PriorityNormal,
+			})
+			return topicsSentMsg{target: target, msg: msg, err: err}
+		}
 		store, err := fmail.NewStore(root)
 		if err != nil {
 			return topicsSentMsg{target: target, err: err}
 		}
 		msg := &fmail.Message{
-			From: self,
-			To:   target,
-			Body: body,
+			From:     self,
+			To:       target,
+			Body:     body,
+			Priority: fmail.PriorityNormal,
 		}
 		if _, err := store.SaveMessage(msg); err != nil {
 			return topicsSentMsg{target: target, err: err}

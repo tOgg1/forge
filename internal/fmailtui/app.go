@@ -59,6 +59,7 @@ type Config struct {
 	ProjectID    string
 	Root         string
 	ForgedAddr   string
+	Agent        string
 	Theme        string
 	PollInterval time.Duration
 }
@@ -87,6 +88,7 @@ func (c *netForgedClient) Close() error {
 type Model struct {
 	projectID    string
 	root         string
+	selfAgent    string
 	store        *fmail.Store
 	provider     data.MessageProvider
 	tuiState     *state.Manager
@@ -95,9 +97,14 @@ type Model struct {
 	theme        Theme
 	pollInterval time.Duration
 
-	width    int
-	height   int
-	showHelp bool
+	width      int
+	height     int
+	showHelp   bool
+	toast      string
+	toastUntil time.Time
+
+	compose composeState
+	quick   quickSendState
 
 	viewStack []ViewID
 	views     map[ViewID]viewModel
@@ -166,7 +173,8 @@ func NewModel(cfg Config) (*Model, error) {
 		return nil, fmt.Errorf("ensure project: %w", err)
 	}
 
-	provider, err := buildProvider(root, normalized.ForgedAddr)
+	selfAgent := resolveSelfAgent(normalized.Agent)
+	provider, err := buildProvider(root, normalized.ForgedAddr, selfAgent)
 	if err != nil {
 		return nil, fmt.Errorf("init data provider: %w", err)
 	}
@@ -180,6 +188,7 @@ func NewModel(cfg Config) (*Model, error) {
 	m := &Model{
 		projectID:    projectID,
 		root:         root,
+		selfAgent:    selfAgent,
 		store:        store,
 		provider:     provider,
 		tuiState:     state.New(filepath.Join(root, ".fmail", "tui-state.json")),
@@ -187,8 +196,11 @@ func NewModel(cfg Config) (*Model, error) {
 		forgedErr:    err,
 		theme:        Theme(normalized.Theme),
 		pollInterval: normalized.PollInterval,
-		viewStack:    []ViewID{ViewDashboard},
-		views:        make(map[ViewID]viewModel),
+		quick: quickSendState{
+			historyIndex: -1,
+		},
+		viewStack: []ViewID{ViewDashboard},
+		views:     make(map[ViewID]viewModel),
 	}
 	// Non-fatal: state can be created later; fall back to in-memory defaults.
 	_ = m.tuiState.Load()
@@ -257,6 +269,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, view.Init()
 		}
 		return m, nil
+	case composeSendResultMsg:
+		return m, m.handleComposeSendResult(typed)
 	case tea.KeyMsg:
 		if cmd, handled := m.handleGlobalKey(typed); handled {
 			return m, cmd
@@ -278,13 +292,42 @@ func (m *Model) View() string {
 			contentHeight = 0
 		}
 		body := active.View(m.width, contentHeight, m.theme)
-		return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+		if m.compose.active {
+			body = m.renderComposeOverlay(m.width, contentHeight, m.theme)
+		}
+
+		lines := []string{header, body}
+		if m.quick.active {
+			lines = append(lines, m.renderQuickSendBar(m.width, m.theme))
+		}
+		if toast := m.renderToast(m.width, m.theme); strings.TrimSpace(toast) != "" {
+			lines = append(lines, toast)
+		}
+		lines = append(lines, footer)
+		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 	return "no active view"
 }
 
 func (m *Model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool) {
+	if cmd, handled := m.handleComposerKey(msg); handled {
+		return cmd, true
+	}
+
 	switch msg.String() {
+	case "n":
+		return nil, m.maybeOpenComposeForNewMessage()
+	case "r":
+		if m.maybeOpenComposeReply(false) {
+			return nil, true
+		}
+	case "R":
+		if m.maybeOpenComposeReply(true) {
+			return nil, true
+		}
+	case ":":
+		m.openQuickSendBar()
+		return nil, true
 	case "q":
 		return tea.Quit, true
 	case "ctrl+c":
@@ -350,6 +393,7 @@ func (c Config) normalize() (Config, error) {
 	c.ProjectID = strings.TrimSpace(c.ProjectID)
 	c.Root = strings.TrimSpace(c.Root)
 	c.ForgedAddr = strings.TrimSpace(c.ForgedAddr)
+	c.Agent = strings.TrimSpace(c.Agent)
 	if c.PollInterval <= 0 {
 		c.PollInterval = defaultPollInterval
 	}
@@ -404,6 +448,21 @@ func forgedEndpoint(addr string) (network string, target string) {
 	default:
 		return "tcp", addr
 	}
+}
+
+func resolveSelfAgent(agent string) string {
+	agent = strings.TrimSpace(agent)
+	if agent == "" {
+		agent = strings.TrimSpace(os.Getenv("FMAIL_AGENT"))
+	}
+	if agent == "" {
+		agent = fmt.Sprintf("tui-%d", os.Getpid())
+	}
+	normalized, err := fmail.NormalizeAgentName(agent)
+	if err != nil {
+		return defaultSelfAgent
+	}
+	return normalized
 }
 
 type placeholderView struct {

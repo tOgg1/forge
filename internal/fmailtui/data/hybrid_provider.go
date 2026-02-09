@@ -90,6 +90,15 @@ func (p *HybridProvider) Search(query SearchQuery) ([]SearchResult, error) {
 	return p.file.Search(query)
 }
 
+func (p *HybridProvider) Send(req SendRequest) (fmail.Message, error) {
+	if p.forgedAvailable() {
+		if msg, err := p.forged.Send(req); err == nil {
+			return msg, nil
+		}
+	}
+	return p.file.Send(req)
+}
+
 func (p *HybridProvider) Subscribe(filter SubscriptionFilter) (<-chan fmail.Message, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	out := make(chan fmail.Message, p.subscribeBuffer)

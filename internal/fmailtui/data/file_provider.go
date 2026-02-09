@@ -286,6 +286,28 @@ func (p *FileProvider) Search(query SearchQuery) ([]SearchResult, error) {
 	return results, nil
 }
 
+func (p *FileProvider) Send(req SendRequest) (fmail.Message, error) {
+	msg, err := normalizeSendRequest(req, p.selfAgent)
+	if err != nil {
+		return fmail.Message{}, err
+	}
+	if _, err := p.store.SaveMessage(&msg); err != nil {
+		return fmail.Message{}, err
+	}
+
+	// Invalidate caches so the new message is visible without waiting for TTL expiry.
+	p.mu.Lock()
+	p.topicsCache = timedEntry[[]TopicInfo]{}
+	if strings.HasPrefix(strings.TrimSpace(msg.To), "@") {
+		p.dmMsgCache = make(map[string]timedEntry[[]fmail.Message])
+	} else {
+		delete(p.topicMsgCache, strings.TrimSpace(msg.To))
+	}
+	p.mu.Unlock()
+
+	return msg, nil
+}
+
 func (p *FileProvider) Subscribe(filter SubscriptionFilter) (<-chan fmail.Message, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	out := make(chan fmail.Message, p.subscribeBuffer)

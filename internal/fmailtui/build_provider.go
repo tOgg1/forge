@@ -1,17 +1,17 @@
 package fmailtui
 
 import (
-	"os"
 	"strings"
 	"time"
 
 	"github.com/tOgg1/forge/internal/fmailtui/data"
 )
 
-func buildProvider(root, forgedAddr string) (data.MessageProvider, error) {
+func buildProvider(root, forgedAddr, selfAgent string) (data.MessageProvider, error) {
+	selfAgent = strings.TrimSpace(selfAgent)
 	fileProvider, err := data.NewFileProvider(data.FileProviderConfig{
 		Root:         root,
-		SelfAgent:    strings.TrimSpace(os.Getenv("FMAIL_AGENT")),
+		SelfAgent:    selfAgent,
 		PollInterval: 100 * time.Millisecond,
 	})
 	if err != nil {
@@ -26,7 +26,7 @@ func buildProvider(root, forgedAddr string) (data.MessageProvider, error) {
 	forgedProvider, err := data.NewForgedProvider(data.ForgedProviderConfig{
 		Root:              root,
 		Addr:              trimmedAddr,
-		Agent:             strings.TrimSpace(os.Getenv("FMAIL_AGENT")),
+		Agent:             selfAgent,
 		ReconnectInterval: 2 * time.Second,
 		SubscribeBuffer:   512,
 		Fallback:          fileProvider,
