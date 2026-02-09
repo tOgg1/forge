@@ -26,11 +26,19 @@ type graphSnapshot struct {
 	Messages int
 	Nodes    []graphNode
 	Edges    []graphEdge
+	Topics          []graphTopic
+	AgentTopicEdges []graphEdge
 }
 
 type graphEdgeKey struct {
 	from string
 	to   string
+}
+
+type graphTopic struct {
+	Name         string
+	MessageCount int
+	Participants int
 }
 
 func buildGraphSnapshot(messages []fmail.Message, maxNodes int) graphSnapshot {
@@ -41,6 +49,8 @@ func buildGraphSnapshot(messages []fmail.Message, maxNodes int) graphSnapshot {
 	// Phase 1: group topic messages so we can treat topics as shared broadcast channels.
 	topicParticipants := make(map[string]map[string]struct{}, 32)
 	topicMsgs := make(map[string][]fmail.Message, 64)
+	topicCounts := make(map[string]int, 64)
+	agentTopic := make(map[graphEdgeKey]int, 256) // from agent -> topic
 
 	dmEdges := make(map[graphEdgeKey]int, 64)
 
@@ -71,6 +81,8 @@ func buildGraphSnapshot(messages []fmail.Message, maxNodes int) graphSnapshot {
 		}
 		parts[from] = struct{}{}
 		topicMsgs[topic] = append(topicMsgs[topic], msg)
+		topicCounts[topic]++
+		agentTopic[graphEdgeKey{from: from, to: topic}]++
 	}
 
 	// Phase 2: build directed agent->agent edges.
@@ -205,10 +217,61 @@ func buildGraphSnapshot(messages []fmail.Message, maxNodes int) graphSnapshot {
 		return finalEdges[i].To < finalEdges[j].To
 	})
 
+	// Phase 5: topic overlay data (top topics + agent->topic edges).
+	topics := make([]graphTopic, 0, len(topicCounts))
+	for topic, count := range topicCounts {
+		parts := 0
+		if ps := topicParticipants[topic]; ps != nil {
+			parts = len(ps)
+		}
+		topics = append(topics, graphTopic{Name: topic, MessageCount: count, Participants: parts})
+	}
+	sort.Slice(topics, func(i, j int) bool {
+		if topics[i].MessageCount != topics[j].MessageCount {
+			return topics[i].MessageCount > topics[j].MessageCount
+		}
+		return topics[i].Name < topics[j].Name
+	})
+	const maxTopics = 10
+	if len(topics) > maxTopics {
+		topics = topics[:maxTopics]
+	}
+	keepTopics := make(map[string]struct{}, len(topics))
+	for i := range topics {
+		keepTopics[topics[i].Name] = struct{}{}
+	}
+
+	agentTopicEdges := make(map[graphEdgeKey]int, len(agentTopic))
+	for k, count := range agentTopic {
+		if _, ok := keepTopics[k.to]; !ok {
+			continue
+		}
+		from := mapNode(k.from)
+		agentTopicEdges[graphEdgeKey{from: from, to: k.to}] += count
+	}
+	finalAgentTopic := make([]graphEdge, 0, len(agentTopicEdges))
+	for k, count := range agentTopicEdges {
+		if strings.TrimSpace(k.from) == "" || strings.TrimSpace(k.to) == "" || count <= 0 {
+			continue
+		}
+		finalAgentTopic = append(finalAgentTopic, graphEdge{From: k.from, To: k.to, Count: count})
+	}
+	sort.Slice(finalAgentTopic, func(i, j int) bool {
+		if finalAgentTopic[i].Count != finalAgentTopic[j].Count {
+			return finalAgentTopic[i].Count > finalAgentTopic[j].Count
+		}
+		if finalAgentTopic[i].From != finalAgentTopic[j].From {
+			return finalAgentTopic[i].From < finalAgentTopic[j].From
+		}
+		return finalAgentTopic[i].To < finalAgentTopic[j].To
+	})
+
 	return graphSnapshot{
-		Messages: len(messages),
-		Nodes:    finalNodes,
-		Edges:    finalEdges,
+		Messages:        len(messages),
+		Nodes:           finalNodes,
+		Edges:           finalEdges,
+		Topics:          topics,
+		AgentTopicEdges: finalAgentTopic,
 	}
 }
 
