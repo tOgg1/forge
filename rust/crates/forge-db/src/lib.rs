@@ -2,6 +2,7 @@
 
 pub mod alert_repository;
 pub mod approval_repository;
+pub mod event_repository;
 pub mod file_lock_repository;
 pub mod loop_queue_repository;
 pub mod loop_repository;
@@ -81,6 +82,10 @@ pub enum DbError {
     UsageRecordNotFound,
     #[error("invalid usage record")]
     InvalidUsageRecord,
+    #[error("event not found")]
+    EventNotFound,
+    #[error("invalid event")]
+    InvalidEvent,
     #[error("loop kv not found: {0}")]
     LoopKVNotFound(String),
     #[error("loop work state not found")]
