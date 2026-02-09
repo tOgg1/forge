@@ -1,0 +1,3 @@
+Current context: myws:agent_abc
+  Workspace: ws_123456789 (myws)
+  Agent: agent_abcdef1234567890 (agent_abc)

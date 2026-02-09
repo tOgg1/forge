@@ -1,0 +1,5 @@
+No context set.
+
+Set context with:
+  forge use <workspace>       # Set workspace
+  forge use --agent <agent>   # Set agent
