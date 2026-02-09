@@ -6,7 +6,9 @@ pub mod audit;
 pub mod clean;
 pub mod completion;
 pub mod config;
+pub mod context;
 pub mod error_envelope;
+pub mod hook;
 pub mod init;
 pub mod kill;
 pub mod logs;
@@ -23,6 +25,7 @@ pub mod resume;
 pub mod rm;
 pub mod run;
 pub mod scale;
+pub mod status;
 pub mod stop;
 pub mod up;
 pub mod work;
@@ -75,6 +78,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             }
             0
         }
+        Some("hook") => {
+            let backend = hook::FilesystemHookBackend;
+            let forwarded = forward_args(remaining, &flags);
+            hook::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
         Some("init") => {
             let backend = init::FilesystemInitBackend;
             let forwarded = forward_args(remaining, &flags);
@@ -106,6 +114,16 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             clean::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("completion") => completion::run(remaining, stdout, stderr),
+        Some("context") => {
+            let backend = context::InMemoryContextBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            context::run_context(&forwarded, &backend, stdout, stderr)
+        }
+        Some("use") => {
+            let backend = context::InMemoryContextBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            context::run_use(&forwarded, &backend, stdout, stderr)
+        }
         Some("config") => {
             let backend = config::FilesystemConfigBackend;
             let forwarded = forward_args(remaining, &flags);
@@ -189,6 +207,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let forwarded = forward_args(remaining, &flags);
             ps::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
+        Some("status") => {
+            let backend = status::InMemoryStatusBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            status::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
         Some("stop") => {
             let mut backend = stop::InMemoryStopBackend::default();
             let forwarded = forward_args(remaining, &flags);
@@ -262,7 +285,9 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  audit     View the Forge audit log")?;
     writeln!(out, "  clean     Remove inactive loops")?;
     writeln!(out, "  completion  Generate shell completion scripts")?;
+    writeln!(out, "  context   Show current context")?;
     writeln!(out, "  config    Manage global configuration")?;
+    writeln!(out, "  hook      Manage event hooks")?;
     writeln!(out, "  init      Initialize a repo for Forge loops")?;
     writeln!(out, "  kill      Kill loops immediately")?;
     writeln!(out, "  logs      Tail loop logs")?;
@@ -278,8 +303,10 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  rm        Remove loop records")?;
     writeln!(out, "  run       Run a single loop iteration")?;
     writeln!(out, "  scale     Scale loops to target count")?;
+    writeln!(out, "  status    Show fleet status summary")?;
     writeln!(out, "  stop      Stop loops after current iteration")?;
     writeln!(out, "  up        Start loop(s) for a repo")?;
+    writeln!(out, "  use       Set current workspace or agent context")?;
     writeln!(out, "  work      Loop work-context command family")?;
     writeln!(out)?;
     writeln!(out, "Global Flags:")?;
@@ -352,14 +379,24 @@ pub struct RootCommandOutput {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::{
-        audit, clean, completion, config, crate_label, init, kill, logs, loop_internal, mem,
-        migrate, msg, pool, profile, prompt, ps, queue, resume, rm, run, run_for_test,
-        run_with_args, scale, stop, up, work,
+        audit, clean, completion, config, context, crate_label, hook, init, kill, logs,
+        loop_internal, mem, migrate, msg, pool, profile, prompt, ps, queue, resume, rm, run,
+        run_for_test, run_with_args, scale, status, stop, up, work,
     };
 
     #[test]
     fn crate_label_is_stable() {
         assert_eq!(crate_label(), "forge-cli");
+    }
+
+    #[test]
+    fn context_module_is_accessible() {
+        let _ = context::InMemoryContextBackend::default();
+    }
+
+    #[test]
+    fn hook_module_is_accessible() {
+        let _ = hook::InMemoryHookBackend::default();
     }
 
     #[test]
@@ -469,6 +506,11 @@ mod tests {
     }
 
     #[test]
+    fn status_module_is_accessible() {
+        let _ = status::InMemoryStatusBackend::default();
+    }
+
+    #[test]
     fn stop_module_is_accessible() {
         let _ = stop::InMemoryStopBackend::default();
     }
@@ -494,6 +536,7 @@ mod tests {
         assert!(rendered.contains("audit"));
         assert!(rendered.contains("clean"));
         assert!(rendered.contains("config"));
+        assert!(rendered.contains("hook"));
         assert!(rendered.contains("init"));
         assert!(rendered.contains("kill"));
         assert!(rendered.contains("logs"));
@@ -507,8 +550,10 @@ mod tests {
         assert!(rendered.contains("rm"));
         assert!(rendered.contains("run"));
         assert!(rendered.contains("scale"));
+        assert!(rendered.contains("status"));
         assert!(rendered.contains("stop"));
         assert!(rendered.contains("up"));
+        assert!(rendered.contains("use"));
         assert!(rendered.contains("work"));
         assert!(rendered.contains("Global Flags:"));
         assert!(rendered.contains("--json"));
