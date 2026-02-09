@@ -183,6 +183,31 @@ func TestThreadViewPendingNewCountWhenScrolledUp(t *testing.T) {
 	require.Greater(t, v.pendingNew, 0)
 }
 
+func TestThreadViewLoadDMTargetUsesDMProvider(t *testing.T) {
+	now := time.Date(2026, 2, 9, 13, 0, 0, 0, time.UTC)
+	provider := &stubThreadProvider{
+		byTopic: map[string][]fmail.Message{
+			"@bob": {
+				{ID: "20260209-130000-0001", From: "bob", To: "@viewer", Time: now, Body: "dm"},
+			},
+		},
+	}
+
+	v := newThreadView("", provider)
+	cmd := v.SetTarget("@bob")
+	require.NotNil(t, cmd)
+
+	loaded, ok := cmd().(threadLoadedMsg)
+	require.True(t, ok)
+	require.NoError(t, loaded.err)
+	require.Equal(t, "@bob", loaded.topic)
+	require.Len(t, loaded.msgs, 1)
+
+	v.applyLoaded(loaded)
+	require.Equal(t, "@bob", v.topic)
+	require.Equal(t, 2, v.participantCount("@bob"))
+}
+
 func mustLoad(v *threadView) threadLoadedMsg {
 	msg, ok := v.loadCmd()().(threadLoadedMsg)
 	if !ok {
