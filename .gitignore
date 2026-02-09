@@ -20,4 +20,6 @@ rust-boundary-check
 
 # Rust build outputs
 rust/target/
+rust/target-local/
+rust/.cargo-home-local/
 rust/coverage/
