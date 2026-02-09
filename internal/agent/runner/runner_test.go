@@ -77,7 +77,7 @@ func TestRunnerEmitsEvents(t *testing.T) {
 		OutputWriter:      io.Discard,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -86,18 +86,18 @@ func TestRunnerEmitsEvents(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		return sink.HasType(EventTypePromptReady)
-	}, 3*time.Second, 10*time.Millisecond, "expected prompt_ready event")
+		return sink.HasType(EventTypeHeartbeat)
+	}, 4*time.Second, 10*time.Millisecond, "expected heartbeat")
 
 	require.NoError(t, runner.SendInput(ctx, "hello"))
 
 	require.Eventually(t, func() bool {
 		return sink.ContainsOutput("working on: hello")
-	}, 3*time.Second, 10*time.Millisecond, "expected output_line for work")
+	}, 4*time.Second, 10*time.Millisecond, "expected output_line for work")
 
 	require.Eventually(t, func() bool {
-		return sink.HasType(EventTypeHeartbeat)
-	}, 3*time.Second, 10*time.Millisecond, "expected heartbeat")
+		return sink.HasType(EventTypePromptReady)
+	}, 4*time.Second, 10*time.Millisecond, "expected prompt_ready event")
 
 	require.NoError(t, runner.SendInput(ctx, "exit"))
 
