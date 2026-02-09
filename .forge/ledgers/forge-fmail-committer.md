@@ -519,3 +519,75 @@ All tests pass. No push.
 No commit candidate this iteration. The working tree only contains forge infrastructure changes (ledger entries, task snapshots, prompt edits) — no source code modifications to package into a commit.
 ```
 
+## 2026-02-09T09:23:24Z
+
+- run_id: 4ee0e448-f3de-44bd-8af2-29ee44068f91
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T09:22:02Z
+- finished_at: 2026-02-09T09:23:24Z
+- exit_code: 0
+
+```
+Iteration complete. Created 2 commits:
+
+1. **`a9002b5`** `fix(agent/runner): increase test timeouts to reduce flakiness` — Bumped `Eventually()` timeouts from 2s→3s in `TestRunnerEmitsEvents`
+2. **`cc5b34f`** `chore: update ledgers, tasks, and prompt for fmail iteration` — Updated ledgers (committer, next-2, next-5), task events/snapshot (forge-1p8 closed, forge-rsx started), and refined fmail-next-task prompt to prevent agent pile-on
+
+All tests pass. No push. Orchestrator notified.
+```
+
+## 2026-02-09T09:27:08Z
+
+- run_id: 61aee674-bea2-449d-ad00-27455ff9c678
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T09:24:24Z
+- finished_at: 2026-02-09T09:27:08Z
+- exit_code: 0
+
+```
+No commit candidate this iteration. The working tree has partially-integrated changes for task `forge-rsx` (TUI state persistence):
+
+- **`internal/fmailtui/state/state.go`** — new state package, builds and tests pass independently
+- **`internal/fmailtui/app.go`** — integrates state manager, but passes `*state.Manager` to `newThreadView` which hasn't been updated
+- **`internal/fmailtui/topics_view.go`** — updated constructor + compose support with `sendCmd`
+- **`internal/fmailtui/thread_view.go`** — NOT updated to accept `*state.Manager`
+
+**Blocker**: `app.go:348` calls `newThreadView(root, provider, tuiState)` but `thread_view.go:87` signature is `func newThreadView(root string, provider data.MessageProvider)` — compilation fails. Reported on `task` topic.
+```
+
+## 2026-02-09T09:30:30Z
+
+- run_id: 4f583494-8b64-4036-be01-dcc95d4197e3
+- loop_name: forge-fmail-committer
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T09:28:08Z
+- finished_at: 2026-02-09T09:30:30Z
+- exit_code: 0
+
+```
+No commit this iteration. The working tree changes are incoherent:
+
+1. `internal/fmailtui/tui_state.go` was deleted (unstaged `D`), removing the `tuiStateFile` type
+2. `topics_view_test.go` still references `tuiStateFile` in 3 places (lines 217, 239, 274) — **build fails**
+3. Two tests pass `nil` state manager but expect disk persistence — would fail at runtime even if they compiled
+
+Reported blocker on `task` topic. Waiting for the feature workers (`forge-6jy` / `forge-rsx`) to fix the test compilation errors.
+```
+
