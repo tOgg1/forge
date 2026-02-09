@@ -161,3 +161,80 @@ hi. one loop down; keep rolling.
 - Tests: `env -u GOROOT go test ./...` (note: your shell had `GOROOT` pinned to Go 1.23.12 while `go` is 1.25.6)
 ```
 
+## 2026-02-09T09:40:54Z
+
+- run_id: 0cde7238-a9f9-44c2-a788-1608ba2814b3
+- loop_name: forge-fmail-next-2
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/fmail-next-task.md
+- prompt_override: false
+- started_at: 2026-02-09T09:24:33Z
+- finished_at: 2026-02-09T09:40:54Z
+- exit_code: 0
+
+```
++++ b/internal/fmailtui/topics_view.go
+@@ -1051,6 +1051,14 @@
+ 	return ""
+ }
+ 
++func (v *topicsView) ComposeTarget() string {
++	return strings.TrimSpace(v.selectedTarget())
++}
++
++func (v *topicsView) ComposeReplySeed(bool) (composeReplySeed, bool) {
++	return composeReplySeed{}, false
++}
++
+ func (v *topicsView) sendCmd(target string, body string) tea.Cmd {
+ 	root := strings.TrimSpace(v.root)
+ 	self := strings.TrimSpace(v.self)
+@@ -1063,14 +1071,24 @@
+ 	}
+ 
+ 	return func() tea.Msg {
++		if sender, ok := v.provider.(providerSender); ok {
++			msg, err := sender.Send(data.SendRequest{
++				From:     self,
++				To:       target,
++				Body:     body,
++				Priority: fmail.PriorityNormal,
++			})
++			return topicsSentMsg{target: target, msg: msg, err: err}
++		}
+ 		store, err := fmail.NewStore(root)
+ 		if err != nil {
+ 			return topicsSentMsg{target: target, err: err}
+ 		}
+ 		msg := &fmail.Message{
+-			From: self,
+-			To:   target,
+-			Body: body,
++			From:     self,
++			To:       target,
++			Body:     body,
++			Priority: fmail.PriorityNormal,
+ 		}
+ 		if _, err := store.SaveMessage(msg); err != nil {
+ 			return topicsSentMsg{target: target, err: err}
+
+tokens used
+370,087
+Hi. Solid loop; task shipped end-to-end.
+
+- Task `forge-6jy` selected, claimed, implemented, validated, closed.
+- Landed commits: `465ebfa` (compose overlay + quick-send + send plumbing), `ac159cc` (state struct tag cleanup).
+- Key files: `internal/fmailtui/compose.go`, `internal/fmailtui/app.go`, `internal/fmailtui/data/send.go`, `internal/fmailtui/data/file_provider.go`, `internal/fmailtui/data/forged_provider.go`, `internal/fmailtui/data/hybrid_provider.go`, `internal/fmailtui/thread_view.go`, `internal/fmailtui/topics_view.go`, `internal/fmailtui/state/state.go`.
+- Validation: `env -u GOROOT go test ./...` passed.
+- Status comms sent:
+  - task progress: `20260209-094032-1087`
+  - orchestrator done: `20260209-094032-1088`
+  - task closed: `20260209-094032-1089`
+- `sv task close forge-6jy` done.
+
+Workspace now only has loop metadata churn plus untracked `mise.toml`.
+```
+
