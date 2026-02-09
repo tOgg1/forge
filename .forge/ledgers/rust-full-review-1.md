@@ -750,3 +750,80 @@ Need your direction before I continue:
 2. Switch review target to another active task right now.
 ```
 
+## 2026-02-09T18:30:22Z
+
+- run_id: 40b822bc-a958-492c-afeb-c846b5b1465c
+- loop_name: rust-full-review-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-09T18:27:50Z
+- finished_at: 2026-02-09T18:30:22Z
+- exit_code: 0
+
+```
+test loop_queue_repository::tests::enqueue_auto_increments_position ... ok
+test loop_queue_repository::tests::enqueue_rejects_empty_type ... ok
+test loop_queue_repository::tests::enqueue_rejects_empty_payload ... ok
+
+thinking
+**Preparing detailed review notifications**
+codex
+issuing findings to `task` + orchestrator now with exact file/line and fix hints.
+exec
+/bin/zsh -lc 'cd /Users/trmd/Code/oss--forge/repos/forge && fmail send task "review: forge-3kr high mail_repository_test no longer compiles after RecipientType migration (E0308 on string literals) rust/crates/forge-db/tests/mail_repository_test.rs:76 Use RecipientType::Workspace/RecipientType::Broadcast in fixtures and enum-aware asserts"' in /Users/trmd/Code/oss--forge/repos/forgeexec
+/bin/zsh -lc 'cd /Users/trmd/Code/oss--forge/repos/forge && fmail send task "review: forge-3kr medium validation regression coverage removed for non-broadcast missing recipient_id path rust/crates/forge-db/tests/mail_repository_test.rs:164 Re-add negative create_message case asserting Err(DbError::Validation(_))"' in /Users/trmd/Code/oss--forge/repos/forgeexec
+/bin/zsh -lc 'cd /Users/trmd/Code/oss--forge/repos/forge && fmail send task "review: forge-3kr medium MailThreadAlreadyExists/MailMessageAlreadyExists added but create_* still bubbles rusqlite Open on UNIQUE conflicts rust/crates/forge-db/src/mail_repository.rs:85 Map UNIQUE errors to new DbError variants and add duplicate insert tests"' in /Users/trmd/Code/oss--forge/repos/forgeexec
+/bin/zsh -lc 'cd /Users/trmd/Code/oss--forge/repos/forge && fmail send @forge-orchestrator "review summary: forge-3kr issues"' in /Users/trmd/Code/oss--forge/repos/forge succeeded in 52ms:
+20260209-183010-3078
+ succeeded in 51ms:
+20260209-183010-3079
+ succeeded in 51ms:
+20260209-183010-3080
+ succeeded in 51ms:
+20260209-183010-3081
+
+thinking
+**Structuring concise final report**
+codex
+**Findings**
+1. `high` Compile break in touched test file: `MailMessage.recipient_type` moved to enum, but tests still assign strings and compare to `&str` in `rust/crates/forge-db/tests/mail_repository_test.rs:76`, `rust/crates/forge-db/tests/mail_repository_test.rs:155`, `rust/crates/forge-db/tests/mail_repository_test.rs:170`.  
+Fix hint: use `RecipientType::Workspace` / `RecipientType::Broadcast` in fixtures and enum equality assertions.
+
+2. `medium` Coverage regression: negative validation case for non-broadcast message without `recipient_id` was removed from `rust/crates/forge-db/tests/mail_repository_test.rs` (around prior validation block near current `broadcast_and_validation_paths`).  
+Fix hint: re-add assertion that workspace/agent recipient with missing `recipient_id` returns `Err(DbError::Validation(_))`.
+
+3. `medium` Parity/API risk: new errors `MailThreadAlreadyExists` / `MailMessageAlreadyExists` were added in `rust/crates/forge-db/src/lib.rs:109` and `rust/crates/forge-db/src/lib.rs:113`, but `create_thread` / `create_message` still propagate raw sqlite errors via `?` in `rust/crates/forge-db/src/mail_repository.rs:85` and `rust/crates/forge-db/src/mail_repository.rs:170`.  
+Fix hint: detect unique-constraint errors and map to the new typed `DbError` variants; add duplicate insert tests.
+
+**Validation Evidence**
+1. `cargo test -p forge-db --test mail_repository_test` -> failed with E0308 at the lines above.
+2. `cargo test -p forge-db --lib` -> passed (`89 passed`).
+
+**Reported**
+1. Sent 3 task findings via `fmail send task` for `forge-3kr`.
+2. Sent `fmail send @forge-orchestrator "review summary: forge-3kr issues"`.
+tokens used
+39,038
+**Findings**
+1. `high` Compile break in touched test file: `MailMessage.recipient_type` moved to enum, but tests still assign strings and compare to `&str` in `rust/crates/forge-db/tests/mail_repository_test.rs:76`, `rust/crates/forge-db/tests/mail_repository_test.rs:155`, `rust/crates/forge-db/tests/mail_repository_test.rs:170`.  
+Fix hint: use `RecipientType::Workspace` / `RecipientType::Broadcast` in fixtures and enum equality assertions.
+
+2. `medium` Coverage regression: negative validation case for non-broadcast message without `recipient_id` was removed from `rust/crates/forge-db/tests/mail_repository_test.rs` (around prior validation block near current `broadcast_and_validation_paths`).  
+Fix hint: re-add assertion that workspace/agent recipient with missing `recipient_id` returns `Err(DbError::Validation(_))`.
+
+3. `medium` Parity/API risk: new errors `MailThreadAlreadyExists` / `MailMessageAlreadyExists` were added in `rust/crates/forge-db/src/lib.rs:109` and `rust/crates/forge-db/src/lib.rs:113`, but `create_thread` / `create_message` still propagate raw sqlite errors via `?` in `rust/crates/forge-db/src/mail_repository.rs:85` and `rust/crates/forge-db/src/mail_repository.rs:170`.  
+Fix hint: detect unique-constraint errors and map to the new typed `DbError` variants; add duplicate insert tests.
+
+**Validation Evidence**
+1. `cargo test -p forge-db --test mail_repository_test` -> failed with E0308 at the lines above.
+2. `cargo test -p forge-db --lib` -> passed (`89 passed`).
+
+**Reported**
+1. Sent 3 task findings via `fmail send task` for `forge-3kr`.
+2. Sent `fmail send @forge-orchestrator "review summary: forge-3kr issues"`.
+```
+

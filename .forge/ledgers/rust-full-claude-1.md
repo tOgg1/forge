@@ -289,3 +289,42 @@ The `forge run` command Rust port was completed with full wiring, tests, and ora
 - Pre-existing flaky test isolation in `loop_repository_test.rs` (temp DB collisions, unrelated to changes)
 ```
 
+## 2026-02-09T18:33:25Z
+
+- run_id: 40560959-d8bb-4ba3-ba5f-e2a0a261e876
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:12:53Z
+- finished_at: 2026-02-09T18:33:25Z
+- exit_code: 0
+
+```
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+Task `forge-3kr` is complete. Here's a summary of what was accomplished:
+
+**Task: forge-3kr — Repo layer: mail_threads/messages repository parity**
+
+**Changes (3 files, +198/-61 lines):**
+
+1. **`rust/crates/forge-db/src/mail_repository.rs`** — Enhanced the mail repository with:
+   - **New methods**: `update_thread`, `delete_thread`, `delete_message`, `list_by_recipient`, `list_unread_by_recipient`
+   - **AlreadyExists handling**: `create_thread` and `create_message` now return `MailThreadAlreadyExists`/`MailMessageAlreadyExists` on duplicate inserts
+   - **Idempotent operations**: `mark_read`/`mark_acked` no longer error on already-read/acked messages (check existence instead)
+   - **Extracted helpers**: `scan_thread`, `is_unique_constraint_error`
+   - `list_inbox` takes `&str` for backward compatibility with tests
+
+2. **`rust/crates/forge-db/src/lib.rs`** — Added `MailThreadAlreadyExists` and `MailMessageAlreadyExists` error variants
+
+3. **`rust/crates/forge-db/tests/mail_repository_test.rs`** — Updated to use type-safe `RecipientType` enum
+
+**Validation**: `cargo fmt --check` + `cargo clippy -D warnings` + `cargo test` all pass (232 tests, 0 failures).
+
+Note: The workspace-level clippy has pre-existing failures in `forge-cli` (another agent's in-progress `context_command_test.rs` changes) — unrelated to this task.
+```
+

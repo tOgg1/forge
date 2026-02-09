@@ -369,3 +369,46 @@ Implemented the `LoopKVRepository` in Rust with full Go behavioral parity.
 **Validation:** `cargo fmt --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace` — all pass, 0 failures.
 ```
 
+## 2026-02-09T18:33:13Z
+
+- run_id: ba710e70-c9c6-4889-8906-1fae084348c0
+- loop_name: rust-full-claude-4
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:21:53Z
+- finished_at: 2026-02-09T18:33:13Z
+- exit_code: 0
+
+```
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+## Task Complete: `forge-2cw` - CLI port: forge hook
+
+**What was done:**
+- Created `rust/crates/forge-cli/src/hook.rs` (~700 lines) implementing the `forge hook on-event` subcommand with full Go parity
+- Registered the `hook` module in `lib.rs` with command dispatch, help text, and accessibility test
+- `uuid` dependency was already present in `Cargo.toml`
+
+**Implementation details:**
+- `HookBackend` trait with dependency injection (filesystem + in-memory backends)
+- `on-event` subcommand with all flags: `--cmd`, `--url`, `--header` (repeatable), `--type`, `--entity-type`, `--entity-id`, `--timeout`, `--disabled`
+- JSON/JSONL/text output parity
+- Hook store persistence as `hooks.json` (append to existing, create new)
+- Timeout validation (Go-style duration parsing: `30s`, `5m`, `1h`, `1h30m`, `0`)
+- Entity type validation (node, workspace, agent, queue, account, system)
+- Header parsing with `key=value` validation
+
+**Validation:**
+- `cargo fmt --check`: PASS
+- `cargo clippy -p forge-cli --lib -- -D warnings`: PASS (0 warnings)
+- `cargo test -p forge-cli --lib`: 333/333 tests pass (32 hook tests + all existing)
+- Note: `--all-targets` blocked by broken `context_command_test.rs` from another agent (not my code)
+```
+

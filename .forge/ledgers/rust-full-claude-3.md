@@ -270,3 +270,41 @@ Task **forge-h2m** (Repo layer: loop_queue_items repository parity) is complete 
 - `cargo test -p forge-db --lib loop_queue_repository::tests`: 31/31 PASS
 ```
 
+## 2026-02-09T18:30:15Z
+
+- run_id: 02517638-d602-4268-b814-c3a43100ed6f
+- loop_name: rust-full-claude-3
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:19:52Z
+- finished_at: 2026-02-09T18:30:15Z
+- exit_code: 0
+
+```
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+## Task Summary: `forge-vry` (CLI port: forge status) - CLOSED
+
+**What was done:**
+- Created `rust/crates/forge-cli/src/status.rs` with full Go parity for `forge status`
+- Wired into `lib.rs` with match arm, help text entry, and module accessibility test
+
+**Implementation details:**
+- `StatusBackend` trait + `InMemoryStatusBackend` for testing (follows `ps.rs` pattern)
+- Data types: `StatusSummary`, `NodeSummary`, `AgentSummary`, `AlertSummary`, `Alert` with `AlertType`, `AlertSeverity`, `AgentState` enums
+- JSON output via `serde_json` (pretty for `--json`, compact for `--jsonl`)
+- Human output via `tabwriter::TabWriter` matching Go's tab formatting
+- `--quiet` suppresses all output
+- `select_top_alerts()` sorts by severity rank (critical>error>warning>info) then recency
+- Agent state counts displayed in fixed Go-parity order
+
+**Validation:**
+- `cargo fmt --check`: PASS
+- `cargo clippy -p forge-cli --all-targets -- -D warnings`: PASS
+- `cargo test -p forge-cli -- status`: 27/27 tests PASS
+```
+

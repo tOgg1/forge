@@ -301,3 +301,50 @@ Ported `forge stop` from Go to Rust with full flag/default/validation/output par
 **Validation**: `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` → PASS (exit 0, 0 failures)
 ```
 
+## 2026-02-09T18:34:31Z
+
+- run_id: 7b23386e-72d4-48ac-8ac8-c5862d006df0
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:20:02Z
+- finished_at: 2026-02-09T18:34:31Z
+- exit_code: 0
+
+```
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+⚠️  [BashTool] Pre-flight check is taking longer than expected. Run with ANTHROPIC_LOG=debug to check for failed or slow API requests.
+## Task Summary: forge-vd2 (CLI port: forge context)
+
+**Status**: Closed
+
+**What was done**:
+- Rewrote `rust/crates/forge-cli/src/context.rs` with full Go parity for both `forge context` and `forge use` commands
+- **`forge context`**: Show-only command with `--json`/`--jsonl`/`--help` support, matching Go `contextCmd`
+- **`forge use`**: Full set/show/clear command with:
+  - `--workspace`/`--agent` flags for explicit setting
+  - `--clear` to remove context
+  - `--show` to display (default when no args)
+  - Positional argument support: workspace name, workspace ID, ID prefix, `workspace:agent` format
+  - Agent fallback: if target doesn't match workspace, tries as agent and auto-sets workspace
+  - JSON/JSONL output modes
+- `ContextRecord` model with `Serialize` + Go-parity JSON field names (`WorkspaceID`, etc.)
+- `ContextBackend` trait abstracting persistence, resolution, and clearing
+- `InMemoryContextBackend` for testability with workspace/agent resolution
+- Wired both `context` and `use` into `lib.rs` dispatch + root help text
+- Updated integration test file to use new backend trait
+- 40+ unit tests + 6 integration tests + golden file tests
+
+**Validation**:
+- `cargo fmt --check` PASS
+- `cargo clippy --workspace --all-targets -- -D warnings` PASS
+- `cargo test -p forge-cli` PASS (333 unit tests + all integration tests)
+- Pre-existing `forge-db` migration test failure in workspace unrelated to this change
+```
+
