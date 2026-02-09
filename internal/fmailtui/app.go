@@ -108,6 +108,7 @@ type Model struct {
 	showHelp     bool
 	toast        string
 	toastUntil   time.Time
+	flashUntil   time.Time
 	spinnerFrame int
 	status       statusState
 	statusCh     <-chan fmail.Message
@@ -319,6 +320,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusProbeMsg:
 		m.status.applyProbe(typed, time.Now().UTC())
 		return m, nil
+	case flashHeaderMsg:
+		m.flashUntil = typed.until
+		return m, nil
+	case liveTailFlashClearMsg:
+		if !m.flashUntil.IsZero() && !typed.until.IsZero() && (m.flashUntil.Equal(typed.until) || m.flashUntil.Before(typed.until)) {
+			m.flashUntil = time.Time{}
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if cmd, handled := m.handleGlobalKey(typed); handled {
 			return m, cmd
@@ -484,7 +493,7 @@ func (m *Model) initViews() {
 	m.views[ViewAgents] = newAgentsView(m.root, m.provider)
 	m.views[ViewOperator] = newOperatorView(m.root, m.projectID, m.selfAgent, m.store, m.provider, m.tuiState)
 	m.views[ViewSearch] = newPlaceholderView(ViewSearch, "Search")
-	m.views[ViewLiveTail] = newPlaceholderView(ViewLiveTail, "Live Tail")
+	m.views[ViewLiveTail] = newLiveTailView(m.root, m.selfAgent, m.provider, m.tuiState)
 	m.views[ViewTimeline] = newPlaceholderView(ViewTimeline, "Timeline")
 }
 

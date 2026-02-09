@@ -65,6 +65,8 @@ type Preferences struct {
 	LiveTailAuto  bool   `json:"live_tail_auto,omitempty"`
 	RelativeTime  bool   `json:"relative_time,omitempty"`
 	SoundAlerts   bool   `json:"sound_alerts,omitempty"`
+	// HighlightPatterns are live-tail keyword highlight regexes.
+	HighlightPatterns []string `json:"highlight_patterns,omitempty"`
 }
 
 type NotificationRule struct {
@@ -126,6 +128,34 @@ func (m *Manager) Snapshot() TUIState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return cloneState(m.state)
+}
+
+func (m *Manager) Preferences() Preferences {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return clonePreferences(m.state.Preferences)
+}
+
+func (m *Manager) HighlightPatterns() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.state.Preferences.HighlightPatterns) == 0 {
+		return nil
+	}
+	return append([]string(nil), m.state.Preferences.HighlightPatterns...)
+}
+
+func (m *Manager) SetHighlightPatterns(patterns []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	normalized := normalizeStringList(patterns)
+	if len(normalized) == 0 {
+		m.state.Preferences.HighlightPatterns = nil
+		m.markDirtyLocked()
+		return
+	}
+	m.state.Preferences.HighlightPatterns = normalized
+	m.markDirtyLocked()
 }
 
 func (m *Manager) ReadMarker(target string) string {
@@ -505,6 +535,7 @@ func normalizeState(state TUIState, now time.Time) TUIState {
 
 func cloneState(state TUIState) TUIState {
 	out := state
+	out.Preferences = clonePreferences(state.Preferences)
 	if state.ReadMarkers != nil {
 		out.ReadMarkers = make(map[string]string, len(state.ReadMarkers))
 		for k, v := range state.ReadMarkers {
@@ -582,5 +613,36 @@ func normalizeGroupMembers(members []string) []string {
 		out = append(out, member)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func clonePreferences(p Preferences) Preferences {
+	out := p
+	if len(p.HighlightPatterns) > 0 {
+		out.HighlightPatterns = append([]string(nil), p.HighlightPatterns...)
+	}
+	return out
+}
+
+func normalizeStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
 	return out
 }
