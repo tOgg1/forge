@@ -52,7 +52,7 @@ pub fn build_queue_interaction_plan(
                 return Ok(plan);
             }
             QueueControlItem::Unsupported(value) => {
-                return Err(format!("unsupported queue item type '{value}'"));
+                return Err(format!("unsupported queue item type \"{value}\""));
             }
         }
     }
@@ -217,6 +217,6 @@ mod tests {
             Ok(_) => panic!("expected error"),
             Err(err) => err,
         };
-        assert_eq!(err, "unsupported queue item type 'unknown'");
+        assert_eq!(err, "unsupported queue item type \"unknown\"");
     }
 }
