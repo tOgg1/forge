@@ -1,0 +1,30 @@
+Manage advisory file locks via Agent Mail for multi-agent coordination.
+
+Usage:
+  forge lock <command> [options]
+
+Commands:
+  claim    Claim file locks
+  release  Release file locks
+  status   Show lock status
+  check    Check if a path is locked
+
+Claim Flags:
+  -a, --agent string     agent name (Agent Mail)
+  -p, --path string      file path or glob pattern (repeatable)
+      --ttl duration     lock duration (e.g., 30m) (default 1h)
+      --exclusive bool   exclusive lock (default true)
+      --reason string    reason for the lock
+      --force            force release conflicting locks
+
+Release Flags:
+  -a, --agent string     agent name (Agent Mail)
+  -p, --path string      file path or glob pattern (repeatable)
+      --lock-id string   lock ID to release (repeatable)
+
+Status Flags:
+  -a, --agent string     filter by agent name
+  -p, --path string      filter by file path or glob pattern
+
+Check Flags:
+  -p, --path string      file path to check (repeatable)
