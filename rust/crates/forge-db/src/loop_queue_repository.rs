@@ -608,11 +608,10 @@ mod tests {
         let lp = create_test_loop(&db);
         let repo = LoopQueueRepository::new(&db);
 
-        let err = repo.peek(&lp.id).unwrap_err();
-        assert!(
-            matches!(err, DbError::QueueEmpty),
-            "expected QueueEmpty, got: {err}"
-        );
+        match repo.peek(&lp.id) {
+            Err(DbError::QueueEmpty) => {}
+            other => panic!("expected QueueEmpty, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
@@ -623,11 +622,10 @@ mod tests {
         let lp = create_test_loop(&db);
         let repo = LoopQueueRepository::new(&db);
 
-        let err = repo.dequeue(&lp.id).unwrap_err();
-        assert!(
-            matches!(err, DbError::QueueEmpty),
-            "expected QueueEmpty, got: {err}"
-        );
+        match repo.dequeue(&lp.id) {
+            Err(DbError::QueueEmpty) => {}
+            other => panic!("expected QueueEmpty, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
@@ -743,11 +741,10 @@ mod tests {
         let (db, path) = setup_db("remove-notfound");
         let repo = LoopQueueRepository::new(&db);
 
-        let err = repo.remove("nonexistent-id").unwrap_err();
-        assert!(
-            matches!(err, DbError::QueueItemNotFound),
-            "expected QueueItemNotFound, got: {err}"
-        );
+        match repo.remove("nonexistent-id") {
+            Err(DbError::QueueItemNotFound) => {}
+            other => panic!("expected QueueItemNotFound, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
@@ -805,11 +802,10 @@ mod tests {
         let (db, path) = setup_db("update-status-notfound");
         let repo = LoopQueueRepository::new(&db);
 
-        let err = repo.update_status("nope", "completed", "").unwrap_err();
-        assert!(
-            matches!(err, DbError::QueueItemNotFound),
-            "expected QueueItemNotFound, got: {err}"
-        );
+        match repo.update_status("nope", "completed", "") {
+            Err(DbError::QueueItemNotFound) => {}
+            other => panic!("expected QueueItemNotFound, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
@@ -879,11 +875,10 @@ mod tests {
             payload: "{\"text\":\"hi\"}".to_string(),
             ..Default::default()
         }];
-        let err = repo.enqueue(&lp.id, &mut items).unwrap_err();
-        assert!(
-            matches!(err, DbError::Validation(_)),
-            "expected Validation, got: {err}"
-        );
+        match repo.enqueue(&lp.id, &mut items) {
+            Err(DbError::Validation(_)) => {}
+            other => panic!("expected Validation, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
@@ -898,11 +893,10 @@ mod tests {
             item_type: "message_append".to_string(),
             ..Default::default()
         }];
-        let err = repo.enqueue(&lp.id, &mut items).unwrap_err();
-        assert!(
-            matches!(err, DbError::Validation(_)),
-            "expected Validation, got: {err}"
-        );
+        match repo.enqueue(&lp.id, &mut items) {
+            Err(DbError::Validation(_)) => {}
+            other => panic!("expected Validation, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
@@ -918,11 +912,10 @@ mod tests {
             payload: "{\"text\":\"hi\"}".to_string(),
             ..Default::default()
         }];
-        let err = repo.enqueue(&lp.id, &mut items).unwrap_err();
-        assert!(
-            matches!(err, DbError::Validation(_)),
-            "expected Validation, got: {err}"
-        );
+        match repo.enqueue(&lp.id, &mut items) {
+            Err(DbError::Validation(_)) => {}
+            other => panic!("expected Validation, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
@@ -938,11 +931,10 @@ mod tests {
             payload: "{\"text\":\"\"}".to_string(),
             ..Default::default()
         }];
-        let err = repo.enqueue(&lp.id, &mut items).unwrap_err();
-        assert!(
-            matches!(err, DbError::Validation(_)),
-            "expected Validation, got: {err}"
-        );
+        match repo.enqueue(&lp.id, &mut items) {
+            Err(DbError::Validation(_)) => {}
+            other => panic!("expected Validation, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
@@ -958,11 +950,10 @@ mod tests {
             payload: "{\"message\":\"\"}".to_string(),
             ..Default::default()
         }];
-        let err = repo.enqueue(&lp.id, &mut items).unwrap_err();
-        assert!(
-            matches!(err, DbError::Validation(_)),
-            "expected Validation, got: {err}"
-        );
+        match repo.enqueue(&lp.id, &mut items) {
+            Err(DbError::Validation(_)) => {}
+            other => panic!("expected Validation, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
@@ -978,11 +969,10 @@ mod tests {
             payload: "{\"duration_seconds\":0}".to_string(),
             ..Default::default()
         }];
-        let err = repo.enqueue(&lp.id, &mut items).unwrap_err();
-        assert!(
-            matches!(err, DbError::Validation(_)),
-            "expected Validation, got: {err}"
-        );
+        match repo.enqueue(&lp.id, &mut items) {
+            Err(DbError::Validation(_)) => {}
+            other => panic!("expected Validation, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
@@ -998,11 +988,10 @@ mod tests {
             payload: "{\"prompt\":\"\",\"is_path\":false}".to_string(),
             ..Default::default()
         }];
-        let err = repo.enqueue(&lp.id, &mut items).unwrap_err();
-        assert!(
-            matches!(err, DbError::Validation(_)),
-            "expected Validation, got: {err}"
-        );
+        match repo.enqueue(&lp.id, &mut items) {
+            Err(DbError::Validation(_)) => {}
+            other => panic!("expected Validation, got: {other:?}"),
+        }
 
         let _ = std::fs::remove_file(path);
     }
