@@ -1,6 +1,8 @@
 use std::io::Write;
+use std::path::PathBuf;
 
-use serde::Serialize;
+use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -121,6 +123,286 @@ pub struct WorkspaceInfo {
 pub struct AgentInfo {
     pub id: String,
     pub workspace_id: String,
+}
+
+// ---------------------------------------------------------------------------
+// Filesystem backend (production)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ContextYaml {
+    #[serde(default, rename = "workspace")]
+    workspace_id: String,
+    #[serde(default, rename = "workspace_name")]
+    workspace_name: String,
+    #[serde(default, rename = "agent")]
+    agent_id: String,
+    #[serde(default, rename = "agent_name")]
+    agent_name: String,
+    #[serde(default, rename = "updated_at")]
+    updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl From<ContextYaml> for ContextRecord {
+    fn from(value: ContextYaml) -> Self {
+        Self {
+            workspace_id: value.workspace_id,
+            workspace_name: value.workspace_name,
+            agent_id: value.agent_id,
+            agent_name: value.agent_name,
+            updated_at: value
+                .updated_at
+                .map(|ts| ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                .unwrap_or_else(|| "0001-01-01T00:00:00Z".to_string()),
+        }
+    }
+}
+
+impl ContextRecord {
+    fn to_yaml(&self) -> ContextYaml {
+        ContextYaml {
+            workspace_id: self.workspace_id.clone(),
+            workspace_name: self.workspace_name.clone(),
+            agent_id: self.agent_id.clone(),
+            agent_name: self.agent_name.clone(),
+            updated_at: parse_rfc3339_utc(&self.updated_at).ok(),
+        }
+    }
+}
+
+fn parse_rfc3339_utc(value: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
+    let parsed = chrono::DateTime::parse_from_rfc3339(value).map_err(|err| err.to_string())?;
+    Ok(parsed.with_timezone(&chrono::Utc))
+}
+
+fn now_rfc3339_utc() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+fn resolve_context_path() -> PathBuf {
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".config");
+        path.push("forge");
+        path.push("context.yaml");
+        return path;
+    }
+
+    PathBuf::from(".config/forge/context.yaml")
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+
+    PathBuf::from("forge.db")
+}
+
+#[derive(Debug, Clone)]
+pub struct FilesystemContextBackend {
+    path: PathBuf,
+    db_path: PathBuf,
+}
+
+impl Default for FilesystemContextBackend {
+    fn default() -> Self {
+        Self {
+            path: resolve_context_path(),
+            db_path: resolve_database_path(),
+        }
+    }
+}
+
+impl FilesystemContextBackend {
+    pub fn new(path: PathBuf, db_path: PathBuf) -> Self {
+        Self { path, db_path }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        let cfg = forge_db::Config::new(&self.db_path);
+        forge_db::Db::open(cfg).map_err(|err| err.to_string())
+    }
+}
+
+impl ContextBackend for FilesystemContextBackend {
+    fn load_context(&self) -> Result<ContextRecord, String> {
+        let raw = match std::fs::read_to_string(&self.path) {
+            Ok(text) => text,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ContextRecord::default());
+            }
+            Err(err) => return Err(format!("failed to read context file: {err}")),
+        };
+
+        let parsed: ContextYaml = serde_yaml::from_str(&raw)
+            .map_err(|err| format!("failed to parse context file: {err}"))?;
+        Ok(parsed.into())
+    }
+
+    fn save_context(&self, ctx: &ContextRecord) -> Result<(), String> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| format!("failed to create context directory: {err}"))?;
+        }
+        let text = serde_yaml::to_string(&ctx.to_yaml())
+            .map_err(|err| format!("failed to serialize context: {err}"))?;
+        std::fs::write(&self.path, text)
+            .map_err(|err| format!("failed to write context file: {err}"))?;
+        Ok(())
+    }
+
+    fn clear_context(&self) -> Result<(), String> {
+        match std::fs::remove_file(&self.path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(format!("failed to remove context file: {err}")),
+        }
+    }
+
+    fn resolve_workspace(&self, target: &str) -> Result<WorkspaceInfo, String> {
+        let db = self.open_db()?;
+
+        // Exact ID.
+        if let Some(row) = db
+            .conn()
+            .query_row(
+                "SELECT id, name FROM workspaces WHERE id = ?1",
+                rusqlite::params![target],
+                |r| {
+                    Ok(WorkspaceInfo {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|err| err.to_string())?
+        {
+            return Ok(row);
+        }
+
+        // Name or prefix match.
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT id, name FROM workspaces ORDER BY id")
+            .map_err(|err| err.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(WorkspaceInfo {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                })
+            })
+            .map_err(|err| err.to_string())?;
+
+        for row in rows {
+            let ws = row.map_err(|err| err.to_string())?;
+            if ws.name == target || ws.id.starts_with(target) {
+                return Ok(ws);
+            }
+        }
+
+        Err(format!("workspace not found: {target}"))
+    }
+
+    fn resolve_agent(&self, target: &str, workspace_id: &str) -> Result<AgentInfo, String> {
+        let db = self.open_db()?;
+
+        // Exact ID.
+        if let Some(row) = db
+            .conn()
+            .query_row(
+                "SELECT id, workspace_id FROM agents WHERE id = ?1",
+                rusqlite::params![target],
+                |r| {
+                    Ok(AgentInfo {
+                        id: r.get(0)?,
+                        workspace_id: r.get(1)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|err| err.to_string())?
+        {
+            if !workspace_id.is_empty() && row.workspace_id != workspace_id {
+                return Err(format!(
+                    "agent {target} does not belong to workspace {workspace_id}"
+                ));
+            }
+            return Ok(row);
+        }
+
+        if workspace_id.is_empty() {
+            let mut stmt = db
+                .conn()
+                .prepare("SELECT id, workspace_id FROM agents ORDER BY id")
+                .map_err(|err| err.to_string())?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(AgentInfo {
+                        id: r.get(0)?,
+                        workspace_id: r.get(1)?,
+                    })
+                })
+                .map_err(|err| err.to_string())?;
+            for row in rows {
+                let agent = row.map_err(|err| err.to_string())?;
+                if agent.id.starts_with(target) {
+                    return Ok(agent);
+                }
+            }
+        } else {
+            let mut stmt = db
+                .conn()
+                .prepare("SELECT id, workspace_id FROM agents WHERE workspace_id = ?1 ORDER BY id")
+                .map_err(|err| err.to_string())?;
+            let rows = stmt
+                .query_map([workspace_id], |r| {
+                    Ok(AgentInfo {
+                        id: r.get(0)?,
+                        workspace_id: r.get(1)?,
+                    })
+                })
+                .map_err(|err| err.to_string())?;
+            for row in rows {
+                let agent = row.map_err(|err| err.to_string())?;
+                if agent.id.starts_with(target) {
+                    return Ok(agent);
+                }
+            }
+        }
+
+        Err(format!("agent not found: {target}"))
+    }
+
+    fn get_workspace(&self, id: &str) -> Result<WorkspaceInfo, String> {
+        let db = self.open_db()?;
+        db.conn()
+            .query_row(
+                "SELECT id, name FROM workspaces WHERE id = ?1",
+                rusqlite::params![id],
+                |r| {
+                    Ok(WorkspaceInfo {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                    })
+                },
+            )
+            .map_err(|err| err.to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +791,7 @@ fn execute_use(
             .resolve_workspace(&parsed.workspace)
             .map_err(|e| format!("failed to resolve workspace: {e}"))?;
         ctx.set_workspace(&ws.id, &ws.name);
+        ctx.updated_at = now_rfc3339_utc();
         writeln!(
             stdout,
             "Workspace set to: {} ({})",
@@ -534,6 +817,7 @@ fn execute_use(
             }
         }
         ctx.set_agent(&agent.id, short_id(&agent.id));
+        ctx.updated_at = now_rfc3339_utc();
         writeln!(stdout, "Agent set to: {}", short_id(&agent.id)).map_err(|e| e.to_string())?;
     }
 
@@ -553,6 +837,7 @@ fn execute_use(
                 .resolve_agent(agent_target, &ws.id)
                 .map_err(|e| format!("failed to resolve agent '{agent_target}': {e}"))?;
             ctx.set_agent(&agent.id, short_id(&agent.id));
+            ctx.updated_at = now_rfc3339_utc();
 
             writeln!(
                 stdout,
@@ -565,6 +850,7 @@ fn execute_use(
             match backend.resolve_workspace(target) {
                 Ok(ws) => {
                     ctx.set_workspace(&ws.id, &ws.name);
+                    ctx.updated_at = now_rfc3339_utc();
                     writeln!(
                         stdout,
                         "Workspace set to: {} ({})",
@@ -588,6 +874,7 @@ fn execute_use(
                         }
                     }
                     ctx.set_agent(&agent.id, short_id(&agent.id));
+                    ctx.updated_at = now_rfc3339_utc();
                     writeln!(stdout, "Agent set to: {}", short_id(&agent.id))
                         .map_err(|e| e.to_string())?;
                 }

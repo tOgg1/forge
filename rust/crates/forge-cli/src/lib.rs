@@ -25,7 +25,9 @@ pub mod resume;
 pub mod rm;
 pub mod run;
 pub mod scale;
+pub mod send;
 pub mod status;
+pub mod template;
 pub mod stop;
 pub mod up;
 pub mod work;
@@ -115,12 +117,12 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
         }
         Some("completion") => completion::run(remaining, stdout, stderr),
         Some("context") => {
-            let backend = context::InMemoryContextBackend::default();
+            let backend = context::FilesystemContextBackend::default();
             let forwarded = forward_args(remaining, &flags);
             context::run_context(&forwarded, &backend, stdout, stderr)
         }
         Some("use") => {
-            let backend = context::InMemoryContextBackend::default();
+            let backend = context::FilesystemContextBackend::default();
             let forwarded = forward_args(remaining, &flags);
             context::run_use(&forwarded, &backend, stdout, stderr)
         }
@@ -207,10 +209,20 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let forwarded = forward_args(remaining, &flags);
             ps::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
+        Some("send") => {
+            let mut backend = send::InMemorySendBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            send::run_with_backend(&forwarded, &mut backend, stdout, stderr)
+        }
         Some("status") => {
             let backend = status::InMemoryStatusBackend::default();
             let forwarded = forward_args(remaining, &flags);
             status::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
+        Some("template") | Some("tmpl") => {
+            let backend = template::InMemoryTemplateBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            template::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("stop") => {
             let mut backend = stop::InMemoryStopBackend::default();
@@ -303,6 +315,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  rm        Remove loop records")?;
     writeln!(out, "  run       Run a single loop iteration")?;
     writeln!(out, "  scale     Scale loops to target count")?;
+    writeln!(out, "  send      Queue a message for an agent")?;
     writeln!(out, "  status    Show fleet status summary")?;
     writeln!(out, "  stop      Stop loops after current iteration")?;
     writeln!(out, "  up        Start loop(s) for a repo")?;
