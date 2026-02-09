@@ -26,6 +26,9 @@ import (
 type Options struct {
 	Hostname string
 	Port     int
+	// MailPort controls the TCP Forge Mail bind port.
+	// 0 uses DefaultMailPort. -1 disables starting the TCP mail server (useful for tests).
+	MailPort int
 	Version  string
 
 	// RateLimitEnabled enables rate limiting (default: true).
@@ -105,6 +108,9 @@ func New(cfg *config.Config, logger zerolog.Logger, opts Options) (*Daemon, erro
 	}
 	if opts.Port == 0 {
 		opts.Port = DefaultPort
+	}
+	if opts.MailPort == 0 {
+		opts.MailPort = DefaultMailPort
 	}
 
 	// Initialize database and repositories (unless disabled for testing)
