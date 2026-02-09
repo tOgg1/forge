@@ -1,0 +1,7 @@
+{
+  "agent_id": "agent-inject-busy",
+  "agent_state": "working",
+  "bypassed_queue": true,
+  "injected": true,
+  "message": "forced msg"
+}

@@ -1,0 +1,7 @@
+{
+  "agent_id": "agent-inject-idle",
+  "agent_state": "idle",
+  "bypassed_queue": true,
+  "injected": true,
+  "message": "Stop and commit"
+}

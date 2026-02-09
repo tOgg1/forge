@@ -1,0 +1,32 @@
+Inject a message directly into an agent (bypasses queue)
+
+WARNING: This bypasses the scheduler queue and sends immediately.
+Use 'forge send' for safe, queue-based message dispatch.
+
+Direct injection is useful for:
+  - Emergency interventions
+  - Debugging agent behavior
+  - Immediate control commands
+
+But it can cause issues if the agent is not ready to receive input.
+Non-idle agents require confirmation (use --force to skip).
+
+Usage:
+  forge inject <agent-id> [message] [flags]
+
+Examples:
+  forge inject abc123 "Stop and commit"            # inject message
+  forge inject --force abc123 "Emergency stop"      # skip confirmation
+  forge inject abc123 --file prompt.txt             # from file
+  echo "Continue" | forge inject abc123 --stdin     # from stdin
+  forge inject abc123 --editor                      # compose in editor
+
+Flags:
+  -F, --force            skip confirmation for non-idle agents
+  -f, --file string      read message from file
+      --stdin            read message from stdin
+      --editor           compose message in $EDITOR
+      --json             output in JSON format
+      --jsonl            output in JSON Lines format
+      --quiet            suppress human output
+  -h, --help             help for inject
