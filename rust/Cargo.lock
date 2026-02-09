@@ -3,5 +3,49 @@
 version = 4
 
 [[package]]
+name = "fmail-cli"
+version = "0.1.0"
+
+[[package]]
+name = "fmail-core"
+version = "0.1.0"
+
+[[package]]
+name = "fmail-tui"
+version = "0.1.0"
+
+[[package]]
+name = "forge-cli"
+version = "0.1.0"
+
+[[package]]
+name = "forge-core"
+version = "0.1.0"
+
+[[package]]
+name = "forge-daemon"
+version = "0.1.0"
+
+[[package]]
+name = "forge-db"
+version = "0.1.0"
+
+[[package]]
+name = "forge-ftui-adapter"
+version = "0.1.0"
+
+[[package]]
+name = "forge-loop"
+version = "0.1.0"
+
+[[package]]
 name = "forge-parity-stub"
+version = "0.1.0"
+
+[[package]]
+name = "forge-runner"
+version = "0.1.0"
+
+[[package]]
+name = "forge-tui"
 version = "0.1.0"

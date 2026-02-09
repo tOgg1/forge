@@ -1,5 +1,5 @@
 [package]
-name = "forge-parity-stub"
+name = "fmail-cli"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -7,6 +7,12 @@ publish.workspace = true
 
 [lib]
 path = "src/lib.rs"
+
+[[bin]]
+name = "fmail-cli"
+path = "src/bin/fmail-cli.rs"
+
+[dependencies]
 
 [lints]
 workspace = true

@@ -1,2 +1,13 @@
 # crate minimum_line_coverage_percent
+fmail-cli 100
+fmail-core 100
+fmail-tui 100
+forge-cli 100
+forge-core 100
+forge-daemon 100
+forge-db 100
+forge-ftui-adapter 100
+forge-loop 100
 forge-parity-stub 100
+forge-runner 100
+forge-tui 100
