@@ -7,7 +7,9 @@ pub mod clean;
 pub mod completion;
 pub mod config;
 pub mod context;
+pub mod doctor;
 pub mod error_envelope;
+pub mod explain;
 pub mod hook;
 pub mod init;
 pub mod kill;
@@ -142,6 +144,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let backend = config::FilesystemConfigBackend;
             let forwarded = forward_args(remaining, &flags);
             config::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
+        Some("doctor") => {
+            let backend = doctor::InMemoryDoctorBackend::default();
+            let forwarded = forward_args(remaining, &flags);
+            doctor::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("migrate") => {
             let forwarded = forward_args(remaining, &flags);
@@ -341,6 +348,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  completion  Generate shell completion scripts")?;
     writeln!(out, "  context   Show current context")?;
     writeln!(out, "  config    Manage global configuration")?;
+    writeln!(out, "  doctor    Run environment diagnostics")?;
     writeln!(out, "  hook      Manage event hooks")?;
     writeln!(out, "  init      Initialize a repo for Forge loops")?;
     writeln!(out, "  kill      Kill loops immediately")?;
@@ -440,10 +448,10 @@ pub struct RootCommandOutput {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::{
-        audit, clean, completion, config, context, crate_label, hook, init, kill, lock, logs,
-        loop_internal, mail, mem, migrate, msg, pool, profile, prompt, ps, queue, resume, rm, run,
-        run_for_test, run_with_args, scale, send, seq, skills, status, stop, template, tui, up,
-        wait, work, workflow,
+        audit, clean, completion, config, context, crate_label, doctor, hook, init, kill, lock,
+        logs, loop_internal, mail, mem, migrate, msg, pool, profile, prompt, ps, queue, resume, rm,
+        run, run_for_test, run_with_args, scale, send, seq, skills, status, stop, template, tui,
+        up, wait, work, workflow,
     };
 
     #[test]
@@ -454,6 +462,11 @@ mod tests {
     #[test]
     fn context_module_is_accessible() {
         let _ = context::InMemoryContextBackend::default();
+    }
+
+    #[test]
+    fn doctor_module_is_accessible() {
+        let _ = doctor::InMemoryDoctorBackend::default();
     }
 
     #[test]
@@ -650,6 +663,7 @@ mod tests {
         assert!(rendered.contains("audit"));
         assert!(rendered.contains("clean"));
         assert!(rendered.contains("config"));
+        assert!(rendered.contains("doctor"));
         assert!(rendered.contains("hook"));
         assert!(rendered.contains("init"));
         assert!(rendered.contains("kill"));
