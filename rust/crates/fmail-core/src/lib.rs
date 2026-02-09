@@ -5,7 +5,9 @@ pub fn crate_label() -> &'static str {
 pub mod agent_registry;
 pub mod constants;
 pub mod format;
+pub mod message;
 pub mod names;
+pub mod project;
 pub mod root;
 pub mod store;
 pub mod validate;

@@ -19,7 +19,7 @@ pub fn format_last_seen(now: DateTime<Utc>, mut t: DateTime<Utc>) -> String {
     format_relative(now, t)
 }
 
-fn format_relative(now: DateTime<Utc>, t: DateTime<Utc>) -> String {
+pub fn format_relative(now: DateTime<Utc>, t: DateTime<Utc>) -> String {
     if is_zero_time(t) {
         return "-".to_string();
     }
