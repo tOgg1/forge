@@ -79,7 +79,9 @@ func parseSearchInput(raw string, now time.Time) parsedSearch {
 		out.Priority = ""
 	}
 	if len(out.Tags) > 0 {
-		out.Tags, _ = fmail.NormalizeTags(out.Tags)
+		if normalized, err := fmail.NormalizeTags(out.Tags); err == nil {
+			out.Tags = normalized
+		}
 	}
 	return parsedSearch{Query: out, Raw: raw}
 }
@@ -109,4 +111,3 @@ func parseHumanDuration(raw string) (time.Duration, bool) {
 	}
 	return d, true
 }
-
