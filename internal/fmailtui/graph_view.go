@@ -2,74 +2,48 @@ package fmailtui
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/tOgg1/forge/internal/fmail"
 	"github.com/tOgg1/forge/internal/fmailtui/data"
-	"github.com/tOgg1/forge/internal/fmailtui/styles"
 )
 
-type graphWindow struct {
-	label  string
-	window time.Duration // 0 = all
-}
-
 type graphLoadedMsg struct {
-	now      time.Time
-	start    time.Time
-	end      time.Time
-	allTime  bool
-	messages []fmail.Message
-	err      error
+	now  time.Time
+	msgs []fmail.Message
+	err  error
 }
 
 type graphIncomingMsg struct {
 	msg fmail.Message
 }
 
-type graphSelectionMode int
-
-const (
-	graphSelectNodes graphSelectionMode = iota
-	graphSelectEdges
-)
-
 type graphView struct {
 	root     string
 	self     string
 	provider data.MessageProvider
 
-	windows   []graphWindow
+	windows   []time.Duration
 	windowIdx int
 	windowEnd time.Time
 
 	loading bool
 	lastErr error
-	now     time.Time
-
-	start time.Time
-	end   time.Time
 
 	all  []fmail.Message
 	seen map[string]struct{}
 
-	zoom       float64
-	panX       int
-	panY       int
-	clustersOn bool
+	snap graphSnapshot
 
-	topicOverlay bool
-
-	graph graphData
-
-	selectMode graphSelectionMode
-	selected   int // node index or edge index
-	detailOpen bool
+	zoom     int
+	panX     int
+	panY     int
+	selected int
 
 	subCh     <-chan fmail.Message
 	subCancel func()
@@ -84,17 +58,17 @@ func newGraphView(root, self string, provider data.MessageProvider) *graphView {
 		root:     root,
 		self:     self,
 		provider: provider,
-		windows: []graphWindow{
-			{label: "1h", window: 1 * time.Hour},
-			{label: "4h", window: 4 * time.Hour},
-			{label: "12h", window: 12 * time.Hour},
-			{label: "24h", window: 24 * time.Hour},
-			{label: "7d", window: 7 * 24 * time.Hour},
-			{label: "all", window: 0},
+		windows: []time.Duration{
+			1 * time.Hour,
+			4 * time.Hour,
+			12 * time.Hour,
+			24 * time.Hour,
+			7 * 24 * time.Hour,
+			0, // all-time
 		},
 		windowIdx: 1,
-		zoom:      1.0,
-		seen:      make(map[string]struct{}, 2048),
+		seen:      make(map[string]struct{}, 1024),
+		zoom:      0,
 	}
 }
 
@@ -150,6 +124,9 @@ func (v *graphView) Update(msg tea.Msg) tea.Cmd {
 
 func (v *graphView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
+	case "r", "ctrl+r":
+		v.loading = true
+		return v.loadCmd()
 	case "[":
 		if v.windowIdx > 0 {
 			v.windowIdx--
@@ -164,77 +141,59 @@ func (v *graphView) handleKey(msg tea.KeyMsg) tea.Cmd {
 			v.loading = true
 			return v.loadCmd()
 		}
-	case "+", "=":
-		v.zoom = minFloat(1.8, v.zoom+0.1)
-		v.rebuildGraph()
-		return nil
-	case "-":
-		v.zoom = maxFloat(0.6, v.zoom-0.1)
-		v.rebuildGraph()
-		return nil
-	case "tab":
-		if v.selectMode == graphSelectNodes {
-			v.selectMode = graphSelectEdges
-		} else {
-			v.selectMode = graphSelectNodes
+	case "h", "left":
+		if v.windows[v.windowIdx] > 0 {
+			v.windowEnd = v.windowEnd.Add(-v.panStep())
+			v.loading = true
+			return v.loadCmd()
 		}
-		v.selected = 0
-		v.detailOpen = false
-		return nil
-	case "c":
-		v.clustersOn = !v.clustersOn
-		return nil
-	case "t":
-		v.topicOverlay = !v.topicOverlay
-		v.rebuildGraph()
-		return nil
-	case "enter":
-		v.detailOpen = !v.detailOpen
-		return nil
-	case "up", "k":
-		v.moveSelection(-1)
-		return nil
-	case "down", "j":
-		v.moveSelection(1)
-		return nil
-	case "left", "h":
+	case "l", "right":
+		if v.windows[v.windowIdx] > 0 {
+			v.windowEnd = v.windowEnd.Add(v.panStep())
+			v.loading = true
+			return v.loadCmd()
+		}
+	case "tab":
+		if len(v.snap.Nodes) > 0 {
+			v.selected = (v.selected + 1) % len(v.snap.Nodes)
+		}
+	case "shift+tab":
+		if len(v.snap.Nodes) > 0 {
+			v.selected--
+			if v.selected < 0 {
+				v.selected = len(v.snap.Nodes) - 1
+			}
+		}
+	case "up":
+		v.panY--
+	case "down":
+		v.panY++
+	case "ctrl+left":
 		v.panX--
-		return nil
-	case "right", "l":
+	case "ctrl+right":
 		v.panX++
-		return nil
+	case "+":
+		if v.zoom < 6 {
+			v.zoom++
+		}
+	case "-":
+		if v.zoom > -3 {
+			v.zoom--
+		}
 	}
 	return nil
 }
 
-func (v *graphView) moveSelection(delta int) {
-	if delta == 0 {
-		return
+func (v *graphView) panStep() time.Duration {
+	d := v.windows[v.windowIdx]
+	if d <= 0 {
+		return 0
 	}
-	if v.selectMode == graphSelectEdges {
-		if len(v.graph.Edges) == 0 {
-			return
-		}
-		v.selected = clampInt(v.selected+delta, 0, len(v.graph.Edges)-1)
-		return
+	step := d / 6
+	if step < 15*time.Minute {
+		step = 15 * time.Minute
 	}
-	if len(v.graph.Nodes) == 0 {
-		return
-	}
-	v.selected = clampInt(v.selected+delta, 0, len(v.graph.Nodes)-1)
-}
-
-func (v *graphView) windowBounds(now time.Time) (time.Time, time.Time, bool) {
-	cfg := v.windows[clampInt(v.windowIdx, 0, len(v.windows)-1)]
-	if cfg.window == 0 {
-		return time.Time{}, time.Time{}, true
-	}
-	end := v.windowEnd
-	if end.IsZero() {
-		end = now
-	}
-	start := end.Add(-cfg.window)
-	return start, end, false
+	return step
 }
 
 func (v *graphView) loadCmd() tea.Cmd {
@@ -242,20 +201,25 @@ func (v *graphView) loadCmd() tea.Cmd {
 	self := v.self
 	windowIdx := v.windowIdx
 	windowEnd := v.windowEnd
-	windows := append([]graphWindow(nil), v.windows...)
+	windows := append([]time.Duration(nil), v.windows...)
 
 	return func() tea.Msg {
 		now := time.Now().UTC()
 		if provider == nil {
 			return graphLoadedMsg{now: now}
 		}
-		cfg := windows[clampInt(windowIdx, 0, len(windows)-1)]
-		allTime := cfg.window == 0
+
+		d := time.Duration(0)
+		if windowIdx >= 0 && windowIdx < len(windows) {
+			d = windows[windowIdx]
+		}
+		allTime := d == 0
+
 		end := windowEnd
 		if end.IsZero() {
 			end = now
 		}
-		start := end.Add(-cfg.window)
+		start := end.Add(-d)
 
 		filter := data.MessageFilter{}
 		if !allTime {
@@ -312,472 +276,460 @@ func (v *graphView) loadCmd() tea.Cmd {
 		}
 
 		sortMessages(merged)
-		return graphLoadedMsg{
-			now:      now,
-			start:    start,
-			end:      end,
-			allTime:  allTime,
-			messages: merged,
-		}
+		return graphLoadedMsg{now: now, msgs: merged}
 	}
 }
 
 func (v *graphView) applyLoaded(msg graphLoadedMsg) {
 	v.loading = false
-	v.now = msg.now
 	v.lastErr = msg.err
 	if msg.err != nil {
 		return
 	}
-	v.all = append(v.all[:0], msg.messages...)
+
+	v.all = append(v.all[:0], msg.msgs...)
 	v.seen = make(map[string]struct{}, len(v.all))
 	for i := range v.all {
 		v.seen[statsDedupKey(v.all[i])] = struct{}{}
 	}
 
-	start := msg.start
-	end := msg.end
-	if msg.allTime {
-		minT, maxT := statsMinMaxTime(v.all)
-		start = minT
-		end = maxT
-		if !end.IsZero() {
-			end = end.Add(1 * time.Second)
-		}
+	v.snap = buildGraphSnapshot(v.all, graphMaxNodesDefault)
+	if v.selected < 0 || v.selected >= len(v.snap.Nodes) {
+		v.selected = 0
 	}
-	v.start = start
-	v.end = end
-	v.rebuildGraph()
 }
 
 func (v *graphView) applyIncoming(msg fmail.Message) {
-	now := time.Now().UTC()
-	v.now = now
 	key := statsDedupKey(msg)
 	if _, ok := v.seen[key]; ok {
 		return
 	}
 	v.seen[key] = struct{}{}
+	v.all = append(v.all, msg)
 
-	// Only follow tail when windowEnd is unset.
-	if v.windowEnd.IsZero() {
-		v.all = append(v.all, msg)
-		sortMessages(v.all)
-		v.rebuildGraph()
+	// Cheap and safe: rebuild. (Message volume is low enough for this view.)
+	v.snap = buildGraphSnapshot(v.all, graphMaxNodesDefault)
+	if v.selected < 0 || v.selected >= len(v.snap.Nodes) {
+		v.selected = 0
 	}
-}
-
-func (v *graphView) rebuildGraph() {
-	if !v.topicOverlay {
-		v.graph = buildAgentGraph(v.all, v.start, v.end)
-	} else {
-		v.graph = buildTopicOverlay(v.all, v.start, v.end)
-	}
-	// Layout within a default canvas; final render clamps.
-	layoutCircle(&v.graph, 80, 22, 12, v.zoom)
-	v.selected = clampInt(v.selected, 0, maxInt(0, v.currentSelectionMax()))
-}
-
-func (v *graphView) currentSelectionMax() int {
-	if v.selectMode == graphSelectEdges {
-		return maxInt(0, len(v.graph.Edges)-1)
-	}
-	return maxInt(0, len(v.graph.Nodes)-1)
-}
-
-func buildTopicOverlay(messages []fmail.Message, start, end time.Time) graphData {
-	type pair struct{ a, b string }
-	nodes := make(map[string]*graphNode, 32)
-	edges := make(map[pair]*graphEdge, 64)
-	for i := range messages {
-		msg := messages[i]
-		if msg.Time.IsZero() || msg.Time.Before(start) || !msg.Time.Before(end) {
-			continue
-		}
-		agent := strings.TrimSpace(msg.From)
-		target := strings.TrimSpace(msg.To)
-		if agent == "" || target == "" {
-			continue
-		}
-		a := nodes[agent]
-		if a == nil {
-			a = &graphNode{ID: agent}
-			nodes[agent] = a
-		}
-		a.Sent++
-		a.Total++
-		t := nodes[target]
-		if t == nil {
-			t = &graphNode{ID: target}
-			nodes[target] = t
-		}
-		p := pair{a: agent, b: target}
-		e := edges[p]
-		if e == nil {
-			e = &graphEdge{From: agent, To: target}
-			edges[p] = e
-		}
-		e.Count++
-	}
-	outNodes := make([]*graphNode, 0, len(nodes))
-	for _, n := range nodes {
-		outNodes = append(outNodes, n)
-	}
-	outEdges := make([]*graphEdge, 0, len(edges))
-	for _, e := range edges {
-		outEdges = append(outEdges, e)
-	}
-	sort.SliceStable(outNodes, func(i, j int) bool {
-		if outNodes[i].Total != outNodes[j].Total {
-			return outNodes[i].Total > outNodes[j].Total
-		}
-		return outNodes[i].ID < outNodes[j].ID
-	})
-	sort.SliceStable(outEdges, func(i, j int) bool {
-		if outEdges[i].Count != outEdges[j].Count {
-			return outEdges[i].Count > outEdges[j].Count
-		}
-		if outEdges[i].From != outEdges[j].From {
-			return outEdges[i].From < outEdges[j].From
-		}
-		return outEdges[i].To < outEdges[j].To
-	})
-	byID := make(map[string]*graphNode, len(outNodes))
-	for _, n := range outNodes {
-		byID[n.ID] = n
-	}
-	return graphData{Nodes: outNodes, Edges: outEdges, ByID: byID, Start: start, End: end}
 }
 
 func (v *graphView) View(width, height int, theme Theme) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
-	palette := themePalette(theme)
-	panel := styles.PanelStyle(palette, true)
-	innerW := maxInt(0, width-(styles.LayoutInnerPadding*2)-2)
-	innerH := maxInt(1, height-(styles.LayoutInnerPadding*2)-2)
 
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb))
-	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted))
-	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Accent)).Bold(true)
-
-	rLabel := v.windows[clampInt(v.windowIdx, 0, len(v.windows)-1)].label
-	mode := "agents"
-	if v.topicOverlay {
-		mode = "topics"
-	}
-	sel := "nodes"
-	if v.selectMode == graphSelectEdges {
-		sel = "edges"
-	}
-	head := fmt.Sprintf("GRAPH  last %s  mode:%s  select:%s  zoom:%.1fx  nodes:%d edges:%d",
-		rLabel, mode, sel, v.zoom, len(v.graph.Nodes), len(v.graph.Edges))
-	header := titleStyle.Render(truncateVis(head, innerW))
-
-	if v.lastErr != nil {
-		content := lipgloss.JoinVertical(lipgloss.Left, header, "", muted.Render("error: "+truncate(v.lastErr.Error(), innerW)))
-		return panel.Width(width).Height(height).Render(content)
-	}
+	title := v.headerLine()
 	if v.loading {
-		content := lipgloss.JoinVertical(lipgloss.Left, header, "", muted.Render("Loading..."))
-		return panel.Width(width).Height(height).Render(content)
+		return truncateLines([]string{
+			truncateVis(title, width),
+			truncateVis("loading…", width),
+		}, height)
+	}
+	if v.lastErr != nil {
+		return truncateLines([]string{
+			truncateVis(title, width),
+			truncateVis("error: "+v.lastErr.Error(), width),
+		}, height)
 	}
 
-	canvasH := maxInt(8, innerH-4)
-	canvas := v.renderCanvas(innerW, canvasH, palette)
-	footer := muted.Render(truncateVis("[/]: range  +/-: zoom  Tab: nodes/edges  t: overlay  c: clusters  Enter: details  Esc: back  (v: graph)", innerW))
-
-	content := lipgloss.JoinVertical(lipgloss.Left, header, "", canvas, "", footer)
-	if v.detailOpen {
-		content = v.renderDetailOverlay(content, innerW, innerH, palette, accent, muted)
+	top := []string{
+		truncateVis(title, width),
+		truncateVis(v.hintLine(), width),
 	}
-	return panel.Width(width).Height(height).Render(content)
+
+	canvasH := height - len(top) - 6
+	if canvasH < 4 {
+		canvasH = maxInt(0, height-len(top))
+	}
+
+	lines := make([]string, 0, height)
+	lines = append(lines, top...)
+	lines = append(lines, v.renderCanvas(width, canvasH)...)
+	lines = append(lines, v.renderDetails(width)...)
+	return truncateLines(lines, height)
 }
 
-func (v *graphView) renderDetailOverlay(content string, width, height int, palette styles.Theme, accent, muted lipgloss.Style) string {
-	lines := []string{accent.Render("DETAIL")}
-	if v.selectMode == graphSelectEdges {
-		if len(v.graph.Edges) == 0 {
-			lines = append(lines, muted.Render("No edges"))
-		} else {
-			e := v.graph.Edges[clampInt(v.selected, 0, len(v.graph.Edges)-1)]
-			lines = append(lines, fmt.Sprintf("%s -> %s", e.From, e.To))
-			lines = append(lines, fmt.Sprintf("count: %d  reverse: %d", e.Count, e.Rev))
-		}
-	} else {
-		if len(v.graph.Nodes) == 0 {
-			lines = append(lines, muted.Render("No nodes"))
-		} else {
-			n := v.graph.Nodes[clampInt(v.selected, 0, len(v.graph.Nodes)-1)]
-			lines = append(lines, fmt.Sprintf("%s", n.ID))
-			lines = append(lines, fmt.Sprintf("sent: %d  received: %d  degree: %d", n.Sent, n.Received, n.Degree))
-		}
-	}
-	lines = append(lines, muted.Render("Dismiss: Enter or Esc"))
-	panel := lipgloss.NewStyle().
-		Border(styles.BorderStyleForTheme(palette)).
-		BorderForeground(lipgloss.Color(palette.Base.Border)).
-		Background(lipgloss.Color(palette.Base.Background)).
-		Foreground(lipgloss.Color(palette.Base.Foreground)).
-		Padding(1, 2).
-		Width(minInt(maxInt(40, width-10), 72))
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, panel.Render(strings.Join(lines, "\n")))
+func (v *graphView) headerLine() string {
+	label := v.windowLabel()
+	nodes := len(v.snap.Nodes)
+	edges := len(v.snap.Edges)
+	return fmt.Sprintf("Graph  last %s  %d messages  %d nodes  %d edges", label, v.snap.Messages, nodes, edges)
 }
 
-func (v *graphView) renderCanvas(width, height int, palette styles.Theme) string {
-	if width <= 0 || height <= 0 {
-		return ""
-	}
-	// Build a simple canvas.
-	c := newRuneCanvas(width, height)
-
-	// Re-layout using current canvas bounds.
-	layoutCircle(&v.graph, width, height, 12, v.zoom)
-
-	// Cluster rectangles (very coarse).
-	if v.clustersOn && !v.topicOverlay {
-		ids := make([]string, 0, len(v.graph.Nodes))
-		for _, n := range v.graph.Nodes {
-			ids = append(ids, n.ID)
-		}
-		clusters := computeClusters(v.graph, 5)
-		for _, members := range clusters {
-			if len(members) < 2 {
-				continue
-			}
-			minX, minY := width, height
-			maxX, maxY := 0, 0
-			for _, id := range members {
-				n := v.graph.ByID[id]
-				if n == nil {
-					continue
-				}
-				x0, y0, x1, y1 := nodeRect(n, width, height)
-				minX = minInt(minX, x0)
-				minY = minInt(minY, y0)
-				maxX = maxInt(maxX, x1)
-				maxY = maxInt(maxY, y1)
-			}
-			if minX < maxX && minY < maxY {
-				c.drawRectDotted(minX-1, minY-1, maxX+1, maxY+1)
-			}
-		}
-	}
-
-	// Edges.
-	for _, e := range v.graph.Edges {
-		if e == nil {
-			continue
-		}
-		from := v.graph.ByID[e.From]
-		to := v.graph.ByID[e.To]
-		if from == nil || to == nil {
-			continue
-		}
-		fx, fy := clampInt(from.X+v.panX, 0, width-1), clampInt(from.Y+v.panY, 0, height-1)
-		tx, ty := clampInt(to.X+v.panX, 0, width-1), clampInt(to.Y+v.panY, 0, height-1)
-		h, vv, arrow := edgeChars(e.Count + e.Rev)
-		c.drawEdge(fx, fy, tx, ty, h, vv, arrow)
-	}
-
-	// Nodes on top.
-	for i, n := range v.graph.Nodes {
-		if n == nil {
-			continue
-		}
-		selected := v.selectMode == graphSelectNodes && i == v.selected
-		label := fmt.Sprintf("%s (%d)", truncate(n.ID, 10), n.Sent)
-		if selected {
-			label = ">" + label + "<"
-		}
-		c.drawBoxCenter(clampInt(n.X+v.panX, 0, width-1), clampInt(n.Y+v.panY, 0, height-1), label, selected)
-	}
-
-	if v.selectMode == graphSelectEdges && len(v.graph.Edges) > 0 {
-		e := v.graph.Edges[clampInt(v.selected, 0, len(v.graph.Edges)-1)]
-		if e != nil {
-			tag := fmt.Sprintf("[%s -> %s] %d", truncate(e.From, 10), truncate(e.To, 10), e.Count)
-			c.drawString(0, height-1, truncate(tag, width))
-		}
-	}
-
-	return c.String()
+func (v *graphView) hintLine() string {
+	return "[/]:range  h/l:time-pan  Tab:next node  +/-:zoom  arrows:pan  r:refresh"
 }
 
-func edgeChars(weight int) (h, v, arrow rune) {
-	switch {
-	case weight > 20:
-		return '━', '┃', '▶'
-	case weight >= 6:
-		return '═', '║', '→'
-	default:
-		return '─', '│', '→'
+func (v *graphView) windowLabel() string {
+	if v.windowIdx < 0 || v.windowIdx >= len(v.windows) {
+		return "?"
 	}
+	d := v.windows[v.windowIdx]
+	if d == 0 {
+		return "all"
+	}
+	if d%(24*time.Hour) == 0 {
+		days := int(d / (24 * time.Hour))
+		if days == 1 {
+			return "24h"
+		}
+		return fmt.Sprintf("%dd", days)
+	}
+	if d%time.Hour == 0 {
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	}
+	if d%time.Minute == 0 {
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	}
+	return d.String()
 }
 
-type runeCanvas struct {
+type graphBox struct {
+	x int
+	y int
 	w int
 	h int
-	b [][]rune
 }
 
-func newRuneCanvas(w, h int) *runeCanvas {
-	b := make([][]rune, h)
-	for y := 0; y < h; y++ {
-		row := make([]rune, w)
-		for x := 0; x < w; x++ {
+func (v *graphView) renderCanvas(width, height int) []string {
+	if height <= 0 {
+		return nil
+	}
+	grid := make([][]rune, height)
+	for y := range grid {
+		row := make([]rune, width)
+		for x := range row {
 			row[x] = ' '
 		}
-		b[y] = row
+		grid[y] = row
 	}
-	return &runeCanvas{w: w, h: h, b: b}
+
+	boxes := v.layoutBoxes(width, height)
+	v.drawEdges(grid, boxes)
+	v.drawBoxes(grid, boxes)
+
+	out := make([]string, 0, height)
+	for y := range grid {
+		out = append(out, string(grid[y]))
+	}
+	return out
 }
 
-func (c *runeCanvas) set(x, y int, r rune) {
-	if x < 0 || y < 0 || x >= c.w || y >= c.h {
-		return
+func (v *graphView) layoutBoxes(width, height int) []graphBox {
+	nodes := v.snap.Nodes
+	if len(nodes) == 0 {
+		return nil
 	}
-	if c.b[y][x] == ' ' {
-		c.b[y][x] = r
-		return
-	}
-	// Keep boxes visible.
-	if c.b[y][x] == '┌' || c.b[y][x] == '┐' || c.b[y][x] == '└' || c.b[y][x] == '┘' {
-		return
-	}
-	c.b[y][x] = r
-}
 
-func (c *runeCanvas) drawString(x, y int, s string) {
-	if y < 0 || y >= c.h {
-		return
+	baseR := float64(minInt(width, height)) * 0.32
+	baseR += float64(v.zoom) * 2.0
+	if baseR < 4 {
+		baseR = 4
 	}
-	runes := []rune(s)
-	for i, r := range runes {
-		if x+i >= c.w {
-			break
+
+	boxes := make([]graphBox, len(nodes))
+	centerIdx := 0
+	for i := range nodes {
+		if nodes[i].Total > nodes[centerIdx].Total {
+			centerIdx = i
 		}
-		if x+i < 0 {
+	}
+
+	cx := float64(width/2 + v.panX)
+	cy := float64(height/2 + v.panY)
+
+	order := make([]int, 0, len(nodes))
+	order = append(order, centerIdx)
+	for i := range nodes {
+		if i == centerIdx {
 			continue
 		}
-		c.b[y][x+i] = r
+		order = append(order, i)
+	}
+
+	outer := order[1:]
+	for i, idx := range order {
+		node := nodes[idx]
+		label := node.Name
+		count := fmt.Sprintf("(%d)", node.Sent)
+		innerW := maxInt(8, maxInt(lipglossWidth(label), lipglossWidth(count))+2)
+		bw := innerW + 2
+		bh := 4
+
+		x := int(cx) - bw/2
+		y := int(cy) - bh/2
+		if i > 0 {
+			angle := 2 * math.Pi * float64(i-1) / float64(maxInt(1, len(outer)))
+			x = int(cx+baseR*math.Cos(angle)) - bw/2
+			y = int(cy+baseR*math.Sin(angle)) - bh/2
+		}
+
+		// Keep within bounds.
+		x = clampInt(x, 0, maxInt(0, width-bw))
+		y = clampInt(y, 0, maxInt(0, height-bh))
+		boxes[idx] = graphBox{x: x, y: y, w: bw, h: bh}
+	}
+
+	return boxes
+}
+
+func (v *graphView) drawBoxes(grid [][]rune, boxes []graphBox) {
+	for i := range boxes {
+		b := boxes[i]
+		if b.w <= 0 || b.h <= 0 {
+			continue
+		}
+		selected := i == v.selected
+		topL, topR, botL, botR, h, vbar := boxRunes(selected)
+
+		drawText(grid, b.x, b.y, topL+strings.Repeat(string(h), maxInt(0, b.w-2))+topR)
+
+		name := v.snap.Nodes[i].Name
+		count := fmt.Sprintf("(%d)", v.snap.Nodes[i].Sent)
+		drawText(grid, b.x, b.y+1, string(vbar)+centerPad(name, b.w-2)+string(vbar))
+		drawText(grid, b.x, b.y+2, string(vbar)+centerPad(count, b.w-2)+string(vbar))
+
+		drawText(grid, b.x, b.y+3, botL+strings.Repeat(string(h), maxInt(0, b.w-2))+botR)
 	}
 }
 
-func (c *runeCanvas) drawBoxCenter(cx, cy int, label string, selected bool) {
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return
-	}
-	w := minInt(c.w-2, maxInt(10, len([]rune(label))+2))
-	h := 3
-	x0 := clampInt(cx-w/2, 0, maxInt(0, c.w-w))
-	y0 := clampInt(cy-h/2, 0, maxInt(0, c.h-h))
-	x1 := x0 + w - 1
-	y1 := y0 + h - 1
-
-	tl, tr, bl, br := '┌', '┐', '└', '┘'
-	hr, vr := '─', '│'
+func boxRunes(selected bool) (topL, topR, botL, botR string, h, vbar rune) {
 	if selected {
-		tl, tr, bl, br = '╔', '╗', '╚', '╝'
-		hr, vr = '═', '║'
+		return "╔", "╗", "╚", "╝", '═', '║'
 	}
-	c.set(x0, y0, tl)
-	c.set(x1, y0, tr)
-	c.set(x0, y1, bl)
-	c.set(x1, y1, br)
-	for x := x0 + 1; x < x1; x++ {
-		c.set(x, y0, hr)
-		c.set(x, y1, hr)
-	}
-	for y := y0 + 1; y < y1; y++ {
-		c.set(x0, y, vr)
-		c.set(x1, y, vr)
-	}
-	c.drawString(x0+1, y0+1, truncate(label, w-2))
+	return "┌", "┐", "└", "┘", '─', '│'
 }
 
-func (c *runeCanvas) drawEdge(x0, y0, x1, y1 int, h, v, arrow rune) {
-	mx := (x0 + x1) / 2
-	step := 1
-	if x1 < x0 {
-		step = -1
+func (v *graphView) drawEdges(grid [][]rune, boxes []graphBox) {
+	type edgeDraw struct {
+		from  int
+		to    int
+		count int
 	}
-	for x := x0; x != mx; x += step {
-		c.set(x, y0, h)
+	idx := make(map[string]int, len(v.snap.Nodes))
+	for i := range v.snap.Nodes {
+		idx[v.snap.Nodes[i].Name] = i
 	}
-	step = 1
-	if y1 < y0 {
-		step = -1
+	edges := make([]edgeDraw, 0, len(v.snap.Edges))
+	for _, e := range v.snap.Edges {
+		fi, ok := idx[e.From]
+		if !ok {
+			continue
+		}
+		ti, ok := idx[e.To]
+		if !ok {
+			continue
+		}
+		edges = append(edges, edgeDraw{from: fi, to: ti, count: e.Count})
 	}
-	for y := y0; y != y1; y += step {
-		c.set(mx, y, v)
+	sort.Slice(edges, func(i, j int) bool { return edges[i].count > edges[j].count })
+
+	for _, e := range edges {
+		v.drawEdge(grid, boxes[e.from], boxes[e.to], e.count)
 	}
-	step = 1
-	if x1 < mx {
-		step = -1
-	}
-	for x := mx; x != x1; x += step {
-		c.set(x, y1, h)
-	}
-	c.set(x1, y1, arrow)
 }
 
-func (c *runeCanvas) drawRectDotted(x0, y0, x1, y1 int) {
-	x0 = clampInt(x0, 0, c.w-1)
-	y0 = clampInt(y0, 0, c.h-1)
-	x1 = clampInt(x1, 0, c.w-1)
-	y1 = clampInt(y1, 0, c.h-1)
-	if x0 >= x1 || y0 >= y1 {
+func (v *graphView) drawEdge(grid [][]rune, from, to graphBox, count int) {
+	if len(grid) == 0 || len(grid[0]) == 0 {
 		return
 	}
-	for x := x0; x <= x1; x++ {
-		if x%2 == 0 {
-			c.set(x, y0, '·')
-			c.set(x, y1, '·')
-		}
+	w := len(grid[0])
+
+	fromCX := from.x + from.w/2
+	fromCY := from.y + from.h/2
+	toCX := to.x + to.w/2
+	toCY := to.y + to.h/2
+
+	startX := fromCX
+	startY := fromCY
+	endX := toCX
+	endY := toCY
+
+	if toCX >= fromCX {
+		startX = from.x + from.w
+		endX = to.x - 1
+	} else {
+		startX = from.x - 1
+		endX = to.x + to.w
 	}
-	for y := y0; y <= y1; y++ {
-		if y%2 == 0 {
-			c.set(x0, y, '·')
-			c.set(x1, y, '·')
-		}
+	startX = clampInt(startX, 0, w-1)
+	endX = clampInt(endX, 0, w-1)
+
+	midX := (startX + endX) / 2
+	midX = clampInt(midX, 0, w-1)
+
+	hRune, vRune := edgeRunes(count)
+
+	drawH(grid, startY, startX, midX, hRune)
+	drawV(grid, midX, startY, endY, vRune)
+	drawH(grid, endY, midX, endX, hRune)
+
+	// Arrow head at end.
+	arrow := '→'
+	if endX < to.x {
+		arrow = '→'
+	} else if endX > to.x+to.w {
+		arrow = '←'
+	}
+	if endY < to.y {
+		arrow = '↓'
+	} else if endY > to.y+to.h {
+		arrow = '↑'
+	}
+	setRuneIfEmpty(grid, endX, endY, arrow)
+
+	// Label near mid.
+	label := fmt.Sprintf("%d", count)
+	labelX := clampInt(midX-len([]rune(label))/2, 0, maxInt(0, w-1))
+	for i, r := range []rune(label) {
+		setRuneIfEmpty(grid, labelX+i, startY, r)
 	}
 }
 
-func (c *runeCanvas) String() string {
-	lines := make([]string, 0, c.h)
-	for y := 0; y < c.h; y++ {
-		lines = append(lines, string(c.b[y]))
+func edgeRunes(count int) (h, v rune) {
+	switch {
+	case count >= 20:
+		return '━', '┃'
+	case count >= 6:
+		return '═', '║'
+	default:
+		return '─', '│'
+	}
+}
+
+func drawH(grid [][]rune, y, x1, x2 int, r rune) {
+	if y < 0 || y >= len(grid) {
+		return
+	}
+	if x2 < x1 {
+		x1, x2 = x2, x1
+	}
+	row := grid[y]
+	for x := x1; x <= x2 && x >= 0 && x < len(row); x++ {
+		setRuneIfEmpty(grid, x, y, r)
+	}
+}
+
+func drawV(grid [][]rune, x, y1, y2 int, r rune) {
+	if y2 < y1 {
+		y1, y2 = y2, y1
+	}
+	for y := y1; y <= y2 && y >= 0 && y < len(grid); y++ {
+		setRuneIfEmpty(grid, x, y, r)
+	}
+}
+
+func setRuneIfEmpty(grid [][]rune, x, y int, r rune) {
+	if y < 0 || y >= len(grid) {
+		return
+	}
+	if x < 0 || x >= len(grid[y]) {
+		return
+	}
+	if grid[y][x] != ' ' {
+		return
+	}
+	grid[y][x] = r
+}
+
+func drawText(grid [][]rune, x, y int, s string) {
+	if y < 0 || y >= len(grid) {
+		return
+	}
+	row := grid[y]
+	col := x
+	for _, r := range s {
+		if col < 0 {
+			col++
+			continue
+		}
+		if col >= len(row) {
+			break
+		}
+		row[col] = r
+		col++
+	}
+}
+
+func centerPad(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	s = strings.TrimSpace(s)
+	if lipglossWidth(s) >= width {
+		return truncateVis(s, width)
+	}
+	pad := width - lipglossWidth(s)
+	left := pad / 2
+	right := pad - left
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", right)
+}
+
+func lipglossWidth(s string) int {
+	// Minimal width helper without importing lipgloss into this file's API surface.
+	return len([]rune(s))
+}
+
+func truncateLines(lines []string, maxLines int) string {
+	if maxLines <= 0 {
+		return ""
+	}
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
 	}
 	return strings.Join(lines, "\n")
 }
 
-func nodeRect(n *graphNode, width, height int) (x0, y0, x1, y1 int) {
-	if n == nil {
-		return 0, 0, 0, 0
+func (v *graphView) renderDetails(width int) []string {
+	if width <= 0 {
+		return nil
 	}
-	// Approximate box around the node center.
-	w := 14
-	h := 3
-	x0 = clampInt(n.X-w/2, 0, maxInt(0, width-w))
-	y0 = clampInt(n.Y-h/2, 0, maxInt(0, height-h))
-	x1 = x0 + w
-	y1 = y0 + h
-	return x0, y0, x1, y1
-}
+	if len(v.snap.Nodes) == 0 {
+		return []string{truncateVis("no data", width)}
+	}
+	if v.selected < 0 || v.selected >= len(v.snap.Nodes) {
+		v.selected = 0
+	}
+	node := v.snap.Nodes[v.selected]
 
-func minFloat(a, b float64) float64 {
-	if a < b {
-		return a
+	lines := []string{
+		fmt.Sprintf("Selected: %s  sent:%d recv:%d", node.Name, node.Sent, node.Recv),
 	}
-	return b
-}
 
-func maxFloat(a, b float64) float64 {
-	if a > b {
-		return a
+	// Top outgoing edges.
+	type edge struct {
+		to    string
+		count int
 	}
-	return b
+	out := make([]edge, 0, 8)
+	for _, e := range v.snap.Edges {
+		if e.From != node.Name {
+			continue
+		}
+		out = append(out, edge{to: e.To, count: e.Count})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].count > out[j].count })
+	if len(out) > 5 {
+		out = out[:5]
+	}
+	if len(out) == 0 {
+		lines = append(lines, "Top: (no edges)")
+	} else {
+		parts := make([]string, 0, len(out))
+		for _, e := range out {
+			parts = append(parts, fmt.Sprintf("%s:%d", e.to, e.count))
+		}
+		lines = append(lines, "Top out: "+strings.Join(parts, "  "))
+	}
+
+	for i := range lines {
+		lines[i] = truncateVis(lines[i], width)
+	}
+
+	// Pad to a stable height so the graph doesn't jump.
+	for len(lines) < 6 {
+		lines = append(lines, "")
+	}
+	return lines
 }
