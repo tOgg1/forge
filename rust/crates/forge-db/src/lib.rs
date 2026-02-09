@@ -105,8 +105,12 @@ pub enum DbError {
     ApprovalNotFound,
     #[error("mail thread not found")]
     MailThreadNotFound,
+    #[error("mail thread already exists")]
+    MailThreadAlreadyExists,
     #[error("mail message not found")]
     MailMessageNotFound,
+    #[error("mail message already exists")]
+    MailMessageAlreadyExists,
     #[error("transcript not found")]
     TranscriptNotFound,
     #[error("queue item not found")]
