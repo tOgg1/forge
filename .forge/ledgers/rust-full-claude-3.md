@@ -360,3 +360,44 @@ Implemented the `forge send` Rust CLI command with full parity to the Go impleme
 - `cargo test -p forge-cli` — PASS (42 send-related tests: 28 inline + 14 external)
 ```
 
+## 2026-02-09T19:07:26Z
+
+- run_id: c3f1c169-3677-4d3c-94ff-82602a0c487c
+- loop_name: rust-full-claude-3
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:55:54Z
+- finished_at: 2026-02-09T19:07:26Z
+- exit_code: 0
+
+```
+## Task Summary: forge-t54 — Daemon: RPC SendInput/List/Get agent parity
+
+**Status: CLOSED**
+
+### What was delivered
+
+Implemented three gRPC RPC handlers in the Rust `forge-daemon` crate with full behavioral parity to the Go daemon (`internal/forged/server.go`):
+
+**New files:**
+- `agent.rs` — Thread-safe `AgentManager` registry with `RwLock<HashMap>`, supporting workspace/state filtering, `register`, `remove`, `get`, `list`, `touch`, `add_transcript_entry`
+- `server.rs` — `ForgedAgentService` with `SendInput`, `ListAgents`, `GetAgent` handlers matching Go behavior exactly (validation, gRPC status codes, tmux key ordering, transcript recording)
+- `tmux.rs` — `TmuxClient` trait with `ShellTmuxClient` implementation (send_keys with literal mode, send_special_key, escape_arg)
+- `transcript.rs` — In-memory `TranscriptStore` with monotonic cursor IDs
+
+**Key parity details:**
+- `SendInput`: validates agent_id required, sends special keys first (no `-l`), text second (literal), updates `last_activity_at`, records transcript
+- `ListAgents`: workspace_id + multi-state filtering, returns all matching
+- `GetAgent`: validates agent_id required, returns proto with timestamp conversion
+
+**Tests: 19 new tests** (36 total in crate):
+- agent registry: register, get, remove, list with filters, count/contains
+- server: all 3 RPCs validated for error paths, happy paths, tmux call ordering, proto conversion round-trips
+
+**Validation:** `cargo fmt --check` + `cargo clippy --all-targets -D warnings` + `cargo test -p forge-daemon` all pass.
+```
+

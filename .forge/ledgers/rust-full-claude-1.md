@@ -378,3 +378,46 @@ cargo test -p forge-cli            ✓ (all tests pass)
 ```
 ```
 
+## 2026-02-09T19:06:31Z
+
+- run_id: e3582745-fe7e-43ce-ac1c-6b7e079f71c2
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:47:57Z
+- finished_at: 2026-02-09T19:06:31Z
+- exit_code: 0
+
+```
+## Task Summary: forge-4qm (CLI port: forge workflow)
+
+**Status:** Closed
+
+**What was done:**
+- Implemented the `forge workflow` command in Rust at `rust/crates/forge-cli/src/workflow.rs` with full Go parity
+- 3 subcommands: `ls`/`list`, `show`, `validate` (plus `wf` alias)
+- Full data models: `Workflow`, `WorkflowStep` (7 step types: agent, loop, bash, logic, job, workflow, human), `StopCondition`, `WorkflowHooks`, `WorkflowError`
+- Complete validation engine with normalization, cycle detection (Kahn's algorithm), dependency/logic target checking, step-specific field validation
+- TOML parsing via `toml` 0.8 crate
+- Output formats: JSON (pretty), JSONL, human-readable text (tabwriter table for `ls`, detailed display with flowchart for `show`)
+- Prompt resolution (inline/path/name) matching Go `resolve.go`
+- `WorkflowBackend` trait + `InMemoryWorkflowBackend` for testing
+- 66 unit tests covering all subcommands, output modes, validation rules, normalization, TOML parsing, error formatting, flowchart generation
+- Wired into `lib.rs` dispatch (workflow + wf alias) + help text + module test
+
+**Files changed:**
+- `rust/crates/forge-cli/src/workflow.rs` (new, ~1600 lines)
+- `rust/crates/forge-cli/src/lib.rs` (module declaration, dispatch arm, help text, test)
+- `rust/crates/forge-cli/Cargo.toml` (added `toml = "0.8"`)
+
+**Validation:**
+- `cargo fmt -p forge-cli --check`: PASS
+- `cargo clippy -p forge-cli --all-targets -- -D warnings`: PASS
+- `cargo test -p forge-cli`: 653 unit tests + all integration tests pass, 0 failures
+- Full workspace gate blocked by unrelated `forge-daemon` compile error (missing `capture_pane` trait impl from another agent's in-progress work)
+```
+

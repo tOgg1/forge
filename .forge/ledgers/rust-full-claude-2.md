@@ -394,3 +394,91 @@ Ported the `forge skills` CLI command from Go to Rust with full flag/default/val
 - `cargo test --workspace` - pass (0 failures across all crates)
 ```
 
+## 2026-02-09T18:56:30Z
+
+- run_id: d7d459ad-011b-4288-8e99-a60d40c5e243
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:46:22Z
+- finished_at: 2026-02-09T18:56:30Z
+- exit_code: 0
+
+```
+## Task Summary: forge-90m — CLI port: forge wait
+
+**Status:** Closed
+
+**What was done:**
+The `forge wait` command was already substantially implemented by a previous agent. I verified full Go parity and made one fix:
+
+1. **Verified existing implementation** (`wait.rs`, 1272 lines):
+   - Backend trait with `WaitBackend` (7 methods)
+   - `InMemoryWaitBackend` for testing
+   - All 6 conditions: `idle`, `queue-empty`, `cooldown-over`, `ready`, `all-idle`, `any-idle`
+   - Polling loop with deadline/timeout support
+   - JSON, JSONL, human-readable, and quiet output modes
+   - Full argument parsing with short flags
+
+2. **Verified registration** in `lib.rs`:
+   - Module declaration (line 35)
+   - Command dispatch (lines 250-253)
+   - Root help entry (line 344)
+   - Module accessibility test (line 606)
+
+3. **Fixed integration test file** (`wait_command_test.rs`):
+   - Added missing `#![allow(clippy::unwrap_used)]` attribute (workspace Clippy requirement)
+
+4. **Cleaned up duplicate golden files** I accidentally created
+
+5. **Verified 7 golden files** exist in `tests/golden/wait/`
+
+**Validation:** All three gates passed:
+- `cargo fmt --check` — PASS
+- `cargo clippy --workspace --all-targets -- -D warnings` — PASS
+- `cargo test --workspace` — PASS (37 unit + 12 integration tests green)
+```
+
+## 2026-02-09T19:05:30Z
+
+- run_id: 35a29689-a602-4091-9a3d-8a9b77c373c6
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:57:15Z
+- finished_at: 2026-02-09T19:05:30Z
+- exit_code: 0
+
+```
+## Task Summary: forge-6h3 (CLI port: forge tui)
+
+**Status:** Closed
+
+**What was done:**
+- Implemented `forge tui` command in Rust with full Go parity
+- Created `rust/crates/forge-cli/src/tui.rs` (~290 lines)
+  - `TuiBackend` trait abstracting terminal/database dependencies
+  - `InMemoryTuiBackend` for testing with configurable behavior
+  - Supports `tui` and `ui` command aliases (matching Go)
+  - `--help`/`-h`/`help` subcommand with parity help text
+  - `--json`/`--jsonl` output modes
+  - Non-interactive detection → `PreflightError` (matches Go's `PreflightError` shape)
+  - Launch error handling with exit code 2
+  - Flag validation (unknown flags, mutual exclusivity)
+- Wired into `lib.rs`: module declaration, dispatch arms for `tui`/`ui`, root help entry, accessibility test
+- Created 5 golden fixture files in `tests/golden/tui/`
+- Created `tests/tui_command_test.rs` with 9 integration tests
+
+**Test coverage:** 17 unit tests + 9 integration/golden tests = 26 tests, all passing
+
+**Validation:** `cargo fmt -p forge-cli --check` PASS, `cargo clippy -p forge-cli --all-targets -- -D warnings` PASS, `cargo test -p forge-cli` PASS
+```
+
