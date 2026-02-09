@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/tOgg1/forge/internal/fmail"
+	"github.com/tOgg1/forge/internal/fmailtui/data"
 )
 
 const (
@@ -83,6 +84,7 @@ type Model struct {
 	projectID    string
 	root         string
 	store        *fmail.Store
+	provider     data.MessageProvider
 	forgedClient ForgedClient
 	theme        Theme
 	pollInterval time.Duration
@@ -148,6 +150,15 @@ func NewModel(cfg Config) (*Model, error) {
 		return nil, fmt.Errorf("ensure project: %w", err)
 	}
 
+	provider, err := data.NewHybridProvider(data.HybridProviderConfig{
+		Root:              root,
+		ReconnectInterval: 2 * time.Second,
+		SubscribeBuffer:   512,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("init data provider: %w", err)
+	}
+
 	forgedClient, err := connectForged(normalized.ForgedAddr)
 	if err != nil {
 		return nil, fmt.Errorf("connect forged: %w", err)
@@ -157,6 +168,7 @@ func NewModel(cfg Config) (*Model, error) {
 		projectID:    projectID,
 		root:         root,
 		store:        store,
+		provider:     provider,
 		forgedClient: forgedClient,
 		theme:        Theme(normalized.Theme),
 		pollInterval: normalized.PollInterval,
@@ -180,6 +192,11 @@ func Run(cfg Config) error {
 }
 
 func (m *Model) Close() error {
+	for _, view := range m.views {
+		if closer, ok := view.(interface{ Close() }); ok {
+			closer.Close()
+		}
+	}
 	if m == nil || m.forgedClient == nil {
 		return nil
 	}
@@ -291,7 +308,7 @@ func (m *Model) popView() {
 }
 
 func (m *Model) initViews() {
-	m.views[ViewDashboard] = newPlaceholderView(ViewDashboard, "Dashboard")
+	m.views[ViewDashboard] = newDashboardView(m.provider, m.projectID, m.root)
 	m.views[ViewTopics] = newPlaceholderView(ViewTopics, "Topics")
 	m.views[ViewThread] = newPlaceholderView(ViewThread, "Thread")
 	m.views[ViewAgents] = newPlaceholderView(ViewAgents, "Agents")

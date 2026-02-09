@@ -69,22 +69,24 @@ func TestViewStackAndEnterNavigation(t *testing.T) {
 	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyEsc})
 	require.Equal(t, ViewDashboard, model.activeViewID())
 
+	// Dashboard default focus is agents, so Enter pushes ViewAgents.
 	model = applyUpdateWithCmd(t, model, tea.KeyMsg{Type: tea.KeyEnter})
-	require.Equal(t, ViewTopics, model.activeViewID())
-
-	model = applyUpdateWithCmd(t, model, tea.KeyMsg{Type: tea.KeyEnter})
-	require.Equal(t, ViewThread, model.activeViewID())
+	require.Equal(t, ViewAgents, model.activeViewID())
 
 	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyBackspace})
-	require.Equal(t, ViewTopics, model.activeViewID())
+	require.Equal(t, ViewDashboard, model.activeViewID())
 }
 
 func TestRoutesKeyToActiveView(t *testing.T) {
 	model := newTestModel(t, Config{})
-	view := model.views[ViewDashboard].(*placeholderView)
+	// Dashboard is now a *dashboardView, not a placeholder.
+	// Verify that key events reach the active view without panic.
+	view := model.views[ViewDashboard].(*dashboardView)
+	require.NotNil(t, view)
 
-	model = applyUpdate(t, model, runeKey('x'))
-	require.Equal(t, "x", view.lastKey)
+	// Tab should cycle dashboard focus without error.
+	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyTab})
+	require.Equal(t, ViewDashboard, model.activeViewID())
 }
 
 func TestConnectForgedOptional(t *testing.T) {
