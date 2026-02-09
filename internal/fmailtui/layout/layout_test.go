@@ -25,9 +25,9 @@ func TestSplitPaneGeometryAndFocus(t *testing.T) {
 	m.SetFocus(0)
 
 	panes := m.Panes(Spec{
-		Width:    120,
-		Height:   30,
-		Primary:  "topics",
+		Width:     120,
+		Height:    30,
+		Primary:   "topics",
 		Secondary: "thread",
 	})
 
@@ -51,9 +51,9 @@ func TestDashboardGridModes(t *testing.T) {
 	m.SetFocus(2)
 
 	spec := Spec{
-		Width:    160,
-		Height:   40,
-		Primary:  "topics",
+		Width:     160,
+		Height:    40,
+		Primary:   "topics",
 		Secondary: "thread",
 		Dashboard: [4]string{"agents", "live-tail", "topics", "thread"},
 	}
@@ -90,9 +90,9 @@ func TestExpandedAndCollapsedModes(t *testing.T) {
 	m.ToggleExpanded()
 
 	panes := m.Panes(Spec{
-		Width:    120,
-		Height:   30,
-		Primary:  "topics",
+		Width:     120,
+		Height:    30,
+		Primary:   "topics",
 		Secondary: "thread",
 	})
 	require.Len(t, panes, 1)
@@ -101,9 +101,9 @@ func TestExpandedAndCollapsedModes(t *testing.T) {
 	m.ToggleExpanded()
 	m.ToggleSplitCollapsed()
 	panes = m.Panes(Spec{
-		Width:    120,
-		Height:   30,
-		Primary:  "topics",
+		Width:     120,
+		Height:    30,
+		Primary:   "topics",
 		Secondary: "thread",
 	})
 	require.Len(t, panes, 1)

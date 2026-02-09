@@ -254,6 +254,10 @@ func (v *topicsView) View(width, height int, theme Theme) string {
 		Render(body)
 }
 
+func (v *topicsView) MinSize() (int, int) {
+	return 44, 10
+}
+
 func (v *topicsView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if v.composeActive {
 		switch msg.Type {
@@ -522,7 +526,7 @@ func (v *topicsView) renderPreviewLines(target string, width, maxLines int, pale
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render("No messages")
 	}
 
-	mapper := styles.NewAgentColorMapper()
+	mapper := styles.NewAgentColorMapperWithPalette(palette.AgentPalette)
 	lines := make([]string, 0, len(msgs)*3)
 	for _, msg := range msgs {
 		ts := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render(msg.Time.UTC().Format("15:04"))

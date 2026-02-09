@@ -177,6 +177,10 @@ func (v *liveTailView) View(width, height int, theme Theme) string {
 	return base.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
+func (v *liveTailView) MinSize() (int, int) {
+	return 40, 10
+}
+
 func (v *liveTailView) startSubscription() {
 	if v.provider == nil || v.subCh != nil {
 		return
@@ -421,7 +425,7 @@ func (v *liveTailView) renderMessages(width, height int, palette styles.Theme, h
 	if height <= 0 {
 		return nil
 	}
-	mapper := styles.NewAgentColorMapper()
+	mapper := styles.NewAgentColorMapperWithPalette(palette.AgentPalette)
 	ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Border))
 	bodyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Foreground))
 
@@ -459,14 +463,13 @@ func (v *liveTailView) renderMessages(width, height int, palette styles.Theme, h
 		head := fmt.Sprintf("%s %s %s → %s", ts.Format("15:04:05"), tag, mapper.Foreground(msg.From).Render(mapper.Plain(msg.From)), truncate(target, 20))
 		lines = append(lines, bodyStyle.Render(truncateVis(head, width)))
 
-		body := messageBodyString(msg.Body)
-		body = strings.TrimRight(body, "\n")
-		if body == "" {
+		body := strings.TrimRight(messageBodyString(msg.Body), "\n")
+		if strings.TrimSpace(body) == "" {
 			continue
 		}
-		bodyLines := wrapLines(body, maxInt(0, width-4))
+		bodyLines := renderBodyLines(body, maxInt(0, width-4), palette)
 		if len(bodyLines) > 5 {
-			bodyLines = append(bodyLines[:5], "...")
+			bodyLines = append(bodyLines[:5], muted.Render("..."))
 		}
 		for _, bl := range bodyLines {
 			if len(lines) >= height {
@@ -548,7 +551,6 @@ func parseLiveTailFilter(input string) liveTailFilter {
 	return out
 }
 
-
 func splitCSVLike(s string) []string {
 	raw := strings.Split(s, ",")
 	out := make([]string, 0, len(raw))
@@ -627,4 +629,3 @@ func bellCmd() tea.Cmd {
 		return nil
 	}
 }
-

@@ -152,6 +152,10 @@ func (v *dashboardView) View(width, height int, theme Theme) string {
 	return base.Render(content)
 }
 
+func (v *dashboardView) MinSize() (int, int) {
+	return 60, 12
+}
+
 func (v *dashboardView) renderPanels(width, height int, palette styles.Theme) string {
 	if width < 80 {
 		return v.renderFeedPanel(width, height, palette, true)
@@ -208,7 +212,7 @@ func (v *dashboardView) renderAgents(width int, palette styles.Theme) (string, s
 
 	onlineCount := 0
 	lines := make([]string, 0, minInt(len(records), 8))
-	mapper := styles.NewAgentColorMapper()
+	mapper := styles.NewAgentColorMapperWithPalette(palette.AgentPalette)
 	for idx, rec := range records {
 		presence := presenceIndicator(now, rec.LastSeen)
 		if presence == "●" {
@@ -292,7 +296,7 @@ func (v *dashboardView) renderFeedLines(width, maxLines int, palette styles.Them
 	if maxLines <= 0 {
 		return ""
 	}
-	mapper := styles.NewAgentColorMapper()
+	mapper := styles.NewAgentColorMapperWithPalette(palette.AgentPalette)
 
 	start := 0
 	if v.feedOffset > 0 {

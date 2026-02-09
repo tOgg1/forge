@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/tOgg1/forge/internal/fmailtui/styles"
 )
 
 type helpItem struct {
@@ -43,7 +45,7 @@ func (m *Model) renderHelpOverlay(width, height int, theme Theme) string {
 
 	panelWidth := minInt(maxInt(50, width-10), 96)
 	panel := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(styles.BorderStyleForTheme(palette)).
 		BorderForeground(lipgloss.Color(palette.Base.Border)).
 		Background(lipgloss.Color(palette.Base.Background)).
 		Foreground(lipgloss.Color(palette.Base.Foreground)).
@@ -61,6 +63,16 @@ func helpForView(id ViewID) []helpSection {
 			{key: "Esc", desc: "back"},
 			{key: ":", desc: "quick send"},
 			{key: "n", desc: "new message"},
+			{key: "Ctrl+T", desc: "cycle theme"},
+			{key: "Ctrl+R", desc: "refresh view"},
+			{key: "Ctrl+Z", desc: "toggle zen layout"},
+			{key: "Tab", desc: "cycle pane focus"},
+			{key: "Ctrl+W h/j/k/l", desc: "move pane focus"},
+			{key: "Ctrl+W +/-", desc: "adjust split ratio"},
+			{key: "Ctrl+W o", desc: "expand focused pane"},
+			{key: "| / Ctrl+\\", desc: "split resize / collapse"},
+			{key: "Ctrl+G", desc: "cycle dashboard grid"},
+			{key: "Ctrl+1..4", desc: "cycle dashboard slot"},
 			{key: "?", desc: "toggle help"},
 		},
 	}
@@ -99,6 +111,21 @@ func helpForView(id ViewID) []helpSection {
 				{key: "s", desc: "cycle sort"},
 				{key: "[ / ]", desc: "adjust activity window"},
 				{key: "/", desc: "filter"},
+			}},
+		}
+	case ViewTimeline:
+		return []helpSection{
+			global,
+			{title: "Timeline", items: []helpItem{
+				{key: "s", desc: "toggle chronological/swim-lane"},
+				{key: "+ / -", desc: "zoom time window"},
+				{key: "h/l or ←/→", desc: "pan window"},
+				{key: "f", desc: "set filter query"},
+				{key: "t", desc: "jump to time/date"},
+				{key: "n", desc: "jump to now"},
+				{key: "Enter", desc: "toggle detail popup"},
+				{key: "o", desc: "open selected in thread view"},
+				{key: "b", desc: "toggle bookmark"},
 			}},
 		}
 	default:

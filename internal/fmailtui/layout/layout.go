@@ -43,21 +43,21 @@ type Pane struct {
 }
 
 type Spec struct {
-	Width    int
-	Height   int
-	Primary  string
+	Width     int
+	Height    int
+	Primary   string
 	Secondary string
 	Dashboard [4]string
 }
 
 type Manager struct {
-	mode          Mode
-	splitRatio    float64
+	mode           Mode
+	splitRatio     float64
 	splitCollapsed bool
-	focus         int
-	expanded      bool
-	grid          Grid
-	dashboard     [4]string
+	focus          int
+	expanded       bool
+	grid           Grid
+	dashboard      [4]string
 }
 
 func NewManager() *Manager {
@@ -181,6 +181,13 @@ func (m *Manager) ToggleSplitCollapsed() bool {
 	return m.splitCollapsed
 }
 
+func (m *Manager) SetSplitCollapsed(collapsed bool) {
+	if m == nil {
+		return
+	}
+	m.splitCollapsed = collapsed
+}
+
 func (m *Manager) Expanded() bool {
 	if m == nil {
 		return false
@@ -194,6 +201,13 @@ func (m *Manager) ToggleExpanded() bool {
 	}
 	m.expanded = !m.expanded
 	return m.expanded
+}
+
+func (m *Manager) SetExpanded(expanded bool) {
+	if m == nil {
+		return
+	}
+	m.expanded = expanded
 }
 
 func (m *Manager) Focus() int {
@@ -288,6 +302,13 @@ func (m *Manager) Grid() Grid {
 		return Grid2x2
 	}
 	return m.grid
+}
+
+func (m *Manager) SetGrid(grid Grid) {
+	if m == nil {
+		return
+	}
+	m.grid = ParseGrid(string(grid))
 }
 
 func (m *Manager) CycleGrid() Grid {

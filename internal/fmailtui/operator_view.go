@@ -217,6 +217,10 @@ func (v *operatorView) View(width, height int, theme Theme) string {
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
+func (v *operatorView) MinSize() (int, int) {
+	return 60, 12
+}
+
 func (v *operatorView) ComposeTarget() string {
 	return strings.TrimSpace(v.target)
 }

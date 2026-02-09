@@ -50,8 +50,8 @@ type BorderColors struct {
 
 // Theme defines the fmail TUI style/theme tokens.
 type Theme struct {
-	Name        string
-	BorderStyle string   // "rounded", "sharp", "double", "hidden"
+	Name         string
+	BorderStyle  string   // "rounded", "sharp", "double", "hidden"
 	AgentPalette []string // optional override for agent identity colors (ANSI-256 codes)
 
 	Base     BaseColors

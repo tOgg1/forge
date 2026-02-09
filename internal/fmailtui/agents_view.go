@@ -215,6 +215,10 @@ func (v *agentsView) View(width, height int, theme Theme) string {
 	return base.Render(body)
 }
 
+func (v *agentsView) MinSize() (int, int) {
+	return 48, 10
+}
+
 func (v *agentsView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	// History mode.
 	if v.mode == agentsModeHistory {
@@ -641,7 +645,7 @@ func (v *agentsView) renderAgentRows(width, maxRows int, palette styles.Theme) s
 		start = maxInt(0, len(v.rows)-maxRows)
 	}
 
-	mapper := styles.NewAgentColorMapper()
+	mapper := styles.NewAgentColorMapperWithPalette(palette.AgentPalette)
 	lines := make([]string, 0, maxRows)
 	for idx := start; idx < len(v.rows) && len(lines) < maxRows; idx++ {
 		row := v.rows[idx]

@@ -2,8 +2,8 @@ package styles
 
 // DefaultTheme is the baseline dark palette for fmail TUI.
 var DefaultTheme = Theme{
-	Name:        "default",
-	BorderStyle: "rounded",
+	Name:         "default",
+	BorderStyle:  "rounded",
 	AgentPalette: append([]string(nil), AgentColorPalette...),
 	Base: BaseColors{
 		Background: "234",
