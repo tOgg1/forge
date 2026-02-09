@@ -5,6 +5,7 @@ use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 use forge_ftui_adapter::style::{ThemeKind, ThemeSpec};
 use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 
+pub mod app;
 pub mod bookmarks;
 pub mod heatmap;
 pub mod live_tail;
@@ -12,8 +13,12 @@ pub mod notifications;
 pub mod replay;
 pub mod search;
 pub mod state_help;
+pub mod stats;
+pub mod thread;
+pub mod threading;
 pub mod timeline;
 
+pub use app::{App, Command, LayoutMode, PlaceholderView, View, ViewId};
 pub use bookmarks::{
     apply_bookmarks_input, parse_bookmarks_filter, render_bookmarks_frame, BookmarkEntry,
     BookmarksFilter, BookmarksViewModel,
@@ -31,6 +36,17 @@ pub use replay::{apply_replay_input, render_replay_frame, ReplayEntry, ReplayVie
 pub use search::{apply_search_input, render_search_frame, SearchResultEntry, SearchViewModel};
 pub use state_help::{
     default_keymap, render_help_frame, Bookmark, KeyBinding, PersistedState, UiPreferences,
+};
+pub use stats::{
+    apply_stats_input, compute_stats, render_stats_frame, StatsBucket, StatsMessage, StatsSnapshot,
+    StatsViewModel,
+};
+pub use thread::{
+    apply_thread_input, render_thread_frame, ThreadMode, ThreadRow, ThreadViewModel, TopicInfo,
+};
+pub use threading::{
+    build_thread_by_id, build_threads, flatten_thread, is_cross_target_reply, summarize_thread,
+    Thread, ThreadMessage, ThreadNode, ThreadSummary,
 };
 pub use timeline::{
     apply_timeline_input, parse_timeline_filter, render_timeline_frame, TimelineFilter,

@@ -192,6 +192,14 @@ pub mod render {
             Some(self.cells[y * self.size.width + x])
         }
 
+        /// Write a single cell, clipped to frame bounds.
+        pub fn set_cell(&mut self, x: usize, y: usize, cell: FrameCell) {
+            if x >= self.size.width || y >= self.size.height {
+                return;
+            }
+            self.cells[y * self.size.width + x] = cell;
+        }
+
         /// Draw text on a single row, clipped to frame width.
         pub fn draw_text(&mut self, x: usize, y: usize, text: &str, role: TextRole) {
             if y >= self.size.height || x >= self.size.width {
