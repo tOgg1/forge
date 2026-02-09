@@ -9,6 +9,7 @@ import (
 
 	"github.com/tOgg1/forge/internal/fmail"
 	"github.com/tOgg1/forge/internal/fmailtui/data"
+	tuistate "github.com/tOgg1/forge/internal/fmailtui/state"
 	"github.com/tOgg1/forge/internal/fmailtui/threading"
 )
 
@@ -53,6 +54,7 @@ type threadRow struct {
 type threadView struct {
 	root     string
 	provider data.MessageProvider
+	state    *tuistate.Manager
 
 	now     time.Time
 	lastErr error
@@ -84,10 +86,11 @@ type threadView struct {
 	initialized bool
 }
 
-func newThreadView(root string, provider data.MessageProvider) *threadView {
+func newThreadView(root string, provider data.MessageProvider, st *tuistate.Manager) *threadView {
 	return &threadView{
 		root:           root,
 		provider:       provider,
+		state:          st,
 		mode:           threadModeThreaded,
 		limit:          threadPageSize,
 		collapsed:      make(map[string]bool),

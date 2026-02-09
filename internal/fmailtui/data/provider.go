@@ -89,6 +89,16 @@ type SearchResult struct {
 	MatchLength int
 }
 
+type SendRequest struct {
+	From     string
+	To       string
+	Body     string
+	ReplyTo  string
+	Priority string
+	Tags     []string
+	Time     time.Time
+}
+
 type FileProviderConfig struct {
 	Root            string
 	CacheTTL        time.Duration

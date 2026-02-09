@@ -1,33 +1,21 @@
 package fmailtui
 
 import (
-	"path/filepath"
 	"strings"
 
 	"github.com/tOgg1/forge/internal/fmail"
 )
 
-func (v *threadView) tuiStatePath() string {
-	if strings.TrimSpace(v.root) == "" {
-		return ""
-	}
-	return filepath.Join(v.root, ".fmail", "tui-state.json")
-}
-
 func (v *threadView) loadState() {
-	path := v.tuiStatePath()
-	if path == "" {
+	if v == nil || v.state == nil {
 		return
 	}
-	state, err := loadTUIState(path)
-	if err != nil {
-		return
-	}
+	snap := v.state.Snapshot()
 
 	if v.readMarkers == nil {
 		v.readMarkers = make(map[string]string)
 	}
-	for target, marker := range state.ReadMarkers {
+	for target, marker := range snap.ReadMarkers {
 		target = strings.TrimSpace(target)
 		marker = strings.TrimSpace(marker)
 		if target == "" || marker == "" {
@@ -41,28 +29,16 @@ func (v *threadView) loadState() {
 }
 
 func (v *threadView) persistReadMarker(target, marker string) {
-	path := v.tuiStatePath()
-	if path == "" {
-		return
-	}
 	target = strings.TrimSpace(target)
 	marker = strings.TrimSpace(marker)
 	if target == "" || marker == "" {
 		return
 	}
-
-	state, err := loadTUIState(path)
-	if err != nil {
+	if v == nil || v.state == nil {
 		return
 	}
-	if state.ReadMarkers == nil {
-		state.ReadMarkers = make(map[string]string)
-	}
-	if prev := strings.TrimSpace(state.ReadMarkers[target]); prev != "" && prev >= marker {
-		return
-	}
-	state.ReadMarkers[target] = marker
-	_ = saveTUIState(path, state)
+	v.state.SetReadMarker(target, marker)
+	v.state.SaveSoon()
 }
 
 func (v *threadView) bodyTruncation(msg fmail.Message) (bool, int) {

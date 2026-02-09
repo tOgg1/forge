@@ -64,7 +64,7 @@ func (s *stubThreadProvider) Subscribe(data.SubscriptionFilter) (<-chan fmail.Me
 
 func TestThreadViewDepthClampAddsOverflowIndicator(t *testing.T) {
 	msgs := makeThreadChain(9)
-	v := newThreadView("", &stubThreadProvider{})
+	v := newThreadView("", &stubThreadProvider{}, nil)
 	v.mode = threadModeThreaded
 	v.allMsgs = msgs
 	v.rebuildRows("", false)
@@ -88,7 +88,7 @@ func TestThreadViewEnterExpandsLongMessage(t *testing.T) {
 		byTopic: map[string][]fmail.Message{"task": msgs},
 	}
 
-	v := newThreadView("", provider)
+	v := newThreadView("", provider, nil)
 	v.lastWidth = 120
 	v.lastHeight = 30
 	v.applyLoaded(mustLoad(v))
@@ -112,7 +112,7 @@ func TestThreadViewToggleFlatKeepsSelectedMessage(t *testing.T) {
 		byTopic: map[string][]fmail.Message{"task": msgs},
 	}
 
-	v := newThreadView("", provider)
+	v := newThreadView("", provider, nil)
 	v.lastWidth = 120
 	v.lastHeight = 30
 	v.applyLoaded(mustLoad(v))
@@ -140,7 +140,7 @@ func TestThreadViewPaginationLoadsOlderAtTop(t *testing.T) {
 		byTopic: map[string][]fmail.Message{"task": msgs},
 	}
 
-	v := newThreadView("", provider)
+	v := newThreadView("", provider, nil)
 	v.lastWidth = 120
 	v.lastHeight = 30
 	v.applyLoaded(mustLoad(v))
@@ -168,7 +168,7 @@ func TestThreadViewPendingNewCountWhenScrolledUp(t *testing.T) {
 		byTopic: map[string][]fmail.Message{"task": msgs},
 	}
 
-	v := newThreadView("", provider)
+	v := newThreadView("", provider, nil)
 	v.lastWidth = 80
 	v.lastHeight = 12
 	v.applyLoaded(mustLoad(v))
@@ -193,7 +193,7 @@ func TestThreadViewLoadDMTargetUsesDMProvider(t *testing.T) {
 		},
 	}
 
-	v := newThreadView("", provider)
+	v := newThreadView("", provider, nil)
 	cmd := v.SetTarget("@bob")
 	require.NotNil(t, cmd)
 

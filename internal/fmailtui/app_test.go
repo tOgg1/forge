@@ -66,7 +66,7 @@ func TestViewStackAndEnterNavigation(t *testing.T) {
 	require.Equal(t, ViewTopics, model.activeViewID())
 	require.Equal(t, 2, len(model.viewStack))
 
-	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyEsc})
+	model = applyUpdateWithCmd(t, model, tea.KeyMsg{Type: tea.KeyEsc})
 	require.Equal(t, ViewDashboard, model.activeViewID())
 
 	// Dashboard Enter opens the focused pane (agents by default).
@@ -74,7 +74,7 @@ func TestViewStackAndEnterNavigation(t *testing.T) {
 	require.Equal(t, ViewAgents, model.activeViewID())
 
 	// Back to dashboard.
-	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyEsc})
+	model = applyUpdateWithCmd(t, model, tea.KeyMsg{Type: tea.KeyEsc})
 	require.Equal(t, ViewDashboard, model.activeViewID())
 
 	// Tab to topics focus then Enter should route to thread (even if no topics yet).
@@ -86,7 +86,7 @@ func TestViewStackAndEnterNavigation(t *testing.T) {
 	model = applyUpdateWithCmd(t, model, tea.KeyMsg{Type: tea.KeyEnter})
 	require.Equal(t, ViewThread, model.activeViewID())
 
-	model = applyUpdate(t, model, tea.KeyMsg{Type: tea.KeyEsc})
+	model = applyUpdateWithCmd(t, model, tea.KeyMsg{Type: tea.KeyEsc})
 	require.Equal(t, ViewDashboard, model.activeViewID())
 }
 

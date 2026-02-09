@@ -1,7 +1,6 @@
 package fmailtui
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/tOgg1/forge/internal/fmail"
 	"github.com/tOgg1/forge/internal/fmailtui/data"
+	tuistate "github.com/tOgg1/forge/internal/fmailtui/state"
 )
 
 type stubTopicsProvider struct {
@@ -76,7 +76,7 @@ func (s *stubTopicsProvider) Subscribe(data.SubscriptionFilter) (<-chan fmail.Me
 
 func TestTopicsViewRebuildItemsHonorsStarFilterAndSort(t *testing.T) {
 	now := time.Date(2026, 2, 9, 10, 0, 0, 0, time.UTC)
-	v := newTopicsView(t.TempDir(), &stubTopicsProvider{})
+	v := newTopicsView(t.TempDir(), &stubTopicsProvider{}, nil)
 	v.now = now
 	v.topics = []data.TopicInfo{
 		{Name: "task", MessageCount: 5, LastActivity: now.Add(-10 * time.Minute), Participants: []string{"a", "b"}},
@@ -124,7 +124,7 @@ func TestTopicsViewLoadCmdComputesUnreadFromReadMarkers(t *testing.T) {
 		},
 	}
 
-	v := newTopicsView(t.TempDir(), provider)
+	v := newTopicsView(t.TempDir(), provider, nil)
 	v.self = "viewer"
 	v.readMarkers = map[string]string{
 		"task": "20260209-100000-0001",
@@ -161,7 +161,7 @@ func TestTopicsViewLoadCmdDefaultsUnreadToAllWithoutMarker(t *testing.T) {
 		},
 	}
 
-	v := newTopicsView(t.TempDir(), provider)
+	v := newTopicsView(t.TempDir(), provider, nil)
 	v.self = "viewer"
 
 	msg, ok := v.loadCmd()().(topicsLoadedMsg)
@@ -184,7 +184,7 @@ func TestTopicsViewPreviewLoadsLazilyAndCaches(t *testing.T) {
 		},
 	}
 
-	v := newTopicsView(t.TempDir(), provider)
+	v := newTopicsView(t.TempDir(), provider, nil)
 	v.topics = []data.TopicInfo{
 		{Name: "task", LastActivity: now},
 		{Name: "build", LastActivity: now.Add(-time.Minute)},
@@ -213,16 +213,12 @@ func TestTopicsViewPreviewLoadsLazilyAndCaches(t *testing.T) {
 func TestTopicsViewStarTogglePersistsToStateFile(t *testing.T) {
 	root := t.TempDir()
 	statePath := filepath.Join(root, ".fmail", "tui-state.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(statePath), 0o755))
-	initial := tuiStateFile{
-		ReadMarkers:   map[string]string{"task": "20260209-100000-0001"},
-		StarredTopics: []string{"alerts"},
-	}
-	payload, err := json.Marshal(initial)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(statePath, payload, 0o644))
+	st := tuistate.New(statePath)
+	st.SetReadMarker("task", "20260209-100000-0001")
+	st.SetStarredTopics([]string{"alerts"})
+	require.NoError(t, st.SaveNow())
 
-	v := newTopicsView(root, &stubTopicsProvider{})
+	v := newTopicsView(root, &stubTopicsProvider{}, st)
 	v.loadState()
 	require.True(t, v.starred["alerts"])
 
@@ -233,11 +229,44 @@ func TestTopicsViewStarTogglePersistsToStateFile(t *testing.T) {
 	require.Nil(t, cmd)
 	require.True(t, v.starred["task"])
 
-	written, err := os.ReadFile(statePath)
-	require.NoError(t, err)
+	require.NoError(t, st.SaveNow())
+	st2 := tuistate.New(statePath)
+	require.NoError(t, st2.Load())
+	snap := st2.Snapshot()
+	require.Contains(t, snap.StarredTopics, "task")
+	require.Equal(t, "20260209-100000-0001", snap.ReadMarkers["task"])
+}
 
-	var state tuiStateFile
-	require.NoError(t, json.Unmarshal(written, &state))
-	require.Contains(t, state.StarredTopics, "task")
-	require.Equal(t, "20260209-100000-0001", state.ReadMarkers["task"])
+func TestTopicsViewComposeWritesMessageAndMarksRead(t *testing.T) {
+	root := t.TempDir()
+	statePath := filepath.Join(root, ".fmail", "tui-state.json")
+	st := tuistate.New(statePath)
+	require.NoError(t, st.Load())
+
+	v := newTopicsView(root, &stubTopicsProvider{}, st)
+	v.self = "viewer"
+	v.items = []topicsItem{{target: "task", label: "task"}}
+	v.selected = 0
+
+	require.Nil(t, v.handleKey(runeKey('n')))
+	require.True(t, v.composeActive)
+
+	require.Nil(t, v.handleKey(runeKey('h')))
+	require.Nil(t, v.handleKey(runeKey('i')))
+
+	cmd := v.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	sent, ok := cmd().(topicsSentMsg)
+	require.True(t, ok)
+	require.NoError(t, sent.err)
+	require.NotEmpty(t, sent.msg.ID)
+
+	require.Nil(t, v.Update(sent))
+	require.False(t, v.composeActive)
+
+	entries, err := os.ReadDir(filepath.Join(root, ".fmail", "topics", "task"))
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+
+	require.Equal(t, sent.msg.ID, st.ReadMarker("task"))
 }

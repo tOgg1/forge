@@ -13,6 +13,7 @@ import (
 
 	"github.com/tOgg1/forge/internal/fmail"
 	"github.com/tOgg1/forge/internal/fmailtui/data"
+	"github.com/tOgg1/forge/internal/fmailtui/state"
 )
 
 const (
@@ -88,6 +89,7 @@ type Model struct {
 	root         string
 	store        *fmail.Store
 	provider     data.MessageProvider
+	tuiState     *state.Manager
 	forgedClient ForgedClient
 	forgedErr    error
 	theme        Theme
@@ -180,6 +182,7 @@ func NewModel(cfg Config) (*Model, error) {
 		root:         root,
 		store:        store,
 		provider:     provider,
+		tuiState:     state.New(filepath.Join(root, ".fmail", "tui-state.json")),
 		forgedClient: forgedClient,
 		forgedErr:    err,
 		theme:        Theme(normalized.Theme),
@@ -187,6 +190,8 @@ func NewModel(cfg Config) (*Model, error) {
 		viewStack:    []ViewID{ViewDashboard},
 		views:        make(map[ViewID]viewModel),
 	}
+	// Non-fatal: state can be created later; fall back to in-memory defaults.
+	_ = m.tuiState.Load()
 	m.initViews()
 	return m, nil
 }
@@ -208,6 +213,9 @@ func (m *Model) Close() error {
 		if closer, ok := view.(interface{ Close() }); ok {
 			closer.Close()
 		}
+	}
+	if m != nil && m.tuiState != nil {
+		_ = m.tuiState.Close()
 	}
 	if m == nil || m.forgedClient == nil {
 		return nil
@@ -277,12 +285,6 @@ func (m *Model) View() string {
 
 func (m *Model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	switch msg.String() {
-	case "esc", "backspace":
-		m.popView()
-		if view := m.activeView(); view != nil {
-			return view.Init(), true
-		}
-		return nil, true
 	case "q":
 		return tea.Quit, true
 	case "ctrl+c":
@@ -336,8 +338,8 @@ func (m *Model) popView() {
 
 func (m *Model) initViews() {
 	m.views[ViewDashboard] = newDashboardView(m.root, m.projectID, m.provider)
-	m.views[ViewTopics] = newTopicsView(m.root, m.provider)
-	m.views[ViewThread] = newThreadView(m.root, m.provider)
+	m.views[ViewTopics] = newTopicsView(m.root, m.provider, m.tuiState)
+	m.views[ViewThread] = newThreadView(m.root, m.provider, m.tuiState)
 	m.views[ViewAgents] = newPlaceholderView(ViewAgents, "Agents")
 	m.views[ViewSearch] = newPlaceholderView(ViewSearch, "Search")
 	m.views[ViewLiveTail] = newPlaceholderView(ViewLiveTail, "Live Tail")

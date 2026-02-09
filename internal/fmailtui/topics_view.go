@@ -3,7 +3,6 @@ package fmailtui
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/tOgg1/forge/internal/fmail"
 	"github.com/tOgg1/forge/internal/fmailtui/data"
+	tuistate "github.com/tOgg1/forge/internal/fmailtui/state"
 	"github.com/tOgg1/forge/internal/fmailtui/styles"
 )
 
@@ -63,6 +63,12 @@ type topicsIncomingMsg struct {
 	msg fmail.Message
 }
 
+type topicsSentMsg struct {
+	target string
+	msg    fmail.Message
+	err    error
+}
+
 type topicsItem struct {
 	target       string
 	label        string
@@ -75,6 +81,7 @@ type topicsItem struct {
 type topicsView struct {
 	root     string
 	provider data.MessageProvider
+	state    *tuistate.Manager
 	self     string
 
 	now     time.Time
@@ -101,13 +108,19 @@ type topicsView struct {
 
 	starred     map[string]bool
 	readMarkers map[string]string
-	statePath   string
+	statePath   string // legacy (kept for migration; set empty when using state manager)
+
+	composeActive  bool
+	composeSending bool
+	composeTarget  string
+	composeBody    string
+	composeErr     error
 
 	subCh     <-chan fmail.Message
 	subCancel func()
 }
 
-func newTopicsView(root string, provider data.MessageProvider) *topicsView {
+func newTopicsView(root string, provider data.MessageProvider, st *tuistate.Manager) *topicsView {
 	self := strings.TrimSpace(os.Getenv("FMAIL_AGENT"))
 	if self == "" {
 		self = defaultSelfAgent
@@ -116,6 +129,7 @@ func newTopicsView(root string, provider data.MessageProvider) *topicsView {
 	return &topicsView{
 		root:         root,
 		provider:     provider,
+		state:        st,
 		self:         self,
 		mode:         topicsModeTopics,
 		sortKey:      topicSortActivity,
@@ -124,7 +138,7 @@ func newTopicsView(root string, provider data.MessageProvider) *topicsView {
 		previewCache: make(map[string][]fmail.Message),
 		starred:      make(map[string]bool),
 		readMarkers:  make(map[string]string),
-		statePath:    filepath.Join(root, ".fmail", "tui-state.json"),
+		statePath:    "",
 	}
 }
 
@@ -158,6 +172,34 @@ func (v *topicsView) Update(msg tea.Msg) tea.Cmd {
 		v.applyIncoming(typed.msg)
 		v.loadState()
 		return tea.Batch(v.loadCmd(), v.waitForMessageCmd())
+	case topicsSentMsg:
+		v.composeSending = false
+		v.composeErr = typed.err
+		if typed.err != nil {
+			return nil
+		}
+
+		v.composeActive = false
+		v.composeBody = ""
+		v.composeErr = nil
+
+		if typed.target != "" && typed.msg.ID != "" {
+			// Treat own send as read.
+			v.loadState()
+			if v.readMarkers == nil {
+				v.readMarkers = make(map[string]string)
+			}
+			v.readMarkers[typed.target] = typed.msg.ID
+			_ = v.saveState()
+
+			// Ensure preview shows the new message before next refresh.
+			v.previewCache[typed.target] = append(v.previewCache[typed.target], typed.msg)
+			if len(v.previewCache[typed.target]) > topicsPreviewLimit {
+				v.previewCache[typed.target] = v.previewCache[typed.target][len(v.previewCache[typed.target])-topicsPreviewLimit:]
+			}
+		}
+		v.rebuildItems()
+		return v.ensurePreviewCmd()
 	case tea.KeyMsg:
 		return v.handleKey(typed)
 	}
@@ -203,6 +245,45 @@ func (v *topicsView) View(width, height int, theme Theme) string {
 }
 
 func (v *topicsView) handleKey(msg tea.KeyMsg) tea.Cmd {
+	if v.composeActive {
+		switch msg.Type {
+		case tea.KeyEsc:
+			if v.composeSending {
+				return nil
+			}
+			v.composeActive = false
+			v.composeSending = false
+			v.composeTarget = ""
+			v.composeBody = ""
+			v.composeErr = nil
+			return nil
+		case tea.KeyBackspace, tea.KeyDelete:
+			if v.composeSending {
+				return nil
+			}
+			if len(v.composeBody) == 0 {
+				return nil
+			}
+			runes := []rune(v.composeBody)
+			v.composeBody = string(runes[:len(runes)-1])
+			return nil
+		case tea.KeyEnter:
+			if v.composeSending {
+				return nil
+			}
+			v.composeSending = true
+			v.composeErr = nil
+			return v.sendCmd(v.composeTarget, v.composeBody)
+		case tea.KeyRunes:
+			if v.composeSending {
+				return nil
+			}
+			v.composeBody += string(msg.Runes)
+			return nil
+		}
+		return nil
+	}
+
 	switch msg.Type {
 	case tea.KeyEsc:
 		if v.filterActive {
@@ -274,12 +355,16 @@ func (v *topicsView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return tea.Batch(openThreadCmd(target), pushViewCmd(ViewThread))
 	case "n":
-		// Compose view not landed yet; route to thread target for fastest path.
 		target := v.selectedTarget()
 		if target == "" {
 			return nil
 		}
-		return tea.Batch(openThreadCmd(target), pushViewCmd(ViewThread))
+		v.composeActive = true
+		v.composeSending = false
+		v.composeTarget = target
+		v.composeBody = ""
+		v.composeErr = nil
+		return nil
 	}
 
 	return nil
@@ -392,9 +477,16 @@ func (v *topicsView) renderPreviewPanel(width, height int, palette styles.Theme)
 		Bold(true).
 		Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).
 		Render(truncateVis(title, innerW))
-	metaLine := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(palette.Base.Muted)).
-		Render("ctrl+u/d scroll preview  n new")
+	meta := "ctrl+u/d scroll preview  n new"
+	if v.composeActive {
+		meta = "To " + target + ": " + v.composeBody + "_" + "  (Enter send, Esc cancel)"
+		if v.composeSending {
+			meta = "Sending..."
+		} else if v.composeErr != nil {
+			meta = "Send failed: " + v.composeErr.Error()
+		}
+	}
+	metaLine := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render(truncateVis(meta, innerW))
 
 	used := lipgloss.Height(titleLine) + lipgloss.Height(metaLine) + 1
 	bodyH := maxInt(1, innerH-used)
@@ -792,14 +884,13 @@ func (v *topicsView) activityHeatRune(lastActivity time.Time, palette styles.The
 }
 
 func (v *topicsView) loadState() {
-	state, err := loadTUIState(v.statePath)
-	if err != nil {
-		v.lastErr = fmt.Errorf("parse tui state: %w", err)
+	if v.state == nil {
 		return
 	}
+	snap := v.state.Snapshot()
 
-	v.readMarkers = make(map[string]string, len(state.ReadMarkers))
-	for key, marker := range state.ReadMarkers {
+	v.readMarkers = make(map[string]string, len(snap.ReadMarkers))
+	for key, marker := range snap.ReadMarkers {
 		key = strings.TrimSpace(key)
 		marker = strings.TrimSpace(marker)
 		if key == "" || marker == "" {
@@ -808,8 +899,8 @@ func (v *topicsView) loadState() {
 		v.readMarkers[key] = marker
 	}
 
-	v.starred = make(map[string]bool, len(state.StarredTopics))
-	for _, topic := range state.StarredTopics {
+	v.starred = make(map[string]bool, len(snap.StarredTopics))
+	for _, topic := range snap.StarredTopics {
 		name := strings.TrimSpace(topic)
 		if name == "" {
 			continue
@@ -819,11 +910,13 @@ func (v *topicsView) loadState() {
 }
 
 func (v *topicsView) saveState() error {
-	state := tuiStateFile{
-		ReadMarkers:   cloneStringMap(v.readMarkers),
-		StarredTopics: sortedStarred(v.starred),
+	if v.state == nil {
+		return nil
 	}
-	return saveTUIState(v.statePath, state)
+	v.state.SetReadMarkers(cloneStringMap(v.readMarkers))
+	v.state.SetStarredTopics(sortedStarred(v.starred))
+	v.state.SaveSoon()
+	return nil
 }
 
 func unreadCountForTopic(provider data.MessageProvider, topic string, marker string, total int) (int, error) {
@@ -956,4 +1049,32 @@ func dmPeerForSelf(self string, msg fmail.Message) string {
 		return strings.TrimSpace(msg.From)
 	}
 	return ""
+}
+
+func (v *topicsView) sendCmd(target string, body string) tea.Cmd {
+	root := strings.TrimSpace(v.root)
+	self := strings.TrimSpace(v.self)
+	target = strings.TrimSpace(target)
+	body = strings.TrimSpace(body)
+	if root == "" || self == "" || target == "" || body == "" {
+		return func() tea.Msg {
+			return topicsSentMsg{target: target, err: fmt.Errorf("missing to/from/body")}
+		}
+	}
+
+	return func() tea.Msg {
+		store, err := fmail.NewStore(root)
+		if err != nil {
+			return topicsSentMsg{target: target, err: err}
+		}
+		msg := &fmail.Message{
+			From: self,
+			To:   target,
+			Body: body,
+		}
+		if _, err := store.SaveMessage(msg); err != nil {
+			return topicsSentMsg{target: target, err: err}
+		}
+		return topicsSentMsg{target: target, msg: *msg}
+	}
 }
