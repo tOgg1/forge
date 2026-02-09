@@ -7,6 +7,7 @@ use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 
 pub mod app;
 pub mod bookmarks;
+pub mod dashboard;
 pub mod heatmap;
 pub mod live_tail;
 pub mod notifications;
@@ -17,11 +18,16 @@ pub mod stats;
 pub mod thread;
 pub mod threading;
 pub mod timeline;
+pub mod topics;
 
 pub use app::{App, Command, LayoutMode, PlaceholderView, View, ViewId};
 pub use bookmarks::{
     apply_bookmarks_input, parse_bookmarks_filter, render_bookmarks_frame, BookmarkEntry,
     BookmarksFilter, BookmarksViewModel,
+};
+pub use dashboard::{
+    apply_dashboard_input, render_dashboard_frame, AgentEntry, DashboardFocus, DashboardViewModel,
+    FeedMessage, TopicEntry, DASHBOARD_FEED_LIMIT,
 };
 pub use heatmap::{apply_heatmap_input, render_heatmap_frame, HeatmapViewModel};
 pub use live_tail::{
@@ -51,6 +57,10 @@ pub use threading::{
 pub use timeline::{
     apply_timeline_input, parse_timeline_filter, render_timeline_frame, TimelineFilter,
     TimelineMessage, TimelineMode, TimelineViewModel,
+};
+pub use topics::{
+    apply_topics_input, render_topics_frame, PreviewMessage, TopicSortKey, TopicsItem, TopicsMode,
+    TopicsViewModel,
 };
 
 /// Stable crate label used by bootstrap smoke tests.
