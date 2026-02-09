@@ -1,0 +1,165 @@
+{
+  "command_shapes": {
+    "audit": {
+      "flags": [
+        "action",
+        "cursor",
+        "entity-id",
+        "entity-type",
+        "limit",
+        "type",
+        "until"
+      ],
+      "subcommands": [],
+      "use": "audit"
+    },
+    "completion": {
+      "flags": [],
+      "subcommands": [],
+      "use": "completion [bash|zsh|fish]"
+    },
+    "config": {
+      "flags": [],
+      "subcommands": [
+        "init",
+        "path"
+      ],
+      "use": "config"
+    },
+    "context": {
+      "flags": [],
+      "subcommands": [],
+      "use": "context"
+    },
+    "doctor": {
+      "flags": [],
+      "subcommands": [],
+      "use": "doctor"
+    },
+    "explain": {
+      "flags": [],
+      "subcommands": [],
+      "use": "explain [agent-id|queue-item-id]"
+    },
+    "export": {
+      "flags": [],
+      "subcommands": [
+        "events",
+        "status"
+      ],
+      "use": "export"
+    },
+    "hook": {
+      "flags": [],
+      "subcommands": [
+        "on-event"
+      ],
+      "use": "hook"
+    },
+    "init": {
+      "flags": [
+        "force",
+        "no-create-prompt",
+        "prompts-from"
+      ],
+      "subcommands": [],
+      "use": "init"
+    },
+    "lock": {
+      "flags": [],
+      "subcommands": [
+        "check",
+        "claim",
+        "release",
+        "status"
+      ],
+      "use": "lock"
+    },
+    "skills": {
+      "flags": [],
+      "subcommands": [
+        "bootstrap"
+      ],
+      "use": "skills"
+    },
+    "status": {
+      "flags": [],
+      "subcommands": [],
+      "use": "status"
+    },
+    "use": {
+      "flags": [
+        "agent",
+        "clear",
+        "show",
+        "workspace"
+      ],
+      "subcommands": [],
+      "use": "use [workspace|agent]"
+    },
+    "wait": {
+      "flags": [
+        "agent",
+        "poll-interval",
+        "quiet",
+        "timeout",
+        "until",
+        "workspace"
+      ],
+      "subcommands": [],
+      "use": "wait"
+    }
+  },
+  "runtime_smoke": {
+    "audit_json_kind": "other",
+    "completion_bash_has_start": true,
+    "config_init_created": true,
+    "config_path_suffix": "/.config/forge/config.yaml",
+    "context_keys": [
+      "AgentID",
+      "AgentName",
+      "UpdatedAt",
+      "WorkspaceID",
+      "WorkspaceName"
+    ],
+    "doctor_keys": [
+      "checked_at",
+      "checks",
+      "summary"
+    ],
+    "doctor_summary_keys": [
+      "failed",
+      "passed",
+      "skipped",
+      "total",
+      "warnings"
+    ],
+    "doctor_unique_categories": [
+      "config",
+      "database",
+      "dependencies",
+      "nodes"
+    ],
+    "explain_no_context_error": "no agent specified and no context set (use 'forge use \u003cagent\u003e' or provide agent ID)",
+    "export_events_json_kind": "other",
+    "export_status_keys": [
+      "agents",
+      "alerts",
+      "nodes",
+      "queues",
+      "workspaces"
+    ],
+    "hook_missing_target_error": "exactly one of --cmd or --url is required",
+    "init_created_count": 8,
+    "lock_claim_missing_path_error": "at least one --path is required",
+    "status_keys": [
+      "agents",
+      "alerts",
+      "nodes",
+      "timestamp",
+      "workspaces"
+    ],
+    "use_show_reports_empty_context": true,
+    "wait_invalid_condition_error": "invalid condition 'definitely-invalid'; valid conditions: [idle queue-empty cooldown-over all-idle any-idle ready]"
+  }
+}

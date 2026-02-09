@@ -1,0 +1,28 @@
+{
+  "steps": [
+    {
+      "name": "local send",
+      "stdout": "{\n  \"backend\": \"local\",\n  \"from\": \"oracle-sender\",\n  \"message_ids\": [\n    1\n  ],\n  \"project\": \"\\u003cPROJECT\\u003e\",\n  \"subject\": \"oracle subject\",\n  \"to\": [\n    \"oracle-recipient\"\n  ]\n}\n"
+    },
+    {
+      "name": "backend selection",
+      "stdout": "{\n  \"agent\": \"oracle-recipient\",\n  \"backend\": \"mcp\",\n  \"has_git\": true,\n  \"limit\": 50,\n  \"project\": \"\\u003cPROJECT\\u003e\",\n  \"timeout\": \"5s\",\n  \"url\": \"http://127.0.0.1:8765/mcp/\"\n}\n"
+    },
+    {
+      "name": "mcp send",
+      "stdout": "{\n  \"backend\": \"mcp\",\n  \"from\": \"oracle-sender\",\n  \"project\": \"oracle-project\",\n  \"subject\": \"mcp subject\",\n  \"to\": [\n    \"oracle-recipient\"\n  ]\n}\n"
+    },
+    {
+      "name": "mcp inbox",
+      "stdout": "[\n  {\n    \"ack_required\": true,\n    \"backend\": \"mcp\",\n    \"created_at\": \"\\u003cTIME\\u003e\",\n    \"from\": \"oracle-sender\",\n    \"id\": 1,\n    \"importance\": \"high\",\n    \"subject\": \"mcp subject\"\n  }\n]\n"
+    },
+    {
+      "name": "mcp read",
+      "stdout": "{\n  \"ack_required\": true,\n  \"backend\": \"mcp\",\n  \"body\": \"mcp body\",\n  \"created_at\": \"\\u003cTIME\\u003e\",\n  \"from\": \"oracle-sender\",\n  \"id\": 1,\n  \"importance\": \"high\",\n  \"read_at\": \"\\u003cTIME\\u003e\",\n  \"subject\": \"mcp subject\"\n}\n"
+    },
+    {
+      "name": "mcp ack",
+      "stdout": "{\n  \"acked_at\": \"\\u003cTIME\\u003e\",\n  \"acknowledged\": true,\n  \"agent\": \"oracle-recipient\",\n  \"backend\": \"mcp\",\n  \"id\": 1,\n  \"project\": \"oracle-project\"\n}\n"
+    }
+  ]
+}

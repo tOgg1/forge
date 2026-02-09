@@ -1,0 +1,23 @@
+[
+  {
+    "agent": "agent-flag",
+    "backend": "mcp",
+    "project_non_empty": true,
+    "scenario": "explicit_flags",
+    "url": "http://mail.test/mcp/"
+  },
+  {
+    "agent": "agent-env",
+    "backend": "mcp",
+    "project_non_empty": true,
+    "scenario": "env_config",
+    "url": "http://env-mail.test/mcp/"
+  },
+  {
+    "agent": "",
+    "backend": "local",
+    "project_non_empty": true,
+    "scenario": "local_fallback",
+    "url": "http://127.0.0.1:8765/mcp/"
+  }
+]

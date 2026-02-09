@@ -1,0 +1,43 @@
+Initialize a repository with the .forge/ scaffolding and prompts.
+
+This creates:
+  - .forge/forge.yaml
+  - .forge/prompts/
+  - .forge/templates/
+  - .forge/sequences/
+  - .forge/workflows/
+  - .forge/ledgers/
+
+Also ensures .fmail/ is in .gitignore (runtime messaging state).
+Optionally creates PROMPT.md if missing.
+
+Usage:
+  forge init [flags]
+
+Examples:
+  forge init
+  forge init --prompts-from ./prompts
+  forge init --no-create-prompt
+
+Flags:
+  -f, --force                 overwrite existing scaffold files
+  -h, --help                  help for init
+      --no-create-prompt      skip creating PROMPT.md
+      --prompts-from string   import prompt files from directory
+
+Global Flags:
+  -C, --chdir string        change working directory for this command
+      --config string       config file (default is $HOME/.config/forge/config.yaml)
+      --json                output in JSON format
+      --jsonl               output in JSON Lines format (for streaming)
+      --log-format string   override logging format (json, console)
+      --log-level string    override logging level (debug, info, warn, error)
+      --no-color            disable colored output
+      --no-progress         disable progress output
+      --non-interactive     run without prompts, use defaults
+      --quiet               suppress non-essential output
+      --robot-help          show agent-oriented help and exit
+      --since string        replay events since duration (e.g., 1h, 30m, 24h) or timestamp
+  -v, --verbose             enable verbose output
+      --watch               watch for changes and stream updates
+  -y, --yes                 skip confirmation prompts

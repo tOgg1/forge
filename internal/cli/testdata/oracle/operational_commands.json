@@ -1,0 +1,122 @@
+{
+  "commands": [
+    {
+      "path": "audit",
+      "use": "audit",
+      "short": "View the Forge audit log",
+      "flags": [
+        "--action",
+        "--cursor",
+        "--entity-id",
+        "--entity-type",
+        "--limit",
+        "--type",
+        "--until"
+      ]
+    },
+    {
+      "path": "export",
+      "use": "export",
+      "short": "Export Forge data",
+      "subcommands": [
+        "events",
+        "status"
+      ]
+    },
+    {
+      "path": "status",
+      "use": "status",
+      "short": "Show fleet status summary"
+    },
+    {
+      "path": "doctor",
+      "use": "doctor",
+      "short": "Run environment diagnostics"
+    },
+    {
+      "path": "wait",
+      "use": "wait",
+      "short": "Wait for a condition to be met",
+      "flags": [
+        "--agent",
+        "--poll-interval",
+        "--quiet",
+        "--timeout",
+        "--until",
+        "--workspace"
+      ]
+    },
+    {
+      "path": "explain",
+      "use": "explain [agent-id|queue-item-id]",
+      "short": "Explain agent or queue item status"
+    },
+    {
+      "path": "hook",
+      "use": "hook",
+      "short": "Manage event hooks",
+      "subcommands": [
+        "on-event"
+      ]
+    },
+    {
+      "path": "lock",
+      "use": "lock",
+      "short": "Manage advisory file locks",
+      "subcommands": [
+        "check",
+        "claim",
+        "release",
+        "status"
+      ]
+    },
+    {
+      "path": "context",
+      "use": "context",
+      "short": "Show current context"
+    },
+    {
+      "path": "use",
+      "use": "use [workspace|agent]",
+      "short": "Set the current workspace or agent context",
+      "flags": [
+        "--agent",
+        "--clear",
+        "--show",
+        "--workspace"
+      ]
+    },
+    {
+      "path": "init",
+      "use": "init",
+      "short": "Initialize a repo for Forge loops",
+      "flags": [
+        "--force",
+        "--no-create-prompt",
+        "--prompts-from"
+      ]
+    },
+    {
+      "path": "config",
+      "use": "config",
+      "short": "Manage global configuration",
+      "subcommands": [
+        "init",
+        "path"
+      ]
+    },
+    {
+      "path": "skills",
+      "use": "skills",
+      "short": "Manage workspace skills",
+      "subcommands": [
+        "bootstrap"
+      ]
+    },
+    {
+      "path": "completion",
+      "use": "completion [bash|zsh|fish]",
+      "short": "Generate shell completion scripts"
+    }
+  ]
+}

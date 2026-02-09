@@ -1,0 +1,1511 @@
+{
+  "steps": [
+    {
+      "name": "profile add alpha",
+      "stdout": "{\n  \"auth_home\": \"/tmp/oracle-auth-alpha\",\n  \"auth_kind\": \"codex\",\n  \"command_template\": \"codex exec\",\n  \"created_at\": \"\\u003cTIME\\u003e\",\n  \"env\": {\n    \"A\": \"1\"\n  },\n  \"extra_args\": [\n    \"--sandbox\",\n    \"workspace-write\"\n  ],\n  \"harness\": \"codex\",\n  \"id\": \"\\u003cID\\u003e\",\n  \"max_concurrency\": 1,\n  \"model\": \"gpt-5\",\n  \"name\": \"alpha\",\n  \"prompt_mode\": \"env\",\n  \"updated_at\": \"\\u003cTIME\\u003e\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "profile add beta",
+      "stdout": "{\n  \"auth_home\": \"/tmp/oracle-auth-beta\",\n  \"auth_kind\": \"claude\",\n  \"command_template\": \"claude --print\",\n  \"created_at\": \"\\u003cTIME\\u003e\",\n  \"harness\": \"claude\",\n  \"id\": \"\\u003cID\\u003e\",\n  \"max_concurrency\": 1,\n  \"model\": \"sonnet\",\n  \"name\": \"beta\",\n  \"prompt_mode\": \"stdin\",\n  \"updated_at\": \"\\u003cTIME\\u003e\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "profile add gamma",
+      "stdout": "{\n  \"auth_kind\": \"opencode\",\n  \"command_template\": \"opencode run\",\n  \"created_at\": \"\\u003cTIME\\u003e\",\n  \"harness\": \"opencode\",\n  \"id\": \"\\u003cID\\u003e\",\n  \"max_concurrency\": 1,\n  \"model\": \"default\",\n  \"name\": \"gamma\",\n  \"prompt_mode\": \"path\",\n  \"updated_at\": \"\\u003cTIME\\u003e\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "gamma",
+            "harness": "opencode",
+            "auth_kind": "opencode",
+            "prompt_mode": "path",
+            "command": "opencode run",
+            "model": "default",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "profile edit alpha --model",
+      "stdout": "{\n  \"auth_home\": \"/tmp/oracle-auth-alpha\",\n  \"auth_kind\": \"codex\",\n  \"command_template\": \"codex exec\",\n  \"created_at\": \"\\u003cTIME\\u003e\",\n  \"env\": {\n    \"A\": \"1\"\n  },\n  \"extra_args\": [\n    \"--sandbox\",\n    \"workspace-write\"\n  ],\n  \"harness\": \"codex\",\n  \"id\": \"\\u003cID\\u003e\",\n  \"max_concurrency\": 1,\n  \"model\": \"gpt-5.1\",\n  \"name\": \"alpha\",\n  \"prompt_mode\": \"env\",\n  \"updated_at\": \"\\u003cTIME\\u003e\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "gamma",
+            "harness": "opencode",
+            "auth_kind": "opencode",
+            "prompt_mode": "path",
+            "command": "opencode run",
+            "model": "default",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "profile cooldown set alpha",
+      "stdout": "{\n  \"auth_home\": \"/tmp/oracle-auth-alpha\",\n  \"auth_kind\": \"codex\",\n  \"command_template\": \"codex exec\",\n  \"cooldown_until\": \"\\u003cTIME\\u003e\",\n  \"created_at\": \"\\u003cTIME\\u003e\",\n  \"env\": {\n    \"A\": \"1\"\n  },\n  \"extra_args\": [\n    \"--sandbox\",\n    \"workspace-write\"\n  ],\n  \"harness\": \"codex\",\n  \"id\": \"\\u003cID\\u003e\",\n  \"max_concurrency\": 1,\n  \"model\": \"gpt-5.1\",\n  \"name\": \"alpha\",\n  \"prompt_mode\": \"env\",\n  \"updated_at\": \"\\u003cTIME\\u003e\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": true
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "gamma",
+            "harness": "opencode",
+            "auth_kind": "opencode",
+            "prompt_mode": "path",
+            "command": "opencode run",
+            "model": "default",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "profile cooldown clear alpha",
+      "stdout": "{\n  \"auth_home\": \"/tmp/oracle-auth-alpha\",\n  \"auth_kind\": \"codex\",\n  \"command_template\": \"codex exec\",\n  \"created_at\": \"\\u003cTIME\\u003e\",\n  \"env\": {\n    \"A\": \"1\"\n  },\n  \"extra_args\": [\n    \"--sandbox\",\n    \"workspace-write\"\n  ],\n  \"harness\": \"codex\",\n  \"id\": \"\\u003cID\\u003e\",\n  \"max_concurrency\": 1,\n  \"model\": \"gpt-5.1\",\n  \"name\": \"alpha\",\n  \"prompt_mode\": \"env\",\n  \"updated_at\": \"\\u003cTIME\\u003e\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "gamma",
+            "harness": "opencode",
+            "auth_kind": "opencode",
+            "prompt_mode": "path",
+            "command": "opencode run",
+            "model": "default",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "profile ls",
+      "stdout": "[\n  {\n    \"auth_home\": \"/tmp/oracle-auth-alpha\",\n    \"auth_kind\": \"codex\",\n    \"command_template\": \"codex exec\",\n    \"created_at\": \"\\u003cTIME\\u003e\",\n    \"env\": {\n      \"A\": \"1\"\n    },\n    \"extra_args\": [\n      \"--sandbox\",\n      \"workspace-write\"\n    ],\n    \"harness\": \"codex\",\n    \"id\": \"\\u003cID\\u003e\",\n    \"max_concurrency\": 1,\n    \"model\": \"gpt-5.1\",\n    \"name\": \"alpha\",\n    \"prompt_mode\": \"env\",\n    \"updated_at\": \"\\u003cTIME\\u003e\"\n  },\n  {\n    \"auth_home\": \"/tmp/oracle-auth-beta\",\n    \"auth_kind\": \"claude\",\n    \"command_template\": \"claude --print\",\n    \"created_at\": \"\\u003cTIME\\u003e\",\n    \"harness\": \"claude\",\n    \"id\": \"\\u003cID\\u003e\",\n    \"max_concurrency\": 1,\n    \"model\": \"sonnet\",\n    \"name\": \"beta\",\n    \"prompt_mode\": \"stdin\",\n    \"updated_at\": \"\\u003cTIME\\u003e\"\n  },\n  {\n    \"auth_kind\": \"opencode\",\n    \"command_template\": \"opencode run\",\n    \"created_at\": \"\\u003cTIME\\u003e\",\n    \"harness\": \"opencode\",\n    \"id\": \"\\u003cID\\u003e\",\n    \"max_concurrency\": 1,\n    \"model\": \"default\",\n    \"name\": \"gamma\",\n    \"prompt_mode\": \"path\",\n    \"updated_at\": \"\\u003cTIME\\u003e\"\n  }\n]\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "gamma",
+            "harness": "opencode",
+            "auth_kind": "opencode",
+            "prompt_mode": "path",
+            "command": "opencode run",
+            "model": "default",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "profile rm gamma",
+      "stdout": "{\n  \"deleted\": true,\n  \"profile\": \"gamma\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "pool create primary",
+      "stdout": "{\n  \"created_at\": \"\\u003cTIME\\u003e\",\n  \"id\": \"\\u003cID\\u003e\",\n  \"is_default\": true,\n  \"name\": \"primary\",\n  \"strategy\": \"round_robin\",\n  \"updated_at\": \"\\u003cTIME\\u003e\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "pool add primary alpha beta",
+      "stdout": "{\n  \"added\": [\n    \"alpha\",\n    \"beta\"\n  ],\n  \"pool\": \"primary\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "pool show primary",
+      "stdout": "{\n  \"members\": [\n    {\n      \"auth_kind\": \"codex\",\n      \"harness\": \"codex\",\n      \"profile_id\": \"\\u003cPROFILE_ID\\u003e\",\n      \"profile_name\": \"alpha\"\n    },\n    {\n      \"auth_kind\": \"claude\",\n      \"harness\": \"claude\",\n      \"profile_id\": \"\\u003cPROFILE_ID\\u003e\",\n      \"profile_name\": \"beta\"\n    }\n  ],\n  \"pool\": {\n    \"created_at\": \"\\u003cTIME\\u003e\",\n    \"id\": \"\\u003cID\\u003e\",\n    \"is_default\": true,\n    \"name\": \"primary\",\n    \"strategy\": \"round_robin\",\n    \"updated_at\": \"\\u003cTIME\\u003e\"\n  }\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "pool set-default primary",
+      "stdout": "{\n  \"default_pool\": \"primary\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "pool ls",
+      "stdout": "[\n  {\n    \"created_at\": \"\\u003cTIME\\u003e\",\n    \"id\": \"\\u003cID\\u003e\",\n    \"is_default\": true,\n    \"name\": \"primary\",\n    \"strategy\": \"round_robin\",\n    \"updated_at\": \"\\u003cTIME\\u003e\"\n  }\n]\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "prompt add oracle-prompt",
+      "stdout": "{\n  \"path\": \"/private\u003cREPO\u003e/.forge/prompts/oracle-prompt.md\",\n  \"prompt\": \"oracle-prompt\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "oracle-prompt"
+        ]
+      }
+    },
+    {
+      "name": "prompt ls",
+      "stdout": "[\n  \"oracle-prompt\"\n]\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "oracle-prompt"
+        ]
+      }
+    },
+    {
+      "name": "prompt set-default oracle-prompt",
+      "stdout": "{\n  \"default_prompt\": \"oracle-prompt\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ]
+      }
+    },
+    {
+      "name": "prompt edit oracle-prompt",
+      "stdout": "Prompt \"oracle-prompt\" updated\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ]
+      }
+    },
+    {
+      "name": "template add oracle-template",
+      "stdout": "{\n  \"path\": \"\u003cREPO\u003e/home/.config/forge/templates/oracle-template.yaml\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "templates": [
+          "oracle-template"
+        ]
+      }
+    },
+    {
+      "name": "template ls",
+      "stdout": "[\n  {\n    \"Description\": \"Describe this template\",\n    \"Message\": \"Write the instruction here.\\n\",\n    \"Name\": \"oracle-template\",\n    \"Source\": \"\u003cREPO\u003e/home/.config/forge/templates/oracle-template.yaml\",\n    \"Tags\": null,\n    \"Variables\": null\n  },\n  {\n    \"Description\": \"Commit changes\",\n    \"Message\": \"Commit your changes with a concise, descriptive message.\\nInclude tests run and any relevant notes.\\n\",\n    \"Name\": \"commit\",\n    \"Source\": \"builtin\",\n    \"Tags\": [\n      \"git\"\n    ],\n    \"Variables\": null\n  },\n  {\n    \"Description\": \"Resume current task\",\n    \"Message\": \"Continue working on the current task. If you are blocked,\\nexplain what you need to proceed.\\n\",\n    \"Name\": \"continue\",\n    \"Source\": \"builtin\",\n    \"Tags\": [\n      \"resume\"\n    ],\n    \"Variables\": null\n  },\n  {\n    \"Description\": \"Explain current status\",\n    \"Message\": \"Summarize what you have done so far, the current state,\\nand the next steps. Note any blockers.\\n\",\n    \"Name\": \"explain\",\n    \"Source\": \"builtin\",\n    \"Tags\": [\n      \"status\"\n    ],\n    \"Variables\": null\n  },\n  {\n    \"Description\": \"Request a review\",\n    \"Message\": \"Review the recent changes and provide feedback. Focus on\\ncorrectness, edge cases, and any missing tests.\\n\",\n    \"Name\": \"review\",\n    \"Source\": \"builtin\",\n    \"Tags\": [\n      \"review\"\n    ],\n    \"Variables\": null\n  },\n  {\n    \"Description\": \"Run tests\",\n    \"Message\": \"Run the test suite and report results. If tests fail,\\nsummarize the failures and likely causes.\\n\",\n    \"Name\": \"test\",\n    \"Source\": \"builtin\",\n    \"Tags\": [\n      \"test\"\n    ],\n    \"Variables\": null\n  }\n]\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "templates": [
+          "oracle-template"
+        ]
+      }
+    },
+    {
+      "name": "template show oracle-template",
+      "stdout": "{\n  \"Description\": \"Describe this template\",\n  \"Message\": \"Write the instruction here.\\n\",\n  \"Name\": \"oracle-template\",\n  \"Source\": \"\u003cREPO\u003e/home/.config/forge/templates/oracle-template.yaml\",\n  \"Tags\": null,\n  \"Variables\": null\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "templates": [
+          "oracle-template"
+        ]
+      }
+    },
+    {
+      "name": "template edit oracle-template",
+      "stdout": "{\n  \"path\": \"\u003cREPO\u003e/home/.config/forge/templates/oracle-template.yaml\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "templates": [
+          "oracle-template"
+        ]
+      }
+    },
+    {
+      "name": "template run oracle-template",
+      "stdout": "{\n  \"agent_id\": \"config-oracle-agent\",\n  \"item_id\": \"\\u003cITEM_ID\\u003e\",\n  \"template\": \"oracle-template\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "templates": [
+          "oracle-template"
+        ],
+        "queue": [
+          {
+            "type": "message",
+            "status": "pending",
+            "position": 1,
+            "message": "Write the instruction here.\n"
+          }
+        ]
+      }
+    },
+    {
+      "name": "template delete oracle-template",
+      "stdout": "{\n  \"deleted\": \"oracle-template\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "queue": [
+          {
+            "type": "message",
+            "status": "pending",
+            "position": 1,
+            "message": "Write the instruction here.\n"
+          }
+        ]
+      }
+    },
+    {
+      "name": "seq add oracle-seq",
+      "stdout": "{\n  \"path\": \"\u003cREPO\u003e/home/.config/forge/sequences/oracle-seq.yaml\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "sequences": [
+          "oracle-seq"
+        ],
+        "queue": [
+          {
+            "type": "message",
+            "status": "pending",
+            "position": 1,
+            "message": "Write the instruction here.\n"
+          }
+        ]
+      }
+    },
+    {
+      "name": "seq ls",
+      "stdout": "[\n  {\n    \"Description\": \"Describe this sequence\",\n    \"Name\": \"oracle-seq\",\n    \"Source\": \"\u003cREPO\u003e/home/.config/forge/sequences/oracle-seq.yaml\",\n    \"Steps\": [\n      {\n        \"Content\": \"Describe the workflow here.\",\n        \"Duration\": \"\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"\",\n        \"Type\": \"message\",\n        \"When\": \"\"\n      }\n    ],\n    \"Tags\": null,\n    \"Variables\": null\n  },\n  {\n    \"Description\": \"Standard bug fix workflow\",\n    \"Name\": \"bugfix\",\n    \"Source\": \"builtin\",\n    \"Steps\": [\n      {\n        \"Content\": \"Find and fix the bug described in issue {{.issue_id}}.\",\n        \"Duration\": \"\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"\",\n        \"Type\": \"message\",\n        \"When\": \"\"\n      },\n      {\n        \"Content\": \"\",\n        \"Duration\": \"30s\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"Wait for initial analysis\",\n        \"Type\": \"pause\",\n        \"When\": \"\"\n      },\n      {\n        \"Content\": \"Run the tests and report results.\",\n        \"Duration\": \"\",\n        \"Expression\": \"\",\n        \"Message\": \"Run the tests and report results.\",\n        \"Reason\": \"\",\n        \"Type\": \"conditional\",\n        \"When\": \"idle\"\n      },\n      {\n        \"Content\": \"\",\n        \"Duration\": \"30s\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"Wait for tests to finish\",\n        \"Type\": \"pause\",\n        \"When\": \"\"\n      },\n      {\n        \"Content\": \"Commit the fix with a clear summary.\",\n        \"Duration\": \"\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"\",\n        \"Type\": \"message\",\n        \"When\": \"\"\n      }\n    ],\n    \"Tags\": null,\n    \"Variables\": [\n      {\n        \"Default\": \"\",\n        \"Description\": \"Issue identifier or URL\",\n        \"Name\": \"issue_id\",\n        \"Required\": true\n      }\n    ]\n  },\n  {\n    \"Description\": \"Implement, test, and document a feature\",\n    \"Name\": \"feature\",\n    \"Source\": \"builtin\",\n    \"Steps\": [\n      {\n        \"Content\": \"Implement the feature: {{.feature_name}}.\",\n        \"Duration\": \"\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"\",\n        \"Type\": \"message\",\n        \"When\": \"\"\n      },\n      {\n        \"Content\": \"\",\n        \"Duration\": \"30s\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"Allow initial implementation time\",\n        \"Type\": \"pause\",\n        \"When\": \"\"\n      },\n      {\n        \"Content\": \"Run tests and report results for {{.feature_name}}.\",\n        \"Duration\": \"\",\n        \"Expression\": \"\",\n        \"Message\": \"Run tests and report results for {{.feature_name}}.\",\n        \"Reason\": \"\",\n        \"Type\": \"conditional\",\n        \"When\": \"idle\"\n      },\n      {\n        \"Content\": \"Update documentation for {{.feature_name}} and summarize changes.\",\n        \"Duration\": \"\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"\",\n        \"Type\": \"message\",\n        \"When\": \"\"\n      },\n      {\n        \"Content\": \"Commit the feature with a descriptive message.\",\n        \"Duration\": \"\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"\",\n        \"Type\": \"message\",\n        \"When\": \"\"\n      }\n    ],\n    \"Tags\": null,\n    \"Variables\": [\n      {\n        \"Default\": \"\",\n        \"Description\": \"Feature name or short description\",\n        \"Name\": \"feature_name\",\n        \"Required\": true\n      }\n    ]\n  },\n  {\n    \"Description\": \"Review, address feedback, and re-review\",\n    \"Name\": \"review-loop\",\n    \"Source\": \"builtin\",\n    \"Steps\": [\n      {\n        \"Content\": \"Review the latest changes and list any issues or risks.\",\n        \"Duration\": \"\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"\",\n        \"Type\": \"message\",\n        \"When\": \"\"\n      },\n      {\n        \"Content\": \"\",\n        \"Duration\": \"30s\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"Allow time for review\",\n        \"Type\": \"pause\",\n        \"When\": \"\"\n      },\n      {\n        \"Content\": \"Address the review feedback and summarize the fixes.\",\n        \"Duration\": \"\",\n        \"Expression\": \"\",\n        \"Message\": \"Address the review feedback and summarize the fixes.\",\n        \"Reason\": \"\",\n        \"Type\": \"conditional\",\n        \"When\": \"idle\"\n      },\n      {\n        \"Content\": \"\",\n        \"Duration\": \"20s\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"Allow time for fixes\",\n        \"Type\": \"pause\",\n        \"When\": \"\"\n      },\n      {\n        \"Content\": \"Re-review and provide a final summary.\",\n        \"Duration\": \"\",\n        \"Expression\": \"\",\n        \"Message\": \"\",\n        \"Reason\": \"\",\n        \"Type\": \"message\",\n        \"When\": \"\"\n      }\n    ],\n    \"Tags\": null,\n    \"Variables\": null\n  }\n]\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "sequences": [
+          "oracle-seq"
+        ],
+        "queue": [
+          {
+            "type": "message",
+            "status": "pending",
+            "position": 1,
+            "message": "Write the instruction here.\n"
+          }
+        ]
+      }
+    },
+    {
+      "name": "seq show oracle-seq",
+      "stdout": "{\n  \"Description\": \"Describe this sequence\",\n  \"Name\": \"oracle-seq\",\n  \"Source\": \"\u003cREPO\u003e/home/.config/forge/sequences/oracle-seq.yaml\",\n  \"Steps\": [\n    {\n      \"Content\": \"Describe the workflow here.\",\n      \"Duration\": \"\",\n      \"Expression\": \"\",\n      \"Message\": \"\",\n      \"Reason\": \"\",\n      \"Type\": \"message\",\n      \"When\": \"\"\n    }\n  ],\n  \"Tags\": null,\n  \"Variables\": null\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "sequences": [
+          "oracle-seq"
+        ],
+        "queue": [
+          {
+            "type": "message",
+            "status": "pending",
+            "position": 1,
+            "message": "Write the instruction here.\n"
+          }
+        ]
+      }
+    },
+    {
+      "name": "seq edit oracle-seq",
+      "stdout": "{\n  \"path\": \"\u003cREPO\u003e/home/.config/forge/sequences/oracle-seq.yaml\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "sequences": [
+          "oracle-seq"
+        ],
+        "queue": [
+          {
+            "type": "message",
+            "status": "pending",
+            "position": 1,
+            "message": "Write the instruction here.\n"
+          }
+        ]
+      }
+    },
+    {
+      "name": "seq run oracle-seq",
+      "stdout": "{\n  \"agent_id\": \"config-oracle-agent\",\n  \"item_ids\": [\n    \"\\u003cITEM_ID\\u003e\"\n  ],\n  \"sequence\": \"oracle-seq\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "sequences": [
+          "oracle-seq"
+        ],
+        "queue": [
+          {
+            "type": "message",
+            "status": "pending",
+            "position": 1,
+            "message": "Write the instruction here.\n"
+          },
+          {
+            "type": "message",
+            "status": "pending",
+            "position": 2,
+            "message": "Describe the workflow here."
+          }
+        ]
+      }
+    },
+    {
+      "name": "seq delete oracle-seq",
+      "stdout": "{\n  \"deleted\": \"oracle-seq\"\n}\n",
+      "state": {
+        "profiles": [
+          {
+            "name": "alpha",
+            "harness": "codex",
+            "auth_kind": "codex",
+            "auth_home": "/tmp/oracle-auth-alpha",
+            "prompt_mode": "env",
+            "command": "codex exec",
+            "model": "gpt-5.1",
+            "extra_args": [
+              "--sandbox",
+              "workspace-write"
+            ],
+            "env": {
+              "A": "1"
+            },
+            "max_concurrency": 1,
+            "cooldown": false
+          },
+          {
+            "name": "beta",
+            "harness": "claude",
+            "auth_kind": "claude",
+            "auth_home": "/tmp/oracle-auth-beta",
+            "prompt_mode": "stdin",
+            "command": "claude --print",
+            "model": "sonnet",
+            "max_concurrency": 1,
+            "cooldown": false
+          }
+        ],
+        "pools": [
+          {
+            "name": "primary",
+            "strategy": "round_robin",
+            "default": true,
+            "members": [
+              "alpha",
+              "beta"
+            ]
+          }
+        ],
+        "prompts": [
+          "default",
+          "oracle-prompt"
+        ],
+        "queue": [
+          {
+            "type": "message",
+            "status": "pending",
+            "position": 1,
+            "message": "Write the instruction here.\n"
+          },
+          {
+            "type": "message",
+            "status": "pending",
+            "position": 2,
+            "message": "Describe the workflow here."
+          }
+        ]
+      }
+    }
+  ]
+}

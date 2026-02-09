@@ -1,0 +1,36 @@
+View the audit log with filters for time range, entity, and action.
+
+Examples:
+  forge audit --since 1h
+  forge audit --type agent.state_changed --entity-type agent
+  forge audit --action message.dispatched --limit 200
+
+Usage:
+  forge audit [flags]
+
+Flags:
+      --action string        alias for --type
+      --cursor string        start after this event ID
+      --entity-id string     filter by entity ID
+      --entity-type string   filter by entity type (node, workspace, agent, queue, account, system)
+  -h, --help                 help for audit
+      --limit int            max number of events to return (default 100)
+      --type string          filter by event type (comma-separated)
+      --until string         filter events before a time (same format as --since)
+
+Global Flags:
+  -C, --chdir string        change working directory for this command
+      --config string       config file (default is $HOME/.config/forge/config.yaml)
+      --json                output in JSON format
+      --jsonl               output in JSON Lines format (for streaming)
+      --log-format string   override logging format (json, console)
+      --log-level string    override logging level (debug, info, warn, error)
+      --no-color            disable colored output
+      --no-progress         disable progress output
+      --non-interactive     run without prompts, use defaults
+      --quiet               suppress non-essential output
+      --robot-help          show agent-oriented help and exit
+      --since string        replay events since duration (e.g., 1h, 30m, 24h) or timestamp
+  -v, --verbose             enable verbose output
+      --watch               watch for changes and stream updates
+  -y, --yes                 skip confirmation prompts

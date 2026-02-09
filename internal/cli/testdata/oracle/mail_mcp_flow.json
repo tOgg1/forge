@@ -1,0 +1,16 @@
+{
+  "call_sequence": [
+    "send_message",
+    "fetch_inbox",
+    "fetch_inbox",
+    "mark_message_read",
+    "acknowledge_message"
+  ],
+  "inbox_count": 1,
+  "read_message": {
+    "backend": "mcp",
+    "from": "agent-a",
+    "id": 101,
+    "subject": "hello"
+  }
+}

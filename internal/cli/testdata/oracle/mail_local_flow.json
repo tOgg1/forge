@@ -1,0 +1,17 @@
+{
+  "first_message": {
+    "ack_required": true,
+    "from": "sender-a",
+    "importance": "high",
+    "subject": "handoff"
+  },
+  "inbox_counts": {
+    "agent_1": 1,
+    "agent_2": 1
+  },
+  "sent_ids_count": 2,
+  "status_marked": {
+    "ack": true,
+    "read": true
+  }
+}

@@ -1,0 +1,39 @@
+Set the current context to avoid repeating --workspace and --agent flags.
+
+Context is persisted to ~/.config/forge/context.yaml and used by other commands
+when explicit flags are not provided.
+
+Examples:
+  forge use my-project           # Set workspace context by name
+  forge use ws_abc123            # Set workspace context by ID
+  forge use --agent agent_xyz    # Set agent context (keeps workspace)
+  forge use --clear              # Clear all context
+  forge use --show               # Show current context
+  forge use                      # Show current context (same as --show)
+
+Usage:
+  forge use [workspace|agent] [flags]
+
+Flags:
+      --agent string       set agent context (within current workspace)
+      --clear              clear all context
+  -h, --help               help for use
+      --show               show current context
+      --workspace string   set workspace context
+
+Global Flags:
+  -C, --chdir string        change working directory for this command
+      --config string       config file (default is $HOME/.config/forge/config.yaml)
+      --json                output in JSON format
+      --jsonl               output in JSON Lines format (for streaming)
+      --log-format string   override logging format (json, console)
+      --log-level string    override logging level (debug, info, warn, error)
+      --no-color            disable colored output
+      --no-progress         disable progress output
+      --non-interactive     run without prompts, use defaults
+      --quiet               suppress non-essential output
+      --robot-help          show agent-oriented help and exit
+      --since string        replay events since duration (e.g., 1h, 30m, 24h) or timestamp
+  -v, --verbose             enable verbose output
+      --watch               watch for changes and stream updates
+  -y, --yes                 skip confirmation prompts
