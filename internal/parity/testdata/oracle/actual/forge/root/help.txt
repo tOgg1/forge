@@ -1,0 +1,77 @@
+Forge is a control plane for running and supervising AI coding agents
+across multiple repositories and servers.
+
+It provides:
+  - A fast TUI dashboard for monitoring agent progress
+  - A CLI for automation and scripting
+  - Deep integration with tmux and SSH
+  - Multi-account orchestration with cooldown management
+
+Run 'forge' without arguments to launch the TUI dashboard.
+
+Usage:
+  forge [flags]
+  forge [command]
+
+Available Commands:
+  audit       View the Forge audit log
+  clean       Remove inactive loops
+  completion  Generate shell completion scripts
+  config      Manage global configuration
+  context     Show current context
+  doctor      Run environment diagnostics
+  explain     Explain agent or queue item status
+  export      Export Forge data
+  help        Help about any command
+  hook        Manage event hooks
+  init        Initialize a repo for Forge loops
+  inject      Inject a message directly into an agent (bypasses queue)
+  kill        Kill loops immediately
+  lock        Manage advisory file locks
+  logs        Tail loop logs
+  mail        Forge Mail messaging
+  mem         Persistent per-loop key/value memory
+  migrate     Manage database migrations
+  msg         Queue a message for loop(s)
+  pool        Manage profile pools
+  profile     Manage harness profiles
+  prompt      Manage loop prompts
+  ps          List loops
+  queue       Manage loop queues
+  resume      Resume a stopped loop
+  rm          Remove loop records
+  run         Run a single loop iteration
+  scale       Scale loops to a target count
+  send        Queue a message for an agent
+  seq         Manage sequences
+  skills      Manage workspace skills
+  status      Show fleet status summary
+  stop        Stop loops after current iteration
+  template    Manage message templates
+  tui         Launch the Forge TUI
+  up          Start loop(s) for a repo
+  use         Set the current workspace or agent context
+  wait        Wait for a condition to be met
+  work        Persist loop work context (task id + status)
+  workflow    Manage workflows
+
+Flags:
+  -C, --chdir string        change working directory for this command
+      --config string       config file (default is $HOME/.config/forge/config.yaml)
+  -h, --help                help for forge
+      --json                output in JSON format
+      --jsonl               output in JSON Lines format (for streaming)
+      --log-format string   override logging format (json, console)
+      --log-level string    override logging level (debug, info, warn, error)
+      --no-color            disable colored output
+      --no-progress         disable progress output
+      --non-interactive     run without prompts, use defaults
+      --quiet               suppress non-essential output
+      --robot-help          show agent-oriented help and exit
+      --since string        replay events since duration (e.g., 1h, 30m, 24h) or timestamp
+  -v, --verbose             enable verbose output
+      --version             version for forge
+      --watch               watch for changes and stream updates
+  -y, --yes                 skip confirmation prompts
+
+Use "forge [command] --help" for more information about a command.

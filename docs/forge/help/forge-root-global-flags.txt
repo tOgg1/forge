@@ -1,0 +1,17 @@
+--chdir
+--config
+--help
+--json
+--jsonl
+--log-format
+--log-level
+--no-color
+--no-progress
+--non-interactive
+--quiet
+--robot-help
+--since
+--verbose
+--version
+--watch
+--yes
