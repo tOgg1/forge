@@ -234,7 +234,7 @@ func (v *agentsView) handleKey(msg tea.KeyMsg) tea.Cmd {
 			if target == "" {
 				return nil
 			}
-			return tea.Batch(openThreadCmd(target), pushViewCmd(ViewThread))
+			return tea.Batch(openThreadCmd(target, ""), pushViewCmd(ViewThread))
 		}
 		return nil
 	}

@@ -337,7 +337,7 @@ func (v *dashboardView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		case focusTopics:
 			if v.topicIdx >= 0 && v.topicIdx < len(v.topics) {
 				return tea.Batch(
-					openThreadCmd(v.topics[v.topicIdx].Name),
+					openThreadCmd(v.topics[v.topicIdx].Name, ""),
 					pushViewCmd(ViewThread),
 				)
 			}
@@ -353,7 +353,7 @@ func (v *dashboardView) handleKey(msg tea.KeyMsg) tea.Cmd {
 				}
 				target := strings.TrimSpace(v.feed[idx].To)
 				if target != "" {
-					return tea.Batch(openThreadCmd(target), pushViewCmd(ViewThread))
+					return tea.Batch(openThreadCmd(target, ""), pushViewCmd(ViewThread))
 				}
 			}
 			return pushViewCmd(ViewThread)

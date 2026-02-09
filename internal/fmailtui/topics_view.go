@@ -363,7 +363,7 @@ func (v *topicsView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if target == "" {
 			return pushViewCmd(ViewThread)
 		}
-		return tea.Batch(openThreadCmd(target), pushViewCmd(ViewThread))
+		return tea.Batch(openThreadCmd(target, ""), pushViewCmd(ViewThread))
 	case "n":
 		target := v.selectedTarget()
 		if target == "" {

@@ -134,7 +134,8 @@ type pushViewMsg struct {
 type popViewMsg struct{}
 
 type openThreadMsg struct {
-	target string // topic name or "@agent"
+	target  string // topic name or "@agent"
+	focusID string // optional message ID to focus within the thread
 }
 
 func pushViewCmd(id ViewID) tea.Cmd {
@@ -149,9 +150,9 @@ func popViewCmd() tea.Cmd {
 	}
 }
 
-func openThreadCmd(target string) tea.Cmd {
+func openThreadCmd(target, focusID string) tea.Cmd {
 	return func() tea.Msg {
-		return openThreadMsg{target: target}
+		return openThreadMsg{target: target, focusID: focusID}
 	}
 }
 
@@ -276,6 +277,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if setter, ok := view.(interface {
 				SetTarget(string) tea.Cmd
 			}); ok {
+				if typed.focusID != "" {
+					if focuser, ok := view.(interface{ SetFocus(string) }); ok {
+						focuser.SetFocus(typed.focusID)
+					}
+				}
 				return m, setter.SetTarget(typed.target)
 			}
 		}
