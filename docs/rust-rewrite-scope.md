@@ -16,6 +16,7 @@ Legacy drop freeze: `docs/rust-legacy-drop-list.md`.
 Coverage gate policy: `docs/rust-coverage-policy.md`.
 Crate boundary policy: `docs/rust-crate-boundary-policy.md`.
 Crate contribution contracts: `docs/rust-crate-contracts.md`.
+FrankenTUI pin policy: `docs/rust-frankentui-pin-policy.md`.
 
 ## Non-Negotiables
 
