@@ -1,0 +1,6 @@
+# bash completion for fmail
+__start_fmail()
+{
+    :
+}
+complete -F __start_fmail fmail

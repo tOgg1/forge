@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use fmail_cli::{run_cli_for_test, FmailBackend};
 use fmail_core::agent_registry::AgentRecord;
+use fmail_core::message::Message;
 use fmail_core::store::ERR_AGENT_EXISTS;
 
 struct RegisterBackend {
@@ -54,6 +55,46 @@ impl FmailBackend for RegisterBackend {
 
     fn hostname(&self) -> String {
         self.host.clone()
+    }
+
+    fn agent_name(&self) -> Result<String, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn save_message(&self, _message: &mut Message) -> Result<String, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn read_file(&self, _path: &str) -> Result<String, String> {
+        Err("not implemented".to_string())
+    }
+    fn read_agent_record(&self, _name: &str) -> Result<Option<AgentRecord>, String> {
+        Err("not implemented".to_string())
+    }
+    fn set_agent_status(
+        &self,
+        _name: &str,
+        _status: &str,
+        _host: &str,
+    ) -> Result<AgentRecord, String> {
+        Err("not implemented".to_string())
+    }
+    fn list_topics(&self) -> Result<Vec<fmail_core::store::TopicSummary>, String> {
+        Err("not implemented".to_string())
+    }
+    fn list_message_files(&self, _target: Option<&str>) -> Result<Vec<std::path::PathBuf>, String> {
+        Err("not implemented".to_string())
+    }
+    fn read_message_at(&self, _path: &std::path::Path) -> Result<Message, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn init_project(&self, _project_id: Option<&str>) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn gc_messages(&self, _days: i64, _dry_run: bool) -> Result<String, String> {
+        Ok(String::new())
     }
 }
 

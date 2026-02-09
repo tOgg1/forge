@@ -1,0 +1,3 @@
+Usage: fmail completion [bash|zsh|fish]
+
+Generate shell completion scripts for bash, zsh, or fish.

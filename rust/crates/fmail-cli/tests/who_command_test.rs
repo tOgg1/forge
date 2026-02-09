@@ -1,8 +1,12 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::path::PathBuf;
+
 use chrono::{DateTime, Utc};
 use fmail_cli::{run_cli_for_test, FmailBackend};
 use fmail_core::agent_registry::AgentRecord;
+use fmail_core::message::Message;
+use fmail_core::store::TopicSummary;
 
 struct InMemoryBackend {
     now: DateTime<Utc>,
@@ -14,6 +18,10 @@ impl FmailBackend for InMemoryBackend {
         Ok(self.records.clone())
     }
 
+    fn read_agent_record(&self, _name: &str) -> Result<Option<AgentRecord>, String> {
+        Ok(None)
+    }
+
     fn now_utc(&self) -> DateTime<Utc> {
         self.now
     }
@@ -22,8 +30,49 @@ impl FmailBackend for InMemoryBackend {
         Err("not implemented".to_string())
     }
 
+    fn set_agent_status(
+        &self,
+        _name: &str,
+        _status: &str,
+        _host: &str,
+    ) -> Result<AgentRecord, String> {
+        Err("not implemented".to_string())
+    }
+
     fn hostname(&self) -> String {
         "test-host".to_string()
+    }
+
+    fn agent_name(&self) -> Result<String, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn save_message(&self, _message: &mut Message) -> Result<String, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn read_file(&self, _path: &str) -> Result<String, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn list_topics(&self) -> Result<Vec<TopicSummary>, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn list_message_files(&self, _target: Option<&str>) -> Result<Vec<PathBuf>, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn read_message_at(&self, _path: &std::path::Path) -> Result<Message, String> {
+        Err("not implemented".to_string())
+    }
+
+    fn init_project(&self, _project_id: Option<&str>) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn gc_messages(&self, _days: i64, _dry_run: bool) -> Result<String, String> {
+        Ok(String::new())
     }
 }
 
