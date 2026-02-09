@@ -5,6 +5,32 @@ use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 use forge_ftui_adapter::style::{ThemeKind, ThemeSpec};
 use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 
+pub mod bookmarks;
+pub mod live_tail;
+pub mod notifications;
+pub mod state_help;
+pub mod timeline;
+
+pub use bookmarks::{
+    apply_bookmarks_input, parse_bookmarks_filter, render_bookmarks_frame, BookmarkEntry,
+    BookmarksFilter, BookmarksViewModel,
+};
+pub use live_tail::{
+    apply_live_tail_input, parse_live_tail_filter, render_live_tail_frame, LiveTailFilter,
+    LiveTailMessage, LiveTailViewModel, LIVE_TAIL_MAX_MESSAGES,
+};
+pub use notifications::{
+    apply_notifications_input, render_notifications_frame, NotificationItem, NotificationRule,
+    NotificationsFocus, NotificationsViewModel, NOTIFICATION_MEMORY_LIMIT,
+};
+pub use state_help::{
+    default_keymap, render_help_frame, Bookmark, KeyBinding, PersistedState, UiPreferences,
+};
+pub use timeline::{
+    apply_timeline_input, parse_timeline_filter, render_timeline_frame, TimelineFilter,
+    TimelineMessage, TimelineMode, TimelineViewModel,
+};
+
 /// Stable crate label used by bootstrap smoke tests.
 pub fn crate_label() -> &'static str {
     "fmail-tui"
