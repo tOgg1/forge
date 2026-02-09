@@ -13,6 +13,9 @@ version = "0.1.0"
 [[package]]
 name = "fmail-tui"
 version = "0.1.0"
+dependencies = [
+ "forge-ftui-adapter",
+]
 
 [[package]]
 name = "forge-cli"
@@ -49,3 +52,6 @@ version = "0.1.0"
 [[package]]
 name = "forge-tui"
 version = "0.1.0"
+dependencies = [
+ "forge-ftui-adapter",
+]

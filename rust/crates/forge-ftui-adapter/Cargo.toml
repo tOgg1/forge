@@ -12,7 +12,12 @@ path = "src/lib.rs"
 name = "forge-ftui-adapter"
 path = "src/bin/forge-ftui-adapter.rs"
 
+[features]
+default = []
+frankentui-upstream = ["dep:ftui"]
+
 [dependencies]
+ftui = { git = "https://github.com/Dicklesworthstone/frankentui", rev = "23429fac0e739635c7b8e0b995bde09401ff6ea0", default-features = false, optional = true }
 
 [lints]
 workspace = true

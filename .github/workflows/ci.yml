@@ -63,6 +63,8 @@ jobs:
         run: go test ./internal/parity -run '^TestCompareTreesDetectsSyntheticDrift$' -count=1
       - name: Run schema fingerprint baseline test
         run: go test ./internal/parity -run '^TestSchemaFingerprintBaseline$' -count=1
+      - name: Run daemon/proto parity gate baseline tests
+        run: go test ./internal/parity -run '^TestDaemonProtoGate' -count=1
       - name: Generate parity diff artifacts on drift
         if: failure()
         run: |
@@ -102,6 +104,8 @@ jobs:
           components: rustfmt, clippy
       - name: rust boundary check
         run: scripts/rust-boundary-check.sh
+      - name: rust frankentui pin check
+        run: scripts/rust-frankentui-pin-check.sh
       - name: rust fmt
         working-directory: rust
         run: cargo fmt --all --check
