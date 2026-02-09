@@ -14,5 +14,10 @@ logs/
 
 forged
 
+# Go build artifacts
+schema-fingerprint
+rust-boundary-check
+
 # Rust build outputs
 rust/target/
+rust/coverage/
