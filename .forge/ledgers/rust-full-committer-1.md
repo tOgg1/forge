@@ -105,3 +105,41 @@ Committer iteration complete. Summary:
 **Validation:** `cargo fmt --check` PASS, `cargo clippy --workspace --all-targets -- -D warnings` PASS, `cargo test --workspace` PASS (all green).
 ```
 
+## 2026-02-09T18:12:25Z
+
+- run_id: 164eb3fd-ea8a-4140-8db7-095a7b4a43ef
+- loop_name: rust-full-committer-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-09T18:07:53Z
+- finished_at: 2026-02-09T18:12:25Z
+- exit_code: 0
+
+```
+Committer iteration complete. Summary:
+
+**Committed:**
+1. `9746c73` — `fix(paritydash): fail-closed when check outcomes are unknown` [forge-4ss]
+   - Dashboard now treats unknown outcomes as failure, preventing false-positive PASS
+   - Includes regression test and review doc
+
+2. `48a3d62` — `feat(forge-loop): add iteration result, runner metadata, and Object variant` [forge-4pe, forge-0pk]
+   - Iteration result persistence module (status/error/output-tail mapping)
+   - Runner PID/metadata lifecycle with stop-state reset
+   - RuntimeMetaValue::Object variant for nested metadata
+   - Integration scenario test
+
+3. `be39187` — `chore: update ledgers, task state, and parity matrix`
+   - Ledger entries, task events (forge-y93/4pe/fhq closed by codex-6)
+
+**Deferred (agents still in-progress or code won't compile):**
+- `rust/crates/forge-db/src/lib.rs` + all new repository files (approval, alert, transcript, loop_queue, loop_run, loop_work_state, port, usage) — `alert_repository.rs` has a compile error; multiple agents (forge-p6s, forge-k0d, forge-qxy, forge-dg1) still in_progress
+- Additional ledger/task changes written by agents since commit
+
+**Validation:** `cargo check -p forge-loop` PASS, `cargo fmt --check` PASS, `cargo clippy` PASS, `cargo test -p forge-loop` PASS (all green). `go test ./internal/paritydash/...` PASS.
+```
+

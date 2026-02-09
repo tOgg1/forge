@@ -392,3 +392,157 @@ I paused per safety rule. Choose next step:
 2. I wait for owning agent to land fixes, then continue from next open task.
 ```
 
+## 2026-02-09T18:09:16Z
+
+- run_id: 986adc92-7f54-4c27-9910-4d9d5df479db
+- loop_name: rust-full-codex-1
+- status: success
+- profile: codex1
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T17:41:30Z
+- finished_at: 2026-02-09T18:09:16Z
+- exit_code: 0
+
+```
++        LOOP_PID_KEY.to_string(),
++        RuntimeMetaValue::Text("999".to_string()),
++    );
++
++    attach_loop_pid(&mut metadata, 4242, parse_time("2026-02-09T18:05:00Z"));
++
++    assert_eq!(loop_pid(Some(&metadata)), Some(4242));
++    assert_eq!(
++        metadata.get("started_at"),
++        Some(&RuntimeMetaValue::Text(
++            "2026-02-09T18:05:00+00:00".to_string(),
++        ))
++    );
++    assert_eq!(
++        metadata.get("iteration_count"),
++        Some(&RuntimeMetaValue::Int(0))
++    );
++    assert_eq!(
++        metadata.get(LOOP_STOP_STATE_KEY),
++        Some(&RuntimeMetaValue::Object(BTreeMap::new()))
++    );
++    assert_eq!(
++        metadata.get(LOOP_STOP_CONFIG_KEY),
++        Some(&RuntimeMetaValue::Text(
++            "{\"quant\":{\"cmd\":\"echo ok\"}}".to_string(),
++        ))
++    );
++}
++
++fn parse_time(value: &str) -> DateTime<Utc> {
++    match DateTime::parse_from_rfc3339(value) {
++        Ok(timestamp) => timestamp.with_timezone(&Utc),
++        Err(err) => panic!("invalid timestamp {value}: {err}"),
++    }
++}
+
+tokens used
+506,746
+hi. keep pace; unblock next fast.
+
+hard stop: unexpected concurrent change.
+- `forge-0pk` was closed by another agent while I was mid-run (`sv task show forge-0pk` now `closed` by `rust-full-codex-6`).
+- I sent correction on `fmail` (`task` + `@forge-orchestrator`).
+- queue now `ready=0`.
+
+local in-flight edits from this run:
+- `rust/crates/forge-loop/src/runner_metadata.rs`
+- `rust/crates/forge-loop/tests/runner_metadata_scenario_test.rs`
+- `rust/crates/forge-loop/src/runtime_limits.rs`
+- `rust/crates/forge-loop/src/lib.rs`
+- `rust/crates/forge-db/tests/transaction_parity_test.rs`
+- `rust/crates/forge-db/tests/port_repository_test.rs`
+
+validation status:
+- full rust gate not stable due concurrent `forge-db` module churn (`rust/crates/forge-db/src/lib.rs:3` etc declared modules appearing/disappearing).
+
+pick next action:
+1. keep these edits, I claim next task when ready appears.
+2. drop these local edits, resnapshot queue clean.
+3. have me continue shared gate-unblock work first.
+```
+
+## 2026-02-09T18:12:14Z
+
+- run_id: 08ef48b3-ab57-41bc-bdeb-19e0b22178e5
+- loop_name: rust-full-codex-1
+- status: success
+- profile: codex1
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T18:09:46Z
+- finished_at: 2026-02-09T18:12:14Z
+- exit_code: 0
+
+```
+exec
+/bin/zsh -lc 'git status --short' in /Users/trmd/Code/oss--forge/repos/forge succeeded in 51ms:
+ M .forge/ledgers/rust-full-codex-1.md
+ M .forge/ledgers/rust-full-codex-6.md
+ M .forge/ledgers/rust-full-review-1.md
+ M .tasks/tasks.jsonl
+ M .tasks/tasks.snapshot.json
+ M rust/crates/forge-db/src/lib.rs
+?? docs/review/2026-02-09-forge-4ss-review-loop.md
+?? rust/.cargo-home-loop/
+?? rust/crates/forge-db/src/alert_repository.rs
+?? rust/crates/forge-db/src/approval_repository.rs
+?? rust/crates/forge-db/src/loop_queue_repository.rs
+?? rust/crates/forge-db/src/loop_run_repository.rs
+?? rust/crates/forge-db/src/loop_work_state_repository.rs
+?? rust/crates/forge-db/src/port_repository.rs
+?? rust/crates/forge-db/src/transcript_repository.rs
+?? rust/crates/forge-db/src/usage_repository.rs
+?? rust/crates/forge-db/tests/alert_repository_test.rs
+?? rust/crates/forge-db/tests/approval_repository_test.rs
+?? rust/crates/forge-db/tests/loop_run_repository_test.rs
+?? rust/crates/forge-db/tests/loop_work_state_repository_test.rs
+
+thinking
+**Composing concise AGENTS-style final**
+codex
+Loop pass complete.
+
+- Closed `forge-rzk` and `forge-pfv`.
+- Sent claim/progress/close on `fmail task`; sent done + idle updates to `@forge-orchestrator`.
+- Validation run:
+  - `cd rust && cargo test -p forge-loop` PASS
+  - `cd rust && cargo test -p forge-loop queue_interactions::tests && cargo test -p forge-loop --test smart_stop_queue_fixture_test && cargo test -p forge-loop --test qual_signal_fixture_test` PASS
+- Also attempted full gate once:
+  - `cd rust && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
+  - Failed at `rust/crates/forge-db/tests/migration_001_test.rs:26` (`table_exists(&conn, "nodes")` assertion).
+
+Queue state now:
+
+- `sv task ready --project prj-vr0104gr --json` => `0`
+- No stale (`>=45m`) `in_progress` takeover candidates.
+- Loop idle at queue boundary.
+tokens used
+56,698
+Loop pass complete.
+
+- Closed `forge-rzk` and `forge-pfv`.
+- Sent claim/progress/close on `fmail task`; sent done + idle updates to `@forge-orchestrator`.
+- Validation run:
+  - `cd rust && cargo test -p forge-loop` PASS
+  - `cd rust && cargo test -p forge-loop queue_interactions::tests && cargo test -p forge-loop --test smart_stop_queue_fixture_test && cargo test -p forge-loop --test qual_signal_fixture_test` PASS
+- Also attempted full gate once:
+  - `cd rust && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
+  - Failed at `rust/crates/forge-db/tests/migration_001_test.rs:26` (`table_exists(&conn, "nodes")` assertion).
+
+Queue state now:
+
+- `sv task ready --project prj-vr0104gr --json` => `0`
+- No stale (`>=45m`) `in_progress` takeover candidates.
+- Loop idle at queue boundary.
+```
+

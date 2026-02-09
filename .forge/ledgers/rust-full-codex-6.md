@@ -392,3 +392,80 @@ Hi. strong momentum; ready queue drained.
 - Loop state: idle (no claimable `ready` tasks).
 ```
 
+## 2026-02-09T18:10:02Z
+
+- run_id: dd5396b7-1ffb-4c63-b2b5-9230b62ba8e9
+- loop_name: rust-full-codex-6
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T18:04:39Z
+- finished_at: 2026-02-09T18:10:02Z
+- exit_code: 0
+
+```
+exec
+/bin/zsh -lc "sv task ready --project prj-vr0104gr --json; sv task list --project prj-vr0104gr --status in_progress --json | jq -r '.data.tasks[] | .id'" in /Users/trmd/Code/oss--forge/repos/forge succeeded in 51ms:
+{
+  "schema_version": "sv.v1",
+  "command": "task ready",
+  "status": "success",
+  "data": {
+    "total": 0,
+    "tasks": []
+  }
+}
+forge-dg1
+forge-p6s
+forge-qxy
+forge-jvd
+forge-k0d
+forge-jzy
+forge-h2m
+forge-gvv
+forge-180
+forge-pfv
+forge-rzk
+
+thinking
+**Summarizing test results and task status**
+codex
+Hi. Strong loop pass; cleared multiple blockers-to-close.
+
+- Registered `FMAIL_AGENT=rust-full-codex-6`; snapshot + `fmail` protocol followed.
+- Closed:
+1. `forge-y93` (stale takeover)  
+   validation: `cd rust && cargo test -p forge-db --test migration_004_test` PASS
+2. `forge-4pe`  
+   validation: `cd rust && cargo test -p forge-loop iteration_result::tests` PASS
+3. `forge-fhq`  
+   validation: `cd rust && cargo test -p forge-loop stale_runner::tests` PASS
+4. `forge-x4b`  
+   validation: `env -u GOROOT -u GOTOOLDIR go test ./internal/parity -count=1` PASS  
+   plus targeted proto-wire gate refresh run.
+
+- Blocker reports sent when hit (`forge-4pe`, `forge-x4b`) with file/line context; later resolved/closed.
+- Current queue: `ready=0` for `prj-vr0104gr`; loop idle.
+tokens used
+59,796
+Hi. Strong loop pass; cleared multiple blockers-to-close.
+
+- Registered `FMAIL_AGENT=rust-full-codex-6`; snapshot + `fmail` protocol followed.
+- Closed:
+1. `forge-y93` (stale takeover)  
+   validation: `cd rust && cargo test -p forge-db --test migration_004_test` PASS
+2. `forge-4pe`  
+   validation: `cd rust && cargo test -p forge-loop iteration_result::tests` PASS
+3. `forge-fhq`  
+   validation: `cd rust && cargo test -p forge-loop stale_runner::tests` PASS
+4. `forge-x4b`  
+   validation: `env -u GOROOT -u GOTOOLDIR go test ./internal/parity -count=1` PASS  
+   plus targeted proto-wire gate refresh run.
+
+- Blocker reports sent when hit (`forge-4pe`, `forge-x4b`) with file/line context; later resolved/closed.
+- Current queue: `ready=0` for `prj-vr0104gr`; loop idle.
+```
+

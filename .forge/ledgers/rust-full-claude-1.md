@@ -253,3 +253,39 @@ The `forge run` command Rust port was completed with full wiring, tests, and ora
 **Validation:** `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` — all PASS.
 ```
 
+## 2026-02-09T18:12:08Z
+
+- run_id: 1216ce12-bc5b-4d83-8ba5-bc8ea4a88959
+- loop_name: rust-full-claude-1
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-09T18:03:42Z
+- finished_at: 2026-02-09T18:12:08Z
+- exit_code: 0
+
+```
+## Task Summary: forge-qxy (Repo layer: usage_records cache repository parity)
+
+**Status: CLOSED**
+
+### Deliverables
+- **`rust/crates/forge-db/src/usage_repository.rs`** — Full Rust implementation of the usage records cache repository with Go parity:
+  - **Models**: `UsageRecord`, `UsageSummary`, `DailyUsage`, `UsageQuery`
+  - **Repository API**: `create`, `get`, `query`, `delete`, `summarize_by_account`, `summarize_by_provider`, `summarize_all`, `get_daily_usage`, `get_top_accounts_by_usage`, `update_daily_cache`, `delete_older_than`
+  - Matches all Go semantics: UUID auto-generation, total_tokens computation, request_count default, nullable string handling, RFC3339 timestamps, metadata JSON roundtrip, dynamic query building with optional filters
+
+- **`rust/crates/forge-db/src/lib.rs`** — Added `pub mod usage_repository`, `UsageRecordNotFound` + `InvalidUsageRecord` to `DbError` enum
+
+- **`rust/crates/forge-db/tests/usage_repository_test.rs`** — 6 integration tests covering create+get+defaults parity, query filters (account/provider/time), summarize aggregation (by account/all), daily usage grouping, top accounts + delete + cache update
+
+### Validation
+- `cargo fmt --check`: PASS
+- `cargo clippy --workspace --all-targets -- -D warnings`: PASS
+- `cargo test -p forge-db`: All usage repository tests PASS (6/6)
+- Pre-existing flaky test isolation in `loop_repository_test.rs` (temp DB collisions, unrelated to changes)
+```
+

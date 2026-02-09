@@ -442,3 +442,80 @@ Fix landed + regression test added at `internal/paritydash/dashboard_test.go:42`
   - `review summary: forge-4ss pass (1 medium issue fixed, residual risk noted)`
 ```
 
+## 2026-02-09T18:09:35Z
+
+- run_id: 2aa7b0bf-ec19-459b-ae42-5e7cd7e014ff
+- loop_name: rust-full-review-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-09T18:06:18Z
+- finished_at: 2026-02-09T18:09:35Z
+- exit_code: 0
+
+```
+- Reported via fmail: task messages `20260209-180902-2901`, `20260209-180902-2902`; orchestrator summary `20260209-180902-2903`.
+- Review doc written: `docs/review/2026-02-09-forge-4ss-review-loop.md`.
+- Validation run:
+1. `cargo test -p forge-loop` passed.
+2. `cargo test -p forge-db loop_run_repository` passed.
+3. `go test ./internal/loop ./internal/db` blocked by local Go tool mismatch (`go1.25.7` stdlib vs `go1.25.6` tool).
+file update:
+diff --git a/docs/review/2026-02-09-forge-4ss-review-loop.md b/docs/review/2026-02-09-forge-4ss-review-loop.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..29368a5994bf62af9a37d37337e99be97efbfc61
+--- /dev/null
++++ b/docs/review/2026-02-09-forge-4ss-review-loop.md
+@@ -0,0 +1,27 @@
++# Review: `forge-4ss` (iteration result persistence)
++
++## Findings
++
++1. **High**: interrupt status parity miss (`killed` missing in Rust helper)
++   - Rust `iteration_result` status enum only has `Running|Success|Error` and `status_from_error` only maps `None -> Success`, `Some -> Error` (`rust/crates/forge-loop/src/iteration_result.rs:2`, `rust/crates/forge-loop/src/iteration_result.rs:16`).
++   - Go runner explicitly persists `killed` on interrupt (`internal/loop/runner.go:519`).
++   - Risk: interrupted runs can be persisted with wrong status once this helper is wired into persistence path.
++   - Fix hint: add `Killed` variant + interrupt-aware mapping API (or pass explicit final status), plus regression test for interrupt -> `killed`.
++
++2. **Medium**: unknown DB status coerced to `running`
++   - Rust scan path defaults parse failures to `Running` (`rust/crates/forge-db/src/loop_run_repository.rs:266`).
++   - Go scan path does not coerce to running; it preserves raw DB status text (`internal/db/loop_run_repository.go:218`).
++   - Risk: malformed/corrupt status rows get silently misreported as active `running`.
++   - Fix hint: remove `unwrap_or_default` coercion; preserve unknown status or surface explicit validation error. Add malformed-status test.
++
++## Validation
++
++- `cargo test -p forge-loop` ✅ (127 tests incl scenario tests)
++- `cargo test -p forge-db loop_run_repository` ✅
++- `go test ./internal/loop ./internal/db` ❌ blocked by local Go toolchain mismatch:
++  - compile errors show `go1.25.7` stdlib vs `go1.25.6` tool.
++
++## Summary
++
++- Result: **issues found** (2).
++- Residual risk: Go parity validation for touched oracle packages is currently blocked until local Go version mismatch is resolved.
+
+tokens used
+133,705
+hi. momentum: bugs caught before merge.
+
+1. **High** parity miss: interrupted run status (`killed`) not representable in Rust helper.  
+`rust/crates/forge-loop/src/iteration_result.rs:2` and `rust/crates/forge-loop/src/iteration_result.rs:16` only model/map `success|error`; Go sets `killed` on interrupt at `internal/loop/runner.go:519`.  
+Fix hint: add `Killed` + interrupt-aware status mapping; add regression test for interrupt -> `killed`.
+
+2. **Medium** status coercion bug: malformed DB status becomes `running`.  
+`rust/crates/forge-db/src/loop_run_repository.rs:266` uses `unwrap_or_default()` (defaults to `Running`), while Go preserves raw status text at `internal/db/loop_run_repository.go:218`.  
+Fix hint: remove default-to-running coercion; preserve unknown status or return explicit validation error; add malformed-status test.
+
+Summary:
+- Reported via fmail: task messages `20260209-180902-2901`, `20260209-180902-2902`; orchestrator summary `20260209-180902-2903`.
+- Review doc written: `docs/review/2026-02-09-forge-4ss-review-loop.md`.
+- Validation run:
+1. `cargo test -p forge-loop` passed.
+2. `cargo test -p forge-db loop_run_repository` passed.
+3. `go test ./internal/loop ./internal/db` blocked by local Go tool mismatch (`go1.25.7` stdlib vs `go1.25.6` tool).
+```
+
