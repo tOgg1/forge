@@ -1,8 +1,16 @@
 //! forge-db: SQLite storage + migration engine for Forge.
 
+pub mod alert_repository;
+pub mod approval_repository;
+pub mod loop_queue_repository;
 pub mod loop_repository;
+pub mod loop_run_repository;
+pub mod loop_work_state_repository;
 pub mod pool_repository;
+pub mod port_repository;
 pub mod profile_repository;
+pub mod transcript_repository;
+pub mod usage_repository;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -60,12 +68,22 @@ pub enum DbError {
     },
     #[error("{0}")]
     Validation(String),
+    #[error("{0}")]
+    Transaction(String),
     #[error("loop not found")]
     LoopNotFound,
     #[error("loop already exists")]
     LoopAlreadyExists,
+    #[error("loop run not found")]
+    LoopRunNotFound,
+    #[error("usage record not found")]
+    UsageRecordNotFound,
+    #[error("invalid usage record")]
+    InvalidUsageRecord,
     #[error("loop kv not found: {0}")]
     LoopKVNotFound(String),
+    #[error("loop work state not found")]
+    LoopWorkStateNotFound,
     #[error("pool not found")]
     PoolNotFound,
     #[error("pool already exists")]
@@ -74,9 +92,28 @@ pub enum DbError {
     ProfileNotFound,
     #[error("profile already exists")]
     ProfileAlreadyExists,
+    #[error("alert not found")]
+    AlertNotFound,
+    #[error("approval not found")]
+    ApprovalNotFound,
+    #[error("transcript not found")]
+    TranscriptNotFound,
+    #[error("queue item not found")]
+    QueueItemNotFound,
+    #[error("queue is empty")]
+    QueueEmpty,
+    #[error("no available ports in range")]
+    NoAvailablePorts,
+    #[error("port already allocated")]
+    PortAlreadyAllocated,
+    #[error("port not allocated")]
+    PortNotAllocated,
 }
 
 impl Db {
+    const DEFAULT_RETRY_ATTEMPTS: usize = 3;
+    const DEFAULT_RETRY_BACKOFF_MS: u64 = 50;
+
     pub fn open(cfg: Config) -> Result<Self, DbError> {
         ensure_parent_dir(&cfg.path)?;
         let conn = Connection::open(&cfg.path)?;
@@ -265,6 +302,65 @@ impl Db {
         &self.conn
     }
 
+    /// Transaction executes `f` inside a SQLite transaction.
+    ///
+    /// Mirrors Go's `db.Transaction`: explicit rollback on error, explicit commit on success.
+    pub fn transaction<T>(
+        &mut self,
+        f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, DbError>,
+    ) -> Result<T, DbError> {
+        let tx = self.conn.transaction()?;
+
+        match f(&tx) {
+            Ok(v) => {
+                tx.commit()?;
+                Ok(v)
+            }
+            Err(e) => {
+                if let Err(rb) = tx.rollback() {
+                    return Err(DbError::Transaction(format!(
+                        "rollback failed: {rb} (original error: {e})"
+                    )));
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// TransactionWithRetry retries a transaction when SQLite reports busy/locked.
+    ///
+    /// Mirrors Go's `db.TransactionWithRetry` string-matching behavior.
+    pub fn transaction_with_retry<T>(
+        &mut self,
+        mut max_attempts: usize,
+        mut base_backoff: Duration,
+        mut f: impl FnMut(&rusqlite::Transaction<'_>) -> Result<T, DbError>,
+    ) -> Result<T, DbError> {
+        if max_attempts == 0 {
+            max_attempts = Self::DEFAULT_RETRY_ATTEMPTS;
+        }
+        if base_backoff.is_zero() {
+            base_backoff = Duration::from_millis(Self::DEFAULT_RETRY_BACKOFF_MS);
+        }
+
+        let mut backoff = base_backoff;
+        for attempt in 1..=max_attempts {
+            let result = self.transaction(|tx| f(tx));
+            match result {
+                Ok(v) => return Ok(v),
+                Err(e) => {
+                    if attempt >= max_attempts || !is_busy_error(&e) {
+                        return Err(e);
+                    }
+                    std::thread::sleep(backoff);
+                    backoff = backoff.saturating_mul(2);
+                }
+            }
+        }
+
+        unreachable!("loop returns on success or final error")
+    }
+
     fn current_version(&self) -> Result<i32, DbError> {
         let version: Option<i32> = self
             .conn
@@ -276,6 +372,13 @@ impl Db {
             .optional()?;
         Ok(version.unwrap_or(0))
     }
+}
+
+fn is_busy_error(err: &DbError) -> bool {
+    let msg = err.to_string().to_lowercase();
+    msg.contains("database is locked")
+        || msg.contains("database is busy")
+        || msg.contains("sqlite_busy")
 }
 
 // ---------------------------------------------------------------------------
