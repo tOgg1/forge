@@ -13,6 +13,11 @@ name = "fmail-cli"
 path = "src/bin/fmail-cli.rs"
 
 [dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+fmail-core = { path = "../fmail-core" }
+rand = "0.8"
+serde_json = "1"
+tabwriter = "1"
 
 [lints]
 workspace = true

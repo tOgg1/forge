@@ -295,10 +295,24 @@ checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 [[package]]
 name = "fmail-cli"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "fmail-core",
+ "rand",
+ "serde_json",
+ "tabwriter",
+]
 
 [[package]]
 name = "fmail-core"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rand",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "fmail-tui"
@@ -343,6 +357,7 @@ name = "forge-daemon"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "forge-core",
  "forge-rpc",
  "nix",
  "prost-types",
@@ -395,6 +410,8 @@ dependencies = [
  "prost",
  "prost-types",
  "protoc-bin-vendored",
+ "serde",
+ "serde_json",
  "tonic",
  "tonic-build",
 ]
@@ -402,6 +419,16 @@ dependencies = [
 [[package]]
 name = "forge-runner"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "forge-db",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror",
+]
 
 [[package]]
 name = "forge-tui"

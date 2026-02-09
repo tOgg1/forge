@@ -1,0 +1,4 @@
+NAME   LAST SEEN  STATUS
+alice  active     -
+bob    2h ago     offline
+carol  2d ago     working on fmail
