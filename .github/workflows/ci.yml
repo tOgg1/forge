@@ -75,6 +75,22 @@ jobs:
           path: parity-artifacts/
           if-no-files-found: ignore
 
+  baseline-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Generate baseline snapshot and check drift
+        run: scripts/rust-baseline-snapshot.sh build/rust-baseline/latest --check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-baseline-snapshot
+          path: build/rust-baseline/latest/
+          if-no-files-found: error
+
   rust-quality:
     runs-on: ubuntu-latest
     steps:
@@ -120,7 +136,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [lint, test, parity, rust-quality, rust-coverage]
+    needs: [lint, test, parity, baseline-snapshot, rust-quality, rust-coverage]
     steps:
       - uses: actions/checkout@v4
         with:
