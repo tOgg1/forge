@@ -1,7 +1,6 @@
 package data
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tOgg1/forge/internal/fmail"
@@ -18,19 +18,27 @@ type FileProvider struct {
 	root            string
 	store           *fmail.Store
 	cacheTTL        time.Duration
-	pollInterval    time.Duration
+	metadataTTL     time.Duration
+	pollMin         time.Duration
+	pollMax         time.Duration
 	subscribeBuffer int
 	selfAgent       string
 	messageCache    *messageCache
 
-	mu            sync.RWMutex
-	topicsCache   timedEntry[[]TopicInfo]
-	agentsCache   timedEntry[[]fmail.AgentRecord]
-	topicMsgCache map[string]timedEntry[[]fmail.Message]
-	dmMsgCache    map[string]timedEntry[[]fmail.Message]
+	mu                   sync.RWMutex
+	topicsCache          timedEntry[[]TopicInfo]
+	agentsCache          timedEntry[[]fmail.AgentRecord]
+	topicMsgCache        map[string]timedEntry[[]fmail.Message]
+	dmMsgCache           map[string]timedEntry[[]fmail.Message]
+	topicMetadataCache   map[string]topicMetadataEntry
+	dmDirMetadataCache   map[string]dmDirMetadataEntry
+	dmConversationsCache map[string]timedEntry[[]DMConversation]
 
 	searchMu    sync.Mutex
 	searchIndex *textSearchIndex
+
+	messageReadLookups atomic.Int64
+	messageDiskReads   atomic.Int64
 }
 
 func NewFileProvider(cfg FileProviderConfig) (*FileProvider, error) {
@@ -50,9 +58,20 @@ func NewFileProvider(cfg FileProviderConfig) (*FileProvider, error) {
 	if cacheTTL <= 0 {
 		cacheTTL = defaultCacheTTL
 	}
-	pollInterval := cfg.PollInterval
-	if pollInterval <= 0 {
-		pollInterval = defaultPollInterval
+	metadataTTL := cfg.MetadataTTL
+	if metadataTTL <= 0 {
+		metadataTTL = defaultMetadataTTL
+	}
+	pollMin := cfg.PollInterval
+	if pollMin <= 0 {
+		pollMin = defaultPollInterval
+	}
+	pollMax := cfg.PollMax
+	if pollMax <= 0 {
+		pollMax = defaultPollMax
+	}
+	if pollMax < pollMin {
+		pollMax = pollMin
 	}
 	subscribeBuffer := cfg.SubscribeBuffer
 	if subscribeBuffer <= 0 {
@@ -73,15 +92,20 @@ func NewFileProvider(cfg FileProviderConfig) (*FileProvider, error) {
 	}
 
 	return &FileProvider{
-		root:            root,
-		store:           store,
-		cacheTTL:        cacheTTL,
-		pollInterval:    pollInterval,
-		subscribeBuffer: subscribeBuffer,
-		selfAgent:       selfAgent,
-		messageCache:    newMessageCache(cacheSize),
-		topicMsgCache:   make(map[string]timedEntry[[]fmail.Message]),
-		dmMsgCache:      make(map[string]timedEntry[[]fmail.Message]),
+		root:                 root,
+		store:                store,
+		cacheTTL:             cacheTTL,
+		metadataTTL:          metadataTTL,
+		pollMin:              pollMin,
+		pollMax:              pollMax,
+		subscribeBuffer:      subscribeBuffer,
+		selfAgent:            selfAgent,
+		messageCache:         newMessageCache(cacheSize),
+		topicMsgCache:        make(map[string]timedEntry[[]fmail.Message]),
+		dmMsgCache:           make(map[string]timedEntry[[]fmail.Message]),
+		topicMetadataCache:   make(map[string]topicMetadataEntry),
+		dmDirMetadataCache:   make(map[string]dmDirMetadataEntry),
+		dmConversationsCache: make(map[string]timedEntry[[]DMConversation]),
 	}, nil
 }
 
@@ -90,32 +114,10 @@ func (p *FileProvider) Topics() ([]TopicInfo, error) {
 		return topics, nil
 	}
 
-	topicNames, err := p.listTopicNames()
+	topics, err := p.buildTopicsFromMetadata()
 	if err != nil {
 		return nil, err
 	}
-
-	topics := make([]TopicInfo, 0, len(topicNames))
-	for _, topic := range topicNames {
-		messages, err := p.messagesForTopic(topic)
-		if err != nil {
-			return nil, err
-		}
-
-		info := TopicInfo{
-			Name:         topic,
-			MessageCount: len(messages),
-			Participants: participantsFromMessages(messages),
-		}
-		if len(messages) > 0 {
-			last := cloneMessage(messages[len(messages)-1])
-			info.LastMessage = &last
-			info.LastActivity = latestActivity(last)
-		}
-		topics = append(topics, info)
-	}
-
-	sort.Slice(topics, func(i, j int) bool { return topics[i].Name < topics[j].Name })
 	p.storeTopics(topics)
 	return cloneTopics(topics), nil
 }
@@ -124,6 +126,14 @@ func (p *FileProvider) Messages(topic string, opts MessageFilter) ([]fmail.Messa
 	normalized, err := fmail.NormalizeTopic(topic)
 	if err != nil {
 		return nil, err
+	}
+
+	if shouldUseWindowedRead(opts) {
+		messages, err := p.readMessagesFromDir(p.store.TopicDir(normalized), opts.Since, opts.Until, opts.Limit)
+		if err != nil {
+			return nil, err
+		}
+		return applyMessageFilter(messages, opts), nil
 	}
 
 	messages, err := p.messagesForTopic(normalized)
@@ -139,47 +149,7 @@ func (p *FileProvider) DMConversations(agent string) ([]DMConversation, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	dmDirs, err := p.listDMDirectoryNames()
-	if err != nil {
-		return nil, err
-	}
-	byAgent := make(map[string]*DMConversation)
-
-	for _, dirAgent := range dmDirs {
-		messages, err := p.messagesForDMDirectory(dirAgent)
-		if err != nil {
-			return nil, err
-		}
-		for i := range messages {
-			msg := messages[i]
-			peer := dmPeer(viewer, dirAgent, msg)
-			if peer == "" {
-				continue
-			}
-			conv, ok := byAgent[peer]
-			if !ok {
-				conv = &DMConversation{Agent: peer}
-				byAgent[peer] = conv
-			}
-			conv.MessageCount++
-			if activity := latestActivity(msg); activity.After(conv.LastActivity) {
-				conv.LastActivity = activity
-			}
-		}
-	}
-
-	conversations := make([]DMConversation, 0, len(byAgent))
-	for _, conversation := range byAgent {
-		conversations = append(conversations, *conversation)
-	}
-	sort.Slice(conversations, func(i, j int) bool {
-		if !conversations[i].LastActivity.Equal(conversations[j].LastActivity) {
-			return conversations[i].LastActivity.After(conversations[j].LastActivity)
-		}
-		return conversations[i].Agent < conversations[j].Agent
-	})
-	return conversations, nil
+	return p.buildDMConversationsFromMetadata(viewer)
 }
 
 func (p *FileProvider) DMs(agent string, opts MessageFilter) ([]fmail.Message, error) {
@@ -198,7 +168,7 @@ func (p *FileProvider) DMs(agent string, opts MessageFilter) ([]fmail.Message, e
 	}
 
 	if viewer == "" {
-		messages, err := p.messagesForDMDirectory(target)
+		messages, err := p.dmMessagesByDir(target, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -206,7 +176,7 @@ func (p *FileProvider) DMs(agent string, opts MessageFilter) ([]fmail.Message, e
 		return applyMessageFilter(ranged, opts), nil
 	}
 
-	allMessages, err := p.dmConversationMessages(viewer, target)
+	allMessages, err := p.dmConversationMessages(viewer, target, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -482,93 +452,23 @@ func (p *FileProvider) Send(req SendRequest) (fmail.Message, error) {
 	if err != nil {
 		return fmail.Message{}, err
 	}
-	if _, err := p.store.SaveMessage(&msg); err != nil {
+	messageID, err := p.store.SaveMessage(&msg)
+	if err != nil {
 		return fmail.Message{}, err
 	}
+	msg.ID = messageID
 
 	// Invalidate caches so the new message is visible without waiting for TTL expiry.
-	p.mu.Lock()
-	p.topicsCache = timedEntry[[]TopicInfo]{}
-	if strings.HasPrefix(strings.TrimSpace(msg.To), "@") {
-		p.dmMsgCache = make(map[string]timedEntry[[]fmail.Message])
-	} else {
-		delete(p.topicMsgCache, strings.TrimSpace(msg.To))
-	}
-	p.mu.Unlock()
+	p.invalidateCachesForMessage(msg)
 
 	return msg, nil
-}
-
-func (p *FileProvider) Subscribe(filter SubscriptionFilter) (<-chan fmail.Message, func()) {
-	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan fmail.Message, p.subscribeBuffer)
-	go p.subscribeLoop(ctx, out, filter)
-	return out, cancel
-}
-
-func (p *FileProvider) subscribeLoop(ctx context.Context, out chan<- fmail.Message, filter SubscriptionFilter) {
-	defer close(out)
-
-	lastSeenID := strings.TrimSpace(filter.SinceID)
-	seenPaths := make(map[string]struct{})
-	ticker := time.NewTicker(p.pollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-
-		files, err := p.listSubscriptionFiles(filter)
-		if err != nil {
-			continue
-		}
-		for _, file := range files {
-			if _, ok := seenPaths[file.path]; ok {
-				continue
-			}
-			if lastSeenID != "" && file.id <= lastSeenID {
-				seenPaths[file.path] = struct{}{}
-				continue
-			}
-
-			message, ok, err := p.readMessageFile(file.path, file.entry)
-			if err != nil {
-				continue
-			}
-			if !ok {
-				seenPaths[file.path] = struct{}{}
-				continue
-			}
-			if !filter.Since.IsZero() && message.Time.Before(filter.Since) {
-				seenPaths[file.path] = struct{}{}
-				continue
-			}
-			if !messageMatchesSubscription(message, filter) {
-				seenPaths[file.path] = struct{}{}
-				continue
-			}
-			if message.ID != "" && message.ID > lastSeenID {
-				lastSeenID = message.ID
-			}
-			seenPaths[file.path] = struct{}{}
-
-			select {
-			case <-ctx.Done():
-				return
-			case out <- cloneMessage(message):
-			}
-		}
-	}
 }
 
 func (p *FileProvider) messagesForTopic(topic string) ([]fmail.Message, error) {
 	if messages, ok := p.cachedTopicMessages(topic); ok {
 		return messages, nil
 	}
-	messages, err := p.readMessagesFromDir(p.store.TopicDir(topic), time.Time{}, time.Time{})
+	messages, err := p.readMessagesFromDir(p.store.TopicDir(topic), time.Time{}, time.Time{}, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +480,7 @@ func (p *FileProvider) messagesForDMDirectory(agent string) ([]fmail.Message, er
 	if messages, ok := p.cachedDMMessages(agent); ok {
 		return messages, nil
 	}
-	messages, err := p.readMessagesFromDir(p.store.DMDir(agent), time.Time{}, time.Time{})
+	messages, err := p.readMessagesFromDir(p.store.DMDir(agent), time.Time{}, time.Time{}, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -588,14 +488,16 @@ func (p *FileProvider) messagesForDMDirectory(agent string) ([]fmail.Message, er
 	return cloneMessages(messages), nil
 }
 
-func (p *FileProvider) dmConversationMessages(viewer string, peer string) ([]fmail.Message, error) {
-	dmDirs, err := p.listDMDirectoryNames()
-	if err != nil {
-		return nil, err
+func (p *FileProvider) dmConversationMessages(viewer string, peer string, opts MessageFilter) ([]fmail.Message, error) {
+	readOpts := opts
+	if hasMessageAttributeFilters(opts) {
+		readOpts.Limit = 0
 	}
+	dmDirs := dedupeSortedStrings([]string{viewer, peer})
+
 	collected := make([]fmail.Message, 0)
 	for _, dirAgent := range dmDirs {
-		messages, err := p.messagesForDMDirectory(dirAgent)
+		messages, err := p.dmMessagesByDir(dirAgent, readOpts)
 		if err != nil {
 			return nil, err
 		}
@@ -607,7 +509,21 @@ func (p *FileProvider) dmConversationMessages(viewer string, peer string) ([]fma
 		}
 	}
 	sortMessagesByID(collected)
+	if opts.Limit > 0 && len(collected) > opts.Limit {
+		collected = collected[len(collected)-opts.Limit:]
+	}
 	return collected, nil
+}
+
+func (p *FileProvider) dmMessagesByDir(agent string, opts MessageFilter) ([]fmail.Message, error) {
+	if shouldUseWindowedRead(opts) {
+		messages, err := p.readMessagesFromDir(p.store.DMDir(agent), opts.Since, opts.Until, opts.Limit)
+		if err != nil {
+			return nil, err
+		}
+		return messages, nil
+	}
+	return p.messagesForDMDirectory(agent)
 }
 
 func (p *FileProvider) listTopicNames() ([]string, error) {
@@ -664,7 +580,7 @@ func (p *FileProvider) listDMDirectoryNames() ([]string, error) {
 	return names, nil
 }
 
-func (p *FileProvider) readMessagesFromDir(dir string, since time.Time, until time.Time) ([]fmail.Message, error) {
+func (p *FileProvider) readMessagesFromDir(dir string, since time.Time, until time.Time, limit int) ([]fmail.Message, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -675,6 +591,9 @@ func (p *FileProvider) readMessagesFromDir(dir string, since time.Time, until ti
 
 	names, entryByName := sortedJSONNames(entries)
 	names = selectNamesByIDRange(names, since, until)
+	if limit > 0 && len(names) > limit {
+		names = names[len(names)-limit:]
+	}
 
 	messages := make([]fmail.Message, 0, len(names))
 	for _, name := range names {
@@ -693,7 +612,47 @@ func (p *FileProvider) readMessagesFromDir(dir string, since time.Time, until ti
 	return messages, nil
 }
 
+func shouldUseWindowedRead(opts MessageFilter) bool {
+	return (opts.Limit > 0 || !opts.Since.IsZero() || !opts.Until.IsZero()) && !hasMessageAttributeFilters(opts)
+}
+
+func hasMessageAttributeFilters(opts MessageFilter) bool {
+	if strings.TrimSpace(opts.From) != "" {
+		return true
+	}
+	if strings.TrimSpace(opts.Priority) != "" {
+		return true
+	}
+	if strings.TrimSpace(opts.To) != "" {
+		return true
+	}
+	return len(opts.Tags) > 0
+}
+
+func dedupeSortedStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (p *FileProvider) readMessageFile(path string, entry os.DirEntry) (fmail.Message, bool, error) {
+	p.messageReadLookups.Add(1)
+
 	info, err := entry.Info()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -713,6 +672,7 @@ func (p *FileProvider) readMessageFile(path string, entry os.DirEntry) (fmail.Me
 		}
 		return fmail.Message{}, false, err
 	}
+	p.messageDiskReads.Add(1)
 	p.messageCache.put(path, modTime, *message)
 	return cloneMessage(*message), true, nil
 }
@@ -787,119 +747,6 @@ func sliceMessagesByIDRange(messages []fmail.Message, since time.Time, until tim
 		start = end
 	}
 	return cloneMessages(messages[start:end])
-}
-
-type subscriptionFile struct {
-	path  string
-	id    string
-	entry os.DirEntry
-}
-
-func (p *FileProvider) listSubscriptionFiles(filter SubscriptionFilter) ([]subscriptionFile, error) {
-	dirs, err := p.subscriptionDirs(filter)
-	if err != nil {
-		return nil, err
-	}
-	files := make([]subscriptionFile, 0)
-	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, err
-		}
-		for _, entry := range entries {
-			if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-				continue
-			}
-			files = append(files, subscriptionFile{
-				path:  filepath.Join(dir, entry.Name()),
-				id:    trimJSONSuffix(entry.Name()),
-				entry: entry,
-			})
-		}
-	}
-	sort.SliceStable(files, func(i, j int) bool {
-		if files[i].id != files[j].id {
-			return files[i].id < files[j].id
-		}
-		return files[i].path < files[j].path
-	})
-	return files, nil
-}
-
-func (p *FileProvider) subscriptionDirs(filter SubscriptionFilter) ([]string, error) {
-	topic := strings.TrimSpace(filter.Topic)
-	if topic != "" && topic != "*" {
-		if strings.HasPrefix(topic, "@") {
-			agent := strings.TrimPrefix(topic, "@")
-			normalized, err := fmail.NormalizeAgentName(agent)
-			if err != nil {
-				return nil, err
-			}
-			return []string{p.store.DMDir(normalized)}, nil
-		}
-		normalized, err := fmail.NormalizeTopic(topic)
-		if err != nil {
-			return nil, err
-		}
-		return []string{p.store.TopicDir(normalized)}, nil
-	}
-
-	dirs := make([]string, 0)
-	topics, err := p.listTopicNames()
-	if err != nil {
-		return nil, err
-	}
-	for _, topicName := range topics {
-		dirs = append(dirs, p.store.TopicDir(topicName))
-	}
-
-	includeDM := filter.IncludeDM || topic == "*" || (topic == "" && strings.TrimSpace(filter.Agent) == "")
-	if includeDM {
-		dmDirs, err := p.listDMDirectoryNames()
-		if err != nil {
-			return nil, err
-		}
-		for _, dmDir := range dmDirs {
-			dirs = append(dirs, p.store.DMDir(dmDir))
-		}
-	}
-	return dirs, nil
-}
-
-func messageMatchesSubscription(message fmail.Message, filter SubscriptionFilter) bool {
-	topic := strings.TrimSpace(filter.Topic)
-	if topic != "" && topic != "*" {
-		if strings.HasPrefix(topic, "@") {
-			normalizedTopic := strings.ToLower(topic)
-			if strings.ToLower(message.To) != normalizedTopic {
-				return false
-			}
-		} else if !strings.EqualFold(message.To, topic) {
-			return false
-		}
-	} else if !filter.IncludeDM && strings.HasPrefix(message.To, "@") {
-		return false
-	}
-
-	if agent := strings.TrimSpace(filter.Agent); agent != "" {
-		normalized, err := fmail.NormalizeAgentName(agent)
-		if err == nil {
-			target := strings.TrimPrefix(strings.ToLower(message.To), "@")
-			if !strings.EqualFold(message.From, normalized) && target != strings.ToLower(normalized) {
-				return false
-			}
-		}
-	}
-
-	return messageMatchesFilter(&message, MessageFilter{
-		Since:    filter.Since,
-		From:     filter.From,
-		Priority: filter.Priority,
-		Tags:     filter.Tags,
-	})
 }
 
 func isDMBetween(message fmail.Message, left string, right string) bool {

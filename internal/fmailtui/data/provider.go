@@ -11,7 +11,9 @@ import (
 
 const (
 	defaultCacheTTL            = 500 * time.Millisecond
+	defaultMetadataTTL         = 5 * time.Second
 	defaultPollInterval        = 100 * time.Millisecond
+	defaultPollMax             = 2 * time.Second
 	defaultReconnectInterval   = 2 * time.Second
 	defaultSubscribeBufferSize = 256
 	defaultMessageCacheSize    = 2048
@@ -108,9 +110,14 @@ type SendRequest struct {
 }
 
 type FileProviderConfig struct {
-	Root            string
-	CacheTTL        time.Duration
-	PollInterval    time.Duration
+	Root     string
+	CacheTTL time.Duration
+	// MetadataTTL controls topic/DM metadata index refresh frequency.
+	MetadataTTL time.Duration
+	// PollInterval controls the minimum poll cadence used by Subscribe().
+	PollInterval time.Duration
+	// PollMax controls the maximum poll cadence used by Subscribe() backoff.
+	PollMax         time.Duration
 	CacheCapacity   int
 	SubscribeBuffer int
 	SelfAgent       string
