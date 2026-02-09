@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -24,28 +25,21 @@ func (m *Model) renderHeader() string {
 		Padding(0, 1)
 
 	left := "fmail TUI"
+	if crumb := strings.TrimSpace(m.breadcrumb()); crumb != "" {
+		left = left + " | " + crumb
+	}
 	center := fmt.Sprintf("project: %s", m.projectID)
-	right := connectionStatus(m.root, m.forgedClient != nil, m.forgedErr)
+	now := m.status.now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	right := fmt.Sprintf("agent: %s  %s", m.selfAgent, now.Format("15:04"))
 	line := joinHeader(left, center, right, m.width)
 	return style.Width(maxInt(0, m.width)).Render(line)
 }
 
 func (m *Model) renderFooter() string {
-	palette, ok := styles.Themes[string(m.theme)]
-	if !ok {
-		palette = styles.DefaultTheme
-	}
-
-	style := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(palette.Base.Foreground)).
-		Background(lipgloss.Color(palette.Chrome.Footer)).
-		Padding(0, 1)
-
-	base := "[T]opics [A]gents [/]Search [L]ive tail [?]Help q Quit"
-	if m.showHelp {
-		base = base + "  (tab focus, arrows scroll/select, End/G resume feed)"
-	}
-	return style.Width(maxInt(0, m.width)).Render(truncate(base, maxInt(0, m.width-2)))
+	return m.renderStatusBar()
 }
 
 func connectionStatus(root string, hasClient bool, dialErr error) string {

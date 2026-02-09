@@ -29,6 +29,7 @@ type TUIState struct {
 	Bookmarks     []Bookmark              `json:"bookmarks,omitempty"`      // saved message references
 	Annotations   map[string]string       `json:"annotations,omitempty"`    // message ID -> annotation text
 	Drafts        map[string]ComposeDraft `json:"drafts,omitempty"`         // target -> draft payload
+	Groups        map[string][]string     `json:"groups,omitempty"`         // ad-hoc compose groups
 	StarredTopics []string                `json:"starred_topics,omitempty"` // pinned topic names
 	SavedSearches []SavedSearch           `json:"saved_searches,omitempty"` // named search presets
 	Preferences   Preferences             `json:"preferences,omitempty"`    // UI preferences
@@ -97,6 +98,7 @@ func New(path string) *Manager {
 			ReadMarkers: make(map[string]string),
 			Annotations: make(map[string]string),
 			Drafts:      make(map[string]ComposeDraft),
+			Groups:      make(map[string][]string),
 		},
 		debounce: defaultDebounce,
 	}
@@ -217,6 +219,32 @@ func (m *Manager) DeleteDraft(target string) {
 		return
 	}
 	delete(m.state.Drafts, target)
+	m.markDirtyLocked()
+}
+
+func (m *Manager) Groups() map[string][]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return cloneGroups(m.state.Groups)
+}
+
+func (m *Manager) SetGroup(name string, members []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	normalized := normalizeGroupMembers(members)
+	if m.state.Groups == nil {
+		m.state.Groups = make(map[string][]string)
+	}
+	if len(normalized) == 0 {
+		delete(m.state.Groups, name)
+		m.markDirtyLocked()
+		return
+	}
+	m.state.Groups[name] = normalized
 	m.markDirtyLocked()
 }
 
@@ -360,6 +388,9 @@ func (m *Manager) loadLocked() (TUIState, error) {
 	if out.Drafts == nil {
 		out.Drafts = make(map[string]ComposeDraft)
 	}
+	if out.Groups == nil {
+		out.Groups = make(map[string][]string)
+	}
 	return out, nil
 }
 
@@ -410,6 +441,9 @@ func normalizeState(state TUIState, now time.Time) TUIState {
 	if state.Drafts == nil {
 		state.Drafts = make(map[string]ComposeDraft)
 	}
+	if state.Groups == nil {
+		state.Groups = make(map[string][]string)
+	}
 
 	// Prune + cap bookmarks.
 	if len(state.Bookmarks) > 0 {
@@ -450,6 +484,21 @@ func normalizeState(state TUIState, now time.Time) TUIState {
 		sort.Strings(out)
 		state.StarredTopics = out
 	}
+	if len(state.Groups) > 0 {
+		normalized := make(map[string][]string, len(state.Groups))
+		for name, members := range state.Groups {
+			trimmed := strings.TrimSpace(name)
+			if trimmed == "" {
+				continue
+			}
+			clean := normalizeGroupMembers(members)
+			if len(clean) == 0 {
+				continue
+			}
+			normalized[trimmed] = clean
+		}
+		state.Groups = normalized
+	}
 
 	return state
 }
@@ -474,6 +523,9 @@ func cloneState(state TUIState) TUIState {
 			out.Drafts[k] = v
 		}
 	}
+	if state.Groups != nil {
+		out.Groups = cloneGroups(state.Groups)
+	}
 	if len(state.Bookmarks) > 0 {
 		out.Bookmarks = append([]Bookmark(nil), state.Bookmarks...)
 	}
@@ -486,5 +538,49 @@ func cloneState(state TUIState) TUIState {
 	if len(state.NotifyRules) > 0 {
 		out.NotifyRules = append([]NotificationRule(nil), state.NotifyRules...)
 	}
+	return out
+}
+
+func cloneGroups(src map[string][]string) map[string][]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string][]string, len(src))
+	for name, members := range src {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		if len(members) == 0 {
+			continue
+		}
+		dst[name] = append([]string(nil), members...)
+	}
+	if len(dst) == 0 {
+		return nil
+	}
+	return dst
+}
+
+func normalizeGroupMembers(members []string) []string {
+	if len(members) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(members))
+	out := make([]string, 0, len(members))
+	for _, member := range members {
+		member = strings.TrimSpace(member)
+		if member == "" {
+			continue
+		}
+		if !strings.HasPrefix(member, "@") {
+			member = "@" + member
+		}
+		if _, ok := seen[member]; ok {
+			continue
+		}
+		seen[member] = struct{}{}
+		out = append(out, member)
+	}
+	sort.Strings(out)
 	return out
 }

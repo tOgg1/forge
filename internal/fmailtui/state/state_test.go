@@ -98,3 +98,21 @@ func TestManager_DraftRoundTrip(t *testing.T) {
 	_, ok = reloaded.Draft("task")
 	require.False(t, ok)
 }
+
+func TestManager_GroupRoundTripAndNormalization(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".fmail", "tui-state.json")
+	m := New(path)
+	require.NoError(t, m.Load())
+
+	m.SetGroup("frontend", []string{"coder-1", "@coder-1", "designer"})
+	m.SetGroup("empty", nil)
+	require.NoError(t, m.SaveNow())
+
+	loaded := New(path)
+	require.NoError(t, loaded.Load())
+	groups := loaded.Groups()
+	require.Contains(t, groups, "frontend")
+	require.Equal(t, []string{"@coder-1", "@designer"}, groups["frontend"])
+	require.NotContains(t, groups, "empty")
+}

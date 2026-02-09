@@ -7,6 +7,8 @@ import (
 	"github.com/tOgg1/forge/internal/fmailtui/data"
 )
 
+const defaultFileProviderPollInterval = 100 * time.Millisecond
+
 func buildProvider(root, forgedAddr, selfAgent string) (data.MessageProvider, error) {
 	selfAgent = strings.TrimSpace(selfAgent)
 	fileProvider, err := data.NewFileProvider(data.FileProviderConfig{

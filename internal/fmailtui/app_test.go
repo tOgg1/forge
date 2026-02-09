@@ -40,6 +40,19 @@ func TestNewModelRejectsInvalidTheme(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid theme")
 }
 
+func TestNewModelOperatorStartsInOperatorView(t *testing.T) {
+	model, err := NewModel(Config{
+		Root:     t.TempDir(),
+		Operator: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, model.Close())
+	})
+
+	require.Equal(t, ViewOperator, model.activeViewID())
+}
+
 func TestUpdateHandlesResizeHelpAndQuit(t *testing.T) {
 	model := newTestModel(t, Config{})
 

@@ -35,12 +35,14 @@ const (
 	ViewTopics    ViewID = "topics"
 	ViewThread    ViewID = "thread"
 	ViewAgents    ViewID = "agents"
+	ViewOperator  ViewID = "operator"
 	ViewSearch    ViewID = "search"
 	ViewLiveTail  ViewID = "live-tail"
 	ViewTimeline  ViewID = "timeline"
 )
 
 var viewSwitchKeys = map[string]ViewID{
+	"o": ViewOperator,
 	"t": ViewTopics,
 	"r": ViewThread,
 	"a": ViewAgents,
@@ -60,6 +62,7 @@ type Config struct {
 	Root         string
 	ForgedAddr   string
 	Agent        string
+	Operator     bool
 	Theme        string
 	PollInterval time.Duration
 }
@@ -86,16 +89,19 @@ func (c *netForgedClient) Close() error {
 }
 
 type Model struct {
-	projectID    string
-	root         string
-	selfAgent    string
-	store        *fmail.Store
-	provider     data.MessageProvider
-	tuiState     *state.Manager
-	forgedClient ForgedClient
-	forgedErr    error
-	theme        Theme
-	pollInterval time.Duration
+	projectID            string
+	root                 string
+	selfAgent            string
+	store                *fmail.Store
+	provider             data.MessageProvider
+	tuiState             *state.Manager
+	forgedClient         ForgedClient
+	forgedAddr           string
+	forgedErr            error
+	reconnectAttempts    int
+	lastReconnectAttempt time.Time
+	theme                Theme
+	pollInterval         time.Duration
 
 	width        int
 	height       int
@@ -103,6 +109,9 @@ type Model struct {
 	toast        string
 	toastUntil   time.Time
 	spinnerFrame int
+	status       statusState
+	statusCh     <-chan fmail.Message
+	statusCancel func()
 
 	compose composeState
 	quick   quickSendState
@@ -186,6 +195,11 @@ func NewModel(cfg Config) (*Model, error) {
 		forgedClient = nil
 	}
 
+	initialView := ViewDashboard
+	if normalized.Operator {
+		initialView = ViewOperator
+	}
+
 	m := &Model{
 		projectID:    projectID,
 		root:         root,
@@ -194,13 +208,14 @@ func NewModel(cfg Config) (*Model, error) {
 		provider:     provider,
 		tuiState:     state.New(filepath.Join(root, ".fmail", "tui-state.json")),
 		forgedClient: forgedClient,
+		forgedAddr:   normalized.ForgedAddr,
 		forgedErr:    err,
 		theme:        Theme(normalized.Theme),
 		pollInterval: normalized.PollInterval,
 		quick: quickSendState{
 			historyIndex: -1,
 		},
-		viewStack: []ViewID{ViewDashboard},
+		viewStack: []ViewID{initialView},
 		views:     make(map[ViewID]viewModel),
 	}
 	// Non-fatal: state can be created later; fall back to in-memory defaults.
@@ -222,6 +237,10 @@ func Run(cfg Config) error {
 }
 
 func (m *Model) Close() error {
+	if m != nil && m.statusCancel != nil {
+		m.statusCancel()
+		m.statusCancel = nil
+	}
 	for _, view := range m.views {
 		if closer, ok := view.(interface{ Close() }); ok {
 			closer.Close()
@@ -237,10 +256,12 @@ func (m *Model) Close() error {
 }
 
 func (m *Model) Init() tea.Cmd {
+	cmds := make([]tea.Cmd, 0, 2)
 	if view := m.activeView(); view != nil {
-		return view.Init()
+		cmds = append(cmds, view.Init())
 	}
-	return nil
+	cmds = append(cmds, m.statusInitCmd())
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -278,6 +299,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, spinnerTickCmd()
 		}
 		return m, nil
+	case statusTickMsg:
+		now := time.Now().UTC()
+		needProbe, needMetrics := m.status.onTick(now)
+		cmds := []tea.Cmd{statusTickCmd()}
+		if needProbe {
+			cmds = append(cmds, m.statusProbeCmd())
+		}
+		if needMetrics {
+			cmds = append(cmds, m.statusMetricsCmd())
+		}
+		return m, tea.Batch(cmds...)
+	case statusIncomingMsg:
+		m.status.record(typed.msg, time.Now().UTC())
+		return m, m.waitForStatusMsgCmd()
+	case statusMetricsMsg:
+		m.status.applyMetrics(typed)
+		return m, nil
+	case statusProbeMsg:
+		m.status.applyProbe(typed, time.Now().UTC())
+		return m, nil
 	case tea.KeyMsg:
 		if cmd, handled := m.handleGlobalKey(typed); handled {
 			return m, cmd
@@ -302,13 +343,18 @@ func (m *Model) View() string {
 		if m.compose.active {
 			body = m.renderComposeOverlay(m.width, contentHeight, m.theme)
 		}
+		if m.showHelp {
+			body = m.renderHelpOverlay(m.width, contentHeight, m.theme)
+		}
 
 		lines := []string{header, body}
-		if m.quick.active {
+		if !m.showHelp && m.quick.active {
 			lines = append(lines, m.renderQuickSendBar(m.width, m.theme))
 		}
-		if toast := m.renderToast(m.width, m.theme); strings.TrimSpace(toast) != "" {
-			lines = append(lines, toast)
+		if !m.showHelp {
+			if toast := m.renderToast(m.width, m.theme); strings.TrimSpace(toast) != "" {
+				lines = append(lines, toast)
+			}
 		}
 		lines = append(lines, footer)
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
@@ -317,11 +363,41 @@ func (m *Model) View() string {
 }
 
 func (m *Model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool) {
+	// Help overlay: Esc closes; any other key closes then continues.
+	if m.showHelp {
+		switch msg.String() {
+		case "?":
+			m.showHelp = false
+			return nil, true
+		case "esc":
+			m.showHelp = false
+			return nil, true
+		default:
+			m.showHelp = false
+		}
+	}
+
+	if m.activeViewID() == ViewOperator {
+		switch msg.String() {
+		case "q":
+			return tea.Quit, true
+		case "ctrl+c":
+			return tea.Quit, true
+		case "?":
+			m.showHelp = !m.showHelp
+			return nil, true
+		default:
+			return nil, false
+		}
+	}
+
 	if cmd, handled := m.handleComposerKey(msg); handled {
 		return cmd, true
 	}
 
 	switch msg.String() {
+	case "esc":
+		return popViewCmd(), true
 	case "n":
 		return nil, m.maybeOpenComposeForNewMessage()
 	case "r":
@@ -335,6 +411,21 @@ func (m *Model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	case ":":
 		m.openQuickSendBar()
 		return nil, true
+	case "ctrl+r":
+		if view := m.activeView(); view != nil {
+			return view.Init(), true
+		}
+		return nil, true
+	case "1":
+		return pushViewCmd(ViewDashboard), true
+	case "2":
+		return pushViewCmd(ViewTopics), true
+	case "3":
+		return pushViewCmd(ViewAgents), true
+	case "/":
+		if m.activeViewID() != ViewTopics && m.activeViewID() != ViewAgents {
+			return pushViewCmd(ViewSearch), true
+		}
 	case "q":
 		return tea.Quit, true
 	case "ctrl+c":
@@ -391,6 +482,7 @@ func (m *Model) initViews() {
 	m.views[ViewTopics] = newTopicsView(m.root, m.provider, m.tuiState)
 	m.views[ViewThread] = newThreadView(m.root, m.provider, m.tuiState)
 	m.views[ViewAgents] = newAgentsView(m.root, m.provider)
+	m.views[ViewOperator] = newOperatorView(m.root, m.projectID, m.selfAgent, m.store, m.provider, m.tuiState)
 	m.views[ViewSearch] = newPlaceholderView(ViewSearch, "Search")
 	m.views[ViewLiveTail] = newPlaceholderView(ViewLiveTail, "Live Tail")
 	m.views[ViewTimeline] = newPlaceholderView(ViewTimeline, "Timeline")

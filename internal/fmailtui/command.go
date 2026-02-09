@@ -25,6 +25,7 @@ func newRootCmd(version string) *cobra.Command {
 	cmd.Flags().StringVar(&cfg.Root, "root", "", "project root containing .fmail")
 	cmd.Flags().StringVar(&cfg.ForgedAddr, "forged-addr", "", "forged endpoint (socket path or host:port)")
 	cmd.Flags().StringVar(&cfg.Agent, "agent", "", "sender identity for compose/quick-send (defaults to FMAIL_AGENT)")
+	cmd.Flags().BoolVarP(&cfg.Operator, "operator", "o", false, "start in operator console view")
 	cmd.Flags().StringVar(&cfg.Theme, "theme", string(ThemeDefault), "theme: default|high-contrast")
 	cmd.Flags().DurationVar(&cfg.PollInterval, "poll-interval", defaultPollInterval, "poll interval for background refresh")
 	return cmd
