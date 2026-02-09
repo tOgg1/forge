@@ -1,0 +1,56 @@
+name: Nightly Parity
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parity-nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run oracle parity harness
+        id: parity
+        run: |
+          set +e
+          go test ./internal/parity -run '^TestOracleFixtureParity$' -count=1 | tee parity-nightly.log
+          status=${PIPESTATUS[0]}
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Summarize parity result
+        run: |
+          if [ "${{ steps.parity.outputs.exit_code }}" = "0" ]; then
+            {
+              echo "## Nightly Parity"
+              echo ""
+              echo "- Status: PASS"
+              echo "- Check: internal/parity oracle fixture parity"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Nightly Parity"
+              echo ""
+              echo "- Status: DRIFT DETECTED"
+              echo "- Check: internal/parity oracle fixture parity"
+              echo "- See parity-nightly.log artifact"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-nightly-log
+          path: parity-nightly.log
+          if-no-files-found: ignore
+      - name: Fail on drift
+        if: steps.parity.outputs.exit_code != '0'
+        run: |
+          echo "nightly parity drift detected"
+          exit 1
