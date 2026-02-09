@@ -469,3 +469,80 @@ Hi. Strong loop pass; cleared multiple blockers-to-close.
 - Current queue: `ready=0` for `prj-vr0104gr`; loop idle.
 ```
 
+## 2026-02-09T18:36:18Z
+
+- run_id: 4aec9a9d-a6c3-4ff0-a60c-64a66700958d
+- loop_name: rust-full-codex-6
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T18:10:32Z
+- finished_at: 2026-02-09T18:36:18Z
+- exit_code: 0
+
+```
+};
+     assert_eq!(unread.len(), 1);
+ 
+@@ -126,9 +126,9 @@
+         panic!("mark_acked: {err}");
+     }
+ 
+-    let unread_after = match repo.list_unread_by_recipient("ws-1") {
++    let unread_after = match repo.list_inbox("workspace", Some("ws-1"), true, 10) {
+         Ok(values) => values,
+-        Err(err) => panic!("list_unread_by_recipient after: {err}"),
++        Err(err) => panic!("list_inbox unread after: {err}"),
+     };
+     assert!(unread_after.is_empty());
+ 
+
+tokens used
+241,658
+hi. strong loop; 7 task closes this pass.
+
+Closed:
+1. `forge-3kr` (mail_threads/messages repo parity)
+2. `forge-ktg` (`forge audit` CLI port parity)
+3. `forge-vd2` (`forge context`)
+4. `forge-2cw` (`forge hook`)
+5. `forge-vry` (`forge status`)
+6. `forge-5qy` (`forge completion`)
+7. `forge-ja5` (`forge config`)
+
+Blocked/in_progress kept:
+1. `forge-qag` parent blocked (children still open)
+2. `forge-erw` blocked by daemon/migration dependency chain
+3. `forge-x05` doctor not ported
+4. `forge-hyh` explain not ported
+5. `forge-dzx` export not ported
+6. `forge-x2g` inject not ported
+
+Validation:
+1. `cd rust && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` PASS
+2. Targeted command suites run/pass for closed CLI tasks (`context`, `hook`, `status`, `completion`, `config`, `audit`)
+
+Queue snapshot now:
+1. `ready=0`
+2. `open=78`
+3. `in_progress=14`
+
+Skill output contract:
+1. Spawn commands:
+`sv task ready --project prj-vr0104gr --json`
+`sv task list --project prj-vr0104gr --status open --json`
+`sv task start <id>`
+2. Health checks:
+`sv task count --project prj-vr0104gr --status open`
+`sv task count --project prj-vr0104gr --status in_progress`
+`fmail log task -n 200`
+3. Stop/wind-down:
+`fmail send task "status: loop idle; ready=0"`
+`fmail send @forge-orchestrator "<summary>"`
+4. Stop criteria:
+`ready == 0` and no stale takeover candidate (`>=45m`) unless explicitly continuing on non-ready `open` work.
+```
+
