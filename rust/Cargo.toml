@@ -9,6 +9,7 @@ members = [
     "crates/forge-daemon",
     "crates/forge-ftui-adapter",
     "crates/forge-loop",
+    "crates/forge-rpc",
     "crates/forge-runner",
     "crates/forge-tui",
     "crates/forge-parity-stub",

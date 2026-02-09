@@ -1,5 +1,12 @@
 //! forge-daemon: Rust daemon surface for Forge.
 
+pub mod agent;
+pub mod loop_runner;
+pub mod server;
+pub mod status;
+pub mod tmux;
+pub mod transcript;
+
 /// Stable crate label used by bootstrap smoke tests.
 pub fn crate_label() -> &'static str {
     "forge-daemon"
