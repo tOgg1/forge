@@ -97,11 +97,11 @@ type Model struct {
 	theme        Theme
 	pollInterval time.Duration
 
-	width      int
-	height     int
-	showHelp   bool
-	toast      string
-	toastUntil time.Time
+	width        int
+	height       int
+	showHelp     bool
+	toast        string
+	toastUntil   time.Time
 	spinnerFrame int
 
 	compose composeState
@@ -390,7 +390,7 @@ func (m *Model) initViews() {
 	m.views[ViewDashboard] = newDashboardView(m.root, m.projectID, m.provider)
 	m.views[ViewTopics] = newTopicsView(m.root, m.provider, m.tuiState)
 	m.views[ViewThread] = newThreadView(m.root, m.provider, m.tuiState)
-	m.views[ViewAgents] = newPlaceholderView(ViewAgents, "Agents")
+	m.views[ViewAgents] = newAgentsView(m.root, m.provider)
 	m.views[ViewSearch] = newPlaceholderView(ViewSearch, "Search")
 	m.views[ViewLiveTail] = newPlaceholderView(ViewLiveTail, "Live Tail")
 	m.views[ViewTimeline] = newPlaceholderView(ViewTimeline, "Timeline")

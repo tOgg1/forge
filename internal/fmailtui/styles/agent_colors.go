@@ -39,6 +39,15 @@ func NewAgentColorMapper() *AgentColorMapper {
 	}
 }
 
+// Plain returns a stable, non-styled label for display/truncation.
+func (m *AgentColorMapper) Plain(agent string) string {
+	agent = strings.TrimSpace(agent)
+	if agent == "" {
+		return "unknown"
+	}
+	return agent
+}
+
 // Foreground returns a cached foreground style for an agent.
 func (m *AgentColorMapper) Foreground(agent string) lipgloss.Style {
 	key := normalizeAgent(agent)
