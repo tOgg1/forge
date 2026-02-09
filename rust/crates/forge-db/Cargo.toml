@@ -13,6 +13,11 @@ name = "forge-db"
 path = "src/bin/forge-db.rs"
 
 [dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
+thiserror = "1"
 
 [lints]
 workspace = true
+
+[build-dependencies]
+walkdir = "2"

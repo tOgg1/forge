@@ -1,13 +1,825 @@
+//! forge-db: SQLite storage + migration engine for Forge.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use rusqlite::{params, Connection, OptionalExtension};
+use thiserror::Error;
+
+include!(concat!(env!("OUT_DIR"), "/migrations.rs"));
+
+/// Crate identity label used for parity verification.
 pub fn crate_label() -> &'static str {
     "forge-db"
 }
 
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub path: PathBuf,
+    pub busy_timeout_ms: u64,
+}
+
+impl Config {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            busy_timeout_ms: 5000,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Db {
+    conn: Connection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationStatus {
+    pub version: i32,
+    pub description: String,
+    pub applied: bool,
+    pub applied_at: String,
+}
+
+#[derive(Debug, Error)]
+pub enum DbError {
+    #[error("open database: {0}")]
+    Open(#[from] rusqlite::Error),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("migration {version} missing {direction} sql")]
+    MissingSQL {
+        version: i32,
+        direction: &'static str,
+    },
+}
+
+impl Db {
+    pub fn open(cfg: Config) -> Result<Self, DbError> {
+        ensure_parent_dir(&cfg.path)?;
+        let conn = Connection::open(&cfg.path)?;
+        conn.busy_timeout(Duration::from_millis(cfg.busy_timeout_ms))?;
+        // Match Go connection defaults as closely as possible.
+        // Best-effort: ignore pragma errors on older SQLite builds.
+        let _ = conn.pragma_update(None, "journal_mode", "WAL");
+        let _ = conn.pragma_update(None, "foreign_keys", "ON");
+        let _ = conn.pragma_update(None, "synchronous", "NORMAL");
+        Ok(Self { conn })
+    }
+
+    pub fn migrate_up(&mut self) -> Result<usize, DbError> {
+        self.ensure_schema_version_table()?;
+        let current = self.current_version()?;
+
+        let mut applied = 0usize;
+        for m in MIGRATIONS {
+            if m.version <= current {
+                continue;
+            }
+            if m.up_sql.is_empty() {
+                return Err(DbError::MissingSQL {
+                    version: m.version,
+                    direction: "up",
+                });
+            }
+
+            let tx = self.conn.transaction()?;
+            tx.execute_batch(m.up_sql)?;
+            tx.execute(
+                "INSERT INTO schema_version (version, description) VALUES (?1, ?2)",
+                params![m.version, m.description],
+            )?;
+            tx.commit()?;
+            applied += 1;
+        }
+        Ok(applied)
+    }
+
+    pub fn migrate_down(&mut self, steps: i32) -> Result<usize, DbError> {
+        self.ensure_schema_version_table()?;
+        let current = self.current_version()?;
+        if current == 0 || steps <= 0 {
+            return Ok(0);
+        }
+
+        let mut to_rollback = Vec::new();
+        for m in MIGRATIONS.iter().rev() {
+            if m.version <= current {
+                to_rollback.push(*m);
+                if to_rollback.len() >= steps as usize {
+                    break;
+                }
+            }
+        }
+
+        let mut rolled_back = 0usize;
+        for m in to_rollback {
+            if m.down_sql.is_empty() {
+                return Err(DbError::MissingSQL {
+                    version: m.version,
+                    direction: "down",
+                });
+            }
+
+            let tx = self.conn.transaction()?;
+            tx.execute_batch(m.down_sql)?;
+            tx.execute(
+                "DELETE FROM schema_version WHERE version = ?1",
+                params![m.version],
+            )?;
+            tx.commit()?;
+            rolled_back += 1;
+        }
+
+        Ok(rolled_back)
+    }
+
+    pub fn migrate_to(&mut self, target_version: i32) -> Result<(), DbError> {
+        self.ensure_schema_version_table()?;
+        let current = self.current_version()?;
+        if target_version == current {
+            return Ok(());
+        }
+
+        if target_version > current {
+            for m in MIGRATIONS {
+                if m.version <= current || m.version > target_version {
+                    continue;
+                }
+                if m.up_sql.is_empty() {
+                    return Err(DbError::MissingSQL {
+                        version: m.version,
+                        direction: "up",
+                    });
+                }
+
+                let tx = self.conn.transaction()?;
+                tx.execute_batch(m.up_sql)?;
+                tx.execute(
+                    "INSERT INTO schema_version (version, description) VALUES (?1, ?2)",
+                    params![m.version, m.description],
+                )?;
+                tx.commit()?;
+            }
+        } else {
+            for m in MIGRATIONS.iter().rev() {
+                if m.version <= target_version || m.version > current {
+                    continue;
+                }
+                if m.down_sql.is_empty() {
+                    return Err(DbError::MissingSQL {
+                        version: m.version,
+                        direction: "down",
+                    });
+                }
+
+                let tx = self.conn.transaction()?;
+                tx.execute_batch(m.down_sql)?;
+                tx.execute(
+                    "DELETE FROM schema_version WHERE version = ?1",
+                    params![m.version],
+                )?;
+                tx.commit()?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn migration_status(&mut self) -> Result<Vec<MigrationStatus>, DbError> {
+        self.ensure_schema_version_table()?;
+
+        let mut applied_at: BTreeMap<i32, String> = BTreeMap::new();
+        let mut stmt = self
+            .conn
+            .prepare("SELECT version, applied_at FROM schema_version ORDER BY version")?;
+        let rows = stmt.query_map([], |row| {
+            let version: i32 = row.get(0)?;
+            let stamp: String = row.get(1)?;
+            Ok((version, stamp))
+        })?;
+        for row in rows {
+            let (version, stamp) = row?;
+            applied_at.insert(version, stamp);
+        }
+
+        let mut status = Vec::with_capacity(MIGRATIONS.len());
+        for m in MIGRATIONS {
+            let stamp = applied_at.get(&m.version).cloned().unwrap_or_default();
+            status.push(MigrationStatus {
+                version: m.version,
+                description: m.description.to_string(),
+                applied: applied_at.contains_key(&m.version),
+                applied_at: stamp,
+            });
+        }
+        Ok(status)
+    }
+
+    pub fn schema_version(&self) -> Result<i32, DbError> {
+        let version: Option<i32> = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(version.unwrap_or(0))
+    }
+
+    fn ensure_schema_version_table(&self) -> Result<(), DbError> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_version (\n\
+                version INTEGER PRIMARY KEY,\n\
+                applied_at TEXT NOT NULL DEFAULT (datetime('now')),\n\
+                description TEXT\n\
+             );",
+        )?;
+        Ok(())
+    }
+
+    fn current_version(&self) -> Result<i32, DbError> {
+        let version: Option<i32> = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(version.unwrap_or(0))
+    }
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<(), std::io::Error> {
+    let parent = match path.parent() {
+        Some(parent) => parent,
+        None => return Ok(()),
+    };
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(parent)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::crate_label;
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn crate_label_is_stable() {
         assert_eq!(crate_label(), "forge-db");
+    }
+
+    #[test]
+    fn embedded_migrations_are_sorted_and_nonempty() {
+        assert!(!MIGRATIONS.is_empty());
+        let mut prev = 0;
+        for m in MIGRATIONS {
+            assert!(m.version > prev);
+            assert!(!m.description.is_empty());
+            prev = m.version;
+        }
+    }
+
+    #[test]
+    fn migration_001_embedded_sql_matches_go_files() {
+        let migration = match MIGRATIONS.iter().find(|m| m.version == 1) {
+            Some(migration) => migration,
+            None => panic!("migration 001 not embedded"),
+        };
+
+        let up = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/001_initial_schema.up.sql"
+        ));
+        let down = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/001_initial_schema.down.sql"
+        ));
+
+        assert_eq!(migration.up_sql, up);
+        assert_eq!(migration.down_sql, down);
+    }
+
+    #[test]
+    fn migration_001_up_down_creates_and_removes_initial_schema() {
+        let db_path = temp_db_path("migration-001");
+        let mut db = match Db::open(Config::new(&db_path)) {
+            Ok(db) => db,
+            Err(err) => panic!("open db: {err}"),
+        };
+
+        if let Err(err) = db.migrate_to(1) {
+            panic!("migrate_to(1): {err}");
+        }
+        let version_after_up = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after up: {err}"),
+        };
+        assert_eq!(version_after_up, 1);
+
+        // Tables
+        assert!(table_exists(&db_path, "nodes"));
+        assert!(table_exists(&db_path, "workspaces"));
+        assert!(table_exists(&db_path, "accounts"));
+        assert!(table_exists(&db_path, "agents"));
+        assert!(table_exists(&db_path, "queue_items"));
+        assert!(table_exists(&db_path, "events"));
+        assert!(table_exists(&db_path, "alerts"));
+        assert!(table_exists(&db_path, "transcripts"));
+        assert!(table_exists(&db_path, "approvals"));
+
+        // Indexes
+        assert!(index_exists(&db_path, "idx_nodes_name"));
+        assert!(index_exists(&db_path, "idx_nodes_status"));
+        assert!(index_exists(&db_path, "idx_workspaces_node_id"));
+        assert!(index_exists(&db_path, "idx_workspaces_status"));
+        assert!(index_exists(&db_path, "idx_workspaces_name"));
+        assert!(index_exists(&db_path, "idx_accounts_provider"));
+        assert!(index_exists(&db_path, "idx_accounts_is_active"));
+        assert!(index_exists(&db_path, "idx_accounts_cooldown"));
+        assert!(index_exists(&db_path, "idx_agents_workspace_id"));
+        assert!(index_exists(&db_path, "idx_agents_state"));
+        assert!(index_exists(&db_path, "idx_agents_account_id"));
+        assert!(index_exists(&db_path, "idx_agents_type"));
+        assert!(index_exists(&db_path, "idx_queue_items_agent_id"));
+        assert!(index_exists(&db_path, "idx_queue_items_status"));
+        assert!(index_exists(&db_path, "idx_queue_items_position"));
+        assert!(index_exists(&db_path, "idx_events_timestamp"));
+        assert!(index_exists(&db_path, "idx_events_type"));
+        assert!(index_exists(&db_path, "idx_events_entity"));
+        assert!(index_exists(&db_path, "idx_events_entity_timestamp"));
+        assert!(index_exists(&db_path, "idx_alerts_workspace_id"));
+        assert!(index_exists(&db_path, "idx_alerts_agent_id"));
+        assert!(index_exists(&db_path, "idx_alerts_is_resolved"));
+        assert!(index_exists(&db_path, "idx_alerts_severity"));
+        assert!(index_exists(&db_path, "idx_transcripts_agent_id"));
+        assert!(index_exists(&db_path, "idx_transcripts_captured_at"));
+        assert!(index_exists(&db_path, "idx_transcripts_hash"));
+        assert!(index_exists(&db_path, "idx_approvals_agent_id"));
+        assert!(index_exists(&db_path, "idx_approvals_status"));
+
+        // Triggers
+        assert!(trigger_exists(&db_path, "update_nodes_timestamp"));
+        assert!(trigger_exists(&db_path, "update_workspaces_timestamp"));
+        assert!(trigger_exists(&db_path, "update_agents_timestamp"));
+        assert!(trigger_exists(&db_path, "update_accounts_timestamp"));
+
+        let rolled_back = match db.migrate_down(1) {
+            Ok(count) => count,
+            Err(err) => panic!("migrate_down(1): {err}"),
+        };
+        assert_eq!(rolled_back, 1);
+
+        let version_after_down = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after down: {err}"),
+        };
+        assert_eq!(version_after_down, 0);
+
+        // Tables removed
+        assert!(!table_exists(&db_path, "nodes"));
+        assert!(!table_exists(&db_path, "workspaces"));
+        assert!(!table_exists(&db_path, "accounts"));
+        assert!(!table_exists(&db_path, "agents"));
+        assert!(!table_exists(&db_path, "queue_items"));
+        assert!(!table_exists(&db_path, "events"));
+        assert!(!table_exists(&db_path, "alerts"));
+        assert!(!table_exists(&db_path, "transcripts"));
+        assert!(!table_exists(&db_path, "approvals"));
+
+        // Indexes removed
+        assert!(!index_exists(&db_path, "idx_nodes_name"));
+        assert!(!index_exists(&db_path, "idx_nodes_status"));
+        assert!(!index_exists(&db_path, "idx_workspaces_node_id"));
+        assert!(!index_exists(&db_path, "idx_workspaces_status"));
+        assert!(!index_exists(&db_path, "idx_workspaces_name"));
+        assert!(!index_exists(&db_path, "idx_accounts_provider"));
+        assert!(!index_exists(&db_path, "idx_accounts_is_active"));
+        assert!(!index_exists(&db_path, "idx_accounts_cooldown"));
+        assert!(!index_exists(&db_path, "idx_agents_workspace_id"));
+        assert!(!index_exists(&db_path, "idx_agents_state"));
+        assert!(!index_exists(&db_path, "idx_agents_account_id"));
+        assert!(!index_exists(&db_path, "idx_agents_type"));
+        assert!(!index_exists(&db_path, "idx_queue_items_agent_id"));
+        assert!(!index_exists(&db_path, "idx_queue_items_status"));
+        assert!(!index_exists(&db_path, "idx_queue_items_position"));
+        assert!(!index_exists(&db_path, "idx_events_timestamp"));
+        assert!(!index_exists(&db_path, "idx_events_type"));
+        assert!(!index_exists(&db_path, "idx_events_entity"));
+        assert!(!index_exists(&db_path, "idx_events_entity_timestamp"));
+        assert!(!index_exists(&db_path, "idx_alerts_workspace_id"));
+        assert!(!index_exists(&db_path, "idx_alerts_agent_id"));
+        assert!(!index_exists(&db_path, "idx_alerts_is_resolved"));
+        assert!(!index_exists(&db_path, "idx_alerts_severity"));
+        assert!(!index_exists(&db_path, "idx_transcripts_agent_id"));
+        assert!(!index_exists(&db_path, "idx_transcripts_captured_at"));
+        assert!(!index_exists(&db_path, "idx_transcripts_hash"));
+        assert!(!index_exists(&db_path, "idx_approvals_agent_id"));
+        assert!(!index_exists(&db_path, "idx_approvals_status"));
+
+        // Triggers removed
+        assert!(!trigger_exists(&db_path, "update_nodes_timestamp"));
+        assert!(!trigger_exists(&db_path, "update_workspaces_timestamp"));
+        assert!(!trigger_exists(&db_path, "update_agents_timestamp"));
+        assert!(!trigger_exists(&db_path, "update_accounts_timestamp"));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn migration_006_embedded_sql_matches_go_files() {
+        let migration = match MIGRATIONS.iter().find(|m| m.version == 6) {
+            Some(migration) => migration,
+            None => panic!("migration 006 not embedded"),
+        };
+
+        let up = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/006_mail_and_file_locks.up.sql"
+        ));
+        let down = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/006_mail_and_file_locks.down.sql"
+        ));
+
+        assert_eq!(migration.up_sql, up);
+        assert_eq!(migration.down_sql, down);
+    }
+
+    #[test]
+    fn migration_006_up_down_creates_and_removes_mail_and_file_lock_schema() {
+        let db_path = temp_db_path("migration-006");
+        let mut db = match Db::open(Config::new(&db_path)) {
+            Ok(db) => db,
+            Err(err) => panic!("open db: {err}"),
+        };
+
+        if let Err(err) = db.migrate_to(6) {
+            panic!("migrate_to(6): {err}");
+        }
+        let version_after_up = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after up: {err}"),
+        };
+        assert_eq!(version_after_up, 6);
+
+        assert!(table_exists(&db_path, "mail_threads"));
+        assert!(table_exists(&db_path, "mail_messages"));
+        assert!(table_exists(&db_path, "file_locks"));
+        assert!(index_exists(&db_path, "idx_mail_threads_workspace_id"));
+        assert!(index_exists(&db_path, "idx_mail_messages_thread_id"));
+        assert!(index_exists(&db_path, "idx_mail_messages_recipient"));
+        assert!(index_exists(&db_path, "idx_mail_messages_unread"));
+        assert!(index_exists(&db_path, "idx_file_locks_active"));
+        assert!(index_exists(&db_path, "idx_file_locks_path"));
+
+        let rolled_back = match db.migrate_down(1) {
+            Ok(count) => count,
+            Err(err) => panic!("migrate_down(1): {err}"),
+        };
+        assert_eq!(rolled_back, 1);
+
+        let version_after_down = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after down: {err}"),
+        };
+        assert_eq!(version_after_down, 5);
+
+        assert!(!table_exists(&db_path, "mail_threads"));
+        assert!(!table_exists(&db_path, "mail_messages"));
+        assert!(!table_exists(&db_path, "file_locks"));
+        assert!(!index_exists(&db_path, "idx_mail_threads_workspace_id"));
+        assert!(!index_exists(&db_path, "idx_mail_messages_thread_id"));
+        assert!(!index_exists(&db_path, "idx_mail_messages_recipient"));
+        assert!(!index_exists(&db_path, "idx_mail_messages_unread"));
+        assert!(!index_exists(&db_path, "idx_file_locks_active"));
+        assert!(!index_exists(&db_path, "idx_file_locks_path"));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn migration_002_embedded_sql_matches_go_files() {
+        let migration = match MIGRATIONS.iter().find(|m| m.version == 2) {
+            Some(migration) => migration,
+            None => panic!("migration 002 not embedded"),
+        };
+
+        let up = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/002_node_connection_prefs.up.sql"
+        ));
+        let down = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/002_node_connection_prefs.down.sql"
+        ));
+
+        assert_eq!(migration.up_sql, up);
+        assert_eq!(migration.down_sql, down);
+    }
+
+    #[test]
+    fn migration_002_up_down_creates_and_removes_node_connection_prefs() {
+        let db_path = temp_db_path("migration-002");
+        let mut db = match Db::open(Config::new(&db_path)) {
+            Ok(db) => db,
+            Err(err) => panic!("open db: {err}"),
+        };
+
+        if let Err(err) = db.migrate_to(2) {
+            panic!("migrate_to(2): {err}");
+        }
+        let version_after_up = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after up: {err}"),
+        };
+        assert_eq!(version_after_up, 2);
+
+        assert!(table_exists(&db_path, "nodes"));
+        assert!(column_exists(&db_path, "nodes", "ssh_agent_forwarding"));
+        assert!(column_exists(&db_path, "nodes", "ssh_proxy_jump"));
+        assert!(column_exists(&db_path, "nodes", "ssh_control_master"));
+        assert!(column_exists(&db_path, "nodes", "ssh_control_path"));
+        assert!(column_exists(&db_path, "nodes", "ssh_control_persist"));
+        assert!(column_exists(&db_path, "nodes", "ssh_timeout_seconds"));
+
+        let rolled_back = match db.migrate_down(1) {
+            Ok(count) => count,
+            Err(err) => panic!("migrate_down(1): {err}"),
+        };
+        assert_eq!(rolled_back, 1);
+
+        let version_after_down = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after down: {err}"),
+        };
+        assert_eq!(version_after_down, 1);
+
+        assert!(table_exists(&db_path, "nodes"));
+        assert!(!column_exists(&db_path, "nodes", "ssh_agent_forwarding"));
+        assert!(!column_exists(&db_path, "nodes", "ssh_proxy_jump"));
+        assert!(!column_exists(&db_path, "nodes", "ssh_control_master"));
+        assert!(!column_exists(&db_path, "nodes", "ssh_control_path"));
+        assert!(!column_exists(&db_path, "nodes", "ssh_control_persist"));
+        assert!(!column_exists(&db_path, "nodes", "ssh_timeout_seconds"));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn migration_005_embedded_sql_matches_go_files() {
+        let migration = match MIGRATIONS.iter().find(|m| m.version == 5) {
+            Some(migration) => migration,
+            None => panic!("migration 005 not embedded"),
+        };
+
+        let up = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/005_port_allocations.up.sql"
+        ));
+        let down = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/005_port_allocations.down.sql"
+        ));
+
+        assert_eq!(migration.up_sql, up);
+        assert_eq!(migration.down_sql, down);
+    }
+
+    #[test]
+    fn migration_005_up_down_creates_and_removes_port_allocation_schema() {
+        let db_path = temp_db_path("migration-005");
+        let mut db = match Db::open(Config::new(&db_path)) {
+            Ok(db) => db,
+            Err(err) => panic!("open db: {err}"),
+        };
+
+        if let Err(err) = db.migrate_to(5) {
+            panic!("migrate_to(5): {err}");
+        }
+        let version_after_up = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after up: {err}"),
+        };
+        assert_eq!(version_after_up, 5);
+
+        assert!(table_exists(&db_path, "port_allocations"));
+        assert!(index_exists(&db_path, "idx_port_allocations_agent"));
+        assert!(index_exists(&db_path, "idx_port_allocations_node"));
+
+        let rolled_back = match db.migrate_down(1) {
+            Ok(count) => count,
+            Err(err) => panic!("migrate_down(1): {err}"),
+        };
+        assert_eq!(rolled_back, 1);
+
+        let version_after_down = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after down: {err}"),
+        };
+        assert_eq!(version_after_down, 4);
+
+        assert!(!table_exists(&db_path, "port_allocations"));
+        assert!(!index_exists(&db_path, "idx_port_allocations_agent"));
+        assert!(!index_exists(&db_path, "idx_port_allocations_node"));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn migration_003_embedded_sql_matches_go_files() {
+        let migration = match MIGRATIONS.iter().find(|m| m.version == 3) {
+            Some(migration) => migration,
+            None => panic!("migration 003 not embedded"),
+        };
+
+        let up = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/003_queue_item_attempts.up.sql"
+        ));
+        let down = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/003_queue_item_attempts.down.sql"
+        ));
+
+        assert_eq!(migration.up_sql, up);
+        assert_eq!(migration.down_sql, down);
+    }
+
+    #[test]
+    fn migration_003_up_down_creates_and_removes_attempts_column() {
+        let db_path = temp_db_path("migration-003");
+        let mut db = match Db::open(Config::new(&db_path)) {
+            Ok(db) => db,
+            Err(err) => panic!("open db: {err}"),
+        };
+
+        if let Err(err) = db.migrate_to(3) {
+            panic!("migrate_to(3): {err}");
+        }
+        let version_after_up = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after up: {err}"),
+        };
+        assert_eq!(version_after_up, 3);
+
+        assert!(table_exists(&db_path, "queue_items"));
+        assert!(column_exists(&db_path, "queue_items", "attempts"));
+
+        let rolled_back = match db.migrate_down(1) {
+            Ok(count) => count,
+            Err(err) => panic!("migrate_down(1): {err}"),
+        };
+        assert_eq!(rolled_back, 1);
+
+        let version_after_down = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after down: {err}"),
+        };
+        assert_eq!(version_after_down, 2);
+
+        assert!(table_exists(&db_path, "queue_items"));
+        assert!(!column_exists(&db_path, "queue_items", "attempts"));
+        assert!(index_exists(&db_path, "idx_queue_items_agent_id"));
+        assert!(index_exists(&db_path, "idx_queue_items_status"));
+        assert!(index_exists(&db_path, "idx_queue_items_position"));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn migration_004_embedded_sql_matches_go_files() {
+        let migration = match MIGRATIONS.iter().find(|m| m.version == 4) {
+            Some(migration) => migration,
+            None => panic!("migration 004 not embedded"),
+        };
+
+        let up = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/004_usage_history.up.sql"
+        ));
+        let down = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../internal/db/migrations/004_usage_history.down.sql"
+        ));
+
+        assert_eq!(migration.up_sql, up);
+        assert_eq!(migration.down_sql, down);
+    }
+
+    #[test]
+    fn migration_004_up_down_creates_and_removes_usage_schema() {
+        let db_path = temp_db_path("migration-004");
+        let mut db = match Db::open(Config::new(&db_path)) {
+            Ok(db) => db,
+            Err(err) => panic!("open db: {err}"),
+        };
+
+        if let Err(err) = db.migrate_to(4) {
+            panic!("migrate_to(4): {err}");
+        }
+        let version_after_up = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after up: {err}"),
+        };
+        assert_eq!(version_after_up, 4);
+
+        assert!(table_exists(&db_path, "usage_records"));
+        assert!(table_exists(&db_path, "daily_usage_cache"));
+        assert!(index_exists(&db_path, "idx_usage_records_account_id"));
+        assert!(index_exists(&db_path, "idx_usage_records_provider_time"));
+        assert!(index_exists(&db_path, "idx_daily_usage_cache_provider"));
+
+        let rolled_back = match db.migrate_down(1) {
+            Ok(count) => count,
+            Err(err) => panic!("migrate_down(1): {err}"),
+        };
+        assert_eq!(rolled_back, 1);
+
+        let version_after_down = match db.schema_version() {
+            Ok(version) => version,
+            Err(err) => panic!("schema_version after down: {err}"),
+        };
+        assert_eq!(version_after_down, 3);
+
+        assert!(!table_exists(&db_path, "usage_records"));
+        assert!(!table_exists(&db_path, "daily_usage_cache"));
+        assert!(!index_exists(&db_path, "idx_usage_records_account_id"));
+        assert!(!index_exists(&db_path, "idx_usage_records_provider_time"));
+        assert!(!index_exists(&db_path, "idx_daily_usage_cache_provider"));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    fn temp_db_path(tag: &str) -> PathBuf {
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
+        };
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "forge-db-{tag}-{nanos}-{}.sqlite",
+            std::process::id()
+        ));
+        path
+    }
+
+    fn table_exists(db_path: &Path, table: &str) -> bool {
+        object_exists(db_path, "table", table)
+    }
+
+    fn index_exists(db_path: &Path, index: &str) -> bool {
+        object_exists(db_path, "index", index)
+    }
+
+    fn trigger_exists(db_path: &Path, trigger: &str) -> bool {
+        object_exists(db_path, "trigger", trigger)
+    }
+
+    fn column_exists(db_path: &Path, table: &str, column: &str) -> bool {
+        let conn = match Connection::open(db_path) {
+            Ok(conn) => conn,
+            Err(err) => panic!("open sqlite connection {}: {err}", db_path.display()),
+        };
+        let sql = format!("PRAGMA table_info({})", table);
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(stmt) => stmt,
+            Err(err) => panic!("prepare table_info for {table}: {err}"),
+        };
+        let rows = match stmt.query_map([], |row| row.get::<_, String>(1)) {
+            Ok(rows) => rows,
+            Err(err) => panic!("query table_info for {table}: {err}"),
+        };
+        for row in rows {
+            let col_name = match row {
+                Ok(name) => name,
+                Err(err) => panic!("read column name: {err}"),
+            };
+            if col_name == column {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn object_exists(db_path: &Path, object_type: &str, name: &str) -> bool {
+        let conn = match Connection::open(db_path) {
+            Ok(conn) => conn,
+            Err(err) => panic!("open sqlite connection {}: {err}", db_path.display()),
+        };
+        let exists: i64 = match conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = ?1 AND name = ?2)",
+            params![object_type, name],
+            |row| row.get(0),
+        ) {
+            Ok(exists) => exists,
+            Err(err) => panic!("sqlite_master lookup ({object_type}/{name}): {err}"),
+        };
+        exists == 1
     }
 }
