@@ -20,12 +20,22 @@ type stubThreadProvider struct {
 
 func (s *stubThreadProvider) Topics() ([]data.TopicInfo, error) {
 	out := make([]data.TopicInfo, len(s.topics))
-	copy(out, s.topics)
+	for i := range s.topics {
+		out[i] = s.topics[i]
+		if out[i].MessageCount == 0 {
+			if msgs, ok := s.byTopic[out[i].Name]; ok {
+				out[i].MessageCount = len(msgs)
+			}
+		}
+	}
 	return out, nil
 }
 
-func (s *stubThreadProvider) Messages(topic string, _ data.MessageFilter) ([]fmail.Message, error) {
+func (s *stubThreadProvider) Messages(topic string, opts data.MessageFilter) ([]fmail.Message, error) {
 	msgs := append([]fmail.Message(nil), s.byTopic[topic]...)
+	if opts.Limit > 0 && len(msgs) > opts.Limit {
+		msgs = msgs[len(msgs)-opts.Limit:]
+	}
 	return msgs, nil
 }
 
@@ -33,8 +43,11 @@ func (s *stubThreadProvider) DMConversations(string) ([]data.DMConversation, err
 	return nil, nil
 }
 
-func (s *stubThreadProvider) DMs(agent string, _ data.MessageFilter) ([]fmail.Message, error) {
+func (s *stubThreadProvider) DMs(agent string, opts data.MessageFilter) ([]fmail.Message, error) {
 	msgs := append([]fmail.Message(nil), s.byTopic["@"+agent]...)
+	if opts.Limit > 0 && len(msgs) > opts.Limit {
+		msgs = msgs[len(msgs)-opts.Limit:]
+	}
 	return msgs, nil
 }
 
@@ -123,7 +136,7 @@ func TestThreadViewPaginationLoadsOlderAtTop(t *testing.T) {
 		msgs = append(msgs, fmail.Message{ID: id, From: "a", To: "task", Time: base.Add(time.Duration(i) * time.Second), Body: "m"})
 	}
 	provider := &stubThreadProvider{
-		topics:  []data.TopicInfo{{Name: "task", LastActivity: msgs[len(msgs)-1].Time}},
+		topics:  []data.TopicInfo{{Name: "task", LastActivity: msgs[len(msgs)-1].Time, MessageCount: len(msgs)}},
 		byTopic: map[string][]fmail.Message{"task": msgs},
 	}
 
@@ -132,13 +145,16 @@ func TestThreadViewPaginationLoadsOlderAtTop(t *testing.T) {
 	v.lastHeight = 30
 	v.applyLoaded(mustLoad(v))
 
-	require.Equal(t, 1205-threadPageSize, v.windowStart)
-	require.Len(t, v.windowMessages(), threadPageSize)
+	require.Equal(t, threadPageSize, len(v.allMsgs))
+	require.Equal(t, len(msgs), v.total)
 
 	v.selected = 0
-	loaded := v.tryLoadOlderOnUp()
-	require.True(t, loaded)
-	require.Equal(t, 1205-(threadPageSize*2), v.windowStart)
+	cmd := v.maybeLoadOlder()
+	require.NotNil(t, cmd)
+	loadedMsg, ok := cmd().(threadLoadedMsg)
+	require.True(t, ok)
+	v.applyLoaded(loadedMsg)
+	require.Equal(t, threadPageSize*2, len(v.allMsgs))
 }
 
 func TestThreadViewPendingNewCountWhenScrolledUp(t *testing.T) {
@@ -148,7 +164,7 @@ func TestThreadViewPendingNewCountWhenScrolledUp(t *testing.T) {
 		msgs = append(msgs, fmail.Message{ID: fmt.Sprintf("20260209-0800%02d-0001", i), From: "a", To: "task", Time: base.Add(time.Duration(i) * time.Second), Body: "line"})
 	}
 	provider := &stubThreadProvider{
-		topics:  []data.TopicInfo{{Name: "task", LastActivity: msgs[len(msgs)-1].Time}},
+		topics:  []data.TopicInfo{{Name: "task", LastActivity: msgs[len(msgs)-1].Time, MessageCount: len(msgs)}},
 		byTopic: map[string][]fmail.Message{"task": msgs},
 	}
 
@@ -161,7 +177,7 @@ func TestThreadViewPendingNewCountWhenScrolledUp(t *testing.T) {
 	next := append([]fmail.Message(nil), msgs...)
 	next = append(next, fmail.Message{ID: "20260209-081000-0001", From: "a", To: "task", Time: base.Add(100 * time.Second), Body: "new"})
 	provider.byTopic["task"] = next
-	provider.topics = []data.TopicInfo{{Name: "task", LastActivity: next[len(next)-1].Time}}
+	provider.topics = []data.TopicInfo{{Name: "task", LastActivity: next[len(next)-1].Time, MessageCount: len(next)}}
 
 	v.applyLoaded(mustLoad(v))
 	require.Greater(t, v.pendingNew, 0)

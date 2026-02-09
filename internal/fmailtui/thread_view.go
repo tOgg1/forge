@@ -40,6 +40,7 @@ type threadLoadedMsg struct {
 	topics []data.TopicInfo
 	topic  string
 	msgs   []fmail.Message
+	total  int
 	err    error
 }
 
@@ -68,8 +69,9 @@ type threadView struct {
 
 	mode threadMode
 
+	limit        int
+	total        int
 	allMsgs      []fmail.Message
-	windowStart  int
 	rows         []threadRow
 	rowIndexByID map[string]int
 
@@ -94,6 +96,7 @@ func newThreadView(root string, provider data.MessageProvider) *threadView {
 		root:           root,
 		provider:       provider,
 		mode:           threadModeThreaded,
+		limit:          threadPageSize,
 		collapsed:      make(map[string]bool),
 		expandedBodies: make(map[string]bool),
 		readMarkers:    make(map[string]string),
@@ -114,10 +117,12 @@ func (v *threadView) SetTarget(target string) tea.Cmd {
 		return v.loadCmd()
 	}
 	v.topic = next
-	v.windowStart = 0
+	v.limit = threadPageSize
+	v.total = 0
 	v.pendingNew = 0
 	v.selected = 0
 	v.top = 0
+	v.initialized = false
 	return v.loadCmd()
 }
 
@@ -169,8 +174,8 @@ func (v *threadView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		v.moveSelection(1)
 		return nil
 	case "k", "up":
-		if v.tryLoadOlderOnUp() {
-			return nil
+		if cmd := v.maybeLoadOlder(); cmd != nil {
+			return cmd
 		}
 		v.moveSelection(-1)
 		return nil
@@ -212,16 +217,21 @@ func (v *threadView) switchTopic(delta int) tea.Cmd {
 	if len(v.topics) == 0 {
 		return nil
 	}
+	if strings.HasPrefix(strings.TrimSpace(v.topic), "@") {
+		return nil
+	}
 	idx := v.topicIndex(v.topic)
 	if idx < 0 {
 		idx = 0
 	}
 	idx = (idx + delta + len(v.topics)) % len(v.topics)
 	v.topic = v.topics[idx].Name
-	v.windowStart = 0
+	v.limit = threadPageSize
+	v.total = 0
 	v.pendingNew = 0
 	v.selected = 0
 	v.top = 0
+	v.initialized = false
 	return v.loadCmd()
 }
 
@@ -271,24 +281,24 @@ func (v *threadView) pageStep() int {
 	return 6
 }
 
-func (v *threadView) tryLoadOlderOnUp() bool {
-	if v.selected > 0 || v.windowStart <= 0 || len(v.allMsgs) == 0 {
-		return false
+func (v *threadView) maybeLoadOlder() tea.Cmd {
+	if v.selected > 0 {
+		return nil
 	}
-	anchorID := v.selectedID()
-	prevStart := v.windowStart
-	v.windowStart = maxInt(0, v.windowStart-threadPageSize)
-	if v.windowStart == prevStart {
-		return false
+	if v.limit <= 0 {
+		v.limit = threadPageSize
 	}
-	v.rebuildRows(anchorID, false)
-	idx := v.indexForID(anchorID)
-	if idx > 0 {
-		v.selected = idx - 1
+	// If we know the total and already have it, nothing to do.
+	if v.total > 0 && len(v.allMsgs) >= v.total {
+		return nil
 	}
-	v.ensureVisible()
-	v.advanceReadMarker()
-	return true
+	// If we don't know total, assume "no more" when provider returned fewer than requested.
+	if v.total == 0 && len(v.allMsgs) < v.limit {
+		return nil
+	}
+
+	v.limit += threadPageSize
+	return v.loadCmd()
 }
 
 func (v *threadView) jumpBottom() {
@@ -333,6 +343,7 @@ func (v *threadView) applyLoaded(msg threadLoadedMsg) {
 	prevAnchor := v.selectedID()
 	wasAtBottom := v.isAtBottom()
 	prevNewest := v.newestID
+	prevTotal := v.total
 
 	v.topics = sortTopicsByActivity(msg.topics)
 	if strings.TrimSpace(msg.topic) != "" {
@@ -343,11 +354,13 @@ func (v *threadView) applyLoaded(msg threadLoadedMsg) {
 
 	v.allMsgs = append([]fmail.Message(nil), msg.msgs...)
 	if !v.initialized || v.topic != prevTopic {
-		v.windowStart = initialWindowStart(len(v.allMsgs))
+		v.limit = maxInt(threadPageSize, v.limit)
+		v.total = msg.total
+		v.pendingNew = 0
 		v.initialized = true
 		prevAnchor = ""
 	}
-	v.windowStart = clampInt(v.windowStart, 0, maxInt(0, len(v.allMsgs)-1))
+	v.total = msg.total
 
 	if len(v.allMsgs) > 0 {
 		v.newestID = v.allMsgs[len(v.allMsgs)-1].ID
@@ -355,8 +368,18 @@ func (v *threadView) applyLoaded(msg threadLoadedMsg) {
 		v.newestID = ""
 	}
 
-	if prevNewest != "" && v.newestID != "" && v.newestID > prevNewest && !wasAtBottom {
-		v.pendingNew += countNewerMessages(v.allMsgs, prevNewest)
+	// Local-only init: on first entry/topic switch, treat current tail as read.
+	if strings.TrimSpace(v.topic) != "" && strings.TrimSpace(v.readMarkers[v.topic]) == "" && v.newestID != "" {
+		v.readMarkers[v.topic] = v.newestID
+	}
+
+	if prevTopic == v.topic && !wasAtBottom {
+		if v.total > 0 && prevTotal > 0 && v.total > prevTotal {
+			v.pendingNew += v.total - prevTotal
+		} else if prevNewest != "" && v.newestID != "" && v.newestID > prevNewest {
+			// Fallback for providers that don't populate total reliably.
+			v.pendingNew += countNewerMessages(v.allMsgs, prevNewest)
+		}
 	}
 
 	preferBottom := wasAtBottom && prevTopic == v.topic
@@ -375,7 +398,16 @@ func (v *threadView) renderHeader(width int, palette styles.Theme) string {
 	}
 	participants := v.participantCount(topic)
 	left := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Chrome.Breadcrumb)).Render(topic)
-	right := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render(fmt.Sprintf("%d messages  %d participants", len(v.allMsgs), participants))
+	total := v.total
+	if total <= 0 {
+		total = len(v.allMsgs)
+	}
+	loaded := len(v.allMsgs)
+	countLabel := fmt.Sprintf("%d messages", total)
+	if total > 0 && loaded > 0 && loaded < total {
+		countLabel = fmt.Sprintf("%d/%d messages", loaded, total)
+	}
+	right := lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Base.Muted)).Render(fmt.Sprintf("%s  %d participants", countLabel, participants))
 
 	gap := maxInt(1, width-lipgloss.Width(left)-lipgloss.Width(right))
 	return truncateVis(left+strings.Repeat(" ", gap)+right, width)
@@ -517,6 +549,10 @@ func (v *threadView) loadCmd() tea.Cmd {
 		}
 	}
 	currentTopic := strings.TrimSpace(v.topic)
+	limit := v.limit
+	if limit <= 0 {
+		limit = threadPageSize
+	}
 	return func() tea.Msg {
 		now := time.Now().UTC()
 		topics, err := v.provider.Topics()
@@ -529,19 +565,38 @@ func (v *threadView) loadCmd() tea.Cmd {
 		if topic == "" && len(sortedTopics) > 0 {
 			topic = sortedTopics[0].Name
 		}
-		if topic != "" && !topicExists(sortedTopics, topic) && len(sortedTopics) > 0 {
+		if topic != "" && !strings.HasPrefix(topic, "@") && !topicExists(sortedTopics, topic) && len(sortedTopics) > 0 {
 			topic = sortedTopics[0].Name
 		}
 
 		msgs := []fmail.Message{}
+		total := 0
 		if topic != "" {
-			msgs, err = v.provider.Messages(topic, data.MessageFilter{})
-			if err != nil {
-				return threadLoadedMsg{now: now, topics: sortedTopics, topic: topic, err: err}
+			if strings.HasPrefix(topic, "@") {
+				msgs, err = v.provider.DMs(strings.TrimPrefix(topic, "@"), data.MessageFilter{Limit: limit})
+				if err != nil {
+					return threadLoadedMsg{now: now, topics: sortedTopics, topic: topic, err: err}
+				}
+				total = len(msgs)
+			} else {
+				for i := range sortedTopics {
+					if sortedTopics[i].Name == topic {
+						total = sortedTopics[i].MessageCount
+						break
+					}
+				}
+				opts := data.MessageFilter{}
+				if total > 1000 {
+					opts.Limit = limit
+				}
+				msgs, err = v.provider.Messages(topic, opts)
+				if err != nil {
+					return threadLoadedMsg{now: now, topics: sortedTopics, topic: topic, err: err}
+				}
 			}
 		}
 
-		return threadLoadedMsg{now: now, topics: sortedTopics, topic: topic, msgs: msgs}
+		return threadLoadedMsg{now: now, topics: sortedTopics, topic: topic, msgs: msgs, total: total}
 	}
 }
 
@@ -552,7 +607,7 @@ func threadTickCmd() tea.Cmd {
 }
 
 func (v *threadView) rebuildRows(anchorID string, preferBottom bool) {
-	msgs := v.windowMessages()
+	msgs := v.allMsgs
 	rows := make([]threadRow, 0, len(msgs))
 
 	if v.mode == threadModeFlat {
@@ -576,9 +631,10 @@ func (v *threadView) rebuildRows(anchorID string, preferBottom bool) {
 				if v.hiddenByCollapsedAncestor(node) {
 					continue
 				}
+
 				depth := minInt(node.Depth, threadMaxDepth)
-				overflow := node.Depth > threadMaxDepth
-				connector := v.nodeConnector(node)
+				connector, clamped := prefixForNode(node, threadMaxDepth)
+				overflow := node.Depth > threadMaxDepth || clamped
 				crossTarget := ""
 				if threading.IsCrossTargetReply(node) && node.Parent != nil && node.Parent.Message != nil {
 					crossTarget = strings.TrimSpace(node.Parent.Message.To)
@@ -625,19 +681,6 @@ func (v *threadView) rebuildRows(anchorID string, preferBottom bool) {
 	}
 }
 
-func (v *threadView) windowMessages() []fmail.Message {
-	if len(v.allMsgs) == 0 {
-		return nil
-	}
-	start := clampInt(v.windowStart, 0, maxInt(0, len(v.allMsgs)-1))
-	if start >= len(v.allMsgs) {
-		return nil
-	}
-	out := make([]fmail.Message, len(v.allMsgs[start:]))
-	copy(out, v.allMsgs[start:])
-	return out
-}
-
 func (v *threadView) hiddenByCollapsedAncestor(node *threading.ThreadNode) bool {
 	for p := node.Parent; p != nil; p = p.Parent {
 		if p.Message == nil {
@@ -650,54 +693,67 @@ func (v *threadView) hiddenByCollapsedAncestor(node *threading.ThreadNode) bool 
 	return false
 }
 
-func (v *threadView) nodeConnector(node *threading.ThreadNode) string {
+func prefixForNode(node *threading.ThreadNode, maxDepth int) (string, bool) {
 	if node == nil || node.Message == nil || node.Parent == nil {
-		return ""
+		return "", false
 	}
-	ancestors := ancestorChain(node)
-	parts := make([]string, 0, len(ancestors))
-	for _, anc := range ancestors {
-		if anc.Parent == nil {
+
+	// Build path root..node for stable connector rendering.
+	path := make([]*threading.ThreadNode, 0, 8)
+	for cur := node; cur != nil; cur = cur.Parent {
+		path = append(path, cur)
+	}
+	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
+		path[i], path[j] = path[j], path[i]
+	}
+
+	depth := len(path) - 1
+	if depth <= 0 {
+		return "", false
+	}
+
+	clamped := maxDepth > 0 && depth > maxDepth
+	visibleDepth := depth
+	if maxDepth > 0 && visibleDepth > maxDepth {
+		visibleDepth = maxDepth
+	}
+	start := depth - visibleDepth
+
+	hasNextSibling := func(parent, child *threading.ThreadNode) bool {
+		if parent == nil || child == nil || parent.Message == nil || child.Message == nil {
+			return false
+		}
+		siblings := sortedChildren(parent.Children)
+		if len(siblings) == 0 {
+			return false
+		}
+		last := siblings[len(siblings)-1]
+		if last == nil || last.Message == nil {
+			return false
+		}
+		return last.Message.ID != child.Message.ID
+	}
+
+	parts := make([]string, 0, visibleDepth)
+	for i := 0; i < visibleDepth; i++ {
+		parent := path[start+i]
+		child := path[start+i+1]
+		if i == visibleDepth-1 {
+			if hasNextSibling(parent, child) {
+				parts = append(parts, "├─ ")
+			} else {
+				parts = append(parts, "└─ ")
+			}
 			continue
 		}
-		if v.isLastChild(anc) {
-			parts = append(parts, "   ")
-		} else {
+		if hasNextSibling(parent, child) {
 			parts = append(parts, "│  ")
+		} else {
+			parts = append(parts, "   ")
 		}
 	}
-	if v.isLastChild(node) {
-		parts = append(parts, "└─ ")
-	} else {
-		parts = append(parts, "├─ ")
-	}
-	return strings.Join(parts, "")
-}
 
-func ancestorChain(node *threading.ThreadNode) []*threading.ThreadNode {
-	out := make([]*threading.ThreadNode, 0, 8)
-	for cur := node.Parent; cur != nil; cur = cur.Parent {
-		out = append(out, cur)
-	}
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	return out
-}
-
-func (v *threadView) isLastChild(node *threading.ThreadNode) bool {
-	if node == nil || node.Parent == nil {
-		return true
-	}
-	siblings := sortedChildren(node.Parent.Children)
-	if len(siblings) == 0 {
-		return true
-	}
-	last := siblings[len(siblings)-1]
-	if last == nil || last.Message == nil || node.Message == nil {
-		return true
-	}
-	return last.Message.ID == node.Message.ID
+	return strings.Join(parts, ""), clamped
 }
 
 func sortedChildren(children []*threading.ThreadNode) []*threading.ThreadNode {
