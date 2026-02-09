@@ -1,6 +1,6 @@
 {
   "schema_version": "sv.tasks.v1",
-  "generated_at": "2026-02-09T16:48:14.401393Z",
+  "generated_at": "2026-02-09T16:48:29.293443Z",
   "tasks": [
     {
       "id": "forge-pwe",
@@ -8,17 +8,17 @@
       "status": "in_progress",
       "priority": "P1",
       "created_at": "2026-02-09T15:36:40.490537Z",
-      "updated_at": "2026-02-09T16:48:14.386091Z",
+      "updated_at": "2026-02-09T16:48:29.283798Z",
       "created_by": "codex",
-      "updated_by": "rust-full-codex-1",
+      "updated_by": "rust-full-codex-6",
       "body": "Scope:\n- Capture fixtures for loop memory and work pointer semantics.\n\nDeliverables:\n- Golden outputs and persisted-state checks for mem/work flows.\n\nAcceptance:\n- Prompt injection relevant state paths validated.\n\nTests:\n- DB-backed integration tests.",
       "epic": "forge-180",
       "project": "prj-vr0104gr",
       "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
       "workspace": "forge",
       "branch": "main",
-      "started_at": "2026-02-09T16:48:14.386091Z",
-      "started_by": "rust-full-codex-1",
+      "started_at": "2026-02-09T16:48:29.283798Z",
+      "started_by": "rust-full-codex-6",
       "comments_count": 0
     },
     {
@@ -27,9 +27,9 @@
       "status": "closed",
       "priority": "P1",
       "created_at": "2026-02-09T15:36:40.783556Z",
-      "updated_at": "2026-02-09T16:48:06.208323Z",
+      "updated_at": "2026-02-09T16:48:25.143831Z",
       "created_by": "codex",
-      "updated_by": "rust-full-codex-1",
+      "updated_by": "rust-full-codex-6",
       "body": "Scope:\n- Capture non-legacy send/inject behavior including validation and queue impacts.\n\nDeliverables:\n- Golden outputs and side-effect assertions for send/inject flows.\n\nAcceptance:\n- Behavior parity preserved for agent-targeted commands.\n\nTests:\n- Scenario tests with mocked transport/state.",
       "epic": "forge-180",
       "project": "prj-vr0104gr",
@@ -38,9 +38,10 @@
       "branch": "main",
       "started_at": "2026-02-09T16:47:27.945095Z",
       "started_by": "rust-full-codex-1",
-      "closed_at": "2026-02-09T16:48:06.208323Z",
-      "closed_by": "rust-full-codex-1",
-      "comments_count": 0
+      "closed_at": "2026-02-09T16:48:25.143831Z",
+      "closed_by": "rust-full-codex-6",
+      "comments_count": 1,
+      "last_comment_at": "2026-02-09T16:48:21.872455Z"
     },
     {
       "id": "forge-mey",
