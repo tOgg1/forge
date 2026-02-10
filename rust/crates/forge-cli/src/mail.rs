@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use chrono::{DateTime, Duration, Utc};
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -712,6 +713,371 @@ impl MailBackend for FilesystemMailBackend {
         }
         Ok(input)
     }
+}
+
+// ---------------------------------------------------------------------------
+// SQLite backend (forge-db bridge)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct SqliteMailBackend {
+    db_path: PathBuf,
+}
+
+impl SqliteMailBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
+
+    /// Ensure a workspace row exists for the given project key, creating one if needed.
+    fn ensure_workspace(&self, db: &forge_db::Db, project: &str) -> Result<String, String> {
+        let conn = db.conn();
+        // Try to find an existing workspace matching the project key.
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT id FROM workspaces WHERE name = ?1 LIMIT 1",
+                rusqlite::params![project],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        if let Some(id) = existing {
+            return Ok(id);
+        }
+
+        // Create a minimal workspace + node so FKs are satisfied.
+        let node_id = "mail-node";
+        let ws_id = format!("mail-ws-{}", &project[..project.len().min(16)]);
+        let repo_path = format!("mail:{project}");
+        let tmux_session = format!("mail-session:{project}");
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO nodes (id, name, is_local, status) VALUES (?1, ?2, 1, 'online')",
+            rusqlite::params![node_id, "mail-local"],
+        );
+        conn.execute(
+            "INSERT OR IGNORE INTO workspaces (id, name, node_id, repo_path, tmux_session, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'active')",
+            rusqlite::params![ws_id, project, node_id, repo_path, tmux_session],
+        )
+        .map_err(|err| format!("create workspace for mail: {err}"))?;
+        Ok(ws_id)
+    }
+
+    /// Ensure an agent row exists for the sender so FK constraints pass.
+    fn ensure_sender_agent(
+        &self,
+        db: &forge_db::Db,
+        workspace_id: &str,
+        sender: &str,
+    ) -> Result<(), String> {
+        if sender.is_empty() {
+            return Ok(());
+        }
+        let conn = db.conn();
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM agents WHERE id = ?1)",
+                rusqlite::params![sender],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if exists {
+            return Ok(());
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO agents (
+                id, workspace_id, type, tmux_pane,
+                state, state_confidence
+             ) VALUES (?1, ?2, 'generic', '.', 'idle', 'high')",
+            rusqlite::params![sender, workspace_id],
+        )
+        .map_err(|err| format!("create sender agent: {err}"))?;
+        Ok(())
+    }
+
+    /// Get a message's UUID by its rowid.
+    fn uuid_for_rowid(&self, db: &forge_db::Db, rowid: i64) -> Result<String, String> {
+        db.conn()
+            .query_row(
+                "SELECT id FROM mail_messages WHERE rowid = ?1",
+                rusqlite::params![rowid],
+                |row| row.get(0),
+            )
+            .map_err(|err| format!("message m-{rowid} not found: {err}"))
+    }
+
+    /// Convert a DB mail message into CLI MailMessage using rowid as the local ID.
+    fn to_cli_message(
+        &self,
+        db: &forge_db::Db,
+        msg: &forge_db::mail_repository::MailMessage,
+    ) -> Result<MailMessage, String> {
+        let rowid: i64 = db
+            .conn()
+            .query_row(
+                "SELECT rowid FROM mail_messages WHERE id = ?1",
+                rusqlite::params![msg.id],
+                |row| row.get(0),
+            )
+            .map_err(|err| format!("resolve rowid for {}: {err}", msg.id))?;
+
+        Ok(MailMessage {
+            id: rowid,
+            thread_id: if msg.thread_id.is_empty() {
+                None
+            } else {
+                Some(msg.thread_id.clone())
+            },
+            from: msg.sender_agent_id.clone().unwrap_or_default(),
+            subject: msg
+                .subject
+                .clone()
+                .unwrap_or_else(|| "(no subject)".to_string()),
+            body: if msg.body.is_empty() {
+                None
+            } else {
+                Some(msg.body.clone())
+            },
+            created_at: msg.created_at.clone(),
+            importance: if msg.importance.is_empty() || msg.importance == "normal" {
+                None
+            } else {
+                Some(msg.importance.clone())
+            },
+            ack_required: msg.ack_required,
+            read_at: msg.read_at.clone(),
+            acked_at: msg.acked_at.clone(),
+            backend: Some("sqlite".to_string()),
+        })
+    }
+}
+
+impl MailBackend for SqliteMailBackend {
+    fn send_message(&self, req: &MailSendRequest) -> Result<Vec<i64>, String> {
+        if !self.db_path.exists() {
+            return Err(format!("database not found: {}", self.db_path.display()));
+        }
+        let db = self.open_db()?;
+        let workspace_id = self.ensure_workspace(&db, &req.project)?;
+        self.ensure_sender_agent(&db, &workspace_id, &req.from)?;
+        let mail_repo = forge_db::mail_repository::MailRepository::new(&db);
+
+        // Create one thread per send operation.
+        let mut thread = forge_db::mail_repository::MailThread {
+            workspace_id: workspace_id.clone(),
+            subject: req.subject.clone(),
+            ..Default::default()
+        };
+        mail_repo
+            .create_thread(&mut thread)
+            .map_err(|err| format!("create mail thread: {err}"))?;
+
+        let mut ids = Vec::new();
+        for recipient in &req.to {
+            let mut msg = forge_db::mail_repository::MailMessage {
+                thread_id: thread.id.clone(),
+                sender_agent_id: if req.from.is_empty() {
+                    None
+                } else {
+                    Some(req.from.clone())
+                },
+                recipient_type: forge_db::mail_repository::RecipientType::Agent,
+                recipient_id: Some(recipient.clone()),
+                subject: Some(req.subject.clone()),
+                body: req.body.clone(),
+                importance: if req.priority.is_empty() {
+                    "normal".to_string()
+                } else {
+                    req.priority.clone()
+                },
+                ack_required: req.ack_required,
+                ..Default::default()
+            };
+            mail_repo
+                .create_message(&mut msg)
+                .map_err(|err| format!("create mail message: {err}"))?;
+
+            // Retrieve the rowid for the new message.
+            let rowid: i64 = db
+                .conn()
+                .query_row(
+                    "SELECT rowid FROM mail_messages WHERE id = ?1",
+                    rusqlite::params![msg.id],
+                    |row| row.get(0),
+                )
+                .map_err(|err| format!("resolve rowid: {err}"))?;
+            ids.push(rowid);
+        }
+
+        Ok(ids)
+    }
+
+    fn fetch_inbox(&self, req: &MailInboxRequest) -> Result<Vec<MailMessage>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+        let db = self.open_db()?;
+        let mail_repo = forge_db::mail_repository::MailRepository::new(&db);
+
+        let limit = if req.limit > 0 {
+            req.limit as usize
+        } else {
+            50
+        };
+
+        let db_messages = mail_repo
+            .list_inbox("agent", Some(&req.agent), req.unread_only, limit)
+            .map_err(|err| {
+                if err.to_string().contains("no such table") {
+                    return String::new(); // treat as empty
+                }
+                format!("list inbox: {err}")
+            })?;
+
+        let cutoff = parse_since_cutoff(req.since.as_deref())?;
+        let mut messages = Vec::new();
+        for msg in &db_messages {
+            if let Some(since) = cutoff {
+                if let Ok(parsed) = DateTime::parse_from_rfc3339(&msg.created_at) {
+                    if parsed.with_timezone(&Utc) < since {
+                        continue;
+                    }
+                }
+            }
+            messages.push(self.to_cli_message(&db, msg)?);
+        }
+
+        Ok(messages)
+    }
+
+    fn get_message(
+        &self,
+        _project: &str,
+        _agent: &str,
+        message_id: i64,
+    ) -> Result<MailMessage, String> {
+        if !self.db_path.exists() {
+            return Err(format!("message m-{message_id} not found"));
+        }
+        let db = self.open_db()?;
+        let uuid = self.uuid_for_rowid(&db, message_id)?;
+        let mail_repo = forge_db::mail_repository::MailRepository::new(&db);
+        let msg = mail_repo
+            .get_message(&uuid)
+            .map_err(|err| format!("message m-{message_id} not found: {err}"))?;
+        self.to_cli_message(&db, &msg)
+    }
+
+    fn mark_read(&self, _project: &str, _agent: &str, message_id: i64) -> Result<String, String> {
+        let db = self.open_db()?;
+        let uuid = self.uuid_for_rowid(&db, message_id)?;
+        let mail_repo = forge_db::mail_repository::MailRepository::new(&db);
+        mail_repo
+            .mark_read(&uuid)
+            .map_err(|err| format!("mark read: {err}"))?;
+
+        // Fetch the updated read_at timestamp.
+        let msg = mail_repo
+            .get_message(&uuid)
+            .map_err(|err| format!("get message after mark_read: {err}"))?;
+        Ok(msg.read_at.unwrap_or_else(|| Utc::now().to_rfc3339()))
+    }
+
+    fn acknowledge(&self, _project: &str, _agent: &str, message_id: i64) -> Result<String, String> {
+        let db = self.open_db()?;
+        let uuid = self.uuid_for_rowid(&db, message_id)?;
+        let mail_repo = forge_db::mail_repository::MailRepository::new(&db);
+        mail_repo
+            .mark_acked(&uuid)
+            .map_err(|err| format!("acknowledge: {err}"))?;
+
+        let msg = mail_repo
+            .get_message(&uuid)
+            .map_err(|err| format!("get message after ack: {err}"))?;
+        Ok(msg.acked_at.unwrap_or_else(|| Utc::now().to_rfc3339()))
+    }
+
+    fn resolve_project(&self) -> Result<String, String> {
+        if let Ok(project) = std::env::var("FORGE_AGENT_MAIL_PROJECT") {
+            let trimmed = project.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(trimmed);
+            }
+        }
+        if let Ok(project) = std::env::var("FORGE_PROJECT") {
+            let trimmed = project.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(trimmed);
+            }
+        }
+        Ok("default".to_string())
+    }
+
+    fn resolve_agent(&self) -> Result<Option<String>, String> {
+        if let Ok(agent) = std::env::var("FORGE_AGENT_MAIL_AGENT") {
+            let trimmed = agent.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed));
+            }
+        }
+        if let Ok(agent) = std::env::var("FMAIL_AGENT") {
+            let trimmed = agent.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed));
+            }
+        }
+        Ok(None)
+    }
+
+    fn backend_kind(&self) -> &str {
+        "sqlite"
+    }
+
+    fn read_body_file(&self, path: &str) -> Result<String, String> {
+        fs::read_to_string(path)
+            .map_err(|err| format!("failed to read message file \"{path}\": {err}"))
+    }
+
+    fn read_body_stdin(&self) -> Result<String, String> {
+        let mut input = String::new();
+        std::io::stdin()
+            .read_to_string(&mut input)
+            .map_err(|err| format!("failed to read stdin: {err}"))?;
+        if input.trim().is_empty() {
+            return Err("stdin was empty (pipe a message or use --file/--body)".to_string());
+        }
+        Ok(input)
+    }
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
 }
 
 // ---------------------------------------------------------------------------
@@ -2316,5 +2682,282 @@ mod tests {
         let out = run(&["mail", "inbox", "--unknown"], &backend);
         assert_eq!(out.exit_code, 1);
         assert!(out.stderr.contains("unknown flag: '--unknown'"));
+    }
+
+    // --- SQLite backend tests ---
+
+    fn sqlite_temp_db(tag: &str) -> PathBuf {
+        let root = temp_project_root(&format!("sqlite-{tag}"));
+        std::fs::create_dir_all(&root).unwrap();
+        let db_path = root.join("forge.db");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path)).unwrap();
+        db.migrate_up().unwrap();
+        db_path
+    }
+
+    fn sqlite_backend(db_path: PathBuf) -> SqliteMailBackend {
+        SqliteMailBackend::new(db_path)
+    }
+
+    #[test]
+    fn sqlite_send_inbox_round_trip() {
+        let db_path = sqlite_temp_db("round-trip");
+        let backend = sqlite_backend(db_path);
+
+        let send = run(
+            &[
+                "mail",
+                "send",
+                "--project",
+                "proj-sqlite",
+                "--from",
+                "sender-a",
+                "--to",
+                "agent-x",
+                "--subject",
+                "handoff",
+                "--body",
+                "please review",
+                "--priority",
+                "high",
+                "--ack-required",
+                "--json",
+            ],
+            &backend,
+        );
+        assert_success(&send);
+        let send_json: serde_json::Value = serde_json::from_str(&send.stdout).unwrap();
+        assert_eq!(send_json["backend"], "sqlite");
+        assert!(!send_json["message_ids"].as_array().unwrap().is_empty());
+
+        let inbox = run(
+            &[
+                "mail",
+                "inbox",
+                "--project",
+                "proj-sqlite",
+                "--agent",
+                "agent-x",
+                "--json",
+            ],
+            &backend,
+        );
+        assert_success(&inbox);
+        let inbox_json: serde_json::Value = serde_json::from_str(&inbox.stdout).unwrap();
+        let arr = inbox_json.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["subject"], "handoff");
+        assert_eq!(arr[0]["from"], "sender-a");
+        assert_eq!(arr[0]["ack_required"], true);
+        assert_eq!(arr[0]["importance"], "high");
+        assert_eq!(arr[0]["backend"], "sqlite");
+    }
+
+    #[test]
+    fn sqlite_read_marks_as_read() {
+        let db_path = sqlite_temp_db("read");
+        let backend = sqlite_backend(db_path);
+
+        run(
+            &[
+                "mail",
+                "send",
+                "--project",
+                "p1",
+                "--from",
+                "s1",
+                "--to",
+                "agent-r",
+                "--subject",
+                "test",
+                "--body",
+                "body",
+            ],
+            &backend,
+        );
+
+        let inbox = run(&["mail", "inbox", "--agent", "agent-r", "--json"], &backend);
+        assert_success(&inbox);
+        let inbox_json: serde_json::Value = serde_json::from_str(&inbox.stdout).unwrap();
+        let id = inbox_json[0]["id"].as_i64().unwrap();
+
+        let read = run(
+            &[
+                "mail",
+                "read",
+                &format!("m-{id}"),
+                "--agent",
+                "agent-r",
+                "--json",
+            ],
+            &backend,
+        );
+        assert_success(&read);
+        let read_json: serde_json::Value = serde_json::from_str(&read.stdout).unwrap();
+        assert!(read_json["read_at"].is_string());
+        assert_eq!(read_json["subject"], "test");
+    }
+
+    #[test]
+    fn sqlite_ack_message() {
+        let db_path = sqlite_temp_db("ack");
+        let backend = sqlite_backend(db_path);
+
+        run(
+            &[
+                "mail",
+                "send",
+                "--project",
+                "p1",
+                "--from",
+                "s1",
+                "--to",
+                "agent-a",
+                "--subject",
+                "ack-test",
+                "--body",
+                "body",
+                "--ack-required",
+            ],
+            &backend,
+        );
+
+        let inbox = run(&["mail", "inbox", "--agent", "agent-a", "--json"], &backend);
+        let inbox_json: serde_json::Value = serde_json::from_str(&inbox.stdout).unwrap();
+        let id = inbox_json[0]["id"].as_i64().unwrap();
+
+        let ack = run(
+            &[
+                "mail",
+                "ack",
+                &format!("m-{id}"),
+                "--agent",
+                "agent-a",
+                "--json",
+            ],
+            &backend,
+        );
+        assert_success(&ack);
+        let ack_json: serde_json::Value = serde_json::from_str(&ack.stdout).unwrap();
+        assert_eq!(ack_json["acknowledged"], true);
+        assert!(ack_json["acked_at"].is_string());
+    }
+
+    #[test]
+    fn sqlite_inbox_empty_when_no_db() {
+        let root = temp_project_root("sqlite-nodb");
+        std::fs::create_dir_all(&root).unwrap();
+        let db_path = root.join("nonexistent.db");
+        let backend = sqlite_backend(db_path);
+
+        let out = run(&["mail", "inbox", "--agent", "agent-x", "--json"], &backend);
+        assert_success(&out);
+        let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn sqlite_multiple_recipients() {
+        let db_path = sqlite_temp_db("multi-recip");
+        let backend = sqlite_backend(db_path);
+
+        let send = run(
+            &[
+                "mail",
+                "send",
+                "--project",
+                "p1",
+                "--from",
+                "s1",
+                "--to",
+                "agent-a,agent-b",
+                "--subject",
+                "multi",
+                "--body",
+                "hello",
+                "--json",
+            ],
+            &backend,
+        );
+        assert_success(&send);
+        let json: serde_json::Value = serde_json::from_str(&send.stdout).unwrap();
+        assert_eq!(json["message_ids"].as_array().unwrap().len(), 2);
+
+        // Each agent sees their own message
+        let inbox_a = run(&["mail", "inbox", "--agent", "agent-a", "--json"], &backend);
+        assert_success(&inbox_a);
+        let a_json: serde_json::Value = serde_json::from_str(&inbox_a.stdout).unwrap();
+        assert_eq!(a_json.as_array().unwrap().len(), 1);
+
+        let inbox_b = run(&["mail", "inbox", "--agent", "agent-b", "--json"], &backend);
+        assert_success(&inbox_b);
+        let b_json: serde_json::Value = serde_json::from_str(&inbox_b.stdout).unwrap();
+        assert_eq!(b_json.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn sqlite_unread_filter() {
+        let db_path = sqlite_temp_db("unread");
+        let backend = sqlite_backend(db_path);
+
+        // Send two messages
+        run(
+            &[
+                "mail",
+                "send",
+                "--project",
+                "p1",
+                "--from",
+                "s1",
+                "--to",
+                "agent-u",
+                "--subject",
+                "msg1",
+                "--body",
+                "b1",
+            ],
+            &backend,
+        );
+        run(
+            &[
+                "mail",
+                "send",
+                "--project",
+                "p1",
+                "--from",
+                "s1",
+                "--to",
+                "agent-u",
+                "--subject",
+                "msg2",
+                "--body",
+                "b2",
+            ],
+            &backend,
+        );
+
+        // Read the first one
+        let inbox = run(&["mail", "inbox", "--agent", "agent-u", "--json"], &backend);
+        let inbox_json: serde_json::Value = serde_json::from_str(&inbox.stdout).unwrap();
+        let first_id = inbox_json[0]["id"].as_i64().unwrap();
+        run(
+            &[
+                "mail",
+                "read",
+                &format!("m-{first_id}"),
+                "--agent",
+                "agent-u",
+            ],
+            &backend,
+        );
+
+        // Unread filter should show only one
+        let unread = run(
+            &["mail", "inbox", "--agent", "agent-u", "--unread", "--json"],
+            &backend,
+        );
+        assert_success(&unread);
+        let unread_json: serde_json::Value = serde_json::from_str(&unread.stdout).unwrap();
+        assert_eq!(unread_json.as_array().unwrap().len(), 1);
     }
 }

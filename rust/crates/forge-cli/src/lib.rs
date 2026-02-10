@@ -193,7 +193,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             queue::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("mail") => {
-            let backend = mail::FilesystemMailBackend::open_from_env();
+            let backend = mail::SqliteMailBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             mail::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
