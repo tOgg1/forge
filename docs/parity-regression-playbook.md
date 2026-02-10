@@ -79,6 +79,14 @@ go run ./cmd/parity-loop-lifecycle \
   --go-bin /tmp/forge-go \
   --rust-bin ./rust/target/debug/rforge \
   --out build/parity-loop-lifecycle-report.json
+
+# Scenario comparator script (stdout/stderr/exit + DB side effects):
+scripts/parity-scenario-compare.sh \
+  --scenario internal/parity/testdata/lifecycle_harness/scenario.json \
+  --fixture . \
+  --go-bin /tmp/forge-go \
+  --rust-bin ./rust/target/debug/rforge \
+  --out-dir build/parity-scenario/latest
 ```
 
 ## Intentional drift
