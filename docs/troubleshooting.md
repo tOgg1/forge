@@ -7,9 +7,9 @@ If you are in JSON mode, add `--no-color` to keep output plain.
 
 ```bash
 ./build/forge --version
-./build/forge node list
-./build/forge ws list
-./build/forge agent list
+./build/forge doctor
+./build/forge ps
+./build/forge logs --all
 ```
 
 If any command fails, see the matching section below.
@@ -73,7 +73,7 @@ rg -n "data_dir|database.path" ~/.config/forge/config.yaml
 Symptoms:
 - connection test fails
 - `ssh binary not found for system backend`
-- `permission denied` when adding a node
+- `permission denied` when connecting to a remote host
 
 Fix (system ssh):
 ```bash
@@ -87,27 +87,10 @@ node_defaults:
   ssh_backend: native
 ```
 
-If you use a custom key:
-```bash
-./build/forge node add --name mynode --ssh user@host --key ~/.ssh/id_rsa
-```
-
-## Workspace path not found
-
-Symptoms:
-- `workspace path not found`
-
-Fix:
-```bash
-./build/forge ws create --path /absolute/path/to/repo --node <node>
-```
-
-Use absolute paths for remote nodes.
-
 ## tmux session or pane missing
 
 Symptoms:
-- agent operations fail with pane/session errors
+- runner operations fail with pane/session errors
 - `pane is dead or inaccessible`
 
 Fix:
@@ -115,30 +98,28 @@ Fix:
 tmux ls
 ```
 
-If the workspace session is missing, recreate it:
+If a loop runner appears stale, recheck state:
+
 ```bash
-./build/forge ws create --path /path/to/repo --node <node>
+./build/forge ps --json | jq '.[]? | {name,state,runner_pid_alive,runner_daemon_alive,reason}'
 ```
 
-If the session exists but a pane is missing, restart the agent:
+Then stop/kill and resume as needed:
+
 ```bash
-./build/forge agent restart <agent-id>
+./build/forge stop <loop-name>
+./build/forge resume <loop-name>
 ```
 
-## Agent stuck or not idle
+## Loop stuck / no progress
 
 Symptoms:
-- `agent is not idle`
+- no new output across iterations
+- repeated failures with no progress
 
 Fix:
 ```bash
-./build/forge agent interrupt <agent-id>
-./build/forge agent send <agent-id> "Retry the last step"
-```
-
-If you need to send anyway:
-```bash
-./build/forge agent send <agent-id> --skip-idle-check "Force this message"
+./build/forge logs <loop-name> -f
 ```
 
 ## Need more detail

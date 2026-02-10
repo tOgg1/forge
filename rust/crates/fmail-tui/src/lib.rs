@@ -5,9 +5,9 @@ use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 use forge_ftui_adapter::style::{ThemeKind, ThemeSpec};
 use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 
-pub mod agents;
 pub mod app;
 pub mod bookmarks;
+pub mod compose;
 pub mod dashboard;
 pub mod graph;
 pub mod heatmap;
@@ -23,15 +23,16 @@ pub mod threading;
 pub mod timeline;
 pub mod topics;
 
-pub use agents::{
-    agent_presence_indicator, apply_agents_input, render_agents_frame, AgentDetail, AgentRecent,
-    AgentRecord, AgentRow, AgentSearchResult, AgentSortKey, AgentsAction, AgentsMode,
-    AgentsViewModel, TargetCount,
-};
 pub use app::{App, Command, LayoutMode, PlaceholderView, View, ViewId};
 pub use bookmarks::{
     apply_bookmarks_input, parse_bookmarks_filter, render_bookmarks_frame, BookmarkEntry,
     BookmarksFilter, BookmarksViewModel,
+};
+pub use compose::{
+    apply_compose_input, first_non_empty_line, normalize_priority, parse_quick_send_input,
+    parse_tag_csv, render_compose_frame, render_quick_send_bar, render_toast, ComposeAction,
+    ComposeDraft, ComposeField, ComposeReplySeed, ComposeState, ComposeViewModel, QuickSendState,
+    SendRequest, SendSource, QUICK_HISTORY_LIMIT,
 };
 pub use dashboard::{
     apply_dashboard_input, render_dashboard_frame, AgentEntry, DashboardFocus, DashboardViewModel,
@@ -208,3 +209,4 @@ mod tests {
         assert_eq!(columns[3].width, 10);
     }
 }
+
