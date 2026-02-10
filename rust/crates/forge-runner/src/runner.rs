@@ -344,11 +344,189 @@ fn spawn_pipe_reader<R: Read + Send + 'static>(mut reader: R, tx: mpsc::Sender<O
 
 #[cfg(test)]
 mod tests {
-    use super::Runner;
+    use std::sync::{Arc, Mutex};
+
+    use super::{
+        Runner, RunnerEvent, EVENT_TYPE_EXIT, EVENT_TYPE_INPUT_SENT, EVENT_TYPE_OUTPUT_LINE,
+        EVENT_TYPE_PROMPT_READY,
+    };
+    use crate::sink::EventSink;
+
+    #[derive(Default)]
+    struct MemorySink {
+        events: Mutex<Vec<RunnerEvent>>,
+    }
+
+    impl MemorySink {
+        fn snapshot(&self) -> Vec<RunnerEvent> {
+            match self.events.lock() {
+                Ok(guard) => guard.clone(),
+                Err(poisoned) => poisoned.into_inner().clone(),
+            }
+        }
+    }
+
+    impl EventSink for MemorySink {
+        fn emit(&self, event: &RunnerEvent) -> Result<(), String> {
+            let mut guard = self
+                .events
+                .lock()
+                .map_err(|_| "memory sink lock poisoned".to_string())?;
+            guard.push(event.clone());
+            Ok(())
+        }
+
+        fn close(&self) -> Result<(), String> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn runner_rejects_missing_fields() {
         let mut r = Runner::new("", "a", vec!["echo".to_string()]);
         assert!(r.run().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runner_emits_lifecycle_events_for_spawn_monitor_and_stop() {
+        use std::io::Cursor;
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Duration;
+
+        use tempfile::tempdir;
+
+        let dir = match tempdir() {
+            Ok(dir) => dir,
+            Err(err) => panic!("tempdir: {err}"),
+        };
+        let script_path = dir.path().join("fake-agent.sh");
+        let script = "\
+#!/bin/sh
+printf 'ready> \n'
+while IFS= read -r line; do
+  if [ \"$line\" = \"exit\" ]; then
+    echo \"bye\"
+    exit 0
+  fi
+  echo \"working on: $line\"
+  printf 'ready> \n'
+done
+";
+        if let Err(err) = std::fs::write(&script_path, script) {
+            panic!("write script: {err}");
+        }
+        if let Err(err) =
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
+        {
+            panic!("chmod script: {err}");
+        }
+
+        let sink = Arc::new(MemorySink::default());
+        let mut runner = Runner::new(
+            "ws_123",
+            "agent_456",
+            vec![script_path.to_string_lossy().to_string()],
+        );
+        runner.event_sink = sink.clone();
+        runner.heartbeat_interval = Duration::from_millis(5);
+        runner.control_reader = Some(Box::new(Cursor::new(
+            b"hello\n{\"type\":\"send_message\",\"text\":\"exit\"}\n".to_vec(),
+        )));
+
+        if let Err(err) = runner.run() {
+            panic!("runner failed: {err}");
+        }
+
+        let events = sink.snapshot();
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == EVENT_TYPE_PROMPT_READY));
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == EVENT_TYPE_INPUT_SENT));
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == EVENT_TYPE_EXIT));
+        assert!(
+            events
+                .iter()
+                .filter(|event| event.event_type == EVENT_TYPE_OUTPUT_LINE)
+                .any(|event| {
+                    event
+                        .data
+                        .as_ref()
+                        .and_then(|data| data.get("line"))
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|line| line.contains("working on: hello"))
+                }),
+            "expected output_line containing work output",
+        );
+
+        let exit_code = events
+            .iter()
+            .find(|event| event.event_type == EVENT_TYPE_EXIT)
+            .and_then(|event| event.data.as_ref())
+            .and_then(|data| data.get("exit_code"))
+            .and_then(serde_json::Value::as_i64);
+        assert_eq!(exit_code, Some(0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runner_can_start_again_after_prior_stop() {
+        use std::io::Cursor;
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::tempdir;
+
+        let dir = match tempdir() {
+            Ok(dir) => dir,
+            Err(err) => panic!("tempdir: {err}"),
+        };
+        let script_path = dir.path().join("fake-agent.sh");
+        let script = "\
+#!/bin/sh
+while IFS= read -r line; do
+  if [ \"$line\" = \"exit\" ]; then
+    echo \"bye\"
+    exit 0
+  fi
+done
+";
+        if let Err(err) = std::fs::write(&script_path, script) {
+            panic!("write script: {err}");
+        }
+        if let Err(err) =
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
+        {
+            panic!("chmod script: {err}");
+        }
+
+        let run_once = || {
+            let sink = Arc::new(MemorySink::default());
+            let mut runner = Runner::new(
+                "ws_123",
+                "agent_456",
+                vec![script_path.to_string_lossy().to_string()],
+            );
+            runner.event_sink = sink.clone();
+            runner.control_reader = Some(Box::new(Cursor::new(
+                b"{\"type\":\"send_message\",\"text\":\"exit\"}\n".to_vec(),
+            )));
+            if let Err(err) = runner.run() {
+                panic!("runner failed: {err}");
+            }
+            sink.snapshot()
+        };
+
+        let first = run_once();
+        let second = run_once();
+
+        assert!(first
+            .iter()
+            .any(|event| event.event_type == EVENT_TYPE_EXIT));
+        assert!(second
+            .iter()
+            .any(|event| event.event_type == EVENT_TYPE_EXIT));
     }
 }
