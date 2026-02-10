@@ -258,6 +258,7 @@ impl UpBackend for SqliteUpBackend {
     }
 
     fn start_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<(), String> {
+        let spawn_result = crate::spawn_loop::start_loop_runner(loop_id, spawn_owner)?;
         let db = self.open_db()?;
         let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
 
@@ -271,11 +272,14 @@ impl UpBackend for SqliteUpBackend {
 
         loop_entry.state = forge_db::loop_repository::LoopState::Running;
         let mut metadata = loop_entry.metadata.take().unwrap_or_default();
-        metadata.insert("runner_owner".to_string(), json!(spawn_owner));
+        metadata.insert("runner_owner".to_string(), json!(spawn_result.owner));
         metadata.insert(
             "runner_instance_id".to_string(),
-            json!(uuid::Uuid::new_v4().to_string()),
+            json!(spawn_result.instance_id),
         );
+        if let Some(pid) = spawn_result.pid {
+            metadata.insert("pid".to_string(), json!(pid));
+        }
         loop_entry.metadata = Some(metadata);
 
         loop_repo

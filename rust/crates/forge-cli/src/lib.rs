@@ -30,10 +30,12 @@ pub mod queue;
 pub mod resume;
 pub mod rm;
 pub mod run;
+mod run_exec;
 pub mod scale;
 pub mod send;
 pub mod seq;
 pub mod skills;
+mod spawn_loop;
 pub mod status;
 pub mod stop;
 pub mod template;
@@ -112,7 +114,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             audit::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("kill") => {
-            let mut backend = kill::InMemoryKillBackend::default();
+            let mut backend = kill::SqliteKillBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             kill::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -122,7 +124,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             lock::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("loop") => {
-            let mut backend = loop_internal::InMemoryLoopInternalBackend::default();
+            let mut backend = run::SqliteRunBackend::open_from_env();
             let forwarded = remaining.to_vec();
             loop_internal::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -163,7 +165,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             explain::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("export") => {
-            let backend = export::InMemoryExportBackend::default();
+            let backend = export::SqliteExportBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             export::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
@@ -277,7 +279,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             stop::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("up") => {
-            let mut backend = up::InMemoryUpBackend::default();
+            let mut backend = up::SqliteUpBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             up::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }

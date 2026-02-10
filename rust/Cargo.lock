@@ -346,6 +346,7 @@ dependencies = [
  "chrono",
  "fmail-core",
  "forge-db",
+ "forge-loop",
  "rusqlite",
  "serde",
  "serde_json",

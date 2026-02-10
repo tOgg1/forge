@@ -27,6 +27,9 @@ pub struct LoopRecord {
 pub trait RunBackend {
     fn list_loops(&self) -> Result<Vec<LoopRecord>, String>;
     fn run_once(&mut self, loop_id: &str) -> Result<(), String>;
+    fn run_loop(&mut self, loop_id: &str) -> Result<(), String> {
+        self.run_once(loop_id)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -103,52 +106,11 @@ impl RunBackend for SqliteRunBackend {
     }
 
     fn run_once(&mut self, loop_id: &str) -> Result<(), String> {
-        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
-            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
-        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
-        let run_repo = forge_db::loop_run_repository::LoopRunRepository::new(&db);
+        crate::run_exec::run_single_iteration(&self.db_path, loop_id)
+    }
 
-        let mut loop_entry = loop_repo
-            .get(loop_id)
-            .map_err(|err| format!("load loop {loop_id}: {err}"))?;
-
-        let mut run = forge_db::loop_run_repository::LoopRun {
-            loop_id: loop_id.to_string(),
-            profile_id: loop_entry.profile_id.clone(),
-            status: forge_db::loop_run_repository::LoopRunStatus::Running,
-            prompt_source: if !loop_entry.base_prompt_path.trim().is_empty() {
-                "path".to_string()
-            } else if !loop_entry.base_prompt_msg.trim().is_empty() {
-                "inline".to_string()
-            } else {
-                String::new()
-            },
-            prompt_path: loop_entry.base_prompt_path.clone(),
-            ..Default::default()
-        };
-        run_repo
-            .create(&mut run)
-            .map_err(|err| format!("create loop run: {err}"))?;
-
-        run.status = forge_db::loop_run_repository::LoopRunStatus::Success;
-        run.exit_code = Some(0);
-        run_repo
-            .finish(&mut run)
-            .map_err(|err| format!("finish loop run: {err}"))?;
-
-        loop_entry.last_run_at = run.finished_at.clone();
-        loop_entry.last_exit_code = Some(0);
-        loop_entry.last_error.clear();
-        if matches!(
-            loop_entry.state,
-            forge_db::loop_repository::LoopState::Error
-        ) {
-            loop_entry.state = forge_db::loop_repository::LoopState::Stopped;
-        }
-        loop_repo
-            .update(&mut loop_entry)
-            .map_err(|err| format!("update loop after run: {err}"))?;
-        Ok(())
+    fn run_loop(&mut self, loop_id: &str) -> Result<(), String> {
+        crate::run_exec::run_loop_until_stop(&self.db_path, loop_id)
     }
 }
 
@@ -476,10 +438,31 @@ mod tests {
 
         let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
         let run_repo = forge_db::loop_run_repository::LoopRunRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let mut profile = forge_db::profile_repository::Profile {
+            name: "runner-profile".to_string(),
+            harness: "codex".to_string(),
+            prompt_mode: "env".to_string(),
+            command_template: "printf 'run ok\\n'".to_string(),
+            ..Default::default()
+        };
+        profile_repo
+            .create(&mut profile)
+            .unwrap_or_else(|err| panic!("create profile: {err}"));
+
+        let repo_path = std::env::temp_dir().join(format!(
+            "forge-cli-run-sqlite-repo-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&repo_path)
+            .unwrap_or_else(|err| panic!("create repo dir {}: {err}", repo_path.display()));
 
         let mut loop_entry = forge_db::loop_repository::Loop {
             name: "alpha-loop".to_string(),
-            repo_path: "/tmp/alpha".to_string(),
+            repo_path: repo_path.to_string_lossy().into_owned(),
+            base_prompt_msg: "prompt".to_string(),
+            profile_id: profile.id.clone(),
             state: forge_db::loop_repository::LoopState::Stopped,
             ..Default::default()
         };
@@ -517,6 +500,7 @@ mod tests {
         assert_eq!(stored_loop.last_exit_code, Some(0));
 
         let _ = std::fs::remove_file(db_path);
+        let _ = std::fs::remove_dir_all(repo_path);
     }
 
     #[test]

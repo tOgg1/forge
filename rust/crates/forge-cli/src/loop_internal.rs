@@ -45,7 +45,7 @@ fn execute(args: &[String], backend: &mut dyn LoopInternalBackend) -> Result<(),
     let loops = backend.list_loops()?;
     let entry = crate::run::resolve_loop_ref(&loops, &loop_ref)?;
     backend
-        .run_once(&entry.id)
+        .run_loop(&entry.id)
         .map_err(|err| format!("loop run failed: {err}"))
 }
 

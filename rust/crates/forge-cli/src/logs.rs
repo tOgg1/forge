@@ -2,8 +2,6 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
 
-use serde_json::Value;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
     pub stdout: String,
@@ -183,13 +181,7 @@ impl LogsBackend for SqliteLogsBackend {
                 },
                 name: entry.name,
                 repo: entry.repo_path,
-                log_path: entry
-                    .metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.get("log_path"))
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
+                log_path: entry.log_path,
             })
             .collect())
     }
@@ -609,6 +601,59 @@ mod tests {
             out.stdout,
             "==> alpha <==\n[2026-01-01T00:00:01Z] two\n[2026-01-01T00:00:02Z] three\n"
         );
+    }
+
+    #[test]
+    fn logs_tail_by_unique_short_id_prefix() {
+        let alpha_path = "/tmp/forge/logs/loops/alpha.log";
+        let mut backend = InMemoryLogsBackend::with_loops(vec![LoopRecord {
+            id: "loop-001".to_string(),
+            short_id: "abc001".to_string(),
+            name: "alpha".to_string(),
+            repo: "/repo".to_string(),
+            log_path: alpha_path.to_string(),
+        }])
+        .with_log(alpha_path, "[2026-01-01T00:00:01Z] one\n");
+
+        let out = run_for_test(&["logs", "a"], &mut backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stderr.is_empty());
+        assert!(out.stdout.contains("==> alpha <=="));
+    }
+
+    #[test]
+    fn logs_rejects_ambiguous_short_id_prefix() {
+        let alpha_path = "/tmp/forge/logs/loops/alpha.log";
+        let beta_path = "/tmp/forge/logs/loops/beta.log";
+        let mut backend = InMemoryLogsBackend::with_loops(vec![
+            LoopRecord {
+                id: "loop-001".to_string(),
+                short_id: "ab123456".to_string(),
+                name: "alpha".to_string(),
+                repo: "/repo".to_string(),
+                log_path: alpha_path.to_string(),
+            },
+            LoopRecord {
+                id: "loop-002".to_string(),
+                short_id: "ad123547".to_string(),
+                name: "beta".to_string(),
+                repo: "/repo".to_string(),
+                log_path: beta_path.to_string(),
+            },
+        ])
+        .with_log(alpha_path, "[2026-01-01T00:00:01Z] alpha\n")
+        .with_log(beta_path, "[2026-01-01T00:00:01Z] beta\n");
+
+        let out = run_for_test(&["logs", "a"], &mut backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("ambiguous"));
+        assert!(out.stderr.contains("alpha (ab123456)"));
+        assert!(out.stderr.contains("beta (ad123547)"));
+
+        let resolved = run_for_test(&["logs", "ab"], &mut backend);
+        assert_eq!(resolved.exit_code, 0);
+        assert!(resolved.stderr.is_empty());
+        assert!(resolved.stdout.contains("==> alpha <=="));
     }
 
     #[test]

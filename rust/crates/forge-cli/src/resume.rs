@@ -164,6 +164,7 @@ impl ResumeBackend for SqliteResumeBackend {
 
     fn resume_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<ResumeResult, String> {
         let owner = resolve_spawn_owner(spawn_owner)?;
+        let spawn_result = crate::spawn_loop::start_loop_runner(loop_id, &owner)?;
         let db = self.open_db()?;
         let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
         let mut loop_entry = loop_repo.get(loop_id).map_err(|err| err.to_string())?;
@@ -182,12 +183,22 @@ impl ResumeBackend for SqliteResumeBackend {
 
         loop_entry.state = forge_db::loop_repository::LoopState::Running;
         let mut metadata = loop_entry.metadata.unwrap_or_default();
-        let instance_id = self.next_instance_id();
-        metadata.insert("runner_owner".to_string(), Value::String(owner.clone()));
+        let instance_id = if spawn_result.instance_id.is_empty() {
+            self.next_instance_id()
+        } else {
+            spawn_result.instance_id
+        };
+        metadata.insert(
+            "runner_owner".to_string(),
+            Value::String(spawn_result.owner.clone()),
+        );
         metadata.insert(
             "runner_instance_id".to_string(),
             Value::String(instance_id.clone()),
         );
+        if let Some(pid) = spawn_result.pid {
+            metadata.insert("pid".to_string(), Value::from(pid));
+        }
         loop_entry.metadata = Some(metadata);
         loop_repo
             .update(&mut loop_entry)
