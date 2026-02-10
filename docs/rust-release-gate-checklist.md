@@ -43,6 +43,9 @@ Status: draft for enforcement
 5. Confirm no data-loss and no protocol drift.
 6. Record outcomes and attach logs.
 
+Latest rehearsal evidence:
+- `docs/rust-final-switch-rehearsal-2026-02-10.md`
+
 ## Cutover decision rule
 
 - `GO` only if every mandatory sign-off is `GO`.
