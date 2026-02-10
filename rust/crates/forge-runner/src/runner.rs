@@ -168,6 +168,9 @@ impl Runner {
 
             for line in lines {
                 self.handle_line(&line);
+                // Detect prompt/busy transitions even when multiple lines arrive in a single chunk.
+                // This avoids missing prompt_ready when the chunk ends with non-prompt output.
+                self.detect_state(line.as_bytes(), line.as_bytes());
             }
 
             self.detect_state(&tail, &chunk.data);
