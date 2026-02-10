@@ -1,0 +1,9 @@
+# Forge loop config
+# This file is committed with the repo.
+
+default_prompt: PROMPT.md
+
+# Optional ledger settings.
+ledger:
+  git_status: false
+  git_diff_stat: false
