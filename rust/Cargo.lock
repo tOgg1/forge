@@ -301,6 +301,7 @@ dependencies = [
  "rand",
  "serde_json",
  "tabwriter",
+ "tempfile",
 ]
 
 [[package]]
@@ -320,6 +321,7 @@ dependencies = [
 name = "fmail-tui"
 version = "0.1.0"
 dependencies = [
+ "fmail-core",
  "forge-ftui-adapter",
  "serde",
  "serde_json",
@@ -438,7 +440,9 @@ dependencies = [
 name = "forge-tui"
 version = "0.1.0"
 dependencies = [
+ "forge-db",
  "forge-ftui-adapter",
+ "serde_json",
 ]
 
 [[package]]

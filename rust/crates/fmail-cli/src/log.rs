@@ -1,10 +1,22 @@
-//! fmail log command ported from Go `internal/fmail/log.go`.
+//! fmail log/messages command behavior from Go `internal/fmail/log.go`.
+
+use std::cmp::Ordering;
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use fmail_core::message::Message;
-use fmail_core::validate::normalize_agent_name;
+use fmail_core::validate::{normalize_agent_name, normalize_topic};
 
+use crate::duration::parse_go_duration_seconds;
 use crate::{CommandOutput, FmailBackend};
+
+const LOG_FOLLOW_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+type MessageEntry = (Message, String);
+type MessageEntriesWithSeen = (Vec<MessageEntry>, HashSet<String>);
 
 /// Run the log command from test arguments.
 pub fn run_log_for_test(args: &[&str], backend: &dyn FmailBackend) -> CommandOutput {
@@ -35,48 +47,18 @@ pub fn execute_log(
     let since = parse_since(&parsed.since, now)?;
     let from = normalize_from_filter(&parsed.from)?;
 
-    // Determine target for listing files
-    let target = if all_messages {
-        None // list all messages (topics + DMs)
-    } else {
-        parsed.target.as_deref()
-    };
-
-    let files = backend
-        .list_message_files(target)
-        .map_err(|e| (1, format!("list messages: {e}")))?;
-
-    // Load and filter messages
-    let mut messages: Vec<Message> = Vec::new();
-    for path in &files {
-        match backend.read_message_at(path) {
-            Ok(msg) => {
-                if filter_message(&msg, &since, &from) {
-                    messages.push(msg);
-                }
-            }
-            Err(_) => continue, // Skip unreadable messages
-        }
-    }
-
-    // Sort by ID, then time
-    messages.sort_by(|a, b| a.id.cmp(&b.id));
-
-    // Apply limit (keep last N)
+    let (mut messages, mut seen) = load_message_entries(backend, &parsed.target, &since, &from)?;
     if parsed.limit > 0 && messages.len() > parsed.limit {
         let start = messages.len() - parsed.limit;
         messages = messages[start..].to_vec();
     }
 
-    // Output
-    if parsed.json {
-        let mut out = String::new();
-        for msg in &messages {
-            let json = serde_json::to_string_pretty(msg)
-                .map_err(|e| (1, format!("encode message: {e}")))?;
-            out.push_str(&json);
-            out.push('\n');
-        }
+    let mut out = String::new();
+    for (message, _) in &messages {
+        write_message(&mut out, message, parsed.json).map_err(|e| (1, format!("output: {e}")))?;
+    }
+
+    if !parsed.follow {
         return Ok(CommandOutput {
             stdout: out,
             stderr: String::new(),
@@ -84,21 +66,223 @@ pub fn execute_log(
         });
     }
 
-    // Text output
-    let mut out = String::new();
-    for msg in &messages {
-        let body_str = format_body(&msg.body);
-        out.push_str(&format!(
-            "{} {} -> {}: {}\n",
-            msg.id, msg.from, msg.to, body_str
-        ));
+    loop {
+        thread::sleep(LOG_FOLLOW_POLL_INTERVAL);
+        let updates = scan_new_messages(backend, &parsed.target, &since, &from, &mut seen)?;
+        for (message, _) in &updates {
+            write_message(&mut out, message, parsed.json)
+                .map_err(|e| (1, format!("output: {e}")))?;
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum LogTarget {
+    AllTopics,
+    AllMessages,
+    Topic(String),
+    Dm(String),
+}
+
+#[derive(Debug)]
+struct ParsedLogArgs {
+    target: LogTarget,
+    limit: usize,
+    since: String,
+    from: String,
+    json: bool,
+    follow: bool,
+}
+
+fn parse_log_args(args: &[String], all_messages: bool) -> Result<ParsedLogArgs, (i32, String)> {
+    let mut target = if all_messages {
+        LogTarget::AllMessages
+    } else {
+        LogTarget::AllTopics
+    };
+
+    let mut target_set = false;
+    let mut limit = 20usize;
+    let mut since = String::new();
+    let mut from = String::new();
+    let mut json = false;
+    let mut follow = false;
+
+    let mut idx = 0usize;
+    while idx < args.len() {
+        let token = &args[idx];
+        match token.as_str() {
+            "-h" | "--help" | "help" => {
+                let help = if all_messages {
+                    HELP_TEXT_MESSAGES
+                } else {
+                    HELP_TEXT_LOG
+                };
+                return Err((0, help.to_string()));
+            }
+            "--json" => json = true,
+            "-n" | "--limit" => {
+                idx += 1;
+                let raw = take_flag_value(args, idx, "--limit")?;
+                let parsed = raw
+                    .parse::<i64>()
+                    .map_err(|_| (2, "limit must be an integer".to_string()))?;
+                if parsed < 0 {
+                    return Err((2, "limit must be >= 0".to_string()));
+                }
+                limit =
+                    usize::try_from(parsed).map_err(|_| (2, "limit out of range".to_string()))?;
+            }
+            "--since" => {
+                idx += 1;
+                since = take_flag_value(args, idx, "--since")?;
+            }
+            "--from" => {
+                idx += 1;
+                from = take_flag_value(args, idx, "--from")?;
+            }
+            "-f" | "--follow" => {
+                follow = true;
+            }
+            flag if flag.starts_with('-') => {
+                return Err((2, format!("unknown flag: {flag}")));
+            }
+            positional => {
+                if all_messages {
+                    return Err((2, "messages takes no arguments".to_string()));
+                }
+                if target_set {
+                    return Err((2, "log takes at most one argument".to_string()));
+                }
+                target = parse_log_target(positional)?;
+                target_set = true;
+            }
+        }
+        idx += 1;
     }
 
-    Ok(CommandOutput {
-        stdout: out,
-        stderr: String::new(),
-        exit_code: 0,
+    Ok(ParsedLogArgs {
+        target,
+        limit,
+        since,
+        from,
+        json,
+        follow,
     })
+}
+
+fn parse_log_target(raw: &str) -> Result<LogTarget, (i32, String)> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(LogTarget::AllTopics);
+    }
+    if let Some(agent_raw) = trimmed.strip_prefix('@') {
+        let agent = normalize_agent_name(agent_raw)
+            .map_err(|e| (1, format!("invalid target \"{trimmed}\": {e}")))?;
+        return Ok(LogTarget::Dm(agent));
+    }
+    let topic =
+        normalize_topic(trimmed).map_err(|e| (1, format!("invalid target \"{trimmed}\": {e}")))?;
+    Ok(LogTarget::Topic(topic))
+}
+
+fn take_flag_value(args: &[String], idx: usize, flag: &str) -> Result<String, (i32, String)> {
+    args.get(idx)
+        .cloned()
+        .ok_or_else(|| (2, format!("missing value for {flag}")))
+}
+
+fn load_message_entries(
+    backend: &dyn FmailBackend,
+    target: &LogTarget,
+    since: &Option<DateTime<Utc>>,
+    from: &Option<String>,
+) -> Result<MessageEntriesWithSeen, (i32, String)> {
+    let files = collect_target_files(backend, target).map_err(|e| (1, format!("log: {e}")))?;
+    let mut seen = HashSet::with_capacity(files.len());
+    let mut messages = Vec::new();
+
+    for path in &files {
+        let key = path.to_string_lossy().to_string();
+        seen.insert(key.clone());
+
+        let message = backend
+            .read_message_at(path)
+            .map_err(|e| (1, format!("log: read message {}: {e}", path.display())))?;
+        if matches_log_target(&message, target) && filter_message(&message, since, from) {
+            messages.push((message, key));
+        }
+    }
+
+    sort_message_entries(&mut messages);
+    Ok((messages, seen))
+}
+
+fn scan_new_messages(
+    backend: &dyn FmailBackend,
+    target: &LogTarget,
+    since: &Option<DateTime<Utc>>,
+    from: &Option<String>,
+    seen: &mut HashSet<String>,
+) -> Result<Vec<MessageEntry>, (i32, String)> {
+    let files = collect_target_files(backend, target).map_err(|e| (1, format!("follow: {e}")))?;
+    let mut updates = Vec::new();
+
+    for path in &files {
+        let key = path.to_string_lossy().to_string();
+        if seen.contains(&key) {
+            continue;
+        }
+
+        seen.insert(key.clone());
+        let message = backend
+            .read_message_at(path)
+            .map_err(|e| (1, format!("follow: read message {}: {e}", path.display())))?;
+        if matches_log_target(&message, target) && filter_message(&message, since, from) {
+            updates.push((message, key));
+        }
+    }
+
+    sort_message_entries(&mut updates);
+    Ok(updates)
+}
+
+fn collect_target_files(
+    backend: &dyn FmailBackend,
+    target: &LogTarget,
+) -> Result<Vec<PathBuf>, String> {
+    match target {
+        LogTarget::AllTopics | LogTarget::AllMessages => backend.list_message_files(None),
+        LogTarget::Topic(topic) => backend.list_message_files(Some(topic)),
+        LogTarget::Dm(agent) => {
+            let dm = format!("@{agent}");
+            backend.list_message_files(Some(&dm))
+        }
+    }
+}
+
+fn matches_log_target(message: &Message, target: &LogTarget) -> bool {
+    match target {
+        LogTarget::AllMessages => true,
+        LogTarget::AllTopics => !message.to.starts_with('@'),
+        LogTarget::Topic(topic) => message.to.eq_ignore_ascii_case(topic),
+        LogTarget::Dm(agent) => message
+            .to
+            .strip_prefix('@')
+            .is_some_and(|name| name.eq_ignore_ascii_case(agent)),
+    }
+}
+
+fn sort_message_entries(entries: &mut [MessageEntry]) {
+    entries.sort_by(
+        |(left, left_path), (right, right_path)| match left.id.cmp(&right.id) {
+            Ordering::Equal => match left.time.cmp(&right.time) {
+                Ordering::Equal => left_path.cmp(right_path),
+                other => other,
+            },
+            other => other,
+        },
+    );
 }
 
 fn filter_message(msg: &Message, since: &Option<DateTime<Utc>>, from: &Option<String>) -> bool {
@@ -108,11 +292,27 @@ fn filter_message(msg: &Message, since: &Option<DateTime<Utc>>, from: &Option<St
         }
     }
     if let Some(from_filter) = from {
-        if msg.from.to_lowercase() != *from_filter {
+        if !msg.from.eq_ignore_ascii_case(from_filter) {
             return false;
         }
     }
     true
+}
+
+fn write_message(out: &mut String, message: &Message, json_output: bool) -> Result<(), String> {
+    if json_output {
+        let encoded = serde_json::to_string(message).map_err(|e| format!("encode message: {e}"))?;
+        out.push_str(&encoded);
+        out.push('\n');
+        return Ok(());
+    }
+
+    let body = format_body(&message.body);
+    out.push_str(&format!(
+        "{} {} -> {}: {}\n",
+        message.id, message.from, message.to, body
+    ));
+    Ok(())
 }
 
 fn format_body(body: &serde_json::Value) -> String {
@@ -122,73 +322,6 @@ fn format_body(body: &serde_json::Value) -> String {
     }
 }
 
-#[derive(Debug)]
-struct ParsedLogArgs {
-    target: Option<String>,
-    limit: usize,
-    since: String,
-    from: String,
-    json: bool,
-}
-
-fn parse_log_args(args: &[String], no_positional: bool) -> Result<ParsedLogArgs, (i32, String)> {
-    let mut parsed = ParsedLogArgs {
-        target: None,
-        limit: 20,
-        since: String::new(),
-        from: String::new(),
-        json: false,
-    };
-
-    let mut idx = 0usize;
-    while idx < args.len() {
-        let token = &args[idx];
-        match token.as_str() {
-            "-h" | "--help" | "help" => return Err((0, HELP_TEXT.to_string())),
-            "--json" => parsed.json = true,
-            "-n" | "--limit" => {
-                idx += 1;
-                let val = take_flag_value(args, idx, "--limit")?;
-                parsed.limit = val
-                    .parse::<usize>()
-                    .map_err(|_| (2, "limit must be a non-negative integer".to_string()))?;
-            }
-            "--since" => {
-                idx += 1;
-                parsed.since = take_flag_value(args, idx, "--since")?;
-            }
-            "--from" => {
-                idx += 1;
-                parsed.from = take_flag_value(args, idx, "--from")?;
-            }
-            "-f" | "--follow" => {
-                // Follow mode is acknowledged but not implemented in test mode
-            }
-            flag if flag.starts_with('-') => {
-                return Err((2, format!("unknown flag: {flag}")));
-            }
-            positional => {
-                if no_positional {
-                    return Err((2, "messages takes no arguments".to_string()));
-                }
-                if parsed.target.is_some() {
-                    return Err((2, "log takes at most one argument".to_string()));
-                }
-                parsed.target = Some(positional.to_string());
-            }
-        }
-        idx += 1;
-    }
-
-    Ok(parsed)
-}
-
-fn take_flag_value(args: &[String], idx: usize, flag: &str) -> Result<String, (i32, String)> {
-    args.get(idx)
-        .cloned()
-        .ok_or_else(|| (2, format!("missing value for {flag}")))
-}
-
 /// Parse the `--since` value into a DateTime filter.
 fn parse_since(value: &str, now: DateTime<Utc>) -> Result<Option<DateTime<Utc>>, (i32, String)> {
     let trimmed = value.trim();
@@ -196,67 +329,61 @@ fn parse_since(value: &str, now: DateTime<Utc>) -> Result<Option<DateTime<Utc>>,
         return Ok(None);
     }
 
-    if trimmed == "now" {
+    if trimmed.eq_ignore_ascii_case("now") {
         return Ok(Some(now));
     }
 
-    // Try duration format: e.g. "1h", "2d", "30m", "3.5d"
     if let Some(dur) = parse_duration_with_days(trimmed) {
         return Ok(Some(now - dur));
     }
 
-    // Try RFC3339
     if let Ok(dt) = DateTime::parse_from_rfc3339(trimmed) {
         return Ok(Some(dt.with_timezone(&Utc)));
     }
 
-    // Try date only: YYYY-MM-DD
     if let Ok(date) = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
         if let Some(ndt) = date.and_hms_opt(0, 0, 0) {
             return Ok(Some(ndt.and_utc()));
         }
     }
 
-    // Try datetime without timezone: YYYY-MM-DDTHH:MM:SS
     if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S") {
         return Ok(Some(ndt.and_utc()));
     }
 
-    Err((1, format!("invalid --since value: {trimmed}")))
+    Err((
+        2,
+        "invalid --since value: use duration like '1h' or timestamp like '2024-01-15T10:30:00Z'"
+            .to_string(),
+    ))
 }
 
-/// Parse a duration string with days support.
-fn parse_duration_with_days(s: &str) -> Option<chrono::Duration> {
-    let s = s.trim();
-    if s.is_empty() {
+/// Parse a duration string with `d` (day) support plus Go-style durations.
+fn parse_duration_with_days(raw: &str) -> Option<chrono::Duration> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
         return None;
     }
 
-    if let Some(num_str) = s.strip_suffix('d') {
-        if let Ok(days) = num_str.parse::<f64>() {
-            let secs = (days * 86400.0) as i64;
-            return chrono::Duration::try_seconds(secs);
-        }
-    }
-    if let Some(num_str) = s.strip_suffix('h') {
-        if let Ok(hours) = num_str.parse::<f64>() {
-            let secs = (hours * 3600.0) as i64;
-            return chrono::Duration::try_seconds(secs);
-        }
-    }
-    if let Some(num_str) = s.strip_suffix('m') {
-        if let Ok(mins) = num_str.parse::<f64>() {
-            let secs = (mins * 60.0) as i64;
-            return chrono::Duration::try_seconds(secs);
-        }
-    }
-    if let Some(num_str) = s.strip_suffix('s') {
-        if let Ok(seconds) = num_str.parse::<f64>() {
-            return chrono::Duration::try_seconds(seconds as i64);
+    if let Some(days_raw) = trimmed.strip_suffix('d') {
+        if let Ok(days) = days_raw.parse::<f64>() {
+            return seconds_to_chrono(days * 86400.0);
         }
     }
 
-    None
+    let seconds = parse_go_duration_seconds(trimmed).ok()?;
+    seconds_to_chrono(seconds)
+}
+
+fn seconds_to_chrono(seconds: f64) -> Option<chrono::Duration> {
+    if !seconds.is_finite() {
+        return None;
+    }
+
+    let negative = seconds < 0.0;
+    let base = std::time::Duration::try_from_secs_f64(seconds.abs()).ok()?;
+    let chrono = chrono::Duration::from_std(base).ok()?;
+    Some(if negative { -chrono } else { chrono })
 }
 
 fn normalize_from_filter(from: &str) -> Result<Option<String>, (i32, String)> {
@@ -266,11 +393,11 @@ fn normalize_from_filter(from: &str) -> Result<Option<String>, (i32, String)> {
     }
     let raw = trimmed.strip_prefix('@').unwrap_or(trimmed);
     let normalized =
-        normalize_agent_name(raw).map_err(|e| (1, format!("invalid --from value: {e}")))?;
+        normalize_agent_name(raw).map_err(|e| (2, format!("invalid --from value: {e}")))?;
     Ok(Some(normalized))
 }
 
-const HELP_TEXT: &str = "\
+const HELP_TEXT_LOG: &str = "\
 View recent messages
 
 Usage:
@@ -287,8 +414,24 @@ Flags:
       --json            Output as JSON
   -h, --help            Help for log";
 
+const HELP_TEXT_MESSAGES: &str = "\
+View all public messages (topics and direct messages)
+
+Usage:
+  fmail messages [flags]
+
+Flags:
+  -n, --limit int       Max messages to show (default: 20)
+      --since string    Filter by time window (e.g. 1h, 2d, 2024-01-15T10:30:00Z)
+      --from string     Filter by sender
+  -f, --follow          Stream new messages (poll-based)
+      --json            Output as JSON
+  -h, --help            Help for messages";
+
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     #[test]
@@ -296,15 +439,15 @@ mod tests {
         let now = Utc::now();
         let result = parse_since("", now);
         assert!(result.is_ok());
-        assert!(result.unwrap_or(None).is_none());
+        assert!(result.unwrap().is_none());
     }
 
     #[test]
-    fn parse_since_now() {
+    fn parse_since_now_case_insensitive() {
         let now = Utc::now();
-        let result = parse_since("now", now);
+        let result = parse_since("NoW", now);
         assert!(result.is_ok());
-        assert!(result.unwrap_or(None).is_some());
+        assert!(result.unwrap().is_some());
     }
 
     #[test]
@@ -312,7 +455,7 @@ mod tests {
         let now = Utc::now();
         let result = parse_since("2h", now);
         assert!(result.is_ok());
-        assert!(result.unwrap_or(None).is_some());
+        assert!(result.unwrap().is_some());
     }
 
     #[test]
@@ -320,7 +463,15 @@ mod tests {
         let now = Utc::now();
         let result = parse_since("1d", now);
         assert!(result.is_ok());
-        assert!(result.unwrap_or(None).is_some());
+        assert!(result.unwrap().is_some());
+    }
+
+    #[test]
+    fn parse_since_duration_chain() {
+        let now = Utc::now();
+        let result = parse_since("1h30m", now);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
     }
 
     #[test]
@@ -328,7 +479,7 @@ mod tests {
         let now = Utc::now();
         let result = parse_since("2026-02-09T12:00:00Z", now);
         assert!(result.is_ok());
-        assert!(result.unwrap_or(None).is_some());
+        assert!(result.unwrap().is_some());
     }
 
     #[test]
@@ -336,13 +487,15 @@ mod tests {
         let now = Utc::now();
         let result = parse_since("2026-02-09", now);
         assert!(result.is_ok());
-        assert!(result.unwrap_or(None).is_some());
+        assert!(result.unwrap().is_some());
     }
 
     #[test]
-    fn parse_since_invalid() {
+    fn parse_since_invalid_is_usage_error() {
         let now = Utc::now();
-        assert!(parse_since("invalid", now).is_err());
+        let err = parse_since("invalid", now).unwrap_err();
+        assert_eq!(err.0, 2);
+        assert!(err.1.contains("invalid --since value"), "{}", err.1);
     }
 
     #[test]
@@ -351,6 +504,7 @@ mod tests {
         assert!(parse_duration_with_days("2h").is_some());
         assert!(parse_duration_with_days("30m").is_some());
         assert!(parse_duration_with_days("3.5d").is_some());
+        assert!(parse_duration_with_days("1h30m").is_some());
         assert!(parse_duration_with_days("invalid").is_none());
     }
 
@@ -371,20 +525,39 @@ mod tests {
     fn normalize_from_empty() {
         let result = normalize_from_filter("");
         assert!(result.is_ok());
-        assert!(result.unwrap_or(None).is_none());
+        assert!(result.unwrap().is_none());
     }
 
     #[test]
     fn normalize_from_strips_at() {
         let result = normalize_from_filter("@alice");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap_or(None).as_deref(), Some("alice"));
+        assert_eq!(result.unwrap().as_deref(), Some("alice"));
     }
 
     #[test]
     fn normalize_from_lowercases() {
         let result = normalize_from_filter("Alice");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap_or(None).as_deref(), Some("alice"));
+        assert_eq!(result.unwrap().as_deref(), Some("alice"));
+    }
+
+    #[test]
+    fn parse_log_target_validates() {
+        assert!(matches!(
+            parse_log_target("Task").unwrap(),
+            LogTarget::Topic(topic) if topic == "task"
+        ));
+        assert!(matches!(
+            parse_log_target("@Bob").unwrap(),
+            LogTarget::Dm(agent) if agent == "bob"
+        ));
+    }
+
+    #[test]
+    fn parse_log_target_invalid_is_failure() {
+        let err = parse_log_target("bad target!").unwrap_err();
+        assert_eq!(err.0, 1);
+        assert!(err.1.contains("invalid target"), "{}", err.1);
     }
 }

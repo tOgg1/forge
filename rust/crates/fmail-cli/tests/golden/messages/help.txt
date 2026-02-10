@@ -1,0 +1,12 @@
+View all public messages (topics and direct messages)
+
+Usage:
+  fmail messages [flags]
+
+Flags:
+  -n, --limit int       Max messages to show (default: 20)
+      --since string    Filter by time window (e.g. 1h, 2d, 2024-01-15T10:30:00Z)
+      --from string     Filter by sender
+  -f, --follow          Stream new messages (poll-based)
+      --json            Output as JSON
+  -h, --help            Help for messages

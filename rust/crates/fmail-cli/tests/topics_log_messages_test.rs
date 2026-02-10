@@ -11,7 +11,7 @@ use fmail_core::store::TopicSummary;
 /// In-memory backend for topics/log/messages tests.
 struct TopicsLogBackend {
     now: DateTime<Utc>,
-    topics: Vec<TopicSummary>,
+    topics: Option<Vec<TopicSummary>>,
     messages: Vec<Message>,
 }
 
@@ -19,13 +19,13 @@ impl TopicsLogBackend {
     fn new(now: DateTime<Utc>) -> Self {
         Self {
             now,
-            topics: Vec::new(),
+            topics: Some(Vec::new()),
             messages: Vec::new(),
         }
     }
 
     fn with_topics(mut self, topics: Vec<TopicSummary>) -> Self {
-        self.topics = topics;
+        self.topics = Some(topics);
         self
     }
 
@@ -77,15 +77,20 @@ impl FmailBackend for TopicsLogBackend {
         Err("not implemented".to_string())
     }
 
-    fn list_topics(&self) -> Result<Vec<TopicSummary>, String> {
+    fn list_topics(&self) -> Result<Option<Vec<TopicSummary>>, String> {
         Ok(self.topics.clone())
     }
 
-    fn list_message_files(&self, _target: Option<&str>) -> Result<Vec<PathBuf>, String> {
+    fn list_message_files(&self, target: Option<&str>) -> Result<Vec<PathBuf>, String> {
+        let normalized_target = target.map(|value| value.trim().to_lowercase());
         Ok(self
             .messages
             .iter()
             .enumerate()
+            .filter(|(_, msg)| match normalized_target.as_deref() {
+                None => true,
+                Some(filter) => msg.to.eq_ignore_ascii_case(filter),
+            })
             .map(|(i, _)| PathBuf::from(format!("/fake/{i}.json")))
             .collect())
     }
@@ -178,6 +183,16 @@ fn topics_json_matches_golden() {
 }
 
 #[test]
+fn topics_json_missing_topics_dir_is_null() {
+    let mut backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
+    backend.topics = None;
+    let out = run_cli_for_test(&["topics", "--json"], &backend);
+    assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+    assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
+    assert_eq!(out.stdout, "null\n");
+}
+
+#[test]
 fn topics_help_matches_golden() {
     let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
     let out = run_cli_for_test(&["topics", "--help"], &backend);
@@ -251,6 +266,66 @@ fn log_text_matches_golden() {
     assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
     assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
     assert_eq!(out.stdout, include_str!("golden/log/text.txt"));
+}
+
+#[test]
+fn log_default_excludes_direct_messages() {
+    let now = rfc3339("2026-02-09T12:00:00Z");
+    let backend = TopicsLogBackend::new(now).with_messages(vec![
+        make_msg(
+            "msg-001",
+            "alice",
+            "tasks",
+            "topic message",
+            "2026-02-09T11:00:00Z",
+        ),
+        make_msg(
+            "msg-002",
+            "bob",
+            "@alice",
+            "dm should be hidden",
+            "2026-02-09T11:30:00Z",
+        ),
+    ]);
+
+    let out = run_cli_for_test(&["log"], &backend);
+    assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("topic message"),
+        "stdout: {}",
+        out.stdout
+    );
+    assert!(
+        !out.stdout.contains("dm should be hidden"),
+        "stdout: {}",
+        out.stdout
+    );
+}
+
+#[test]
+fn log_dm_target_filters_to_agent_mailbox() {
+    let now = rfc3339("2026-02-09T12:00:00Z");
+    let backend = TopicsLogBackend::new(now).with_messages(vec![
+        make_msg(
+            "msg-001",
+            "alice",
+            "@bob",
+            "for bob",
+            "2026-02-09T11:00:00Z",
+        ),
+        make_msg(
+            "msg-002",
+            "alice",
+            "@eve",
+            "for eve",
+            "2026-02-09T11:05:00Z",
+        ),
+    ]);
+
+    let out = run_cli_for_test(&["log", "@Bob"], &backend);
+    assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+    assert!(out.stdout.contains("for bob"), "stdout: {}", out.stdout);
+    assert!(!out.stdout.contains("for eve"), "stdout: {}", out.stdout);
 }
 
 #[test]
@@ -400,7 +475,7 @@ fn log_since_rfc3339_filter() {
 fn log_since_invalid() {
     let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
     let out = run_cli_for_test(&["log", "--since", "bogus"], &backend);
-    assert_eq!(out.exit_code, 1);
+    assert_eq!(out.exit_code, 2);
     assert!(
         out.stderr.contains("invalid --since"),
         "stderr: {}",
@@ -439,6 +514,18 @@ fn log_too_many_positionals() {
     assert_eq!(out.exit_code, 2);
     assert!(
         out.stderr.contains("at most one argument"),
+        "stderr: {}",
+        out.stderr
+    );
+}
+
+#[test]
+fn log_invalid_target_fails() {
+    let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
+    let out = run_cli_for_test(&["log", "bad target!"], &backend);
+    assert_eq!(out.exit_code, 1);
+    assert!(
+        out.stderr.contains("invalid target"),
         "stderr: {}",
         out.stderr
     );
@@ -564,5 +651,5 @@ fn messages_help_matches_golden() {
     let backend = TopicsLogBackend::new(rfc3339("2026-02-09T12:00:00Z"));
     let out = run_cli_for_test(&["messages", "--help"], &backend);
     assert_eq!(out.exit_code, 0);
-    assert_eq!(out.stderr, include_str!("golden/log/help.txt"));
+    assert_eq!(out.stderr, include_str!("golden/messages/help.txt"));
 }

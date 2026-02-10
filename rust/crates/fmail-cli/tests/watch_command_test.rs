@@ -97,8 +97,8 @@ impl FmailBackend for WatchBackend {
         Err("not implemented".to_string())
     }
 
-    fn list_topics(&self) -> Result<Vec<TopicSummary>, String> {
-        Ok(self.topics.lock().expect("topics lock").clone())
+    fn list_topics(&self) -> Result<Option<Vec<TopicSummary>>, String> {
+        Ok(Some(self.topics.lock().expect("topics lock").clone()))
     }
 
     fn list_message_files(&self, target: Option<&str>) -> Result<Vec<PathBuf>, String> {

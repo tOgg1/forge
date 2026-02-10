@@ -51,6 +51,8 @@ fn execute_topics(
         });
     }
 
+    let topics = topics.unwrap_or_default();
+
     // Text output with tabwriter-style formatting
     let mut out = String::new();
     out.push_str("TOPIC\tMESSAGES\tLAST ACTIVITY\n");

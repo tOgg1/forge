@@ -55,7 +55,7 @@ impl FmailBackend for InMemoryBackend {
         Err("not implemented".to_string())
     }
 
-    fn list_topics(&self) -> Result<Vec<TopicSummary>, String> {
+    fn list_topics(&self) -> Result<Option<Vec<TopicSummary>>, String> {
         Err("not implemented".to_string())
     }
 
@@ -157,4 +157,37 @@ fn who_json_nonempty_matches_golden() {
     assert_eq!(out.exit_code, 0);
     assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
     assert_eq!(out.stdout, include_str!("golden/who/json_nonempty.txt"));
+}
+
+#[test]
+fn who_help_matches_go_shape() {
+    let backend = InMemoryBackend {
+        now: rfc3339("2026-02-09T00:00:00Z"),
+        records: Some(vec![]),
+    };
+    let out = run_cli_for_test(&["who", "--help"], &backend);
+    assert_eq!(out.exit_code, 0);
+    assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("List known agents"),
+        "stdout: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("fmail who [flags]"),
+        "stdout: {}",
+        out.stdout
+    );
+}
+
+#[test]
+fn who_rejects_positional_args_with_argsmax_message() {
+    let backend = InMemoryBackend {
+        now: rfc3339("2026-02-09T00:00:00Z"),
+        records: Some(vec![]),
+    };
+    let out = run_cli_for_test(&["who", "extra"], &backend);
+    assert_eq!(out.exit_code, 2);
+    assert!(out.stdout.is_empty(), "stdout: {}", out.stdout);
+    assert_eq!(out.stderr, "expected at most 0 args, got 1\n");
 }

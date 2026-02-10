@@ -1,7 +1,1 @@
-{
-  "id": "msg-001",
-  "from": "alice",
-  "to": "tasks",
-  "time": "2026-02-09T11:00:00Z",
-  "body": "hello"
-}
+{"id":"msg-001","from":"alice","to":"tasks","time":"2026-02-09T11:00:00Z","body":"hello"}

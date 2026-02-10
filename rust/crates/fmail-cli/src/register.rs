@@ -2,13 +2,20 @@ use crate::{CommandOutput, FmailBackend};
 
 pub fn run_register_for_test(args: &[&str], backend: &dyn FmailBackend) -> CommandOutput {
     let mut json = false;
-    let mut name: Option<String> = None;
+    let mut names: Vec<String> = Vec::new();
 
     for arg in args {
         match *arg {
+            "-h" | "--help" | "help" => {
+                return CommandOutput {
+                    stdout: format!("{HELP_TEXT}\n"),
+                    stderr: String::new(),
+                    exit_code: 0,
+                };
+            }
             "--json" => json = true,
             "" => {}
-            v if v.starts_with("--") => {
+            v if v.starts_with('-') => {
                 return CommandOutput {
                     stdout: String::new(),
                     stderr: format!("unknown flag: {v}\n"),
@@ -16,17 +23,18 @@ pub fn run_register_for_test(args: &[&str], backend: &dyn FmailBackend) -> Comma
                 };
             }
             v => {
-                if name.is_some() {
-                    return CommandOutput {
-                        stdout: String::new(),
-                        stderr: "expected at most 1 argument\n".to_string(),
-                        exit_code: 2,
-                    };
-                }
-                name = Some(v.to_string());
+                names.push(v.to_string());
             }
         }
     }
+    if names.len() > 1 {
+        return CommandOutput {
+            stdout: String::new(),
+            stderr: format!("expected at most 1 args, got {}\n", names.len()),
+            exit_code: 2,
+        };
+    }
+    let name = names.into_iter().next();
 
     let host = backend.hostname();
 
@@ -127,3 +135,13 @@ fn register_generated_agent<R: rand::Rng>(
 
     Err("unable to allocate unique agent name".to_string())
 }
+
+const HELP_TEXT: &str = "\
+Request a unique agent name
+
+Usage:
+  fmail register [name] [flags]
+
+Flags:
+  -h, --help   help for register
+      --json   Output as JSON";

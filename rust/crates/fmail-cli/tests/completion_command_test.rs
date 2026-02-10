@@ -44,7 +44,7 @@ impl FmailBackend for StubBackend {
     fn read_file(&self, _path: &str) -> Result<String, String> {
         Err("not implemented".to_string())
     }
-    fn list_topics(&self) -> Result<Vec<TopicSummary>, String> {
+    fn list_topics(&self) -> Result<Option<Vec<TopicSummary>>, String> {
         Err("not implemented".to_string())
     }
     fn list_message_files(&self, _target: Option<&str>) -> Result<Vec<PathBuf>, String> {

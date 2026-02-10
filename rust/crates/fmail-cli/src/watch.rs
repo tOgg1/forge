@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use fmail_core::message::Message;
 use fmail_core::validate::{normalize_agent_name, normalize_topic};
 
+use crate::duration::parse_go_duration_seconds;
 use crate::{CommandOutput, FmailBackend};
 
 const WATCH_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -145,11 +146,13 @@ fn parse_watch_args(args: &[String]) -> Result<ParsedWatchArgs, (i32, String)> {
     let timeout = match timeout_raw {
         None => None,
         Some(raw) => {
-            let (negative, parsed) = parse_signed_duration(&raw)
+            let seconds = parse_go_duration_seconds(&raw)
                 .map_err(|_| (2, format!("invalid timeout duration: {raw}")))?;
-            if negative {
+            if seconds < 0.0 {
                 return Err((2, "timeout must be >= 0".to_string()));
             }
+            let parsed = Duration::try_from_secs_f64(seconds)
+                .map_err(|_| (2, format!("invalid timeout duration: {raw}")))?;
             if parsed.is_zero() {
                 None
             } else {
@@ -183,62 +186,6 @@ fn parse_watch_target(raw: &str) -> Result<WatchTarget, (i32, String)> {
     let normalized =
         normalize_topic(trimmed).map_err(|e| (1, format!("invalid target \"{trimmed}\": {e}")))?;
     Ok(WatchTarget::Topic(normalized))
-}
-
-fn parse_signed_duration(raw: &str) -> Result<(bool, Duration), String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err("empty duration".to_string());
-    }
-
-    let negative = trimmed.starts_with('-');
-    let unsigned = if negative || trimmed.starts_with('+') {
-        &trimmed[1..]
-    } else {
-        trimmed
-    };
-
-    let duration = parse_duration(unsigned)?;
-    Ok((negative, duration))
-}
-
-fn parse_duration(raw: &str) -> Result<Duration, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err("empty duration".to_string());
-    }
-
-    let units = ["ms", "s", "m", "h"];
-    let mut matched_unit = None;
-    for unit in &units {
-        if let Some(number_part) = trimmed.strip_suffix(unit) {
-            matched_unit = Some((number_part, *unit));
-            break;
-        }
-    }
-
-    let Some((number_part, unit)) = matched_unit else {
-        return Err("missing duration unit".to_string());
-    };
-
-    let value = number_part
-        .trim()
-        .parse::<f64>()
-        .map_err(|_| "invalid duration value".to_string())?;
-
-    if value < 0.0 {
-        return Err("duration must be non-negative".to_string());
-    }
-
-    let seconds = match unit {
-        "ms" => value / 1000.0,
-        "s" => value,
-        "m" => value * 60.0,
-        "h" => value * 3600.0,
-        _ => return Err("unsupported duration unit".to_string()),
-    };
-
-    Ok(Duration::from_secs_f64(seconds))
 }
 
 fn initialize_seen(
@@ -299,7 +246,7 @@ fn collect_target_files(
     match target {
         WatchTarget::AllTopics => {
             let mut topic_names: BTreeSet<String> = BTreeSet::new();
-            for topic in backend.list_topics()? {
+            for topic in backend.list_topics()?.unwrap_or_default() {
                 topic_names.insert(topic.name);
             }
 
@@ -403,18 +350,42 @@ mod tests {
 
     #[test]
     fn parse_duration_supports_common_units() {
-        assert_eq!(parse_duration("100ms").unwrap(), Duration::from_millis(100));
-        assert_eq!(parse_duration("2s").unwrap(), Duration::from_secs(2));
-        assert_eq!(parse_duration("2m").unwrap(), Duration::from_secs(120));
-        assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
+        assert_eq!(
+            crate::duration::parse_go_duration("100ms").unwrap(),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            crate::duration::parse_go_duration("2s").unwrap(),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            crate::duration::parse_go_duration("2m").unwrap(),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            crate::duration::parse_go_duration("1h").unwrap(),
+            Duration::from_secs(3600)
+        );
+    }
+
+    #[test]
+    fn parse_duration_supports_composite_values() {
+        assert_eq!(
+            crate::duration::parse_go_duration("1m30s").unwrap(),
+            Duration::from_secs(90)
+        );
+        assert_eq!(
+            crate::duration::parse_go_duration("2h15m").unwrap(),
+            Duration::from_secs(8100)
+        );
     }
 
     #[test]
     fn parse_duration_rejects_invalid() {
-        assert!(parse_duration("").is_err());
-        assert!(parse_duration("2").is_err());
-        assert!(parse_duration("abc").is_err());
-        assert!(parse_duration("1d").is_err());
+        assert!(crate::duration::parse_go_duration("").is_err());
+        assert!(crate::duration::parse_go_duration("2").is_err());
+        assert!(crate::duration::parse_go_duration("abc").is_err());
+        assert!(crate::duration::parse_go_duration("1d").is_err());
     }
 
     #[test]

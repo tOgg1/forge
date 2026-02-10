@@ -27,6 +27,7 @@ fn execute_send(
     backend: &dyn FmailBackend,
 ) -> Result<CommandOutput, (i32, String)> {
     let parsed = parse_send_args(args)?;
+    let reply_to = parsed.reply_to.trim().to_string();
 
     let agent = backend.agent_name().map_err(|e| (1, e))?;
 
@@ -60,7 +61,7 @@ fn execute_send(
         to: normalized_target,
         time: now,
         body,
-        reply_to: parsed.reply_to.clone(),
+        reply_to,
         priority,
         host,
         tags: normalized_tags,
@@ -142,29 +143,35 @@ fn parse_send_args(args: &[String]) -> Result<ParsedSendArgs, (i32, String)> {
             "--json" => {
                 parsed.json = true;
             }
+            flag if flag.starts_with("--file=") || flag.starts_with("-f=") => {
+                parsed.file = inline_flag_value(flag);
+            }
             "-f" | "--file" => {
                 idx += 1;
                 parsed.file = take_flag_value(args, idx, "--file")?;
             }
+            flag if flag.starts_with("--reply-to=") || flag.starts_with("-r=") => {
+                parsed.reply_to = inline_flag_value(flag);
+            }
             "-r" | "--reply-to" => {
                 idx += 1;
                 parsed.reply_to = take_flag_value(args, idx, "--reply-to")?;
+            }
+            flag if flag.starts_with("--priority=") || flag.starts_with("-p=") => {
+                parsed.priority = inline_flag_value(flag);
+                parsed.priority_set = true;
             }
             "-p" | "--priority" => {
                 idx += 1;
                 parsed.priority = take_flag_value(args, idx, "--priority")?;
                 parsed.priority_set = true;
             }
+            flag if flag.starts_with("--tag=") || flag.starts_with("-t=") => {
+                add_tag_values(&mut parsed.tags, inline_flag_value(flag));
+            }
             "-t" | "--tag" => {
                 idx += 1;
-                let val = take_flag_value(args, idx, "--tag")?;
-                // Support comma-separated tags like Go
-                for part in val.split(',') {
-                    let trimmed = part.trim().to_string();
-                    if !trimmed.is_empty() {
-                        parsed.tags.push(trimmed);
-                    }
-                }
+                add_tag_values(&mut parsed.tags, take_flag_value(args, idx, "--tag")?);
             }
             flag if flag.starts_with('-') => {
                 return Err((2, format!("unknown flag: {flag}")));
@@ -192,6 +199,22 @@ fn take_flag_value(args: &[String], idx: usize, flag: &str) -> Result<String, (i
     args.get(idx)
         .cloned()
         .ok_or_else(|| (2, format!("missing value for {flag}")))
+}
+
+fn inline_flag_value(flag: &str) -> String {
+    flag.split_once('=')
+        .map(|(_, value)| value.to_string())
+        .unwrap_or_default()
+}
+
+fn add_tag_values(tags: &mut Vec<String>, raw: String) {
+    // Support comma-separated tags like Go.
+    for part in raw.split(',') {
+        let trimmed = part.trim().to_string();
+        if !trimmed.is_empty() {
+            tags.push(trimmed);
+        }
+    }
 }
 
 const HELP_TEXT: &str = "\

@@ -12,6 +12,10 @@ path = "src/lib.rs"
 name = "fmail-cli"
 path = "src/bin/fmail-cli.rs"
 
+[[bin]]
+name = "rfmail"
+path = "src/bin/rfmail.rs"
+
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 fmail-core = { path = "../fmail-core" }
@@ -21,3 +25,6 @@ tabwriter = "1"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"

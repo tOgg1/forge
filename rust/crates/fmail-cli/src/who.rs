@@ -7,18 +7,36 @@ use crate::{CommandOutput, FmailBackend};
 
 pub fn run_who_for_test(args: &[&str], backend: &dyn FmailBackend) -> CommandOutput {
     let mut json = false;
+    let mut positional = 0usize;
     for arg in args {
         match *arg {
+            "-h" | "--help" | "help" => {
+                return CommandOutput {
+                    stdout: format!("{HELP_TEXT}\n"),
+                    stderr: String::new(),
+                    exit_code: 0,
+                };
+            }
             "--json" => json = true,
             "" => {}
-            _ => {
+            v if v.starts_with('-') => {
                 return CommandOutput {
                     stdout: String::new(),
-                    stderr: format!("unknown flag: {arg}\n"),
+                    stderr: format!("unknown flag: {v}\n"),
                     exit_code: 2,
                 };
             }
+            _ => {
+                positional += 1;
+            }
         }
+    }
+    if positional > 0 {
+        return CommandOutput {
+            stdout: String::new(),
+            stderr: format!("expected at most 0 args, got {positional}\n"),
+            exit_code: 2,
+        };
     }
 
     let now = backend.now_utc();
@@ -89,3 +107,13 @@ fn tabwriter_into_bytes(mut tw: TabWriter<Vec<u8>>) -> Vec<u8> {
         }
     }
 }
+
+const HELP_TEXT: &str = "\
+List known agents
+
+Usage:
+  fmail who [flags]
+
+Flags:
+  -h, --help   help for who
+      --json   Output as JSON";

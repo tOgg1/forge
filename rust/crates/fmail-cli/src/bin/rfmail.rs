@@ -1,4 +1,6 @@
 fn main() {
+    // Temporary binary name for side-by-side Go+Rust operation.
+    // Behavior should match the Rust fmail CLI surface.
     fmail_cli::set_version(env!("CARGO_PKG_VERSION"));
     let args: Vec<String> = std::env::args().skip(1).collect();
     let out = fmail_cli::run_cli(&args, &fmail_cli::FilesystemFmailBackend);

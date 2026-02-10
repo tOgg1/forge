@@ -76,8 +76,8 @@ impl FmailBackend for MockFmailBackend {
         Err("not found".to_string())
     }
 
-    fn list_topics(&self) -> Result<Vec<TopicSummary>, String> {
-        Ok(vec![])
+    fn list_topics(&self) -> Result<Option<Vec<TopicSummary>>, String> {
+        Ok(Some(vec![]))
     }
 
     fn list_message_files(&self, _target: Option<&str>) -> Result<Vec<PathBuf>, String> {

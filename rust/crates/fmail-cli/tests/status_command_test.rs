@@ -95,7 +95,7 @@ impl FmailBackend for StatusBackend {
         Err("not implemented".to_string())
     }
 
-    fn list_topics(&self) -> Result<Vec<TopicSummary>, String> {
+    fn list_topics(&self) -> Result<Option<Vec<TopicSummary>>, String> {
         Err("not implemented".to_string())
     }
 

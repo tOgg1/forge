@@ -75,7 +75,7 @@ impl FmailBackend for SendBackend {
     ) -> Result<AgentRecord, String> {
         Err("not implemented".to_string())
     }
-    fn list_topics(&self) -> Result<Vec<fmail_core::store::TopicSummary>, String> {
+    fn list_topics(&self) -> Result<Option<Vec<fmail_core::store::TopicSummary>>, String> {
         Err("not implemented".to_string())
     }
     fn list_message_files(&self, _target: Option<&str>) -> Result<Vec<std::path::PathBuf>, String> {
@@ -195,6 +195,24 @@ fn send_from_file() {
 }
 
 #[test]
+fn send_from_file_equals_flag() {
+    let mut backend = SendBackend::new(rfc3339("2026-02-09T12:00:00Z"), "alice");
+    backend
+        .files
+        .insert("/tmp/msg.txt".to_string(), "file content".to_string());
+
+    let out = run_cli_for_test(&["send", "task", "--file=/tmp/msg.txt"], &backend);
+    assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+    let messages = backend.messages.borrow();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(
+        messages[0].body,
+        serde_json::Value::String("file content".into())
+    );
+}
+
+#[test]
 fn send_body_and_file_conflict() {
     let mut backend = SendBackend::new(rfc3339("2026-02-09T12:00:00Z"), "alice");
     backend
@@ -219,6 +237,26 @@ fn send_with_priority() {
 
     let messages = backend.messages.borrow();
     assert_eq!(messages[0].priority, "high");
+}
+
+#[test]
+fn send_priority_equals_flag() {
+    let backend = SendBackend::new(rfc3339("2026-02-09T12:00:00Z"), "alice");
+    let out = run_cli_for_test(&["send", "task", "urgent!", "--priority=high"], &backend);
+    assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+    let messages = backend.messages.borrow();
+    assert_eq!(messages[0].priority, "high");
+}
+
+#[test]
+fn send_priority_empty_value_defaults_to_normal() {
+    let backend = SendBackend::new(rfc3339("2026-02-09T12:00:00Z"), "alice");
+    let out = run_cli_for_test(&["send", "task", "urgent!", "--priority="], &backend);
+    assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+    let messages = backend.messages.borrow();
+    assert_eq!(messages[0].priority, "normal");
 }
 
 #[test]
@@ -259,6 +297,19 @@ fn send_with_tags() {
 }
 
 #[test]
+fn send_with_tag_equals_flag() {
+    let backend = SendBackend::new(rfc3339("2026-02-09T12:00:00Z"), "alice");
+    let out = run_cli_for_test(
+        &["send", "task", "msg", "--tag=BUG,feature", "--tag=p1"],
+        &backend,
+    );
+    assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+    let messages = backend.messages.borrow();
+    assert_eq!(messages[0].tags, vec!["bug", "feature", "p1"]);
+}
+
+#[test]
 fn send_comma_separated_tags() {
     let backend = SendBackend::new(rfc3339("2026-02-09T12:00:00Z"), "alice");
     let out = run_cli_for_test(&["send", "task", "msg", "-t", "bug,feature,p1"], &backend);
@@ -281,6 +332,29 @@ fn send_with_reply_to() {
 
     let messages = backend.messages.borrow();
     assert_eq!(messages[0].reply_to, "prev-msg-id");
+}
+
+#[test]
+fn send_with_reply_to_equals_flag() {
+    let backend = SendBackend::new(rfc3339("2026-02-09T12:00:00Z"), "alice");
+    let out = run_cli_for_test(
+        &["send", "task", "reply here", "--reply-to=prev-msg-id"],
+        &backend,
+    );
+    assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+    let messages = backend.messages.borrow();
+    assert_eq!(messages[0].reply_to, "prev-msg-id");
+}
+
+#[test]
+fn send_with_blank_reply_to_omits_field() {
+    let backend = SendBackend::new(rfc3339("2026-02-09T12:00:00Z"), "alice");
+    let out = run_cli_for_test(&["send", "task", "reply here", "--reply-to=   "], &backend);
+    assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+    let messages = backend.messages.borrow();
+    assert!(messages[0].reply_to.is_empty());
 }
 
 #[test]

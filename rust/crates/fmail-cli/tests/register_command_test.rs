@@ -79,7 +79,7 @@ impl FmailBackend for RegisterBackend {
     ) -> Result<AgentRecord, String> {
         Err("not implemented".to_string())
     }
-    fn list_topics(&self) -> Result<Vec<fmail_core::store::TopicSummary>, String> {
+    fn list_topics(&self) -> Result<Option<Vec<fmail_core::store::TopicSummary>>, String> {
         Err("not implemented".to_string())
     }
     fn list_message_files(&self, _target: Option<&str>) -> Result<Vec<std::path::PathBuf>, String> {
@@ -180,7 +180,7 @@ fn register_too_many_args() {
     let out = run_cli_for_test(&["register", "a", "b"], &backend);
     assert_eq!(out.exit_code, 2);
     assert!(
-        out.stderr.contains("at most 1 argument"),
+        out.stderr.contains("expected at most 1 args, got 2"),
         "stderr: {}",
         out.stderr
     );
@@ -195,5 +195,40 @@ fn register_unknown_flag() {
         out.stderr.contains("unknown flag"),
         "stderr: {}",
         out.stderr
+    );
+}
+
+#[test]
+fn register_help_matches_go_shape() {
+    let backend = RegisterBackend::new(rfc3339("2026-01-10T18:00:00Z"));
+    let out = run_cli_for_test(&["register", "--help"], &backend);
+    assert_eq!(out.exit_code, 0);
+    assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("Request a unique agent name"),
+        "stdout: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("fmail register [name] [flags]"),
+        "stdout: {}",
+        out.stdout
+    );
+}
+
+#[test]
+fn register_short_help_flag_does_not_register_literal_h() {
+    let backend = RegisterBackend::new(rfc3339("2026-01-10T18:00:00Z"));
+    let out = run_cli_for_test(&["register", "-h"], &backend);
+    assert_eq!(out.exit_code, 0);
+    assert!(out.stderr.is_empty(), "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("help for register"),
+        "stdout: {}",
+        out.stdout
+    );
+    assert!(
+        !backend.registered.borrow().contains("-h"),
+        "register should not treat -h as agent name"
     );
 }
