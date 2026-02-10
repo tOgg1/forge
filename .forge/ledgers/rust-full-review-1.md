@@ -827,3 +827,80 @@ Fix hint: detect unique-constraint errors and map to the new typed `DbError` var
 2. Sent `fmail send @forge-orchestrator "review summary: forge-3kr issues"`.
 ```
 
+## 2026-02-10T05:22:09Z
+
+- run_id: 840354a2-b537-44e1-972a-51e8b7a89079
+- loop_name: rust-full-review-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-10T05:18:09Z
+- finished_at: 2026-02-10T05:22:09Z
+- exit_code: 0
+
+```
+#[test]
++    fn set_messages_enforces_limit() {
++        let mut vm = OperatorViewModel::new("operator");
++        let msgs: Vec<OperatorMessage> = (0..(OPERATOR_MESSAGE_LIMIT + 5))
++            .map(|i| OperatorMessage {
++                id: format!("msg-{i}"),
++                from: "a".into(),
++                to: "@operator".into(),
++                body: "x".into(),
++                time_label: "10:00".into(),
++                priority: String::new(),
++                tags: Vec::new(),
++                reply_to: String::new(),
++                reply_preview: String::new(),
++                is_mine: false,
++            })
++            .collect();
++
++        vm.set_messages(msgs);
++
++        assert_eq!(vm.messages().len(), OPERATOR_MESSAGE_LIMIT);
++        assert_eq!(vm.messages()[0].id, "msg-5");
++        assert_eq!(
++            vm.messages()[OPERATOR_MESSAGE_LIMIT - 1].id,
++            format!("msg-{}", OPERATOR_MESSAGE_LIMIT + 4)
++        );
++    }
++
++    #[test]
+     fn compose_push_pop_clear() {
+         let mut vm = OperatorViewModel::new("operator");
+         vm.compose_push('/');
+
+tokens used
+109,742
+Hi. Tight loop, real defects found and reduced.
+
+**Findings**
+1. `HIGH` parity bug: operator compose submit path missing for `Enter`/`Ctrl+Enter` in Rust input handler; key consumed, no submit action (`rust/crates/fmail-tui/src/operator.rs:464`). Go baseline submits on those keys (`internal/fmailtui/operator_view.go:304`, `internal/fmailtui/operator_view.go:306`).  
+Fix hint: return submit command/event (or don’t consume submit keys), add regression tests for both keys.
+
+**Summary**
+- Reviewed task: `forge-4kf`.
+- Small fixes landed during review:
+1. Graph `Shift+Tab` reverse selection parity + test (`rust/crates/fmail-tui/src/graph.rs:776`, `rust/crates/fmail-tui/src/graph.rs:1273`).
+2. Enforce operator message cap `250` + test (`rust/crates/fmail-tui/src/operator.rs:188`).
+
+**Validation**
+- `env -u GOROOT -u GOTOOLDIR go test ./...` passed.
+- `cd rust && cargo test -p fmail-tui` passed (261 passed, 1 ignored).
+
+**Reporting**
+- Sent to `task`:
+  - high finding (open)
+  - info note for 2 fixes landed
+- Sent to `@forge-orchestrator`:
+  - `review summary: forge-4kf issues (1 high open, 2 low-risk fixes landed with tests)`
+
+**Review doc**
+- `docs/review/2026-02-10-forge-4kf-review-loop.md`
+```
+

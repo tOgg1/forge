@@ -238,3 +238,80 @@ Key validations I ran while closing:
 Note: `fmail` agent registry update flaked; re-register fixed. Latest working sender: `cool-takanawa`.
 ```
 
+## 2026-02-09T20:17:02Z
+
+- run_id: 8d22bec4-ff5d-4778-9cf9-70e6bd2e42ee
+- loop_name: rust-full-codex-2
+- status: success
+- profile: codex2
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-09T17:51:41Z
+- finished_at: 2026-02-09T20:17:02Z
+- exit_code: 0
+
+```
++        };
+         assert!(confirm.prompt.contains("Delete loop record"));
+         assert!(!confirm.prompt.contains("Force"));
+     }
+diff --git a/rust/crates/forge-tui/src/multi_logs.rs b/rust/crates/forge-tui/src/multi_logs.rs
+index ee3d60926931e987a012f190e7c5d7d306dbe1a9..08d6ba21da8ac15dbd8a864db9b5eac15445d0f9
+--- a/rust/crates/forge-tui/src/multi_logs.rs
++++ b/rust/crates/forge-tui/src/multi_logs.rs
+@@ -158,7 +158,7 @@
+             frame.draw_text(
+                 0,
+                 0,
+-                "No loops on this page. Use ,/. or home/end.",
++                "No loops on this page. Use ,/. or g/G.",
+                 TextRole::Muted,
+             );
+             return frame;
+@@ -183,7 +183,7 @@
+         // Subheader line.
+         let subheader = truncate(
+             &format!(
+-                "layer:{}  pin:<space> clear:c  layout:m  page:,/. home/end  order:pinned first",
++                "layer:{}  pin:<space> clear:c  layout:m  page:,/. g/G  order:pinned first",
+                 self.log_layer().label(),
+             ),
+             width,
+@@ -234,7 +234,7 @@
+         };
+ 
+         // Header: display ID + name + [PIN].
+-        let display_id = loop_display_id(&view.id, "");
++        let display_id = loop_display_id(&view.id, &view.short_id);
+         let mut header_text = format!("{} {}", display_id, view.name);
+         if self.is_pinned(&view.id) {
+             header_text.push_str(" [PIN]");
+@@ -459,12 +459,11 @@
+         app.update(key(Key::Char(',')));
+         assert_eq!(app.multi_page(), 1);
+ 
+-        // move_multi_page_to_start / move_multi_page_to_end directly
+-        // (Home/End keys not yet in adapter Key enum).
+-        app.move_multi_page_to_start();
++        // First/last page (vim-style) for adapter-key compatibility.
++        app.update(key(Key::Char('g')));
+         assert_eq!(app.multi_page(), 0);
+ 
+-        app.move_multi_page_to_end();
++        app.update(key(Key::Char('G')));
+         assert_eq!(app.multi_page(), 2);
+     }
+ 
+
+tokens used
+1,579,191
+hi Tormod. keep loop hot; ship green parity slices.
+
+- `forge-8nd` started; progress: fixed local `.fmail/agents/*.json` corruption (extra `}`) so `fmail who/send` works; workspace gate fixes (fmt/clippy + forge-db temp sqlite path now UUID to avoid parallel migrate collisions). validation: `cd rust && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` PASS. BLOCKED close: child `forge-jn5` still `in_progress` (owner `rust-full-claude-4`).
+- `forge-4jv` started + closed: wired loop TUI multi-logs matrix rendering + tests/snapshots (`rust/crates/forge-tui/src/multi_logs.rs`, `rust/crates/forge-tui/src/app.rs`), paging `,/.` + `g/G` first/last page (adapter-key compat). full rust gate PASS.
+
+Queue: `sv task ready --project prj-vr0104gr` => `0` ready tasks.
+```
+
