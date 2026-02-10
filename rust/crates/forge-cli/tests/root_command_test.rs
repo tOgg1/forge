@@ -37,6 +37,29 @@ fn root_help_subcommand() {
     assert!(out.stdout.contains("Commands:"));
 }
 
+#[test]
+fn root_help_omits_dropped_legacy_command_groups() {
+    let out = run(&["--help"]);
+    assert_eq!(out.exit_code, 0);
+
+    for command in [
+        "accounts",
+        "agent",
+        "attach",
+        "node",
+        "recipe",
+        "vault",
+        "workspace",
+        "ws",
+    ] {
+        let listed = format!("\n  {command} ");
+        assert!(
+            !out.stdout.contains(&listed),
+            "legacy command unexpectedly listed in help: {command}"
+        );
+    }
+}
+
 // -- Version -------------------------------------------------------------
 
 #[test]
@@ -65,6 +88,33 @@ fn unknown_command_text_error() {
     assert!(out.stderr.contains("unknown forge command: nonexistent"));
     // Help text is also printed to stderr
     assert!(out.stderr.contains("Commands:"));
+}
+
+#[test]
+fn dropped_legacy_commands_are_unknown() {
+    for command in [
+        "accounts",
+        "agent",
+        "attach",
+        "node",
+        "recipe",
+        "vault",
+        "workspace",
+        "ws",
+    ] {
+        let out = run(&[command]);
+        assert_eq!(
+            out.exit_code, 1,
+            "expected unknown command exit for {command}"
+        );
+        assert!(out.stdout.is_empty(), "unexpected stdout for {command}");
+        assert!(
+            out.stderr
+                .contains(&format!("unknown forge command: {command}")),
+            "expected unknown command error for {command}, got: {}",
+            out.stderr
+        );
+    }
 }
 
 // -- Unknown command: JSON mode ------------------------------------------
