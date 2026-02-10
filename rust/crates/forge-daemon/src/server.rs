@@ -14,6 +14,10 @@ use tonic::{Request, Response, Status};
 use forge_rpc::forged::v1 as proto;
 
 use crate::agent::{Agent, AgentInfo, AgentManager, AgentState};
+use crate::events::EventBus;
+use crate::loop_runner::{
+    LoopRunner, LoopRunnerError, LoopRunnerManager, LoopRunnerState, StartLoopRunnerRequest,
+};
 use crate::tmux::TmuxClient;
 use crate::transcript::{TranscriptEntry, TranscriptEntryType, TranscriptStore};
 
@@ -21,13 +25,28 @@ use crate::transcript::{TranscriptEntry, TranscriptEntryType, TranscriptStore};
 pub struct ForgedAgentService {
     agents: AgentManager,
     tmux: Arc<dyn TmuxClient>,
+    events: Arc<EventBus>,
+    loop_runners: LoopRunnerManager,
 }
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 impl ForgedAgentService {
     pub fn new(agents: AgentManager, tmux: Arc<dyn TmuxClient>) -> Self {
-        Self { agents, tmux }
+        Self::new_with_loop_runners(agents, tmux, LoopRunnerManager::new())
+    }
+
+    pub fn new_with_loop_runners(
+        agents: AgentManager,
+        tmux: Arc<dyn TmuxClient>,
+        loop_runners: LoopRunnerManager,
+    ) -> Self {
+        Self {
+            agents,
+            tmux,
+            events: Arc::new(EventBus::new()),
+            loop_runners,
+        }
     }
 
     /// Access the agent manager (used by other service components).
@@ -153,6 +172,14 @@ impl ForgedAgentService {
             },
         );
 
+        self.events.publish_agent_state_changed(
+            &req.agent_id,
+            &req.workspace_id,
+            AgentState::Unspecified.to_proto_i32(),
+            AgentState::Starting.to_proto_i32(),
+            "agent spawned",
+        );
+
         Ok(Response::new(proto::SpawnAgentResponse {
             agent: Some(agent_to_proto(&agent)),
             pane_id,
@@ -213,6 +240,19 @@ impl ForgedAgentService {
 
         // Remove agent from registry.
         self.agents.remove(&req.agent_id);
+
+        let reason = if req.force {
+            "agent force killed"
+        } else {
+            "agent killed"
+        };
+        self.events.publish_agent_state_changed(
+            &req.agent_id,
+            &agent.workspace_id,
+            agent.state.to_proto_i32(),
+            AgentState::Stopped.to_proto_i32(),
+            reason,
+        );
 
         Ok(Response::new(proto::KillAgentResponse { success: true }))
     }
@@ -319,6 +359,77 @@ impl ForgedAgentService {
         }))
     }
 
+    /// StartLoopRunner starts a daemon-owned loop runner process.
+    #[allow(clippy::result_large_err)]
+    pub fn start_loop_runner(
+        &self,
+        req: Request<proto::StartLoopRunnerRequest>,
+    ) -> Result<Response<proto::StartLoopRunnerResponse>, Status> {
+        let req = req.into_inner();
+
+        let runner = self
+            .loop_runners
+            .start_loop_runner(StartLoopRunnerRequest {
+                loop_id: req.loop_id,
+                config_path: req.config_path,
+                command_path: req.command_path,
+            })
+            .map_err(loop_runner_error_to_status)?;
+
+        Ok(Response::new(proto::StartLoopRunnerResponse {
+            runner: Some(loop_runner_to_proto(&runner)),
+        }))
+    }
+
+    /// StopLoopRunner stops a daemon-owned loop runner process.
+    #[allow(clippy::result_large_err)]
+    pub fn stop_loop_runner(
+        &self,
+        req: Request<proto::StopLoopRunnerRequest>,
+    ) -> Result<Response<proto::StopLoopRunnerResponse>, Status> {
+        let req = req.into_inner();
+
+        let stopped = self
+            .loop_runners
+            .stop_loop_runner(&req.loop_id, req.force)
+            .map_err(loop_runner_error_to_status)?;
+
+        Ok(Response::new(proto::StopLoopRunnerResponse {
+            success: stopped.success,
+            runner: Some(loop_runner_to_proto(&stopped.runner)),
+        }))
+    }
+
+    /// GetLoopRunner returns one daemon-owned loop runner.
+    #[allow(clippy::result_large_err)]
+    pub fn get_loop_runner(
+        &self,
+        req: Request<proto::GetLoopRunnerRequest>,
+    ) -> Result<Response<proto::GetLoopRunnerResponse>, Status> {
+        let req = req.into_inner();
+
+        let runner = self
+            .loop_runners
+            .get_loop_runner(&req.loop_id)
+            .map_err(loop_runner_error_to_status)?;
+
+        Ok(Response::new(proto::GetLoopRunnerResponse {
+            runner: Some(loop_runner_to_proto(&runner)),
+        }))
+    }
+
+    /// ListLoopRunners lists daemon-owned loop runners.
+    #[allow(clippy::result_large_err)]
+    pub fn list_loop_runners(
+        &self,
+        _req: Request<proto::ListLoopRunnersRequest>,
+    ) -> Result<Response<proto::ListLoopRunnersResponse>, Status> {
+        let runners = self.loop_runners.list_loop_runners();
+        let runners: Vec<proto::LoopRunner> = runners.iter().map(loop_runner_to_proto).collect();
+
+        Ok(Response::new(proto::ListLoopRunnersResponse { runners }))
+    }
+
     /// CapturePane returns current content for an agent pane.
     #[allow(clippy::result_large_err)]
     pub fn capture_pane(
@@ -408,6 +519,40 @@ impl ForgedAgentService {
 
             if changed || last_hash.is_empty() {
                 let detected_state = detect_agent_state(&content, &agent.adapter);
+                let previous_state = agent.state;
+
+                let output_content = tail_utf8(&content, 4096);
+                let mut output_metadata = HashMap::new();
+                output_metadata.insert("content_hash".to_string(), content_hash.clone());
+                self.agents.add_transcript_entry_full(
+                    &req.agent_id,
+                    TranscriptEntry {
+                        entry_type: TranscriptEntryType::Output,
+                        content: output_content,
+                        timestamp: Utc::now(),
+                        metadata: output_metadata,
+                    },
+                );
+
+                let mut state_changed = false;
+                if detected_state != AgentState::Unspecified && previous_state != detected_state {
+                    state_changed = true;
+                    let mut metadata = HashMap::new();
+                    metadata.insert(
+                        "previous".to_string(),
+                        agent_state_name(previous_state).to_string(),
+                    );
+                    self.agents.add_transcript_entry_full(
+                        &req.agent_id,
+                        TranscriptEntry {
+                            entry_type: TranscriptEntryType::StateChange,
+                            content: agent_state_name(detected_state).to_string(),
+                            timestamp: Utc::now(),
+                            metadata,
+                        },
+                    );
+                }
+
                 self.agents.update_snapshot(
                     &req.agent_id,
                     content_hash.clone(),
@@ -422,8 +567,27 @@ impl ForgedAgentService {
                     timestamp: Some(datetime_to_timestamp(Utc::now())),
                     detected_state: detected_state.to_proto_i32(),
                 };
+                let lines_changed = split_lines(&content).len() as i32;
                 if req.include_content {
                     update.content = content;
+                }
+
+                if state_changed {
+                    self.events.publish_agent_state_changed(
+                        &req.agent_id,
+                        &agent.workspace_id,
+                        previous_state.to_proto_i32(),
+                        detected_state.to_proto_i32(),
+                        "state detected from pane content",
+                    );
+                }
+                if changed {
+                    self.events.publish_pane_content_changed(
+                        &req.agent_id,
+                        &agent.workspace_id,
+                        &content_hash,
+                        lines_changed,
+                    );
                 }
 
                 updates.push(update);
@@ -444,38 +608,23 @@ impl ForgedAgentService {
         max_polls: usize,
     ) -> Result<Vec<proto::StreamEventsResponse>, Status> {
         let req = req.into_inner();
-        let mut cursor = if req.cursor.is_empty() {
-            0i64
-        } else {
-            parse_cursor_i64(&req.cursor)?
-        };
-
-        let mut updates = Vec::new();
+        let (sub_id, mut rx, replay) = self.events.subscribe(&req)?;
+        let mut updates = Vec::with_capacity(replay.len());
+        for event in replay {
+            updates.push(proto::StreamEventsResponse { event: Some(event) });
+        }
         let poll_interval = Duration::from_millis(100);
 
         for poll in 0..max_polls {
             if poll > 0 {
                 std::thread::sleep(poll_interval);
             }
-
-            let snapshot =
-                self.collect_filtered_events(&req.types, &req.agent_ids, &req.workspace_ids);
-
-            let mut last_id: Option<i64> = None;
-            for (id, mut event) in snapshot {
-                if id < cursor {
-                    continue;
-                }
-                event.id = format!("{id}");
-                last_id = Some(id);
+            while let Ok(event) = rx.try_recv() {
                 updates.push(proto::StreamEventsResponse { event: Some(event) });
-            }
-
-            if let Some(last_id) = last_id {
-                cursor = last_id + 1;
             }
         }
 
+        self.events.unsubscribe(&sub_id);
         Ok(updates)
     }
 
@@ -611,58 +760,6 @@ impl ForgedAgentService {
 
         Ok(updates)
     }
-
-    fn collect_filtered_events(
-        &self,
-        types: &[i32],
-        agent_ids: &[String],
-        workspace_ids: &[String],
-    ) -> Vec<(i64, proto::Event)> {
-        let mut events: Vec<(DateTime<Utc>, String, i64, proto::Event)> = Vec::new();
-
-        for agent in self.agents.list(None, &[]) {
-            let entries = match self.agents.transcript_snapshot(&agent.id) {
-                Some(entries) => entries,
-                None => continue,
-            };
-
-            for (entry_id, entry) in entries {
-                let event_type = transcript_entry_to_event_type(entry.entry_type);
-                let event = proto::Event {
-                    id: String::new(),
-                    r#type: event_type,
-                    timestamp: Some(datetime_to_timestamp(entry.timestamp)),
-                    agent_id: agent.id.clone(),
-                    workspace_id: agent.workspace_id.clone(),
-                    payload: transcript_entry_to_event_payload(entry.entry_type, &entry.content),
-                };
-
-                if !types.is_empty() && !types.contains(&event.r#type) {
-                    continue;
-                }
-                if !agent_ids.is_empty() && !agent_ids.contains(&event.agent_id) {
-                    continue;
-                }
-                if !workspace_ids.is_empty() && !workspace_ids.contains(&event.workspace_id) {
-                    continue;
-                }
-
-                events.push((entry.timestamp, agent.id.clone(), entry_id, event));
-            }
-        }
-
-        events.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then_with(|| a.1.cmp(&b.1))
-                .then_with(|| a.2.cmp(&b.2))
-        });
-
-        let mut out = Vec::with_capacity(events.len());
-        for (idx, (_, _, _, event)) in events.into_iter().enumerate() {
-            out.push((idx as i64, event));
-        }
-        out
-    }
 }
 
 /// Convert domain Agent to proto Agent.
@@ -680,6 +777,50 @@ fn agent_to_proto(agent: &Agent) -> proto::Agent {
         content_hash: agent.content_hash.clone(),
         resource_limits: None,
         resource_usage: None,
+    }
+}
+
+fn loop_runner_to_proto(runner: &LoopRunner) -> proto::LoopRunner {
+    proto::LoopRunner {
+        loop_id: runner.loop_id.clone(),
+        instance_id: runner.instance_id.clone(),
+        config_path: runner.config_path.clone(),
+        command_path: runner.command_path.clone(),
+        pid: runner.pid,
+        state: loop_runner_state_to_proto_i32(&runner.state),
+        last_error: runner.last_error.clone(),
+        started_at: Some(datetime_to_timestamp(runner.started_at)),
+        stopped_at: runner.stopped_at.map(datetime_to_timestamp),
+    }
+}
+
+fn loop_runner_state_to_proto_i32(state: &LoopRunnerState) -> i32 {
+    match state {
+        LoopRunnerState::Running => proto::LoopRunnerState::Running as i32,
+        LoopRunnerState::Stopped => proto::LoopRunnerState::Stopped as i32,
+        LoopRunnerState::Error => proto::LoopRunnerState::Error as i32,
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn loop_runner_error_to_status(err: LoopRunnerError) -> Status {
+    match err {
+        LoopRunnerError::InvalidArgument => Status::invalid_argument("loop_id is required"),
+        LoopRunnerError::AlreadyExists(loop_id) => {
+            Status::already_exists(format!("loop runner {:?} already running", loop_id))
+        }
+        LoopRunnerError::NotFound(loop_id) => {
+            Status::not_found(format!("loop runner {:?} not found", loop_id))
+        }
+        LoopRunnerError::StartFailed(cause) => {
+            Status::internal(format!("failed to start loop runner: {cause}"))
+        }
+        LoopRunnerError::StopFailed(loop_id, cause) => {
+            Status::internal(format!("failed to stop loop runner {:?}: {cause}", loop_id))
+        }
+        LoopRunnerError::NoProcessHandle(loop_id) => {
+            Status::internal(format!("loop runner {:?} has no process handle", loop_id))
+        }
     }
 }
 
@@ -724,53 +865,6 @@ fn transcript_entry_to_proto(entry: &TranscriptEntry) -> proto::TranscriptEntry 
         r#type: entry.entry_type.to_proto_i32(),
         content: entry.content.clone(),
         metadata: entry.metadata.clone(),
-    }
-}
-
-fn transcript_entry_to_event_type(entry_type: TranscriptEntryType) -> i32 {
-    match entry_type {
-        TranscriptEntryType::StateChange => proto::EventType::AgentStateChanged as i32,
-        TranscriptEntryType::Error => proto::EventType::Error as i32,
-        TranscriptEntryType::Approval => proto::EventType::ApprovalRequested as i32,
-        TranscriptEntryType::Output
-        | TranscriptEntryType::UserInput
-        | TranscriptEntryType::Command => proto::EventType::AgentOutput as i32,
-    }
-}
-
-fn transcript_entry_to_event_payload(
-    entry_type: TranscriptEntryType,
-    content: &str,
-) -> Option<proto::event::Payload> {
-    match entry_type {
-        TranscriptEntryType::StateChange => Some(proto::event::Payload::AgentStateChanged(
-            proto::AgentStateChangedEvent {
-                previous_state: proto::AgentState::Unspecified as i32,
-                new_state: parse_agent_state_label(content).to_proto_i32(),
-                reason: "state detected from transcript".to_string(),
-            },
-        )),
-        TranscriptEntryType::Error => Some(proto::event::Payload::Error(proto::ErrorEvent {
-            code: "TRANSCRIPT_ERROR".to_string(),
-            message: content.to_string(),
-            recoverable: true,
-        })),
-        TranscriptEntryType::Approval => Some(proto::event::Payload::ApprovalRequested(
-            proto::ApprovalRequestedEvent {
-                approval_id: String::new(),
-                action: content.to_string(),
-                details: String::new(),
-                risk_level: String::new(),
-            },
-        )),
-        TranscriptEntryType::Output
-        | TranscriptEntryType::UserInput
-        | TranscriptEntryType::Command => Some(proto::event::Payload::AgentOutput(
-            proto::AgentOutputEvent {
-                text: content.to_string(),
-                is_stderr: false,
-            },
-        )),
     }
 }
 
@@ -853,17 +947,17 @@ fn detect_agent_state(content: &str, _adapter: &str) -> AgentState {
     AgentState::Running
 }
 
-fn parse_agent_state_label(content: &str) -> AgentState {
-    match content.trim().to_ascii_lowercase().as_str() {
-        "starting" => AgentState::Starting,
-        "running" => AgentState::Running,
-        "idle" => AgentState::Idle,
-        "waiting_approval" => AgentState::WaitingApproval,
-        "paused" => AgentState::Paused,
-        "stopping" => AgentState::Stopping,
-        "stopped" => AgentState::Stopped,
-        "failed" => AgentState::Failed,
-        _ => AgentState::Unspecified,
+fn agent_state_name(state: AgentState) -> &'static str {
+    match state {
+        AgentState::Unspecified => "unspecified",
+        AgentState::Starting => "starting",
+        AgentState::Running => "running",
+        AgentState::Idle => "idle",
+        AgentState::WaitingApproval => "waiting_approval",
+        AgentState::Paused => "paused",
+        AgentState::Stopping => "stopping",
+        AgentState::Stopped => "stopped",
+        AgentState::Failed => "failed",
     }
 }
 
@@ -879,6 +973,20 @@ fn split_lines(content: &str) -> Vec<&str> {
         return Vec::new();
     }
     trimmed.split('\n').collect()
+}
+
+fn tail_utf8(content: &str, max_bytes: usize) -> String {
+    if content.len() <= max_bytes {
+        return content.to_string();
+    }
+
+    let raw_start = content.len() - max_bytes;
+    let start = content
+        .char_indices()
+        .find(|(idx, _)| *idx >= raw_start)
+        .map(|(idx, _)| idx)
+        .unwrap_or(0);
+    content[start..].to_string()
 }
 
 #[cfg(test)]
@@ -1135,6 +1243,13 @@ mod tests {
 
     fn make_service(tmux: Arc<dyn TmuxClient>) -> ForgedAgentService {
         ForgedAgentService::new(AgentManager::new(), tmux)
+    }
+
+    fn make_service_with_loop_runners(
+        tmux: Arc<dyn TmuxClient>,
+        loop_runners: LoopRunnerManager,
+    ) -> ForgedAgentService {
+        ForgedAgentService::new_with_loop_runners(AgentManager::new(), tmux, loop_runners)
     }
 
     fn register_agent(svc: &ForgedAgentService, id: &str, ws: &str, state: AgentState) {
@@ -1734,6 +1849,164 @@ mod tests {
         assert!(agent.last_activity_at.is_some());
     }
 
+    // -- LoopRunner RPC tests --
+
+    fn make_loop_runner_manager_for_tests() -> LoopRunnerManager {
+        LoopRunnerManager::with_command_builder(Arc::new(|_, _| {
+            let mut cmd = std::process::Command::new("sh");
+            cmd.args(["-c", "sleep 60"]);
+            cmd
+        }))
+    }
+
+    #[test]
+    fn start_loop_runner_requires_loop_id() {
+        let svc = make_service_with_loop_runners(
+            Arc::new(MockTmux::new()),
+            make_loop_runner_manager_for_tests(),
+        );
+        let result = svc.start_loop_runner(Request::new(proto::StartLoopRunnerRequest {
+            loop_id: "   ".to_string(),
+            config_path: String::new(),
+            command_path: String::new(),
+        }));
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[test]
+    fn loop_runner_lifecycle_via_rpc_handlers() {
+        let loop_runners = make_loop_runner_manager_for_tests();
+        let svc = make_service_with_loop_runners(Arc::new(MockTmux::new()), loop_runners.clone());
+
+        let start = svc
+            .start_loop_runner(Request::new(proto::StartLoopRunnerRequest {
+                loop_id: " loop-a ".to_string(),
+                config_path: " cfg.toml ".to_string(),
+                command_path: String::new(),
+            }))
+            .unwrap()
+            .into_inner();
+        let started = start.runner.unwrap();
+        assert_eq!(started.loop_id, "loop-a");
+        assert_eq!(started.config_path, "cfg.toml");
+        assert_eq!(started.command_path, "forge");
+        assert_eq!(started.state, proto::LoopRunnerState::Running as i32);
+        assert!(!started.instance_id.is_empty());
+
+        let get = svc
+            .get_loop_runner(Request::new(proto::GetLoopRunnerRequest {
+                loop_id: "loop-a".to_string(),
+            }))
+            .unwrap()
+            .into_inner();
+        assert_eq!(get.runner.unwrap().loop_id, "loop-a");
+
+        let list = svc
+            .list_loop_runners(Request::new(proto::ListLoopRunnersRequest {}))
+            .unwrap()
+            .into_inner();
+        assert_eq!(list.runners.len(), 1);
+        assert_eq!(list.runners[0].loop_id, "loop-a");
+
+        let stop = svc
+            .stop_loop_runner(Request::new(proto::StopLoopRunnerRequest {
+                loop_id: "loop-a".to_string(),
+                force: true,
+            }))
+            .unwrap()
+            .into_inner();
+        assert!(stop.success);
+        let stopped = stop.runner.unwrap();
+        assert_eq!(stopped.loop_id, "loop-a");
+        assert_eq!(stopped.state, proto::LoopRunnerState::Stopped as i32);
+        assert!(stopped.stopped_at.is_some());
+
+        loop_runners.stop_all_loop_runners(true);
+    }
+
+    #[test]
+    fn start_loop_runner_duplicate_returns_already_exists() {
+        let loop_runners = make_loop_runner_manager_for_tests();
+        let svc = make_service_with_loop_runners(Arc::new(MockTmux::new()), loop_runners.clone());
+
+        svc.start_loop_runner(Request::new(proto::StartLoopRunnerRequest {
+            loop_id: "loop-dupe".to_string(),
+            config_path: String::new(),
+            command_path: String::new(),
+        }))
+        .unwrap();
+
+        let result = svc.start_loop_runner(Request::new(proto::StartLoopRunnerRequest {
+            loop_id: "loop-dupe".to_string(),
+            config_path: String::new(),
+            command_path: String::new(),
+        }));
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::AlreadyExists);
+
+        loop_runners.stop_all_loop_runners(true);
+    }
+
+    #[test]
+    fn get_loop_runner_not_found() {
+        let svc = make_service_with_loop_runners(
+            Arc::new(MockTmux::new()),
+            make_loop_runner_manager_for_tests(),
+        );
+        let result = svc.get_loop_runner(Request::new(proto::GetLoopRunnerRequest {
+            loop_id: "missing".to_string(),
+        }));
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::NotFound);
+    }
+
+    #[test]
+    fn stop_loop_runner_not_found() {
+        let svc = make_service_with_loop_runners(
+            Arc::new(MockTmux::new()),
+            make_loop_runner_manager_for_tests(),
+        );
+        let result = svc.stop_loop_runner(Request::new(proto::StopLoopRunnerRequest {
+            loop_id: "missing".to_string(),
+            force: true,
+        }));
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::NotFound);
+    }
+
+    #[test]
+    fn list_loop_runners_returns_sorted_ids() {
+        let loop_runners = make_loop_runner_manager_for_tests();
+        let svc = make_service_with_loop_runners(Arc::new(MockTmux::new()), loop_runners.clone());
+
+        svc.start_loop_runner(Request::new(proto::StartLoopRunnerRequest {
+            loop_id: "b-loop".to_string(),
+            config_path: String::new(),
+            command_path: String::new(),
+        }))
+        .unwrap();
+        svc.start_loop_runner(Request::new(proto::StartLoopRunnerRequest {
+            loop_id: "a-loop".to_string(),
+            config_path: String::new(),
+            command_path: String::new(),
+        }))
+        .unwrap();
+
+        let list = svc
+            .list_loop_runners(Request::new(proto::ListLoopRunnersRequest {}))
+            .unwrap()
+            .into_inner();
+        let ids: Vec<&str> = list
+            .runners
+            .iter()
+            .map(|runner| runner.loop_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["a-loop", "b-loop"]);
+
+        loop_runners.stop_all_loop_runners(true);
+    }
+
     // -- CapturePane tests --
 
     #[test]
@@ -1905,6 +2178,53 @@ mod tests {
         assert!(updates.is_empty());
     }
 
+    #[test]
+    fn stream_pane_updates_records_transcript_and_events() {
+        let svc = make_service(Arc::new(MockTmux::with_capture("work complete\n$")));
+        register_agent(&svc, "a1", "ws1", AgentState::Running);
+
+        let updates = svc
+            .stream_pane_updates(
+                Request::new(proto::StreamPaneUpdatesRequest {
+                    agent_id: "a1".to_string(),
+                    min_interval: Some(prost_types::Duration {
+                        seconds: 0,
+                        nanos: 1,
+                    }),
+                    last_known_hash: String::new(),
+                    include_content: false,
+                }),
+                1,
+            )
+            .unwrap();
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].detected_state, proto::AgentState::Idle as i32);
+
+        assert_eq!(svc.events.stored_count(), 2);
+
+        let transcript = svc
+            .get_transcript(Request::new(proto::GetTranscriptRequest {
+                agent_id: "a1".to_string(),
+                start_time: None,
+                end_time: None,
+                limit: 0,
+            }))
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(transcript.entries.len(), 2);
+        assert_eq!(
+            transcript.entries[0].r#type,
+            proto::TranscriptEntryType::Output as i32
+        );
+        assert!(transcript.entries[0].metadata.contains_key("content_hash"));
+        assert_eq!(
+            transcript.entries[1].r#type,
+            proto::TranscriptEntryType::StateChange as i32
+        );
+        assert_eq!(transcript.entries[1].content, "idle");
+    }
+
     // -- StreamEvents tests --
 
     #[test]
@@ -1926,13 +2246,12 @@ mod tests {
     #[test]
     fn stream_events_replay_and_cursor_progression() {
         let svc = make_service(Arc::new(MockTmux::new()));
-        register_agent(&svc, "a1", "ws1", AgentState::Running);
-        svc.agents
-            .add_transcript_entry("a1", TranscriptEntryType::Output, "line 1");
-        svc.agents
-            .add_transcript_entry("a1", TranscriptEntryType::Output, "line 2");
+        svc.events
+            .publish_agent_state_changed("a1", "ws1", 0, 1, "first");
+        svc.events
+            .publish_agent_state_changed("a2", "ws1", 0, 1, "second");
 
-        let replay = svc
+        let from_now = svc
             .stream_events(
                 Request::new(proto::StreamEventsRequest {
                     cursor: String::new(),
@@ -1943,12 +2262,9 @@ mod tests {
                 1,
             )
             .unwrap();
+        assert!(from_now.is_empty());
 
-        assert_eq!(replay.len(), 2);
-        assert_eq!(replay[0].event.as_ref().unwrap().id, "0");
-        assert_eq!(replay[1].event.as_ref().unwrap().id, "1");
-
-        let from_cursor = svc
+        let replay = svc
             .stream_events(
                 Request::new(proto::StreamEventsRequest {
                     cursor: "1".to_string(),
@@ -1960,25 +2276,47 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(from_cursor.len(), 1);
-        assert_eq!(from_cursor[0].event.as_ref().unwrap().id, "1");
+        assert_eq!(replay.len(), 1);
+        assert_eq!(replay[0].event.as_ref().unwrap().id, "1");
+
+        let events = Arc::clone(&svc.events);
+        let publisher = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(10));
+            events.publish_agent_state_changed("a3", "ws2", 0, 1, "live");
+        });
+
+        let live = svc
+            .stream_events(
+                Request::new(proto::StreamEventsRequest {
+                    cursor: String::new(),
+                    types: vec![],
+                    agent_ids: vec![],
+                    workspace_ids: vec![],
+                }),
+                3,
+            )
+            .unwrap();
+        publisher.join().unwrap();
+
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].event.as_ref().unwrap().agent_id, "a3");
+        assert_eq!(live[0].event.as_ref().unwrap().id, "2");
     }
 
     #[test]
     fn stream_events_filters_by_agent_workspace_and_type() {
         let svc = make_service(Arc::new(MockTmux::new()));
-        register_agent(&svc, "a1", "ws1", AgentState::Running);
-        register_agent(&svc, "a2", "ws2", AgentState::Running);
-
-        svc.agents
-            .add_transcript_entry("a1", TranscriptEntryType::Output, "a1 output");
-        svc.agents
-            .add_transcript_entry("a2", TranscriptEntryType::Error, "a2 error");
+        svc.events
+            .publish_agent_state_changed("seed", "ws0", 0, 1, "seed");
+        svc.events
+            .publish_agent_state_changed("a1", "ws1", 0, 1, "a1");
+        svc.events
+            .publish_error("a2", "ws2", "ERR", "a2 error", true);
 
         let by_agent = svc
             .stream_events(
                 Request::new(proto::StreamEventsRequest {
-                    cursor: String::new(),
+                    cursor: "1".to_string(),
                     types: vec![],
                     agent_ids: vec!["a1".to_string()],
                     workspace_ids: vec![],
@@ -1992,7 +2330,7 @@ mod tests {
         let by_workspace_and_type = svc
             .stream_events(
                 Request::new(proto::StreamEventsRequest {
-                    cursor: String::new(),
+                    cursor: "1".to_string(),
                     types: vec![proto::EventType::Error as i32],
                     agent_ids: vec![],
                     workspace_ids: vec!["ws2".to_string()],

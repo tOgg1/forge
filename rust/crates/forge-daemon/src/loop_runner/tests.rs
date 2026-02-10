@@ -1,5 +1,7 @@
 use super::{LoopRunnerError, LoopRunnerManager, LoopRunnerState, StartLoopRunnerRequest};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 type Calls = Arc<Mutex<Vec<(String, Vec<String>)>>>;
 
@@ -168,4 +170,135 @@ fn list_returns_sorted_by_loop_id() {
     assert_eq!(ids, vec!["a-loop".to_string(), "b-loop".to_string()]);
 
     mgr.stop_all_loop_runners(true);
+}
+
+#[test]
+fn monitor_marks_stopped_after_clean_exit() {
+    let mgr = LoopRunnerManager::with_command_builder(Arc::new(|_, _| {
+        let mut c = std::process::Command::new("sh");
+        c.args(["-c", "exit 0"]);
+        c
+    }));
+
+    let _ = match mgr.start_loop_runner(StartLoopRunnerRequest {
+        loop_id: "loop-clean-exit".to_string(),
+        config_path: "".to_string(),
+        command_path: "forge".to_string(),
+    }) {
+        Ok(runner) => runner,
+        Err(err) => panic!("start error: {err:?}"),
+    };
+
+    let stopped = wait_for_state(
+        &mgr,
+        "loop-clean-exit",
+        LoopRunnerState::Stopped,
+        Duration::from_secs(3),
+    );
+    assert!(stopped.stopped_at.is_some());
+    assert!(stopped.last_error.is_empty());
+}
+
+#[test]
+fn monitor_marks_error_after_nonzero_exit() {
+    let mgr = LoopRunnerManager::with_command_builder(Arc::new(|_, _| {
+        let mut c = std::process::Command::new("sh");
+        c.args(["-c", "exit 7"]);
+        c
+    }));
+
+    let _ = match mgr.start_loop_runner(StartLoopRunnerRequest {
+        loop_id: "loop-error-exit".to_string(),
+        config_path: "".to_string(),
+        command_path: "forge".to_string(),
+    }) {
+        Ok(runner) => runner,
+        Err(err) => panic!("start error: {err:?}"),
+    };
+
+    let errored = wait_for_state(
+        &mgr,
+        "loop-error-exit",
+        LoopRunnerState::Error,
+        Duration::from_secs(3),
+    );
+    assert!(
+        errored.last_error.contains("7"),
+        "expected exit status in last_error, got {:?}",
+        errored.last_error
+    );
+}
+
+#[test]
+fn reconnect_recovers_from_stale_exited_runner_with_new_instance() {
+    let starts = Arc::new(AtomicUsize::new(0));
+    let starts_clone = Arc::clone(&starts);
+    let mgr = LoopRunnerManager::with_command_builder(Arc::new(move |_, _| {
+        let start_idx = starts_clone.fetch_add(1, Ordering::SeqCst);
+        let mut c = std::process::Command::new("sh");
+        if start_idx == 0 {
+            c.args(["-c", "exit 0"]);
+        } else {
+            c.args(["-c", "sleep 60"]);
+        }
+        c
+    }));
+
+    let first = match mgr.start_loop_runner(StartLoopRunnerRequest {
+        loop_id: "loop-reconnect".to_string(),
+        config_path: "".to_string(),
+        command_path: "forge".to_string(),
+    }) {
+        Ok(runner) => runner,
+        Err(err) => panic!("first start error: {err:?}"),
+    };
+    let stopped = wait_for_state(
+        &mgr,
+        "loop-reconnect",
+        LoopRunnerState::Stopped,
+        Duration::from_secs(3),
+    );
+    assert_eq!(stopped.instance_id, first.instance_id);
+
+    let second = match mgr.start_loop_runner(StartLoopRunnerRequest {
+        loop_id: "loop-reconnect".to_string(),
+        config_path: "".to_string(),
+        command_path: "forge".to_string(),
+    }) {
+        Ok(runner) => runner,
+        Err(err) => panic!("second start error: {err:?}"),
+    };
+    assert_eq!(second.state, LoopRunnerState::Running);
+    assert_ne!(second.instance_id, first.instance_id);
+
+    let stop = match mgr.stop_loop_runner("loop-reconnect", true) {
+        Ok(res) => res,
+        Err(err) => panic!("stop error: {err:?}"),
+    };
+    assert!(stop.success);
+}
+
+fn wait_for_state(
+    mgr: &LoopRunnerManager,
+    loop_id: &str,
+    want: LoopRunnerState,
+    timeout: Duration,
+) -> super::LoopRunner {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let runner = match mgr.get_loop_runner(loop_id) {
+            Ok(runner) => runner,
+            Err(err) => panic!("get loop runner error: {err:?}"),
+        };
+        if runner.state == want {
+            return runner;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "timed out waiting for {:?}, latest state {:?}",
+                want, runner.state
+            );
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
 }
