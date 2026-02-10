@@ -25,8 +25,9 @@ pub mod topics;
 
 pub use app::{App, Command, LayoutMode, PlaceholderView, View, ViewId};
 pub use bookmarks::{
-    apply_bookmarks_input, parse_bookmarks_filter, render_bookmarks_frame, BookmarkEntry,
-    BookmarksFilter, BookmarksViewModel,
+    apply_bookmarks_input, parse_bookmarks_filter, render_bookmarks_frame,
+    render_bookmarks_markdown, BookmarkEntry, BookmarkSort, BookmarksAction, BookmarksFilter,
+    BookmarksViewModel,
 };
 pub use compose::{
     apply_compose_input, first_non_empty_line, normalize_priority, parse_quick_send_input,
