@@ -55,9 +55,22 @@
   - creates loops in `loops` with real pool/profile ref resolution,
   - enqueues initial pause items into `loop_queue_items`,
   - marks loop `running` and persists runner metadata in `metadata_json`.
+- `forge-cli kill` now uses SQLite (`forge_db`) backend:
+  - resolves loops from `loops`,
+  - enqueues `kill_now` into `loop_queue_items`,
+  - persists loop `stopped` state and best-effort process signal.
+- hidden `forge loop run` now uses SQLite (`forge_db`) backend via `run::SqliteRunBackend`:
+  - resolves loop refs from `loops`,
+  - records loop run rows in `loop_runs`,
+  - updates `loops.last_run_at` and `last_exit_code`.
+- `forge-cli export` now uses SQLite (`forge_db`) backend:
+  - `export status` reads `nodes`, `workspaces`, `agents`, `queue_items`, `alerts`,
+  - `export events` reads `events` via `EventRepository` cursor pagination,
+  - payload/metadata now come from persisted DB event rows.
 - `forge-cli tui` now uses a process backend and launches `forge-tui` (no in-memory launch stub).
 - `forge-tui` binary now renders live loop snapshot data from SQLite (refresh loop in interactive TTY).
 - `fmail-tui` binary now renders live mailbox snapshot data from `.fmail` store.
+- `forge-cli` root runtime dispatch now has no in-memory DB backends left for core loop flow commands.
 
 ## Validated
 
@@ -74,21 +87,27 @@
 - `cargo test -p forge-cli explain::`
 - `cargo test -p forge-cli send::`
 - `cargo test -p forge-cli up::`
+- `cargo test -p forge-cli --test root_command_test`
+- `cargo test -p forge-cli --test export_command_test`
 - `cargo test -p forge-cli tui::`
 - `cargo test -p forge-tui -p fmail-tui`
 - `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
 - `cargo build --release -p forge-cli -p forge-tui -p fmail-tui`
+- `EDITOR=true VISUAL=true cargo test -p forge-cli`
 - Runtime checks:
   - `rforge ps` now returns real loop rows from existing DB.
   - `rforge ps --json` returns real JSON rows.
+  - `rforge loop run <id>` now increments persisted loop runs in DB.
+  - `rforge kill <id>` now updates persisted loop state in DB.
+  - `rforge export events --json` now returns persisted DB events.
   - `rforge-tui` now shows live loop snapshot output.
   - `rfmail-tui` now shows live mailbox snapshot output.
 
 ## Still not complete parity
 
-- Many `forge-cli` commands still route through in-memory backends (`run`, `scale`, `queue`, etc.).
 - `forge-tui` / `fmail-tui` are now live-data shells, but not feature-complete interactive parity with Go TUI yet.
+- In-memory backends remain in code for unit-test doubles, not runtime dispatch.
 
 ## Immediate next wiring target
 
-- Continue loop lifecycle wiring (`run`, `scale`, `queue`) to SQLite + runtime process backends.
+- TUI and CLI parity polish: id-prefix matching UX, colored `ps`, richer `logs` highlighting, Frankentui feature parity.
