@@ -1,6 +1,10 @@
+use std::collections::HashMap;
 use std::io::Write;
+use std::path::PathBuf;
+use std::process::Command;
 
 use serde::Serialize;
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -82,6 +86,142 @@ impl KillBackend for InMemoryKillBackend {
         }
         self.enqueued.push(loop_id.to_string());
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SqliteKillBackend {
+    db_path: PathBuf,
+}
+
+impl SqliteKillBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+}
+
+impl KillBackend for SqliteKillBackend {
+    fn list_loops(&self) -> Result<Vec<LoopRecord>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+
+        let loops = match loop_repo.list() {
+            Ok(loops) => loops,
+            Err(err) if err.to_string().contains("no such table: loops") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let mut out = Vec::new();
+        for entry in loops {
+            let state = map_loop_state(&entry.state);
+            out.push(LoopRecord {
+                id: entry.id.clone(),
+                short_id: if entry.short_id.is_empty() {
+                    entry.id
+                } else {
+                    entry.short_id
+                },
+                name: entry.name,
+                repo: entry.repo_path,
+                pool: entry.pool_id,
+                profile: entry.profile_id,
+                state,
+                tags: entry.tags,
+            });
+        }
+        Ok(out)
+    }
+
+    fn enqueue_kill(&mut self, loop_id: &str) -> Result<(), String> {
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+
+        let mut items = vec![forge_db::loop_queue_repository::LoopQueueItem {
+            item_type: "kill_now".to_string(),
+            payload: r#"{"reason":"operator"}"#.to_string(),
+            ..Default::default()
+        }];
+
+        queue_repo
+            .enqueue(loop_id, &mut items)
+            .map_err(|err| format!("enqueue kill for {loop_id}: {err}"))?;
+
+        // Go parity: best-effort process signal, then persist stopped state.
+        let mut loop_entry = loop_repo
+            .get(loop_id)
+            .map_err(|err| format!("load loop {loop_id}: {err}"))?;
+        if let Some(pid) = loop_pid(loop_entry.metadata.as_ref()) {
+            kill_process(pid);
+        }
+        loop_entry.state = forge_db::loop_repository::LoopState::Stopped;
+        loop_repo
+            .update(&mut loop_entry)
+            .map_err(|err| format!("persist stop state for {loop_id}: {err}"))?;
+
+        Ok(())
+    }
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
+fn map_loop_state(state: &forge_db::loop_repository::LoopState) -> LoopState {
+    match state {
+        forge_db::loop_repository::LoopState::Running => LoopState::Running,
+        forge_db::loop_repository::LoopState::Sleeping
+        | forge_db::loop_repository::LoopState::Waiting => LoopState::Running,
+        forge_db::loop_repository::LoopState::Stopped => LoopState::Stopped,
+        forge_db::loop_repository::LoopState::Error => LoopState::Error,
+    }
+}
+
+fn loop_pid(metadata: Option<&HashMap<String, Value>>) -> Option<i32> {
+    let value = metadata?.get("pid")?;
+    match value {
+        Value::Number(n) => n.as_i64().and_then(|pid| i32::try_from(pid).ok()),
+        Value::String(s) => s.parse::<i32>().ok(),
+        _ => None,
+    }
+}
+
+fn kill_process(pid: i32) {
+    if pid <= 0 {
+        return;
+    }
+
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill").arg("-9").arg(pid.to_string()).status();
     }
 }
 
@@ -377,7 +517,9 @@ Flags:
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_args, run_for_test, InMemoryKillBackend, LoopRecord, LoopState};
+    use super::{
+        parse_args, run_for_test, InMemoryKillBackend, LoopRecord, LoopState, SqliteKillBackend,
+    };
 
     #[test]
     fn parse_requires_selector_or_loop() {
@@ -605,5 +747,136 @@ mod tests {
         assert!(out
             .stderr
             .contains("loop 'abc' is ambiguous; matches: alpha (abc001), beta (abc002)"));
+    }
+
+    // -----------------------------------------------------------------------
+    // SQLite integration tests
+    // -----------------------------------------------------------------------
+
+    use serde_json::json;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    fn temp_db_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(d) => d.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-kill-{tag}-{nanos}-{}-{suffix}.sqlite",
+            std::process::id(),
+        ))
+    }
+
+    #[test]
+    fn kill_sqlite_backend_enqueues_kill_now_and_sets_state_stopped() {
+        let db_path = temp_db_path("sqlite-kill");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "kill-test-loop".to_string(),
+            repo_path: "/tmp/kill-test".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+
+        let mut backend = SqliteKillBackend::new(db_path.clone());
+        let out = run_for_test(&["kill", "kill-test-loop", "--json"], &mut backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        assert!(out.stderr.is_empty());
+        assert_eq!(
+            out.stdout,
+            "{\n  \"action\": \"kill_now\",\n  \"loops\": 1\n}\n"
+        );
+
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+        let items = queue_repo
+            .list(&loop_entry.id)
+            .unwrap_or_else(|err| panic!("list queue: {err}"));
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, "kill_now");
+        assert_eq!(items[0].status, "pending");
+
+        let updated = loop_repo
+            .get(&loop_entry.id)
+            .unwrap_or_else(|err| panic!("get loop: {err}"));
+        assert_eq!(updated.state, forge_db::loop_repository::LoopState::Stopped);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn kill_sqlite_backend_signals_pid_from_metadata() {
+        let db_path = temp_db_path("sqlite-signal");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .unwrap_or_else(|err| panic!("spawn sleep: {err}"));
+
+        let pid = child.id();
+        let pid_i64 = i64::from(pid);
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut metadata = HashMap::new();
+        metadata.insert("pid".to_string(), json!(pid_i64));
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "kill-signal-loop".to_string(),
+            repo_path: "/tmp/kill-signal".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            metadata: Some(metadata),
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+
+        let mut backend = SqliteKillBackend::new(db_path.clone());
+        let out = run_for_test(&["kill", "kill-signal-loop", "--json"], &mut backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+        let mut exited = false;
+        for _ in 0..40 {
+            let polled = child
+                .try_wait()
+                .unwrap_or_else(|err| panic!("poll child: {err}"));
+            if polled.is_some() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if !exited {
+            let _ = child.kill();
+            panic!("expected kill command to terminate child process");
+        }
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn kill_sqlite_backend_missing_db_returns_no_match() {
+        let db_path = std::env::temp_dir().join("forge-cli-kill-nonexistent.sqlite");
+        let _ = std::fs::remove_file(&db_path);
+
+        let mut backend = SqliteKillBackend::new(db_path);
+        let out = run_for_test(&["kill", "--all"], &mut backend);
+        assert_eq!(out.exit_code, 1);
+        assert_eq!(out.stderr, "no loops matched\n");
     }
 }

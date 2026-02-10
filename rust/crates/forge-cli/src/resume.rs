@@ -1,7 +1,9 @@
 use std::env;
 use std::io::Write;
+use std::path::PathBuf;
 
 use serde::Serialize;
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -100,6 +102,138 @@ impl ResumeBackend for InMemoryResumeBackend {
 
         Ok(ResumeResult { owner, instance_id })
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct SqliteResumeBackend {
+    db_path: PathBuf,
+}
+
+impl SqliteResumeBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
+
+    fn next_instance_id(&self) -> String {
+        format!("resume-{}", uuid::Uuid::new_v4().simple())
+    }
+}
+
+impl ResumeBackend for SqliteResumeBackend {
+    fn list_loops(&self) -> Result<Vec<LoopRecord>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let db = self.open_db()?;
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let loops = match loop_repo.list() {
+            Ok(loops) => loops,
+            Err(err) if err.to_string().contains("no such table: loops") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let mut out = Vec::new();
+        for entry in loops {
+            out.push(LoopRecord {
+                id: entry.id.clone(),
+                short_id: if entry.short_id.is_empty() {
+                    entry.id
+                } else {
+                    entry.short_id
+                },
+                name: entry.name,
+                state: map_loop_state(&entry.state),
+                runner_owner: metadata_string(entry.metadata.as_ref(), "runner_owner"),
+                runner_instance_id: metadata_string(entry.metadata.as_ref(), "runner_instance_id"),
+            });
+        }
+        Ok(out)
+    }
+
+    fn resume_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<ResumeResult, String> {
+        let owner = resolve_spawn_owner(spawn_owner)?;
+        let db = self.open_db()?;
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut loop_entry = loop_repo.get(loop_id).map_err(|err| err.to_string())?;
+
+        let state = map_loop_state(&loop_entry.state);
+        match state {
+            LoopState::Stopped | LoopState::Error => {}
+            other => {
+                return Err(format!(
+                    "loop \"{}\" is {}; only stopped or errored loops can be resumed",
+                    loop_entry.name,
+                    other.as_str()
+                ))
+            }
+        }
+
+        loop_entry.state = forge_db::loop_repository::LoopState::Running;
+        let mut metadata = loop_entry.metadata.unwrap_or_default();
+        let instance_id = self.next_instance_id();
+        metadata.insert("runner_owner".to_string(), Value::String(owner.clone()));
+        metadata.insert(
+            "runner_instance_id".to_string(),
+            Value::String(instance_id.clone()),
+        );
+        loop_entry.metadata = Some(metadata);
+        loop_repo
+            .update(&mut loop_entry)
+            .map_err(|err| err.to_string())?;
+
+        Ok(ResumeResult { owner, instance_id })
+    }
+}
+
+fn map_loop_state(state: &forge_db::loop_repository::LoopState) -> LoopState {
+    match state {
+        forge_db::loop_repository::LoopState::Running => LoopState::Running,
+        forge_db::loop_repository::LoopState::Sleeping
+        | forge_db::loop_repository::LoopState::Waiting => LoopState::Pending,
+        forge_db::loop_repository::LoopState::Stopped => LoopState::Stopped,
+        forge_db::loop_repository::LoopState::Error => LoopState::Error,
+    }
+}
+
+fn metadata_string(
+    metadata: Option<&std::collections::HashMap<String, Value>>,
+    key: &str,
+) -> String {
+    metadata
+        .and_then(|map| map.get(key))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -343,7 +477,14 @@ fn write_serialized(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_args, run_for_test, InMemoryResumeBackend, LoopRecord, LoopState};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use super::{
+        parse_args, run_for_test, InMemoryResumeBackend, LoopRecord, LoopState, SqliteResumeBackend,
+    };
 
     #[test]
     fn parse_requires_loop_ref() {
@@ -388,5 +529,136 @@ mod tests {
             out.stderr,
             "loop \"demo\" is running; only stopped or errored loops can be resumed\n"
         );
+    }
+
+    #[test]
+    fn sqlite_resume_updates_runner_metadata_and_preserves_runtime_keys() {
+        let (db_path, _tmp, loop_id) = setup_sqlite_resume_fixture();
+        let mut backend = SqliteResumeBackend::new(db_path.clone());
+
+        let out = run_for_test(
+            &["resume", "demo", "--spawn-owner", "daemon", "--json"],
+            &mut backend,
+        );
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        assert!(out.stderr.is_empty());
+
+        let parsed: serde_json::Value = match serde_json::from_str(&out.stdout) {
+            Ok(value) => value,
+            Err(err) => panic!("parse json output: {err}"),
+        };
+        assert_eq!(parsed["resumed"], true);
+        assert_eq!(parsed["loop_id"], loop_id);
+
+        let db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+        let repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let entry = repo
+            .get(&loop_id)
+            .unwrap_or_else(|err| panic!("get loop {loop_id}: {err}"));
+        assert_eq!(entry.state, forge_db::loop_repository::LoopState::Running);
+
+        let metadata = entry.metadata.unwrap_or_default();
+        assert_eq!(
+            metadata.get("wait_until"),
+            Some(&json!("2026-12-31T00:00:00Z"))
+        );
+        assert_eq!(
+            metadata.get("loop_started_at"),
+            Some(&json!("2026-02-10T00:00:00Z"))
+        );
+        assert_eq!(metadata.get("loop_iteration_count"), Some(&json!(42)));
+        assert_eq!(metadata.get("runner_owner"), Some(&json!("daemon")));
+        let instance_id = metadata
+            .get("runner_instance_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+        assert!(instance_id.starts_with("resume-"));
+    }
+
+    fn setup_sqlite_resume_fixture() -> (PathBuf, TempDir, String) {
+        let tmp = TempDir::new("resume-sqlite");
+        let db_path = tmp.path.join("forge.db");
+
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+
+        let mut pool = forge_db::pool_repository::Pool {
+            name: "default".to_string(),
+            is_default: true,
+            ..Default::default()
+        };
+        pool_repo
+            .create(&mut pool)
+            .unwrap_or_else(|err| panic!("create pool: {err}"));
+
+        let mut profile = forge_db::profile_repository::Profile {
+            name: "codex".to_string(),
+            command_template: "codex".to_string(),
+            ..Default::default()
+        };
+        profile_repo
+            .create(&mut profile)
+            .unwrap_or_else(|err| panic!("create profile: {err}"));
+
+        let repo_path = std::env::current_dir()
+            .unwrap_or_else(|err| panic!("cwd: {err}"))
+            .to_string_lossy()
+            .to_string();
+        let mut metadata: HashMap<String, serde_json::Value> = HashMap::new();
+        metadata.insert("wait_until".to_string(), json!("2026-12-31T00:00:00Z"));
+        metadata.insert("loop_started_at".to_string(), json!("2026-02-10T00:00:00Z"));
+        metadata.insert("loop_iteration_count".to_string(), json!(42));
+
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "demo".to_string(),
+            repo_path,
+            pool_id: pool.id.clone(),
+            profile_id: profile.id.clone(),
+            state: forge_db::loop_repository::LoopState::Stopped,
+            metadata: Some(metadata),
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+
+        (db_path, tmp, loop_entry.id)
+    }
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(prefix: &str) -> Self {
+            let mut path = std::env::temp_dir();
+            let uniq = format!(
+                "{}-{}-{}",
+                prefix,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            );
+            path.push(uniq);
+            std::fs::create_dir_all(&path)
+                .unwrap_or_else(|err| panic!("mkdir {}: {err}", path.display()));
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
     }
 }

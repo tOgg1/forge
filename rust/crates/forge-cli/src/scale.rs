@@ -1,7 +1,9 @@
 use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
+use std::path::PathBuf;
 
 use serde::Serialize;
+use serde_json::json;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -37,13 +39,13 @@ pub enum QueueItem {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct StopConfig {
     pub quant: Option<QuantStopConfig>,
     pub qual: Option<QualStopConfig>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct QuantStopConfig {
     pub cmd: String,
     pub every_n: i32,
@@ -58,7 +60,7 @@ pub struct QuantStopConfig {
     pub timeout_seconds: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct QualStopConfig {
     pub every_n: i32,
     pub prompt: String,
@@ -170,6 +172,223 @@ impl ScaleBackend for InMemoryScaleBackend {
         self.starts
             .push((loop_id.to_string(), spawn_owner.to_string()));
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SqliteScaleBackend {
+    db_path: PathBuf,
+}
+
+impl SqliteScaleBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
+
+    fn resolve_repo_for_create(&self, value: &str) -> Result<String, String> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            let cwd = std::env::current_dir().map_err(|err| format!("resolve cwd: {err}"))?;
+            return Ok(cwd.to_string_lossy().into_owned());
+        }
+        normalize_repo_filter(trimmed)
+    }
+}
+
+impl ScaleBackend for SqliteScaleBackend {
+    fn select_loops(&self, selector: &LoopSelector) -> Result<Vec<LoopRecord>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let db = self.open_db()?;
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let loops = match loop_repo.list() {
+            Ok(loops) => loops,
+            Err(err) if err.to_string().contains("no such table: loops") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let repo_filter = if selector.repo.is_empty() {
+            String::new()
+        } else {
+            normalize_repo_filter(&selector.repo)?
+        };
+        let pool_filter = if selector.pool.is_empty() {
+            String::new()
+        } else {
+            resolve_pool_ref(&pool_repo, &selector.pool)?
+        };
+        let profile_filter = if selector.profile.is_empty() {
+            String::new()
+        } else {
+            resolve_profile_ref(&profile_repo, &selector.profile)?
+        };
+
+        let mut out = Vec::new();
+        for entry in loops {
+            if !repo_filter.is_empty() && entry.repo_path != repo_filter {
+                continue;
+            }
+            if !pool_filter.is_empty() && entry.pool_id != pool_filter {
+                continue;
+            }
+            if !profile_filter.is_empty() && entry.profile_id != profile_filter {
+                continue;
+            }
+
+            let pool_name = if entry.pool_id.is_empty() {
+                String::new()
+            } else {
+                pool_repo
+                    .get(&entry.pool_id)
+                    .map(|pool| pool.name)
+                    .unwrap_or(entry.pool_id.clone())
+            };
+            let profile_name = if entry.profile_id.is_empty() {
+                String::new()
+            } else {
+                profile_repo
+                    .get(&entry.profile_id)
+                    .map(|profile| profile.name)
+                    .unwrap_or(entry.profile_id.clone())
+            };
+
+            let created_seq = (out.len() + 1) as u64;
+            out.push(LoopRecord {
+                id: entry.id,
+                name: entry.name,
+                repo: entry.repo_path,
+                pool: pool_name,
+                profile: profile_name,
+                created_seq,
+            });
+        }
+        Ok(out)
+    }
+
+    fn enqueue_item(&mut self, loop_id: &str, item: QueueItem) -> Result<(), String> {
+        let db = self.open_db()?;
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+
+        let (item_type, payload) = match item {
+            QueueItem::StopGraceful => ("stop_graceful".to_string(), "{}".to_string()),
+            QueueItem::KillNow => ("kill_now".to_string(), "{}".to_string()),
+            QueueItem::Pause {
+                duration_seconds,
+                reason,
+            } => (
+                "pause".to_string(),
+                json!({ "duration_seconds": duration_seconds, "reason": reason }).to_string(),
+            ),
+        };
+
+        let mut queue_item = forge_db::loop_queue_repository::LoopQueueItem {
+            item_type,
+            payload,
+            ..Default::default()
+        };
+        queue_repo
+            .enqueue(loop_id, std::slice::from_mut(&mut queue_item))
+            .map_err(|err| format!("enqueue queue item: {err}"))
+    }
+
+    fn create_loop(&mut self, spec: &LoopCreateSpec) -> Result<LoopRecord, String> {
+        let db = self.open_db()?;
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let repo_path = self.resolve_repo_for_create(&spec.repo)?;
+        let pool_id = if spec.pool.trim().is_empty() {
+            String::new()
+        } else {
+            resolve_pool_ref(&pool_repo, &spec.pool)?
+        };
+        let profile_id = if spec.profile.trim().is_empty() {
+            String::new()
+        } else {
+            resolve_profile_ref(&profile_repo, &spec.profile)?
+        };
+
+        let stop_metadata = if spec.stop_config.quant.is_some() || spec.stop_config.qual.is_some() {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "stop_config".to_string(),
+                serde_json::to_value(&spec.stop_config)
+                    .map_err(|err| format!("serialize stop config: {err}"))?,
+            );
+            Some(metadata)
+        } else {
+            None
+        };
+
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: spec.name.clone(),
+            repo_path: repo_path.clone(),
+            base_prompt_path: spec.prompt.clone(),
+            base_prompt_msg: spec.prompt_msg.clone(),
+            interval_seconds: spec.interval_seconds,
+            max_iterations: i64::from(spec.max_iterations),
+            max_runtime_seconds: spec.max_runtime_seconds,
+            pool_id,
+            profile_id,
+            state: forge_db::loop_repository::LoopState::Stopped,
+            tags: spec.tags.clone(),
+            metadata: stop_metadata,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .map_err(|err| format!("create loop: {err}"))?;
+
+        Ok(LoopRecord {
+            id: loop_entry.id,
+            name: loop_entry.name,
+            repo: repo_path,
+            pool: spec.pool.clone(),
+            profile: spec.profile.clone(),
+            created_seq: 0,
+        })
+    }
+
+    fn start_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<(), String> {
+        let db = self.open_db()?;
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut loop_entry = match loop_repo.get(loop_id) {
+            Ok(entry) => entry,
+            Err(err) if err.to_string().contains("not found") => {
+                return Err(format!("loop {loop_id} not found"));
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+
+        loop_entry.state = forge_db::loop_repository::LoopState::Running;
+        let mut metadata = loop_entry.metadata.take().unwrap_or_default();
+        metadata.insert("runner_owner".to_string(), json!(spawn_owner));
+        metadata.insert(
+            "runner_instance_id".to_string(),
+            json!(uuid::Uuid::new_v4().to_string()),
+        );
+        loop_entry.metadata = Some(metadata);
+
+        loop_repo
+            .update(&mut loop_entry)
+            .map_err(|err| format!("start loop {loop_id}: {err}"))
     }
 }
 
@@ -738,6 +957,63 @@ fn write_serialized(
     Ok(())
 }
 
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
+fn normalize_repo_filter(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("repo filter cannot be empty".to_string());
+    }
+    let path = std::path::Path::new(trimmed);
+    if path.is_absolute() {
+        return Ok(trimmed.to_string());
+    }
+    let cwd = std::env::current_dir().map_err(|err| format!("resolve cwd: {err}"))?;
+    Ok(cwd.join(trimmed).to_string_lossy().into_owned())
+}
+
+fn resolve_pool_ref(
+    repo: &forge_db::pool_repository::PoolRepository<'_>,
+    value: &str,
+) -> Result<String, String> {
+    if let Ok(pool) = repo.get_by_name(value) {
+        return Ok(pool.id);
+    }
+    if let Ok(pool) = repo.get(value) {
+        return Ok(pool.id);
+    }
+    Err(format!("pool {value:?} not found"))
+}
+
+fn resolve_profile_ref(
+    repo: &forge_db::profile_repository::ProfileRepository<'_>,
+    value: &str,
+) -> Result<String, String> {
+    if let Ok(profile) = repo.get_by_name(value) {
+        return Ok(profile.id);
+    }
+    if let Ok(profile) = repo.get(value) {
+        return Ok(profile.id);
+    }
+    Err(format!("profile {value:?} not found"))
+}
+
 const HELP_TEXT: &str = "\
 Scale loops to a target count
 
@@ -756,7 +1032,13 @@ Flags:
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_args, run_for_test, InMemoryScaleBackend, QueueItem, ScaleBackend};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{
+        parse_args, run_for_test, InMemoryScaleBackend, QueueItem, ScaleBackend, SqliteScaleBackend,
+    };
 
     #[test]
     fn parse_rejects_pool_and_profile_combo() {
@@ -1081,6 +1363,146 @@ mod tests {
         let as_trait: &mut dyn ScaleBackend = &mut backend;
         let out = run_for_test(&["scale", "--count", "0", "--quiet"], as_trait);
         assert_eq!(out.exit_code, 0);
+    }
+
+    #[test]
+    fn scale_sqlite_down_enqueues_stop_items() {
+        let db_path = temp_db_path("sqlite-down");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut loop_one = forge_db::loop_repository::Loop {
+            name: "alpha".to_string(),
+            repo_path: "/tmp/alpha".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_one)
+            .unwrap_or_else(|err| panic!("create loop one: {err}"));
+        let mut loop_two = forge_db::loop_repository::Loop {
+            name: "beta".to_string(),
+            repo_path: "/tmp/beta".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_two)
+            .unwrap_or_else(|err| panic!("create loop two: {err}"));
+
+        let mut backend = SqliteScaleBackend::new(db_path.clone());
+        let out = run_for_test(&["scale", "--count", "1", "--json"], &mut backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        assert_eq!(out.stdout, "{\n  \"target\": 1,\n  \"current\": 2\n}\n");
+
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+        let one_items = queue_repo
+            .list(&loop_one.id)
+            .unwrap_or_else(|err| panic!("list loop one queue: {err}"));
+        let two_items = queue_repo
+            .list(&loop_two.id)
+            .unwrap_or_else(|err| panic!("list loop two queue: {err}"));
+
+        assert!(one_items.is_empty());
+        assert_eq!(two_items.len(), 1);
+        assert_eq!(two_items[0].item_type, "stop_graceful");
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn scale_sqlite_up_creates_loop_wait_and_start_metadata() {
+        let db_path = temp_db_path("sqlite-up");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut existing = forge_db::loop_repository::Loop {
+            name: "existing".to_string(),
+            repo_path: "/tmp/existing".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut existing)
+            .unwrap_or_else(|err| panic!("create existing loop: {err}"));
+
+        let mut backend = SqliteScaleBackend::new(db_path.clone());
+        let out = run_for_test(
+            &[
+                "scale",
+                "--count",
+                "2",
+                "--name-prefix",
+                "scaled",
+                "--initial-wait",
+                "30s",
+                "--spawn-owner",
+                "daemon",
+                "--json",
+            ],
+            &mut backend,
+        );
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        assert_eq!(out.stdout, "{\n  \"target\": 2,\n  \"current\": 1\n}\n");
+
+        let loops = loop_repo
+            .list()
+            .unwrap_or_else(|err| panic!("list loops: {err}"));
+        assert_eq!(loops.len(), 2);
+        let created = loops
+            .iter()
+            .find(|entry| entry.id != existing.id)
+            .unwrap_or_else(|| panic!("expected created loop"));
+        assert_eq!(created.name, "scaled-1");
+        assert_eq!(created.state, forge_db::loop_repository::LoopState::Running);
+
+        let metadata = created
+            .metadata
+            .clone()
+            .unwrap_or_else(|| panic!("expected metadata with runner fields"));
+        assert_eq!(
+            metadata
+                .get("runner_owner")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            "daemon"
+        );
+        assert!(metadata
+            .get("runner_instance_id")
+            .and_then(|value| value.as_str())
+            .is_some());
+
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+        let queued = queue_repo
+            .list(&created.id)
+            .unwrap_or_else(|err| panic!("list created queue: {err}"));
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].item_type, "pause");
+        let payload: serde_json::Value = serde_json::from_str(&queued[0].payload)
+            .unwrap_or_else(|err| panic!("parse pause payload: {err}"));
+        assert_eq!(payload["duration_seconds"], 30);
+        assert_eq!(payload["reason"], "initial wait");
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    fn temp_db_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-scale-{tag}-{nanos}-{}-{suffix}.sqlite",
+            std::process::id()
+        ))
     }
 
     fn loop_record(id: &str, name: &str, created_seq: u64) -> super::LoopRecord {

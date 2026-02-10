@@ -3,6 +3,9 @@ use std::io::Write;
 
 use serde::Serialize;
 
+mod sqlite_backend;
+pub use sqlite_backend::SqliteQueueBackend;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
     pub stdout: String,
@@ -35,6 +38,71 @@ pub trait QueueBackend {
     fn move_item(&mut self, loop_id: &str, item_id: &str, to: &str) -> Result<(), String>;
 }
 
+pub(crate) fn resolve_loop_ref(loops: &[LoopRecord], loop_ref: &str) -> Result<LoopRecord, String> {
+    let trimmed = loop_ref.trim();
+    if trimmed.is_empty() {
+        return Err("loop name or ID required".to_string());
+    }
+    if loops.is_empty() {
+        return Err(format!(
+            "loop '{trimmed}' not found (no loops registered yet)"
+        ));
+    }
+
+    if let Some(entry) = loops
+        .iter()
+        .find(|entry| entry.short_id.eq_ignore_ascii_case(trimmed))
+    {
+        return Ok(entry.clone());
+    }
+    if let Some(entry) = loops.iter().find(|entry| entry.id == trimmed) {
+        return Ok(entry.clone());
+    }
+    if let Some(entry) = loops.iter().find(|entry| entry.name == trimmed) {
+        return Ok(entry.clone());
+    }
+
+    let normalized = trimmed.to_ascii_lowercase();
+    let mut matches: Vec<LoopRecord> = loops
+        .iter()
+        .filter(|entry| {
+            entry.short_id.to_ascii_lowercase().starts_with(&normalized)
+                || entry.id.starts_with(trimmed)
+        })
+        .cloned()
+        .collect();
+
+    if matches.len() == 1 {
+        return Ok(matches.remove(0));
+    }
+    if matches.len() > 1 {
+        matches.sort_by(|left, right| {
+            left.name
+                .to_ascii_lowercase()
+                .cmp(&right.name.to_ascii_lowercase())
+                .then_with(|| left.short_id.cmp(&right.short_id))
+        });
+        let labels = matches
+            .iter()
+            .map(format_loop_match)
+            .collect::<Vec<String>>()
+            .join(", ");
+        return Err(format!(
+            "loop '{trimmed}' is ambiguous; matches: {labels} (use a longer prefix or full ID)"
+        ));
+    }
+
+    let example = &loops[0];
+    Err(format!(
+        "loop '{trimmed}' not found. Example input: '{}' or '{}'",
+        example.name, example.short_id
+    ))
+}
+
+fn format_loop_match(entry: &LoopRecord) -> String {
+    format!("{} ({})", entry.name, entry.short_id)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryQueueBackend {
     loops: Vec<LoopRecord>,
@@ -60,45 +128,7 @@ impl InMemoryQueueBackend {
 
 impl QueueBackend for InMemoryQueueBackend {
     fn resolve_loop(&self, loop_ref: &str) -> Result<LoopRecord, String> {
-        let trimmed = loop_ref.trim();
-        if trimmed.is_empty() {
-            return Err("loop name or ID required".to_string());
-        }
-
-        if let Some(found) = self
-            .loops
-            .iter()
-            .find(|entry| entry.short_id.eq_ignore_ascii_case(trimmed))
-        {
-            return Ok(found.clone());
-        }
-        if let Some(found) = self.loops.iter().find(|entry| entry.id == trimmed) {
-            return Ok(found.clone());
-        }
-        if let Some(found) = self.loops.iter().find(|entry| entry.name == trimmed) {
-            return Ok(found.clone());
-        }
-
-        let normalized = trimmed.to_ascii_lowercase();
-        let matches: Vec<LoopRecord> = self
-            .loops
-            .iter()
-            .filter(|entry| {
-                entry.short_id.to_ascii_lowercase().starts_with(&normalized)
-                    || entry.id.starts_with(trimmed)
-            })
-            .cloned()
-            .collect();
-
-        if matches.len() == 1 {
-            return Ok(matches[0].clone());
-        }
-        if matches.len() > 1 {
-            return Err(format!(
-                "loop '{trimmed}' is ambiguous; use a longer prefix or full ID"
-            ));
-        }
-        Err(format!("loop '{trimmed}' not found"))
+        resolve_loop_ref(&self.loops, loop_ref)
     }
 
     fn list_queue(&self, loop_id: &str) -> Result<Vec<QueueItem>, String> {
@@ -355,30 +385,53 @@ fn parse_args(args: &[String]) -> Result<Command, String> {
         return Ok(Command::Help);
     }
 
+    // Accept global output flags before the subcommand (matches Cobra persistent flags).
+    let mut default_json = false;
+    let mut default_jsonl = false;
+    let mut default_quiet = false;
+    while let Some(token) = args.get(index) {
+        match token.as_str() {
+            "--json" => default_json = true,
+            "--jsonl" => default_jsonl = true,
+            "--quiet" => default_quiet = true,
+            "--help" | "-h" => return Ok(Command::Help),
+            _ => break,
+        }
+        index += 1;
+    }
+
     let Some(subcommand) = args.get(index) else {
         return Ok(Command::Help);
     };
     index += 1;
 
     match subcommand.as_str() {
-        "ls" => parse_ls(args, index),
-        "clear" => parse_clear(args, index),
-        "rm" => parse_rm(args, index),
-        "move" => parse_move(args, index),
+        "ls" => parse_ls(args, index, default_json, default_jsonl, default_quiet),
+        "clear" => parse_clear(args, index, default_json, default_jsonl, default_quiet),
+        "rm" => parse_rm(args, index, default_json, default_jsonl, default_quiet),
+        "move" => parse_move(args, index, default_json, default_jsonl, default_quiet),
         other => Err(format!("error: unknown queue subcommand '{other}'")),
     }
 }
 
-fn parse_ls(args: &[String], mut index: usize) -> Result<Command, String> {
+fn parse_ls(
+    args: &[String],
+    mut index: usize,
+    default_json: bool,
+    default_jsonl: bool,
+    _default_quiet: bool,
+) -> Result<Command, String> {
     let loop_ref = take_positional(args, &mut index, "loop")?;
     let mut include_all = false;
-    let mut json = false;
-    let mut jsonl = false;
+    let mut json = default_json;
+    let mut jsonl = default_jsonl;
     while let Some(token) = args.get(index) {
         match token.as_str() {
             "--all" => include_all = true,
             "--json" => json = true,
             "--jsonl" => jsonl = true,
+            // Root global flag; accepted for parity but has no effect on list output.
+            "--quiet" => {}
             other => return Err(format!("error: unknown argument for queue ls: '{other}'")),
         }
         index += 1;
@@ -392,11 +445,17 @@ fn parse_ls(args: &[String], mut index: usize) -> Result<Command, String> {
     })
 }
 
-fn parse_clear(args: &[String], mut index: usize) -> Result<Command, String> {
+fn parse_clear(
+    args: &[String],
+    mut index: usize,
+    default_json: bool,
+    default_jsonl: bool,
+    default_quiet: bool,
+) -> Result<Command, String> {
     let loop_ref = take_positional(args, &mut index, "loop")?;
-    let mut json = false;
-    let mut jsonl = false;
-    let mut quiet = false;
+    let mut json = default_json;
+    let mut jsonl = default_jsonl;
+    let mut quiet = default_quiet;
     while let Some(token) = args.get(index) {
         match token.as_str() {
             "--json" => json = true,
@@ -419,12 +478,18 @@ fn parse_clear(args: &[String], mut index: usize) -> Result<Command, String> {
     })
 }
 
-fn parse_rm(args: &[String], mut index: usize) -> Result<Command, String> {
+fn parse_rm(
+    args: &[String],
+    mut index: usize,
+    default_json: bool,
+    default_jsonl: bool,
+    default_quiet: bool,
+) -> Result<Command, String> {
     let loop_ref = take_positional(args, &mut index, "loop")?;
     let item_id = take_positional(args, &mut index, "item-id")?;
-    let mut json = false;
-    let mut jsonl = false;
-    let mut quiet = false;
+    let mut json = default_json;
+    let mut jsonl = default_jsonl;
+    let mut quiet = default_quiet;
     while let Some(token) = args.get(index) {
         match token.as_str() {
             "--json" => json = true,
@@ -444,12 +509,18 @@ fn parse_rm(args: &[String], mut index: usize) -> Result<Command, String> {
     })
 }
 
-fn parse_move(args: &[String], mut index: usize) -> Result<Command, String> {
+fn parse_move(
+    args: &[String],
+    mut index: usize,
+    default_json: bool,
+    default_jsonl: bool,
+    default_quiet: bool,
+) -> Result<Command, String> {
     let loop_ref = take_positional(args, &mut index, "loop")?;
     let item_id = take_positional(args, &mut index, "item-id")?;
-    let mut json = false;
-    let mut jsonl = false;
-    let mut quiet = false;
+    let mut json = default_json;
+    let mut jsonl = default_jsonl;
+    let mut quiet = default_quiet;
     let mut to = "front".to_string();
     while let Some(token) = args.get(index) {
         match token.as_str() {

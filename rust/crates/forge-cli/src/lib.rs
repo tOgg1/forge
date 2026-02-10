@@ -188,16 +188,8 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             prompt::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("queue") => {
-            let mut backend = queue::InMemoryQueueBackend::default();
-            let mut forwarded = remaining.to_vec();
-            if flags.json {
-                let insertion = if forwarded.len() > 2 {
-                    2
-                } else {
-                    forwarded.len()
-                };
-                forwarded.insert(insertion, "--json".to_string());
-            }
+            let mut backend = queue::SqliteQueueBackend::open_from_env();
+            let forwarded = forward_args(remaining, &flags);
             queue::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("mail") => {
@@ -221,7 +213,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             pool::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("profile") => {
-            let mut backend = profile::InMemoryProfileBackend::default();
+            let mut backend = profile::SqliteProfileBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             profile::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -261,7 +253,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             seq::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("skills") => {
-            let backend = skills::InMemorySkillsBackend::default();
+            let backend = skills::FilesystemSkillsBackend;
             let forwarded = forward_args(remaining, &flags);
             skills::run_with_backend(&forwarded, &backend, stdout, stderr)
         }

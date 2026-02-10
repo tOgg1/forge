@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -298,6 +298,287 @@ impl ProfileBackend for InMemoryProfileBackend {
             checks,
         })
     }
+}
+
+// ---------------------------------------------------------------------------
+// SQLite-backed profile backend
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct SqliteProfileBackend {
+    db_path: PathBuf,
+}
+
+impl SqliteProfileBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
+
+    fn db_to_cli(p: forge_db::profile_repository::Profile) -> Profile {
+        Profile {
+            id: p.id,
+            name: p.name,
+            harness: p.harness,
+            auth_kind: p.auth_kind,
+            auth_home: p.auth_home,
+            prompt_mode: p.prompt_mode,
+            command_template: p.command_template,
+            model: p.model,
+            extra_args: p.extra_args,
+            env: p.env.into_iter().collect(),
+            max_concurrency: p.max_concurrency as i32,
+            cooldown_until: p.cooldown_until,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+        }
+    }
+}
+
+impl ProfileBackend for SqliteProfileBackend {
+    fn list_profiles(&self) -> Result<Vec<Profile>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+        let db = self.open_db()?;
+        let repo = forge_db::profile_repository::ProfileRepository::new(&db);
+        let profiles = match repo.list() {
+            Ok(profiles) => profiles,
+            Err(err) if err.to_string().contains("no such table: profiles") => {
+                return Ok(Vec::new())
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+        Ok(profiles.into_iter().map(Self::db_to_cli).collect())
+    }
+
+    fn create_profile(&mut self, input: ProfileCreateInput) -> Result<Profile, String> {
+        let db = self.open_db()?;
+        let repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let harness = normalize_harness(&input.harness)?;
+        let auth_kind = input.auth_kind.unwrap_or_else(|| harness.clone());
+        let prompt_mode = input
+            .prompt_mode
+            .unwrap_or_else(|| default_prompt_mode(&harness).to_string());
+        validate_prompt_mode(&prompt_mode)?;
+
+        let command_template = input
+            .command_template
+            .unwrap_or_else(|| default_command_template(&harness).to_string());
+        let model = input.model.unwrap_or_else(|| default_model(&harness));
+
+        let max_concurrency = input.max_concurrency.unwrap_or(1);
+        if max_concurrency < 1 {
+            return Err("max concurrency must be >= 1".to_string());
+        }
+
+        let mut db_profile = forge_db::profile_repository::Profile {
+            name: input.name,
+            harness,
+            auth_kind,
+            auth_home: input.auth_home.unwrap_or_default(),
+            prompt_mode,
+            command_template,
+            model,
+            extra_args: input.extra_args,
+            env: input.env.into_iter().collect(),
+            max_concurrency: max_concurrency as i64,
+            ..forge_db::profile_repository::Profile::default()
+        };
+
+        repo.create(&mut db_profile).map_err(|err| {
+            if err.to_string().contains("already exists") {
+                format!("profile \"{}\" already exists", db_profile.name)
+            } else {
+                err.to_string()
+            }
+        })?;
+
+        Ok(Self::db_to_cli(db_profile))
+    }
+
+    fn update_profile(&mut self, name: &str, patch: ProfilePatch) -> Result<Profile, String> {
+        let db = self.open_db()?;
+        let repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let mut db_profile = repo.get_by_name(name).map_err(|err| {
+            if err.to_string().contains("not found") {
+                format!("profile not found: {name}")
+            } else {
+                err.to_string()
+            }
+        })?;
+
+        if let Some(ref next_name) = patch.name {
+            // Check uniqueness if renaming
+            if next_name != &db_profile.name {
+                if let Ok(_existing) = repo.get_by_name(next_name) {
+                    return Err(format!("profile \"{next_name}\" already exists"));
+                }
+            }
+            db_profile.name = next_name.clone();
+        }
+        if let Some(ref next_prompt_mode) = patch.prompt_mode {
+            validate_prompt_mode(next_prompt_mode)?;
+            db_profile.prompt_mode = next_prompt_mode.clone();
+        }
+        if let Some(next_max_concurrency) = patch.max_concurrency {
+            if next_max_concurrency < 1 {
+                return Err("max concurrency must be >= 1".to_string());
+            }
+            db_profile.max_concurrency = next_max_concurrency as i64;
+        }
+        if let Some(next_auth_kind) = patch.auth_kind {
+            db_profile.auth_kind = next_auth_kind;
+        }
+        if let Some(next_auth_home) = patch.auth_home {
+            db_profile.auth_home = next_auth_home;
+        }
+        if let Some(next_command) = patch.command_template {
+            db_profile.command_template = next_command;
+        }
+        if let Some(next_model) = patch.model {
+            db_profile.model = next_model;
+        }
+        if let Some(next_extra_args) = patch.extra_args {
+            db_profile.extra_args = next_extra_args;
+        }
+        if let Some(next_env) = patch.env {
+            db_profile.env = next_env.into_iter().collect();
+        }
+
+        repo.update(&mut db_profile)
+            .map_err(|err| err.to_string())?;
+        Ok(Self::db_to_cli(db_profile))
+    }
+
+    fn delete_profile(&mut self, name: &str) -> Result<(), String> {
+        let db = self.open_db()?;
+        let repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let db_profile = repo.get_by_name(name).map_err(|err| {
+            if err.to_string().contains("not found") {
+                format!("profile not found: {name}")
+            } else {
+                err.to_string()
+            }
+        })?;
+
+        repo.delete(&db_profile.id).map_err(|err| err.to_string())
+    }
+
+    fn set_cooldown(&mut self, name: &str, until: &str) -> Result<Profile, String> {
+        let db = self.open_db()?;
+        let repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let db_profile = repo.get_by_name(name).map_err(|err| {
+            if err.to_string().contains("not found") {
+                format!("profile not found: {name}")
+            } else {
+                err.to_string()
+            }
+        })?;
+
+        repo.set_cooldown(&db_profile.id, Some(until))
+            .map_err(|err| err.to_string())?;
+
+        // Re-read to get updated timestamps
+        let updated = repo.get(&db_profile.id).map_err(|err| err.to_string())?;
+        Ok(Self::db_to_cli(updated))
+    }
+
+    fn clear_cooldown(&mut self, name: &str) -> Result<Profile, String> {
+        let db = self.open_db()?;
+        let repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let db_profile = repo.get_by_name(name).map_err(|err| {
+            if err.to_string().contains("not found") {
+                format!("profile not found: {name}")
+            } else {
+                err.to_string()
+            }
+        })?;
+
+        repo.set_cooldown(&db_profile.id, None)
+            .map_err(|err| err.to_string())?;
+
+        let updated = repo.get(&db_profile.id).map_err(|err| err.to_string())?;
+        Ok(Self::db_to_cli(updated))
+    }
+
+    fn doctor_profile(&self, name: &str) -> Result<ProfileDoctorReport, String> {
+        let db = self.open_db()?;
+        let repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let db_profile = repo.get_by_name(name).map_err(|err| {
+            if err.to_string().contains("not found") {
+                format!("profile not found: {name}")
+            } else {
+                err.to_string()
+            }
+        })?;
+
+        let mut checks = Vec::new();
+
+        if !db_profile.auth_home.is_empty() {
+            let ok = Path::new(&db_profile.auth_home).exists();
+            let details = if ok {
+                db_profile.auth_home.clone()
+            } else {
+                "auth home not found".to_string()
+            };
+            checks.push(DoctorCheck {
+                name: "auth_home".to_string(),
+                ok,
+                details,
+            });
+        }
+
+        let command = first_command_segment(&db_profile.command_template);
+        if !command.is_empty() {
+            let ok = is_command_available(&command);
+            let details = if ok {
+                command.clone()
+            } else {
+                format!("command not found: {command}")
+            };
+            checks.push(DoctorCheck {
+                name: "command".to_string(),
+                ok,
+                details,
+            });
+        }
+
+        Ok(ProfileDoctorReport {
+            profile: db_profile.name,
+            checks,
+        })
+    }
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

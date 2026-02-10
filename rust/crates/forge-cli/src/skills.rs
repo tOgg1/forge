@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A directory entry from walk_dir: (relative_path, is_directory, file_contents).
 pub type DirEntry = (String, bool, Option<Vec<u8>>);
@@ -41,6 +41,34 @@ pub struct SkillsConfig {
     pub profiles: Vec<SkillsProfile>,
     pub pools: Vec<SkillsPool>,
     pub default_pool: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SkillsConfigYaml {
+    #[serde(default)]
+    profiles: Vec<SkillsProfileYaml>,
+    #[serde(default)]
+    pools: Vec<SkillsPoolYaml>,
+    #[serde(default)]
+    default_pool: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SkillsProfileYaml {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    harness: String,
+    #[serde(default)]
+    auth_home: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SkillsPoolYaml {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    profiles: Vec<String>,
 }
 
 /// Result of installing skills to one destination.
@@ -140,11 +168,25 @@ impl SkillsBackend for FilesystemSkillsBackend {
     }
 
     fn load_config(&self) -> Result<Option<SkillsConfig>, String> {
-        // In production, config would be loaded from disk. For the CLI port the
-        // concrete backend can read the YAML, but for now we mirror the Go
-        // pattern where GetConfig() returns the globally-loaded config.  A
-        // full implementation would read ~/.config/forge/config.yaml here.
-        Ok(None)
+        let config_path = resolve_config_path(&self.home_dir()?);
+        let raw = match std::fs::read_to_string(&config_path) {
+            Ok(value) => value,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => {
+                return Err(format!(
+                    "failed to read config file {}: {err}",
+                    config_path.display()
+                ))
+            }
+        };
+
+        let parsed = parse_skills_config_yaml(&raw).map_err(|err| {
+            format!(
+                "failed to parse config file {}: {err}",
+                config_path.display()
+            )
+        })?;
+        Ok(Some(parsed))
     }
 
     fn is_dir(&self, path: &Path) -> bool {
@@ -176,6 +218,40 @@ impl SkillsBackend for FilesystemSkillsBackend {
             .map(PathBuf::from)
             .map_err(|_| "failed to get home directory".to_string())
     }
+}
+
+fn resolve_config_path(home: &Path) -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_CONFIG_PATH") {
+        return PathBuf::from(path);
+    }
+    home.join(".config").join("forge").join("config.yaml")
+}
+
+fn parse_skills_config_yaml(raw: &str) -> Result<SkillsConfig, String> {
+    let parsed: SkillsConfigYaml =
+        serde_yaml::from_str(raw).map_err(|err| format!("yaml decode error: {err}"))?;
+    Ok(SkillsConfig {
+        profiles: parsed
+            .profiles
+            .into_iter()
+            .filter(|profile| !profile.name.trim().is_empty() && !profile.harness.trim().is_empty())
+            .map(|profile| SkillsProfile {
+                name: profile.name,
+                harness: profile.harness,
+                auth_home: profile.auth_home,
+            })
+            .collect(),
+        pools: parsed
+            .pools
+            .into_iter()
+            .filter(|pool| !pool.name.trim().is_empty())
+            .map(|pool| SkillsPool {
+                name: pool.name,
+                profiles: pool.profiles,
+            })
+            .collect(),
+        default_pool: parsed.default_pool,
+    })
 }
 
 fn walk_dir_recursive(root: &Path, current: &Path, out: &mut Vec<DirEntry>) -> Result<(), String> {
@@ -729,6 +805,49 @@ mod tests {
 
     fn test_backend() -> InMemorySkillsBackend {
         InMemorySkillsBackend::new("/repo").with_config(test_config())
+    }
+
+    #[test]
+    fn parse_skills_config_yaml_reads_profiles_pools_and_default_pool() {
+        let raw = r#"
+profiles:
+  - name: claude-main
+    harness: claude
+    auth_home: /tmp/claude
+  - name: codex-main
+    harness: codex
+pools:
+  - name: default
+    profiles: [claude-main]
+default_pool: default
+"#;
+
+        let cfg = parse_skills_config_yaml(raw).expect("parse config yaml");
+        assert_eq!(cfg.default_pool, "default");
+        assert_eq!(cfg.profiles.len(), 2);
+        assert_eq!(cfg.profiles[0].name, "claude-main");
+        assert_eq!(cfg.profiles[0].auth_home, "/tmp/claude");
+        assert_eq!(cfg.pools.len(), 1);
+        assert_eq!(cfg.pools[0].name, "default");
+        assert_eq!(cfg.pools[0].profiles, vec!["claude-main"]);
+    }
+
+    #[test]
+    fn parse_skills_config_yaml_filters_invalid_profile_entries() {
+        let raw = r#"
+profiles:
+  - name: ""
+    harness: claude
+  - name: codex-main
+    harness: ""
+  - name: valid
+    harness: codex
+"#;
+
+        let cfg = parse_skills_config_yaml(raw).expect("parse config yaml");
+        assert_eq!(cfg.profiles.len(), 1);
+        assert_eq!(cfg.profiles[0].name, "valid");
+        assert_eq!(cfg.profiles[0].harness, "codex");
     }
 
     // -- Help ---------------------------------------------------------------
