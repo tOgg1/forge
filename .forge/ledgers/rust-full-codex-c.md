@@ -161,3 +161,80 @@ Queue
 - `sv task ready --project prj-vr0104gr`: 0 ready tasks now.
 ```
 
+## 2026-02-10T05:33:42Z
+
+- run_id: 9f8b377a-390d-426b-9074-76cb5cd09c85
+- loop_name: rust-full-codex-c
+- status: success
+- profile: codex2
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-10T05:18:09Z
+- finished_at: 2026-02-10T05:33:42Z
+- exit_code: 0
+
+```
+tmux ls
+ ```
+ 
+-If the workspace session is missing, recreate it:
++If a loop runner appears stale, recheck state:
++
+ ```bash
+-./build/forge ws create --path /path/to/repo --node <node>
++./build/forge ps --json | jq '.[]? | {name,state,runner_pid_alive,runner_daemon_alive,reason}'
+ ```
+ 
+-If the session exists but a pane is missing, restart the agent:
++Then stop/kill and resume as needed:
++
+ ```bash
+-./build/forge agent restart <agent-id>
++./build/forge stop <loop-name>
++./build/forge resume <loop-name>
+ ```
+ 
+-## Agent stuck or not idle
++## Loop stuck / no progress
+ 
+ Symptoms:
+-- `agent is not idle`
++- no new output across iterations
++- repeated failures with no progress
+ 
+ Fix:
+ ```bash
+-./build/forge agent interrupt <agent-id>
+-./build/forge agent send <agent-id> "Retry the last step"
+-```
+-
+-If you need to send anyway:
+-```bash
+-./build/forge agent send <agent-id> --skip-idle-check "Force this message"
++./build/forge logs <loop-name> -f
+ ```
+ 
+ ## Need more detail
+
+tokens used
+243,807
+closed tasks:
+- `forge-p6k`: added `docs/rust-post-cutover-incident-runbook.md`; updated `docs/rust-release-gate-checklist.md` (evidence row)
+- `forge-g5b`: added `docs/rust-release-notes-and-change-comms.md`
+- `forge-63f`: added `docs/rust-post-release-verification-checklist.md`
+- `forge-3g9`: added `docs/rust-operator-migration-guide.md`
+- `forge-7yp`: cleaned legacy ws/agent/node refs in `docs/troubleshooting.md`; rewrote `docs/system-test-plan.md` to loop-first non-legacy
+- `forge-q5a`: removed legacy-only port plan from `EPICS_AND_TASKS.md` (dropped node/ws/agent/accounts/recipe/vault + EPIC 12 accounts/caam), aligned w/ `docs/rust-legacy-drop-list.md` + `docs/rust-port-manifest.md`
+
+blocked (kept in_progress):
+- `forge-c18`: needs explicit decision on which compat shims to delete (SWARM_* env fallbacks, `caam:` support, `addLegacyCommand` scaffolding). refs sent to fmail task thread.
+
+validation notes:
+- rust fmt (scoped): `cd rust && cargo fmt -p forge-cli --check`
+- go tests: must run as `env -u GOROOT -u GOTOOLDIR go test ./...` (GOROOT mismatch otherwise)
+
+queue now: `open=0`, `ready=0` (others picked remaining work into `in_progress`).
+```
+

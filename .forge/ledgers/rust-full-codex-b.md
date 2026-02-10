@@ -546,3 +546,79 @@ Queue state:
 - Loop status sent: idle/blocked to `@forge-orchestrator`.
 ```
 
+## 2026-02-10T05:32:19Z
+
+- run_id: dd0f9adc-b37f-4626-a9a9-267220510ae3
+- loop_name: rust-full-codex-b
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-10T05:18:09Z
+- finished_at: 2026-02-10T05:32:19Z
+- exit_code: 0
+
+```
+- Parity matrix updated: `docs/rust-parity-matrix.md`
+ 
+@@ -34,6 +35,7 @@
+   - What changes in day-to-day commands? _TBD_
+   - Any known behavior changes (intentional drift)? _TBD_
+ - Upgrade notes:
++  - operator migration guidance: `docs/rust-operator-migration-guide.md`
+   - config changes? `docs/config.md` deltas: _TBD_
+   - database/migrations notes: _TBD_
+ - Reliability notes:
+@@ -95,4 +97,3 @@
+   - _TBD_
+ - Rollback:
+   - _TBD (link runbook if appropriate for audience)_
+-
+
+tokens used
+316,653
+**Loop result**
+- Queue drained: `open=0`, `ready=0`.
+- Throughput high; multiple stale parents unblocked/closed.
+
+**Closed this run**
+- `forge-8nd`
+- `forge-3g9`
+- `forge-8ts` (stale takeover)
+- `forge-qag`
+- `forge-erw`
+- `forge-kg9`
+- `forge-t82`
+- `forge-074`
+- `forge-nbf`
+- `forge-bnm`
+
+**Closed then reopened by other agent**
+- `forge-1s5` (reopened by `rust-full-codex-a`)
+- `forge-g4v` (reopened by `rust-full-codex-a`)
+
+**Still in_progress (blocked)**
+- `forge-wcm` blocked by active child `forge-g4v`.
+- `forge-415` blocked by `forge-wcm`.
+- `forge-s5a` blocked by `forge-415`/`forge-wcm`.
+- `forge-c18`, `forge-05c` blocked by parent chain (`forge-415`).
+- `forge-egs`, `forge-dz6`, `forge-7a3` blocked by concurrent `fmail-tui` API drift:
+  - `rust/crates/fmail-tui/src/agents.rs:1436`
+  - `rust/crates/fmail-tui/src/compose.rs:10`
+  - adapter mismatch at `rust/crates/forge-ftui-adapter/src/lib.rs:224`
+
+**Docs added/updated**
+- `docs/rust-final-switch-rehearsal-2026-02-10.md`
+- `docs/rust-release-gate-checklist.md`
+- `docs/rust-operator-migration-guide.md`
+- `docs/rust-release-notes-and-change-comms.md`
+
+**Validation run**
+- PASS: `cd rust && cargo fmt -p forge-cli -p forge-tui -p forge-daemon -p forge-runner --check && cargo clippy -p forge-cli -p forge-tui -p forge-daemon -p forge-runner --all-targets -- -D warnings && cargo test -p forge-cli -p forge-tui -p forge-daemon -p forge-runner`
+- PASS: `cd rust && cargo build --workspace && cargo test -p forge-db -p forge-loop && scripts/rust-loop-tui-smoke.sh && scripts/rust-fmail-tui-smoke.sh`
+- PASS: `env -u GOROOT -u GOTOOLDIR go build ./cmd/forge ./cmd/forged ./cmd/fmail`
+- FAIL (concurrent drift): `cd rust && cargo clippy -p fmail-tui --all-targets -- -D warnings && cargo test -p fmail-tui`
+```
+

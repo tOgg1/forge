@@ -732,3 +732,37 @@ Task `forge-3t6` (fmail TUI: app shell + navigation stack) is complete.
 **Tests:** 63 new app tests (87 total forge-tui), all passing. Full workspace validation clean.
 ```
 
+## 2026-02-10T05:36:00Z
+
+- run_id: c62775c8-3211-4450-b5d7-59361157bae6
+- loop_name: rust-full-claude-2
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-10T05:18:09Z
+- finished_at: 2026-02-10T05:36:00Z
+- exit_code: 0
+
+```
+**Task `forge-849` complete.**
+
+Summary of what was delivered:
+
+- **File**: `rust/crates/fmail-tui/src/heatmap.rs` (~1920 lines, full rewrite from 243-line skeleton)
+- **Go parity features ported**:
+  - `HeatmapMode` — agents vs topics toggle
+  - `HeatmapSort` — 4 sort modes (total, name, recency, peak)
+  - 5 time windows (4h/12h/24h/7d/30d) with left/right panning
+  - `build_heatmap_matrix()` — time-bucketed computation with dedup
+  - `sort_heatmap_rows()` with all 4 orderings
+  - Percentile-based threshold calculation for heat levels
+  - Full render: axis labels, grid with density glyphs, tooltip, legend, summary, footer
+  - Ctrl+u/d page scrolling, arrow/vim navigation, mode/sort/window keys
+  - Backward-compatible `simple()` API
+- **Tests**: ~30 unit tests covering matrix building, sorting, thresholds, input handling, rendering
+- **Validation**: cargo fmt clean, clippy clean, 289 tests pass (0 failures)
+```
+

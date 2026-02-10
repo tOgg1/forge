@@ -904,3 +904,80 @@ Fix hint: return submit command/event (or don’t consume submit keys), add regr
 - `docs/review/2026-02-10-forge-4kf-review-loop.md`
 ```
 
+## 2026-02-10T05:31:07Z
+
+- run_id: 7fc02770-89a8-4176-bdd1-a3777ebe6d32
+- loop_name: rust-full-review-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-review.md
+- prompt_override: false
+- started_at: 2026-02-10T05:24:09Z
+- finished_at: 2026-02-10T05:31:07Z
+- exit_code: 0
+
+```
++
++        let _ = apply_agents_input(&mut view, InputEvent::Key(KeyEvent::plain(Key::Enter)));
++        let action = apply_agents_input(&mut view, InputEvent::Key(KeyEvent::plain(Key::Enter)));
++        assert_eq!(
++            action,
++            AgentsAction::OpenThread {
++                target: "topic-a".to_owned()
++            }
++        );
++    }
++
++    #[test]
++    fn empty_cached_detail_still_requires_refresh() {
++        let now: i64 = 1_707_480_000;
++        let mut view = AgentsViewModel::new();
++        view.set_now(now);
++        view.load_agents(vec![AgentRecord::new("agent-empty")]);
++        view.load_detail("agent-empty", Vec::new());
++        assert!(view.needs_detail());
++    }
++
++    #[test]
+     fn relative_time_cases() {
+         assert_eq!(relative_time(0, 1000), "-");
+         assert_eq!(relative_time(970, 1000), "30s");
+
+tokens used
+236,815
+**Findings (reviewed `forge-4kf`)**
+1. **HIGH** fixed: history selection/open-thread could target wrong message due render-sort vs unsorted navigation lookup mismatch.  
+   - Fix: unified sorted history source for render/navigation/open (`rust/crates/fmail-tui/src/agents.rs:292`, `rust/crates/fmail-tui/src/agents.rs:501`, `rust/crates/fmail-tui/src/agents.rs:876`).
+2. **HIGH** fixed: history could show/open wrong agent when `detail_agent` stale vs selected roster row.  
+   - Fix: history now binds to `selected_agent`; Enter syncs `detail_agent` (`rust/crates/fmail-tui/src/agents.rs:501`, `rust/crates/fmail-tui/src/agents.rs:627`, `rust/crates/fmail-tui/src/agents.rs:876`).
+3. **MEDIUM** fixed: presence indicator parity drift for future `last_seen` timestamps (Go uses signed delta semantics).  
+   - Fix: switched from absolute to signed threshold logic (`rust/crates/fmail-tui/src/agents.rs:934`).
+
+**Exact small-fix diff scope**
+- Updated logic in `rust/crates/fmail-tui/src/agents.rs`:
+  - `history_target`, `needs_detail`, `move_history`, `render_history`, `agent_presence_indicator`
+  - Added `sorted_history_results` helper
+- Added regression tests in `rust/crates/fmail-tui/src/agents.rs`:
+  - `presence_indicator_future_timestamp_matches_go_behavior` (`:1112`)
+  - `history_enter_uses_sorted_order` (`:1410`)
+  - `history_uses_selected_agent_not_stale_detail_agent` (`:1452`)
+  - `empty_cached_detail_still_requires_refresh` (`:1504`)
+- Appended review log: `docs/review/2026-02-10-forge-4kf-review-loop.md`
+
+**Validation**
+- `cd rust && cargo check -p fmail-tui --lib` ✅
+- `cd rust && cargo test -p fmail-tui --lib` ✅ (300 passed, 1 ignored)
+- `GOTOOLCHAIN=go1.25.7 go test ./internal/fmailtui/...` ✅
+- `GOTOOLCHAIN=go1.25.7 go test ./...` ⚠️ unrelated existing failure: `internal/parity` fixture drift (`TestProtoWireGateCriticalRPCFixtures`)
+
+**Protocol comms sent**
+- `fmail send task ...` for all findings + residual risk
+- `fmail send @forge-orchestrator "review summary: forge-4kf pass ..."`
+
+**Summary**
+- Reviewed task `forge-4kf`; 3 real issues found and patched; no open defects left in touched agents-view scope.
+- Residual risk: no Rust end-to-end provider/event-loop integration assertion yet for agents view.
+```
+

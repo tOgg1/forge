@@ -484,3 +484,45 @@ Task `forge-5b8` (CLI port: forge mail) is complete. Here's the summary:
 - `cargo test -p forge-cli` — 653 tests PASS
 ```
 
+## 2026-02-10T05:31:01Z
+
+- run_id: 7fcdac48-392d-41d2-926c-2b30cad040c2
+- loop_name: rust-full-claude-4
+- status: success
+- profile: cc2
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-claude-single-task.md
+- prompt_override: false
+- started_at: 2026-02-10T05:18:09Z
+- finished_at: 2026-02-10T05:31:01Z
+- exit_code: 0
+
+```
+## Task Complete: forge-849 (fmail TUI: heatmap view parity)
+
+**What was done:**
+- Took over stale task `forge-849` from `rust-full-codex-b` (stale >11h)
+- Rewrote `heatmap.rs` from 243-line skeleton to ~1500-line full Go parity implementation
+
+**Key features ported:**
+- `HeatmapMode` (Agents/Topics toggle via `t` key)
+- `HeatmapSort` (Total/Name/Peak/Recency cycle via `s` key)
+- 5 time window presets (4h/12h/24h/7d/30d) with `[`/`]` keys
+- Time panning with `h`/`l` keys
+- `build_heatmap_matrix` with proper time bucketing
+- Percentile-based threshold computation for density glyphs
+- `HeatmapViewModel` with full lifecycle: `apply_loaded`, `apply_incoming` (dedup + tail-follow)
+- Cell breakdown tooltips (top senders/receivers + DM count)
+- Summary stats (total msgs, active agents, peak bucket, most active, busiest topic, avg response time)
+- Time axis rendering (hour/day labels)
+- Full render with header, error/loading states, grid, tooltip, legend, summary, footer
+- Arrow key edge-panning (pan when at grid boundary)
+
+**Tests:** 30 new tests covering all features
+
+**Validation:** `cargo fmt --check` PASS, `cargo clippy -D warnings` PASS, `cargo test -p fmail-tui` PASS (300 tests, 0 failures)
+
+**Side fix:** Fixed `compose.rs` compilation errors left by another agent (wrong API names)
+```
+

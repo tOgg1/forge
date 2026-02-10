@@ -598,41 +598,20 @@ This document breaks down the Forge product specification into actionable epics 
 - [ ] **9.1.3** Set up Viper for config/env/flag binding
 - [ ] **9.1.4** Implement command completion (bash, zsh, fish)
 
-#### 9.2 Node Commands
-- [ ] **9.2.1** `forge node list` - list all nodes with status
-- [ ] **9.2.2** `forge node add --ssh user@host --name <node>` - register node
-- [ ] **9.2.3** `forge node remove <node>` - unregister node
-- [ ] **9.2.4** `forge node bootstrap --ssh root@host` - full bootstrap
-- [ ] **9.2.5** `forge node doctor <node>` - run diagnostics
-- [ ] **9.2.6** `forge node exec <node> -- <cmd>` - remote command execution
+#### 9.2 Legacy command groups (dropped from Rust port plan)
 
-#### 9.3 Workspace Commands
-- [ ] **9.3.1** `forge ws create --node <node> --path <repo>` - create workspace
-- [ ] **9.3.2** `forge ws import --node <node> --tmux-session <name>` - import existing
-- [ ] **9.3.3** `forge ws list` - list workspaces
-- [ ] **9.3.4** `forge ws status <ws>` - detailed status
-- [ ] **9.3.5** `forge ws attach <ws>` - attach to tmux session
-- [ ] **9.3.6** `forge ws unmanage <ws>` - remove from Forge, keep tmux
-- [ ] **9.3.7** `forge ws kill <ws>` - destroy workspace
+The following CLI groups are legacy-only (wired via `addLegacyCommand(...)`) and
+are explicitly excluded from the Rust rewrite non-legacy parity scope:
+- `forge node ...`
+- `forge ws/workspace ...`
+- `forge agent ...`
+- `forge accounts ...` (incl. `caam` import)
+- `forge recipe ...`
+- `forge vault ...`
 
-#### 9.4 Agent Commands
-- [ ] **9.4.1** `forge agent spawn --ws <ws> --type opencode --count N` - spawn agents
-- [ ] **9.4.2** `forge agent list [--ws <ws>]` - list agents
-- [ ] **9.4.3** `forge agent status <agent>` - agent detail
-- [ ] **9.4.4** `forge agent send <agent> "message"` - send message
-- [ ] **9.4.5** `forge agent queue <agent> --file prompts.txt` - bulk queue
-- [ ] **9.4.6** `forge agent pause <agent> --minutes N` - pause agent
-- [ ] **9.4.7** `forge agent resume <agent>` - resume paused agent
-- [ ] **9.4.8** `forge agent interrupt <agent>` - send interrupt
-- [ ] **9.4.9** `forge agent restart <agent>` - restart agent
-- [ ] **9.4.10** `forge agent approve <agent> [--all]` - handle approvals
-
-#### 9.5 Account Commands
-- [ ] **9.5.1** `forge accounts list` - list configured accounts
-- [ ] **9.5.2** `forge accounts add` - add new account (interactive)
-- [ ] **9.5.3** `forge accounts import-caam` - import from caam
-- [ ] **9.5.4** `forge accounts rotate` - rotate account for agent
-- [ ] **9.5.5** `forge accounts cooldown list|set|clear` - manage cooldowns
+Source of truth:
+- `docs/rust-legacy-drop-list.md`
+- `docs/rust-port-manifest.md`
 
 #### 9.6 Export/Integration Commands
 - [ ] **9.6.1** `forge export status --json` - export full status
@@ -782,56 +761,14 @@ This document breaks down the Forge product specification into actionable epics 
 **Priority:** MEDIUM  
 **MVP:** Basic account config required
 
-### Tasks
+Status: dropped from Rust rewrite non-legacy parity scope.
 
-#### 12.1 Account Model
-- [ ] **12.1.1** Define account configuration:
-  ```go
-  type Account struct {
-      ID           string
-      Provider     string  // anthropic, openai, google, etc.
-      ProfileName  string
-      CredPath     string  // path to credential file/env var
-      IsActive     bool
-      CooldownUntil *time.Time
-  }
-  ```
-- [ ] **12.1.2** Implement secure credential storage (encrypted file)
-- [ ] **12.1.3** Support environment variable references
+Rationale: legacy-only accounts/rotation/caam import are wired via
+`addLegacyCommand(...)` and explicitly excluded.
 
-#### 12.2 Account Service
-- [ ] **12.2.1** Implement `AccountService`:
-  - `AddAccount(cfg AccountConfig) error`
-  - `ListAccounts(provider string) ([]*Account, error)`
-  - `GetAccount(id string) (*Account, error)`
-  - `DeleteAccount(id string) error`
-  - `SetCooldown(id string, until time.Time) error`
-  - `ClearCooldown(id string) error`
-  - `GetNextAvailable(provider string) (*Account, error)`
-
-#### 12.3 caam Import
-- [ ] **12.3.1** Parse caam configuration format
-- [ ] **12.3.2** Import accounts with credential references
-- [ ] **12.3.3** Handle migration of existing sessions
-
-#### 12.4 Account Rotation
-- [ ] **12.4.1** Detect rate limit events from agents
-- [ ] **12.4.2** Set cooldown on current account
-- [ ] **12.4.3** Select next available account
-- [ ] **12.4.4** Restart agent with new account
-- [ ] **12.4.5** Log rotation event
-
-#### 12.5 Cooldown Management
-- [ ] **12.5.1** Track cooldown timers per account
-- [ ] **12.5.2** Automatic cooldown clear on timer expiry
-- [ ] **12.5.3** Manual cooldown override commands
-- [ ] **12.5.4** Display cooldown status in TUI
-
-#### 12.6 Usage Tracking (Best-effort)
-- [ ] **12.6.1** Collect usage metrics from adapters (where available)
-- [ ] **12.6.2** Store usage history
-- [ ] **12.6.3** Display usage estimates in TUI
-- [ ] **12.6.4** Warn on approaching limits
+Source of truth:
+- `docs/rust-legacy-drop-list.md`
+- `docs/rust-port-manifest.md`
 
 ---
 
