@@ -133,6 +133,9 @@ Rollback trigger guideline:
 
 Policy reference: `docs/adr/0005-rust-single-switch-policy.md`.
 
+Rollback rehearsal worksheet (timing budgets + log template):
+- `docs/rust-rollback-rehearsal-timing-budget-template.md`
+
 Preconditions:
 - Go binaries/build path still releasable.
 - Rollback owner on-call is present.
@@ -157,4 +160,3 @@ Requirements:
 - all release gates green again (`docs/rust-release-gate-checklist.md`)
 - incident action items closed or explicitly accepted
 - rehearsal smoke checklist updated with new learnings
-

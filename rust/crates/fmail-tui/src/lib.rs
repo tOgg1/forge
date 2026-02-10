@@ -5,6 +5,7 @@ use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 use forge_ftui_adapter::style::{ThemeKind, ThemeSpec};
 use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 
+pub mod agents;
 pub mod app;
 pub mod bookmarks;
 pub mod dashboard;
@@ -22,6 +23,11 @@ pub mod threading;
 pub mod timeline;
 pub mod topics;
 
+pub use agents::{
+    agent_presence_indicator, apply_agents_input, render_agents_frame, AgentDetail, AgentRecent,
+    AgentRecord, AgentRow, AgentSearchResult, AgentSortKey, AgentsAction, AgentsMode,
+    AgentsViewModel, TargetCount,
+};
 pub use app::{App, Command, LayoutMode, PlaceholderView, View, ViewId};
 pub use bookmarks::{
     apply_bookmarks_input, parse_bookmarks_filter, render_bookmarks_frame, BookmarkEntry,
