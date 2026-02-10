@@ -185,7 +185,11 @@ impl OperatorViewModel {
     }
 
     /// Set messages for the current conversation.
-    pub fn set_messages(&mut self, messages: Vec<OperatorMessage>) {
+    pub fn set_messages(&mut self, mut messages: Vec<OperatorMessage>) {
+        if messages.len() > OPERATOR_MESSAGE_LIMIT {
+            let drop_n = messages.len() - OPERATOR_MESSAGE_LIMIT;
+            messages.drain(0..drop_n);
+        }
         self.messages = messages;
         if self.follow {
             self.scroll = 0;
@@ -1053,6 +1057,34 @@ mod tests {
         vm.scroll_to_end();
         assert!(vm.is_following());
         assert_eq!(vm.scroll(), 0);
+    }
+
+    #[test]
+    fn set_messages_enforces_limit() {
+        let mut vm = OperatorViewModel::new("operator");
+        let msgs: Vec<OperatorMessage> = (0..(OPERATOR_MESSAGE_LIMIT + 5))
+            .map(|i| OperatorMessage {
+                id: format!("msg-{i}"),
+                from: "a".into(),
+                to: "@operator".into(),
+                body: "x".into(),
+                time_label: "10:00".into(),
+                priority: String::new(),
+                tags: Vec::new(),
+                reply_to: String::new(),
+                reply_preview: String::new(),
+                is_mine: false,
+            })
+            .collect();
+
+        vm.set_messages(msgs);
+
+        assert_eq!(vm.messages().len(), OPERATOR_MESSAGE_LIMIT);
+        assert_eq!(vm.messages()[0].id, "msg-5");
+        assert_eq!(
+            vm.messages()[OPERATOR_MESSAGE_LIMIT - 1].id,
+            format!("msg-{}", OPERATOR_MESSAGE_LIMIT + 4)
+        );
     }
 
     #[test]

@@ -747,8 +747,8 @@ fn draw_edges(canvas: &mut Canvas, boxes: &[BoxPos], snap: &GraphSnapshot) {
 /// Returns `true` if the event was consumed.
 pub fn apply_graph_input(view: &mut GraphViewModel, event: InputEvent) -> bool {
     let action = translate_input(&event);
-    let key = match event {
-        InputEvent::Key(ke) => ke.key,
+    let (key, modifiers) = match event {
+        InputEvent::Key(ke) => (ke.key, ke.modifiers),
         _ => return false,
     };
 
@@ -775,7 +775,15 @@ pub fn apply_graph_input(view: &mut GraphViewModel, event: InputEvent) -> bool {
         }
         Key::Tab => {
             if !view.snap.nodes.is_empty() {
-                view.selected = (view.selected + 1) % view.snap.nodes.len();
+                if modifiers.shift {
+                    if view.selected == 0 {
+                        view.selected = view.snap.nodes.len() - 1;
+                    } else {
+                        view.selected -= 1;
+                    }
+                } else {
+                    view.selected = (view.selected + 1) % view.snap.nodes.len();
+                }
             }
             true
         }
@@ -1058,7 +1066,7 @@ fn render_details(view: &GraphViewModel, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent};
+    use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent, Modifiers};
     use forge_ftui_adapter::snapshot::assert_render_frame_snapshot;
     use forge_ftui_adapter::style::{ThemeKind, ThemeSpec};
 
@@ -1068,6 +1076,17 @@ mod tests {
 
     fn key(k: Key) -> InputEvent {
         InputEvent::Key(KeyEvent::plain(k))
+    }
+
+    fn shift_tab() -> InputEvent {
+        InputEvent::Key(KeyEvent {
+            key: Key::Tab,
+            modifiers: Modifiers {
+                shift: true,
+                ctrl: false,
+                alt: false,
+            },
+        })
     }
 
     fn msg(id: &str, from: &str, to: &str) -> GraphMessage {
@@ -1248,6 +1267,17 @@ mod tests {
         assert_eq!(v.selected, 2);
         apply_graph_input(&mut v, key(Key::Tab));
         assert_eq!(v.selected, 0);
+    }
+
+    #[test]
+    fn input_shift_tab_cycles_selected_backwards() {
+        let mut v = GraphViewModel::default();
+        v.set_messages(&[msg("1", "alice", "@bob"), msg("2", "charlie", "@bob")]);
+        assert_eq!(v.selected, 0);
+        apply_graph_input(&mut v, shift_tab());
+        assert_eq!(v.selected, 2);
+        apply_graph_input(&mut v, shift_tab());
+        assert_eq!(v.selected, 1);
     }
 
     #[test]
