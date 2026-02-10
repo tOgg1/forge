@@ -18,6 +18,7 @@ use crate::events::EventBus;
 use crate::loop_runner::{
     LoopRunner, LoopRunnerError, LoopRunnerManager, LoopRunnerState, StartLoopRunnerRequest,
 };
+use crate::status::StatusService;
 use crate::tmux::TmuxClient;
 use crate::transcript::{TranscriptEntry, TranscriptEntryType, TranscriptStore};
 
@@ -27,6 +28,7 @@ pub struct ForgedAgentService {
     tmux: Arc<dyn TmuxClient>,
     events: Arc<EventBus>,
     loop_runners: LoopRunnerManager,
+    status: StatusService,
 }
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -41,11 +43,15 @@ impl ForgedAgentService {
         tmux: Arc<dyn TmuxClient>,
         loop_runners: LoopRunnerManager,
     ) -> Self {
+        let hostname = nix::unistd::gethostname()
+            .map(|h| h.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
         Self {
             agents,
             tmux,
             events: Arc::new(EventBus::new()),
             loop_runners,
+            status: StatusService::new("dev", hostname),
         }
     }
 
@@ -759,6 +765,141 @@ impl ForgedAgentService {
         }
 
         Ok(updates)
+    }
+}
+
+// -- tonic async trait wiring --
+
+use forge_rpc::forged::v1::forged_service_server::ForgedService;
+
+type BoxStream<T> =
+    std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<T, Status>> + Send + 'static>>;
+
+#[tonic::async_trait]
+impl ForgedService for ForgedAgentService {
+    async fn spawn_agent(
+        &self,
+        request: Request<proto::SpawnAgentRequest>,
+    ) -> Result<Response<proto::SpawnAgentResponse>, Status> {
+        self.spawn_agent(request)
+    }
+
+    async fn kill_agent(
+        &self,
+        request: Request<proto::KillAgentRequest>,
+    ) -> Result<Response<proto::KillAgentResponse>, Status> {
+        self.kill_agent(request)
+    }
+
+    async fn send_input(
+        &self,
+        request: Request<proto::SendInputRequest>,
+    ) -> Result<Response<proto::SendInputResponse>, Status> {
+        self.send_input(request)
+    }
+
+    async fn list_agents(
+        &self,
+        request: Request<proto::ListAgentsRequest>,
+    ) -> Result<Response<proto::ListAgentsResponse>, Status> {
+        self.list_agents(request)
+    }
+
+    async fn get_agent(
+        &self,
+        request: Request<proto::GetAgentRequest>,
+    ) -> Result<Response<proto::GetAgentResponse>, Status> {
+        self.get_agent(request)
+    }
+
+    async fn start_loop_runner(
+        &self,
+        request: Request<proto::StartLoopRunnerRequest>,
+    ) -> Result<Response<proto::StartLoopRunnerResponse>, Status> {
+        self.start_loop_runner(request)
+    }
+
+    async fn stop_loop_runner(
+        &self,
+        request: Request<proto::StopLoopRunnerRequest>,
+    ) -> Result<Response<proto::StopLoopRunnerResponse>, Status> {
+        self.stop_loop_runner(request)
+    }
+
+    async fn get_loop_runner(
+        &self,
+        request: Request<proto::GetLoopRunnerRequest>,
+    ) -> Result<Response<proto::GetLoopRunnerResponse>, Status> {
+        self.get_loop_runner(request)
+    }
+
+    async fn list_loop_runners(
+        &self,
+        request: Request<proto::ListLoopRunnersRequest>,
+    ) -> Result<Response<proto::ListLoopRunnersResponse>, Status> {
+        self.list_loop_runners(request)
+    }
+
+    async fn capture_pane(
+        &self,
+        request: Request<proto::CapturePaneRequest>,
+    ) -> Result<Response<proto::CapturePaneResponse>, Status> {
+        self.capture_pane(request)
+    }
+
+    type StreamPaneUpdatesStream = BoxStream<proto::StreamPaneUpdatesResponse>;
+
+    async fn stream_pane_updates(
+        &self,
+        request: Request<proto::StreamPaneUpdatesRequest>,
+    ) -> Result<Response<Self::StreamPaneUpdatesStream>, Status> {
+        let updates = self.stream_pane_updates(request, 5)?;
+        let stream = tokio_stream::iter(updates.into_iter().map(Ok));
+        Ok(Response::new(Box::pin(stream)))
+    }
+
+    type StreamEventsStream = BoxStream<proto::StreamEventsResponse>;
+
+    async fn stream_events(
+        &self,
+        request: Request<proto::StreamEventsRequest>,
+    ) -> Result<Response<Self::StreamEventsStream>, Status> {
+        let updates = self.stream_events(request, 5)?;
+        let stream = tokio_stream::iter(updates.into_iter().map(Ok));
+        Ok(Response::new(Box::pin(stream)))
+    }
+
+    async fn get_transcript(
+        &self,
+        request: Request<proto::GetTranscriptRequest>,
+    ) -> Result<Response<proto::GetTranscriptResponse>, Status> {
+        self.get_transcript(request)
+    }
+
+    type StreamTranscriptStream = BoxStream<proto::StreamTranscriptResponse>;
+
+    async fn stream_transcript(
+        &self,
+        request: Request<proto::StreamTranscriptRequest>,
+    ) -> Result<Response<Self::StreamTranscriptStream>, Status> {
+        let updates = self.stream_transcript(request, 5)?;
+        let stream = tokio_stream::iter(updates.into_iter().map(Ok));
+        Ok(Response::new(Box::pin(stream)))
+    }
+
+    async fn get_status(
+        &self,
+        _request: Request<proto::GetStatusRequest>,
+    ) -> Result<Response<proto::GetStatusResponse>, Status> {
+        let agent_count = self.agents.list(None, &[]).len();
+        Ok(Response::new(self.status.get_status(agent_count)))
+    }
+
+    async fn ping(
+        &self,
+        _request: Request<proto::PingRequest>,
+    ) -> Result<Response<proto::PingResponse>, Status> {
+        Ok(Response::new(self.status.ping()))
     }
 }
 

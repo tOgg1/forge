@@ -16,11 +16,12 @@ path = "src/bin/forge-daemon.rs"
 chrono = "0.4"
 forge-core = { path = "../forge-core" }
 forge-rpc = { path = "../forge-rpc" }
-nix = { version = "0.29", features = ["signal", "resource", "process"] }
+nix = { version = "0.29", features = ["signal", "resource", "process", "hostname"] }
 prost-types = "0.13"
 sha2 = "0.10"
 thiserror = "1"
 tokio = { version = "1", features = ["sync"] }
+tokio-stream = "0.1"
 tonic = { version = "0.12", features = ["transport"] }
 uuid = { version = "1", features = ["v4"] }
 
