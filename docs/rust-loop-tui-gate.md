@@ -25,16 +25,23 @@ Define strict acceptance criteria for loop TUI parity before Rust cutover.
   - stop/kill/resume controls
 - Every workflow needs one reproducible evidence item (smoke output or manual checklist item).
 
-2. Keymap parity
+2. Failure-state parity
+- Required failure-state coverage:
+  - selected loop disappears while navigating
+  - running loop delete prompt requires force
+  - error-state render path remains readable and non-crashing
+- Failure-state checks need scripted probe coverage + manual checklist verification.
+
+3. Keymap parity
 - Critical keybindings must remain equivalent for operator muscle memory.
 - Any keybinding divergence requires explicit parity exception note and owner sign-off.
 
-3. Performance/readability parity
+4. Performance/readability parity
 - Log rendering remains responsive for active loops.
 - No regressions in status readability (state, error reason, queue depth).
 - Smoke baseline: no UI panic/crash under loop refresh churn.
 
-4. Cutover rule
+5. Cutover rule
 - Loop TUI cutover is blocked until all loop TUI gate items are marked green with evidence.
 
 ## Evidence + checks
@@ -45,5 +52,6 @@ Define strict acceptance criteria for loop TUI parity before Rust cutover.
 - Baseline smoke command:
   - `scripts/rust-loop-tui-smoke.sh`
   - `env -u GOROOT -u GOTOOLDIR go test ./internal/looptui -count=1`
+  - targeted Rust `forge-tui` probes for workflow + failure states.
 - Matrix link:
   - `docs/rust-parity-matrix.md` loop TUI row references this gate doc.

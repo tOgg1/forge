@@ -17,7 +17,7 @@ Canonical layer map: `docs/rust-crate-boundaries.json`.
 
 ## Planned crate layers
 
-- Layer 0: `forge-core`, `forge-ftui-adapter`
+- Layer 0: `forge-core`, `forge-ftui-adapter`, `forge-rpc`
 - Layer 1: `forge-db`, `fmail-core`
 - Layer 2: `forge-loop`
 - Layer 3: `forge-daemon`, `forge-runner`
@@ -28,5 +28,7 @@ Canonical layer map: `docs/rust-crate-boundaries.json`.
 ## Enforcement
 
 - Checker script: `scripts/rust-boundary-check.sh`.
-- CI gate: `.github/workflows/ci.yml` job `rust-quality`.
+- CI gate: `.github/workflows/ci.yml` job `rust-boundary`.
+- `docs/rust-crate-boundaries.json` must include every active workspace crate from
+  `rust/Cargo.toml` (`[workspace].members`).
 - Any new workspace crate must be added to `docs/rust-crate-boundaries.json` in the same change.

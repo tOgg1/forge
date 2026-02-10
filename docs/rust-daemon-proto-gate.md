@@ -37,6 +37,10 @@ Define strict, testable gate criteria for daemon/proto parity before Rust cutove
 3. Runner lifecycle parity
 - Loop runner ownership/liveness semantics must match Go behavior.
 - Required parity for runner state transitions and error envelopes.
+- Lifecycle regression suites:
+  - `rust/crates/forge-daemon/src/loop_runner/tests.rs`
+  - `rust/crates/forge-runner/src/runner.rs`
+  - `rust/crates/forge-loop/src/stale_runner.rs`
 
 4. Streaming parity
 - `StreamEvents`, `StreamPaneUpdates`, and `StreamTranscript` must preserve:
@@ -59,6 +63,11 @@ Define strict, testable gate criteria for daemon/proto parity before Rust cutove
 - `parity` workflow job runs:
   - `go test ./internal/parity -run '^TestDaemonProtoGate' -count=1`
   - `go test ./internal/parity -run '^TestProtoWireGate' -count=1`
+- Local Rust validation command:
+  - `cargo test -p forge-daemon loop_runner`
+  - `cargo test -p forge-daemon loop_runner_lifecycle_via_rpc_handlers`
+  - `cargo test -p forge-runner runner`
+  - `cargo test -p forge-loop stale_runner`
 - This baseline gate is required in PR CI.
 
 ## Evidence for final cutover

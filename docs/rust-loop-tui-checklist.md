@@ -1,7 +1,7 @@
 # Rust Loop TUI Baseline Checklist
 
-Task: `forge-ebw`  
-Status: baseline
+Task: `forge-wa7`  
+Status: parity suite in-progress
 
 ## Purpose
 
@@ -13,7 +13,8 @@ Use together with `scripts/rust-loop-tui-smoke.sh`.
 - Run:
   - `scripts/rust-loop-tui-smoke.sh`
 - Expected:
-  - all targeted loop TUI key/workflow tests pass.
+  - targeted Go `internal/looptui` workflow + failure-state probes pass.
+  - targeted Rust `forge-tui` workflow + failure-state probes pass.
 
 ## Manual workflow checklist
 
@@ -36,7 +37,12 @@ Use together with `scripts/rust-loop-tui-smoke.sh`.
 - [ ] Enter filter mode and confirm realtime status text updates.
 - [ ] Validate wizard step validation and create-loops wizard happy path.
 
-5. Evidence capture
+5. Failure-state handling
+- [ ] Force-delete prompt appears for a running loop.
+- [ ] Error banner/state rendering stays readable and non-crashing.
+- [ ] Stop/kill confirm prompts match expected operator wording.
+
+6. Evidence capture
 - [ ] Record smoke script output in release notes/checklist.
 - [ ] Link run to `docs/rust-release-gate-checklist.md` loop TUI sign-off row.
 

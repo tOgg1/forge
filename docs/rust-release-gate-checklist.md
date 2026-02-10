@@ -14,7 +14,9 @@ Status: draft for enforcement
 | Gate | Required evidence | Source |
 |---|---|---|
 | PR parity gate | `parity` job green | `.github/workflows/ci.yml` |
+| Rust boundary gate | `rust-boundary` job green | `.github/workflows/ci.yml` |
 | Rust quality gate | `rust-quality` job green | `.github/workflows/ci.yml` |
+| DB compatibility gate | `db-compat` job green | `.github/workflows/ci.yml` |
 | Rust coverage gate | `rust-coverage` job green + coverage artifacts | `.github/workflows/ci.yml` |
 | Nightly parity stability | latest nightly parity run green | `.github/workflows/parity-nightly.yml` |
 | Baseline snapshot | `rust-baseline-snapshot` artifact present | `.github/workflows/ci.yml` |

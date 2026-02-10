@@ -17,7 +17,8 @@ Use a **single final switch** from Go runtime ownership to Rust runtime
 ownership.
 
 Prerelease parity gates (must all pass before cutover):
-- PR CI: `parity`, `rust-quality`, `rust-coverage` required and green.
+- PR CI: `parity`, `rust-boundary`, `rust-quality`, `db-compat`, and
+  `rust-coverage` required and green.
 - Nightly parity workflow green with no unresolved drift deltas.
 - Parity matrix evidence recorded for CLI, DB, loop runtime, daemon/runner, and
   fmail/fmail-tui critical flows.

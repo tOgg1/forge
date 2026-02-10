@@ -22,7 +22,7 @@ Scope: Rust workspace bootstrap + architecture boundaries
 
 - Policy source-of-truth: `docs/rust-crate-boundaries.json`.
 - Human policy: `docs/rust-crate-boundary-policy.md`.
-- Enforcer: `scripts/rust-boundary-check.sh` (CI rust-quality gate).
+- Enforcer: `scripts/rust-boundary-check.sh` (CI `rust-boundary` gate).
 - Rule: no upward dependency edges by layer.
 
 ## Contribution checklist

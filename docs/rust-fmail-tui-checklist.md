@@ -13,7 +13,9 @@ Use together with `scripts/rust-fmail-tui-smoke.sh`.
 - Run:
   - `scripts/rust-fmail-tui-smoke.sh`
 - Expected:
-  - targeted fmail TUI behavior tests pass.
+  - `TestFmailGateCommandAndTUIBaseline` passes (`internal/parity`).
+  - targeted Go `internal/fmailtui` workflow probes pass.
+  - targeted Rust `fmail-tui` topic/operator/timeline/thread probes pass.
 
 ## Manual workflow checklist
 
@@ -31,6 +33,7 @@ Use together with `scripts/rust-fmail-tui-smoke.sh`.
 - [ ] Compose DM and topic messages from TUI.
 - [ ] Validate slash-command parsing (priority/tags/DM target).
 - [ ] Confirm send success updates read markers and timeline.
+- [ ] Validate operator reply flow from selected conversation.
 
 4. Timeline/thread parity
 - [ ] Open thread from timeline and verify depth/overflow rendering.

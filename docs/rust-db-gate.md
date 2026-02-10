@@ -41,5 +41,11 @@ Define strict, testable criteria for database schema/migration parity before Rus
 
 - `parity` workflow job runs:
   - `go test ./internal/parity -run '^TestSchemaFingerprintBaseline$' -count=1`
+- `db-compat` workflow job runs:
+  - `scripts/rust-db-compat-check.sh`
+  - includes:
+    - `cargo test -p forge-db --test transaction_parity_test`
+    - `cargo test -p forge-cli --test migrate_go_oracle_fixture_test`
+    - `env -u GOROOT -u GOTOOLDIR go test ./internal/db -run '^TestGoReadsRustMutatedDB$' -count=1`
 - Baseline snapshot job must include schema fingerprint check:
   - `scripts/rust-baseline-snapshot.sh ... --check`

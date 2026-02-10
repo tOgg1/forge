@@ -1,6 +1,7 @@
 {
   "forge-core": 0,
   "forge-ftui-adapter": 0,
+  "forge-rpc": 0,
   "forge-db": 1,
   "fmail-core": 1,
   "forge-loop": 2,

@@ -45,6 +45,16 @@ logging, and ledger behavior before Rust cutover.
   - `go test ./internal/parity -run '^TestRuntimeGateLoopQueueSmartStopLedger$' -count=1`
 - This runtime baseline gate is required in PR CI.
 
+## Characterization Fixtures
+
+- Rust fixture suite: `rust/crates/forge-loop/tests/runtime_characterization_fixture_test.rs`
+- Fixture source file: `rust/crates/forge-loop/testdata/runtime_characterization_fixture.json`
+- Go fixture inputs consumed by the suite:
+  - `internal/testutil/testdata/transcripts/claude_code_idle.txt`
+  - `internal/testutil/testdata/transcripts/awaiting_approval.txt`
+- Validation command:
+  - `cargo test -p forge-loop runtime_characterization`
+
 ## Evidence for final cutover
 
 - Green CI run for runtime gate baseline test.

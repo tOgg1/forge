@@ -17,9 +17,19 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
       - name: Verify coverage gate fails on intentional threshold violation
         run: |
+          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main" --depth=1
+
           cat > rust/coverage-thresholds.intentional-fail.txt <<'EOF'
           forge-parity-stub 101
           EOF
+
+          git config user.email "coverage-self-test@example.invalid"
+          git config user.name "coverage-self-test"
+          echo "// coverage gate self-test" >> rust/crates/forge-parity-stub/src/lib.rs
+          git add rust/crates/forge-parity-stub/src/lib.rs
+          git commit -m "test: coverage gate self-test change"
+
+          (cd rust && cargo llvm-cov --workspace --all-features --lcov --output-path coverage/lcov.info)
 
           set +e
           scripts/rust-coverage-gate.sh coverage-thresholds.intentional-fail.txt

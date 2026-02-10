@@ -178,6 +178,17 @@ jobs:
           path: build/rust-baseline/protocol/baseline-refresh-report.json
           if-no-files-found: error
 
+  rust-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: rust boundary check
+        run: scripts/rust-boundary-check.sh
+
   rust-quality:
     runs-on: ubuntu-latest
     steps:
@@ -185,8 +196,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: rust boundary check
-        run: scripts/rust-boundary-check.sh
       - name: rust frankentui pin check
         run: scripts/rust-frankentui-pin-check.sh
       - name: rust fmt
@@ -199,32 +208,41 @@ jobs:
         working-directory: rust
         run: cargo test --workspace
 
+  db-compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: run db compatibility gate checks
+        run: scripts/rust-db-compat-check.sh
+
   rust-coverage:
     runs-on: ubuntu-latest
     needs: [rust-quality]
-    env:
-      RUST_COVERAGE_FAIL_UNDER_LINES: "100"
-      RUST_COVERAGE_FAIL_UNDER_FUNCTIONS: "100"
-      RUST_COVERAGE_FAIL_UNDER_REGIONS: "100"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Enforce per-crate coverage thresholds and waivers
-        run: scripts/rust-coverage-gate.sh
-      - name: rust coverage
+      - name: Fetch base ref for coverage diff
+        run: |
+          base="${GITHUB_BASE_REF:-main}"
+          git fetch --no-tags --prune origin "+refs/heads/${base}:refs/remotes/origin/${base}" --depth=1
+      - name: rust coverage (lcov)
         working-directory: rust
         run: |
           cargo llvm-cov \
             --workspace \
             --all-features \
-            --fail-under-lines "${RUST_COVERAGE_FAIL_UNDER_LINES}" \
-            --fail-under-functions "${RUST_COVERAGE_FAIL_UNDER_FUNCTIONS}" \
-            --fail-under-regions "${RUST_COVERAGE_FAIL_UNDER_REGIONS}" \
             --lcov \
             --output-path coverage/lcov.info
+      - name: Enforce per-crate coverage thresholds and waivers
+        run: scripts/rust-coverage-gate.sh
       - name: Summarize rust coverage
         working-directory: rust
         run: |
@@ -233,8 +251,6 @@ jobs:
             echo ""
             echo "Per-crate thresholds: rust/coverage-thresholds.txt"
             echo "Waivers: rust/coverage-waivers.txt"
-            echo ""
-            echo "Thresholds: lines ${RUST_COVERAGE_FAIL_UNDER_LINES}%, functions ${RUST_COVERAGE_FAIL_UNDER_FUNCTIONS}%, regions ${RUST_COVERAGE_FAIL_UNDER_REGIONS}%"
             echo ""
             cargo llvm-cov report --summary-only
             echo ""
@@ -252,7 +268,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [lint, test, parity, baseline-snapshot, baseline-refresh-protocol, rust-quality, rust-coverage]
+    needs: [lint, test, parity, baseline-snapshot, baseline-refresh-protocol, rust-boundary, rust-quality, db-compat, rust-coverage]
     steps:
       - uses: actions/checkout@v4
         with:
