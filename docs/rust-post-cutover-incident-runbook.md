@@ -145,7 +145,7 @@ Steps (fill exact commands per environment before cutover):
 | Step | Command / Action | Evidence |
 |---|---|---|
 | Freeze deploys and announce rollback intent | _TBD_ | _TBD_ |
-| Switch primary artifact/entrypoint to Go | _TBD_ | _TBD_ |
+| Switch primary artifact/entrypoint to Go | `scripts/rust-final-switch.sh rollback --rollback-cmd '<switch-back-to-go-command>' --hook 'scripts/rust-final-switch-checklist-hook.sh docs/review/rust-final-switch-checklist-log.md' --log-file docs/review/rust-final-switch-run.log` | _TBD_ |
 | Verify `forge --version` shows Go build | _TBD_ | _TBD_ |
 | Run smoke checklist again | _TBD_ | _TBD_ |
 | Document incident timeline + root cause hypothesis | _TBD_ | _TBD_ |

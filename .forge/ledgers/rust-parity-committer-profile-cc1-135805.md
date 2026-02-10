@@ -112,3 +112,33 @@ Iteration complete. Summary:
 **Blockers noted:** scale.rs has type mismatch errors (`&loop_entry` vs `&mut loop_entry` in `LoopRepository::update`). Agent needs to fix before it can pass validation.
 ```
 
+## 2026-02-10T13:56:45Z
+
+- run_id: f4ef017e-765c-41a7-ac78-7cf7f31f3093
+- loop_name: rust-parity-committer-profile-cc1-135805
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-10T13:50:07Z
+- finished_at: 2026-02-10T13:56:45Z
+- exit_code: 0
+
+```
+Iteration complete. Summary of 5 commits landed:
+
+| Hash | Message |
+|------|---------|
+| `4e49689` | `feat(forge-cli): wire kill, profile, queue, resume, run, scale, skills, up to SQLite backends` |
+| `9c20be4` | `feat(forge-cli): dynamic help-driven shell completion generation` |
+| `7d5a085` | `feat(forge-daemon): implement ForgedService async RPC trait with all endpoints` |
+| `d58aff0` | `fix(forge-runner): detect prompt state transitions within multi-line chunks` |
+| `bd81108` | `chore: update docs, task tracking, ledgers, and gitignore` |
+
+Validation: `cargo fmt --check` clean, `cargo clippy -D warnings` clean, all workspace tests pass (0 failures).
+
+Remaining working tree has new changes from concurrent agents (audit.rs, lock.rs, lib.rs, fmail golden tests, new docs/scripts) — will evaluate in the next iteration.
+```
+

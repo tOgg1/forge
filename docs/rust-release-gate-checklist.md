@@ -24,6 +24,7 @@ Status: draft for enforcement
 | Daemon/proto gate | daemon/proto gate test + interop criteria met | `docs/rust-daemon-proto-gate.md` |
 | Legacy scope freeze | drop list + command manifests frozen | `docs/rust-legacy-drop-list.md`, `docs/rust-port-manifest.md`, `docs/rust-fmail-command-manifest.md` |
 | Operator migration guide | operator-facing cutover/rollback guidance published | `docs/rust-operator-migration-guide.md` |
+| Final switch automation | one-command cutover + rollback automation with checklist hooks documented | `docs/rust-final-switch-automation.md` |
 | Post-cutover incident/runbook package | runbook + rollback checklist ready for on-call use | `docs/rust-post-cutover-incident-runbook.md` |
 
 ## Mandatory sign-offs
