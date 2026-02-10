@@ -11,7 +11,7 @@ fn clean_single_human_matches_golden() {
         repo: "/repo/alpha".to_string(),
         pool: "default".to_string(),
         profile: "codex".to_string(),
-        tag: "team-a".to_string(),
+        tags: vec!["team-a".to_string()],
         state: LoopState::Stopped,
     }]);
     let out = run(&["clean"], &mut backend);
@@ -27,7 +27,7 @@ fn clean_single_json_matches_golden() {
         repo: "/repo/alpha".to_string(),
         pool: "default".to_string(),
         profile: "codex".to_string(),
-        tag: "team-a".to_string(),
+        tags: vec!["team-a".to_string()],
         state: LoopState::Stopped,
     }]);
     let out = run(&["clean", "--json"], &mut backend);
@@ -51,7 +51,7 @@ fn clean_requires_inactive_match() {
         repo: "/repo/gamma".to_string(),
         pool: "burst".to_string(),
         profile: "claude".to_string(),
-        tag: "team-b".to_string(),
+        tags: vec!["team-b".to_string()],
         state: LoopState::Running,
     }]);
     let out = run(&["clean"], &mut backend);
@@ -88,7 +88,7 @@ fn seeded() -> InMemoryLoopBackend {
             repo: "/repo/alpha".to_string(),
             pool: "default".to_string(),
             profile: "codex".to_string(),
-            tag: "team-a".to_string(),
+            tags: vec!["team-a".to_string()],
             state: LoopState::Stopped,
         },
         LoopRecord {
@@ -97,7 +97,7 @@ fn seeded() -> InMemoryLoopBackend {
             repo: "/repo/alpha".to_string(),
             pool: "default".to_string(),
             profile: "codex".to_string(),
-            tag: "team-a".to_string(),
+            tags: vec!["team-a".to_string()],
             state: LoopState::Error,
         },
         LoopRecord {
@@ -106,7 +106,7 @@ fn seeded() -> InMemoryLoopBackend {
             repo: "/repo/gamma".to_string(),
             pool: "burst".to_string(),
             profile: "claude".to_string(),
-            tag: "team-b".to_string(),
+            tags: vec!["team-b".to_string()],
             state: LoopState::Running,
         },
     ])

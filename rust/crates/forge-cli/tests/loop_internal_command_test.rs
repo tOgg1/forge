@@ -1,5 +1,6 @@
 use forge_cli::loop_internal::{
     run_for_test, CommandOutput, InMemoryLoopInternalBackend, LoopInternalBackend, LoopRecord,
+    LoopState,
 };
 
 #[test]
@@ -11,7 +12,7 @@ fn loop_run_success_no_stdout() {
         out.stdout.is_empty(),
         "loop run should produce no stdout on success"
     );
-    assert_eq!(backend.ran_loops, vec!["loop-001"]);
+    assert_eq!(backend.ran, vec!["loop-001"]);
 }
 
 #[test]
@@ -19,7 +20,7 @@ fn loop_run_resolves_by_short_id() {
     let mut backend = seeded();
     let out = run(&["loop", "run", "abc001"], &mut backend);
     assert_success(&out);
-    assert_eq!(backend.ran_loops, vec!["loop-001"]);
+    assert_eq!(backend.ran, vec!["loop-001"]);
 }
 
 #[test]
@@ -83,11 +84,13 @@ fn loop_run_ambiguous_prefix() {
             id: "loop-abc001".to_string(),
             short_id: "abc001".to_string(),
             name: "alpha".to_string(),
+            state: LoopState::Running,
         },
         LoopRecord {
             id: "loop-abc002".to_string(),
             short_id: "abc002".to_string(),
             name: "beta".to_string(),
+            state: LoopState::Stopped,
         },
     ]);
 
@@ -172,11 +175,13 @@ fn seeded() -> InMemoryLoopInternalBackend {
             id: "loop-001".to_string(),
             short_id: "abc001".to_string(),
             name: "alpha".to_string(),
+            state: LoopState::Running,
         },
         LoopRecord {
             id: "loop-002".to_string(),
             short_id: "def002".to_string(),
             name: "beta".to_string(),
+            state: LoopState::Stopped,
         },
     ])
 }
@@ -202,10 +207,11 @@ impl LoopInternalBackend for FailingBackend {
             id: "loop-001".to_string(),
             short_id: "abc001".to_string(),
             name: "alpha".to_string(),
+            state: LoopState::Running,
         }])
     }
 
-    fn run_loop(&mut self, _loop_id: &str) -> Result<(), String> {
+    fn run_once(&mut self, _loop_id: &str) -> Result<(), String> {
         Err("runner connection lost".to_string())
     }
 }

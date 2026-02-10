@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -54,6 +55,90 @@ pub struct LoopSelector {
 pub trait LoopBackend {
     fn list_loops(&self) -> Result<Vec<LoopRecord>, String>;
     fn delete_loop(&mut self, loop_id: &str) -> Result<(), String>;
+}
+
+#[derive(Debug, Clone)]
+pub struct SqliteLoopBackend {
+    db_path: PathBuf,
+}
+
+impl SqliteLoopBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+}
+
+impl LoopBackend for SqliteLoopBackend {
+    fn list_loops(&self) -> Result<Vec<LoopRecord>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let loops = match loop_repo.list() {
+            Ok(loops) => loops,
+            Err(err) if err.to_string().contains("no such table: loops") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let mut out = Vec::with_capacity(loops.len());
+        for entry in loops {
+            let pool = if entry.pool_id.is_empty() {
+                String::new()
+            } else {
+                pool_repo
+                    .get(&entry.pool_id)
+                    .map(|pool| pool.name)
+                    .unwrap_or(entry.pool_id.clone())
+            };
+            let profile = if entry.profile_id.is_empty() {
+                String::new()
+            } else {
+                profile_repo
+                    .get(&entry.profile_id)
+                    .map(|profile| profile.name)
+                    .unwrap_or(entry.profile_id.clone())
+            };
+
+            out.push(LoopRecord {
+                id: entry.id.clone(),
+                short_id: if entry.short_id.is_empty() {
+                    entry.id
+                } else {
+                    entry.short_id
+                },
+                name: entry.name,
+                repo: entry.repo_path,
+                pool,
+                profile,
+                state: map_loop_state(&entry.state),
+                tags: entry.tags,
+            });
+        }
+        Ok(out)
+    }
+
+    fn delete_loop(&mut self, loop_id: &str) -> Result<(), String> {
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        loop_repo
+            .delete(loop_id)
+            .map_err(|err| format!("remove loop {loop_id}: {err}"))
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -136,7 +221,10 @@ fn execute(
     backend: &mut dyn LoopBackend,
     stdout: &mut dyn Write,
 ) -> Result<(), String> {
-    let parsed = parse_args(args)?;
+    let mut parsed = parse_args(args)?;
+    if !parsed.selector.repo.is_empty() {
+        parsed.selector.repo = normalize_repo_filter(&parsed.selector.repo)?;
+    }
 
     let loops = backend.list_loops()?;
     let mut matched = filter_loops(loops, &parsed.selector);
@@ -433,9 +521,56 @@ fn take_value(args: &[String], index: usize, flag: &str) -> Result<String, Strin
         .ok_or_else(|| format!("error: missing value for {flag}"))
 }
 
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
+fn normalize_repo_filter(value: &str) -> Result<String, String> {
+    let path = Path::new(value);
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("failed to resolve current directory: {err}"))?
+            .join(path)
+    };
+    Ok(abs.to_string_lossy().into_owned())
+}
+
+fn map_loop_state(state: &forge_db::loop_repository::LoopState) -> LoopState {
+    match state {
+        forge_db::loop_repository::LoopState::Running
+        | forge_db::loop_repository::LoopState::Sleeping
+        | forge_db::loop_repository::LoopState::Waiting => LoopState::Running,
+        forge_db::loop_repository::LoopState::Stopped => LoopState::Stopped,
+        forge_db::loop_repository::LoopState::Error => LoopState::Error,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_args, run_for_test, InMemoryLoopBackend, LoopRecord, LoopState};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{
+        parse_args, run_for_test, InMemoryLoopBackend, LoopRecord, LoopState, SqliteLoopBackend,
+    };
+    use crate::rm::run_with_backend;
 
     #[test]
     fn parse_requires_selector_or_loop() {
@@ -511,5 +646,85 @@ mod tests {
             out.stderr,
             "loop 'hot-loop' is running; use --force to remove anyway\n"
         );
+    }
+
+    fn temp_db_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-rm-{tag}-{nanos}-{}-{suffix}.sqlite",
+            std::process::id(),
+        ))
+    }
+
+    #[test]
+    fn rm_sqlite_backend_removes_loop_from_real_db() {
+        let db_path = temp_db_path("sqlite-remove");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut alpha = forge_db::loop_repository::Loop {
+            name: "alpha-loop".to_string(),
+            repo_path: "/tmp/alpha".to_string(),
+            state: forge_db::loop_repository::LoopState::Stopped,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut alpha)
+            .unwrap_or_else(|err| panic!("create alpha: {err}"));
+
+        let mut beta = forge_db::loop_repository::Loop {
+            name: "beta-loop".to_string(),
+            repo_path: "/tmp/beta".to_string(),
+            state: forge_db::loop_repository::LoopState::Stopped,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut beta)
+            .unwrap_or_else(|err| panic!("create beta: {err}"));
+
+        let mut backend = SqliteLoopBackend::new(db_path.clone());
+        let args = vec![
+            "rm".to_string(),
+            "alpha-loop".to_string(),
+            "--force".to_string(),
+            "--json".to_string(),
+        ];
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run_with_backend(&args, &mut backend, &mut stdout, &mut stderr);
+        assert_eq!(exit_code, 0, "stderr: {}", String::from_utf8_lossy(&stderr));
+        assert!(
+            String::from_utf8_lossy(&stdout).contains("\"removed\": 1"),
+            "stdout: {}",
+            String::from_utf8_lossy(&stdout)
+        );
+
+        let remaining = loop_repo
+            .list()
+            .unwrap_or_else(|err| panic!("list loops: {err}"));
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].name, "beta-loop");
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn rm_sqlite_backend_missing_db_returns_no_match() {
+        let db_path = temp_db_path("sqlite-missing");
+        let _ = std::fs::remove_file(&db_path);
+
+        let mut backend = SqliteLoopBackend::new(db_path);
+        let out = run_for_test(&["rm", "--all", "--force"], &mut backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stdout.is_empty());
+        assert_eq!(out.stderr, "no loops matched\n");
     }
 }

@@ -119,7 +119,7 @@ fn parse_args(args: &[String]) -> Result<String, String> {
     loop_ref.ok_or_else(|| "error: requires exactly 1 argument: <loop>".to_string())
 }
 
-fn resolve_loop_ref(loops: &[LoopRecord], loop_ref: &str) -> Result<LoopRecord, String> {
+pub(crate) fn resolve_loop_ref(loops: &[LoopRecord], loop_ref: &str) -> Result<LoopRecord, String> {
     let trimmed = loop_ref.trim();
     if trimmed.is_empty() {
         return Err("loop name or ID required".to_string());

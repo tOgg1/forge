@@ -7,43 +7,10 @@ pub struct CommandOutput {
     pub exit_code: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopRecord {
-    pub id: String,
-    pub short_id: String,
-    pub name: String,
-}
-
-pub trait LoopInternalBackend {
-    fn list_loops(&self) -> Result<Vec<LoopRecord>, String>;
-    fn run_loop(&mut self, loop_id: &str) -> Result<(), String>;
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct InMemoryLoopInternalBackend {
-    loops: Vec<LoopRecord>,
-    pub ran_loops: Vec<String>,
-}
-
-impl InMemoryLoopInternalBackend {
-    pub fn with_loops(loops: Vec<LoopRecord>) -> Self {
-        Self {
-            loops,
-            ran_loops: Vec::new(),
-        }
-    }
-}
-
-impl LoopInternalBackend for InMemoryLoopInternalBackend {
-    fn list_loops(&self) -> Result<Vec<LoopRecord>, String> {
-        Ok(self.loops.clone())
-    }
-
-    fn run_loop(&mut self, loop_id: &str) -> Result<(), String> {
-        self.ran_loops.push(loop_id.to_string());
-        Ok(())
-    }
-}
+pub use crate::run::{
+    InMemoryRunBackend as InMemoryLoopInternalBackend, LoopRecord, LoopState,
+    RunBackend as LoopInternalBackend,
+};
 
 pub fn run_for_test(args: &[&str], backend: &mut dyn LoopInternalBackend) -> CommandOutput {
     let owned_args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
@@ -76,9 +43,9 @@ pub fn run_with_backend(
 fn execute(args: &[String], backend: &mut dyn LoopInternalBackend) -> Result<(), String> {
     let loop_ref = parse_args(args)?;
     let loops = backend.list_loops()?;
-    let entry = resolve_loop_ref(&loops, &loop_ref)?;
+    let entry = crate::run::resolve_loop_ref(&loops, &loop_ref)?;
     backend
-        .run_loop(&entry.id)
+        .run_once(&entry.id)
         .map_err(|err| format!("loop run failed: {err}"))
 }
 
@@ -123,86 +90,9 @@ fn parse_args(args: &[String]) -> Result<String, String> {
     loop_ref.ok_or_else(|| "error: requires exactly 1 argument: <loop-id>".to_string())
 }
 
-fn resolve_loop_ref(loops: &[LoopRecord], loop_ref: &str) -> Result<LoopRecord, String> {
-    let trimmed = loop_ref.trim();
-    if trimmed.is_empty() {
-        return Err("loop name or ID required".to_string());
-    }
-    if loops.is_empty() {
-        return Err(format!("loop '{trimmed}' not found"));
-    }
-
-    if let Some(entry) = loops
-        .iter()
-        .find(|entry| short_id(entry).eq_ignore_ascii_case(trimmed))
-    {
-        return Ok(entry.clone());
-    }
-
-    if let Some(entry) = loops.iter().find(|entry| entry.id == trimmed) {
-        return Ok(entry.clone());
-    }
-
-    if let Some(entry) = loops.iter().find(|entry| entry.name == trimmed) {
-        return Ok(entry.clone());
-    }
-
-    let normalized = trimmed.to_ascii_lowercase();
-    let mut prefix_matches: Vec<LoopRecord> = loops
-        .iter()
-        .filter(|entry| {
-            short_id(entry)
-                .to_ascii_lowercase()
-                .starts_with(&normalized)
-                || entry.id.starts_with(trimmed)
-        })
-        .cloned()
-        .collect();
-
-    if prefix_matches.len() == 1 {
-        return Ok(prefix_matches.remove(0));
-    }
-
-    if !prefix_matches.is_empty() {
-        prefix_matches.sort_by(|left, right| {
-            left.name
-                .to_ascii_lowercase()
-                .cmp(&right.name.to_ascii_lowercase())
-                .then_with(|| short_id(left).cmp(short_id(right)))
-        });
-        let labels = prefix_matches
-            .iter()
-            .map(format_loop_match)
-            .collect::<Vec<String>>()
-            .join(", ");
-        return Err(format!(
-            "loop '{trimmed}' is ambiguous; matches: {labels} (use a longer prefix or full ID)"
-        ));
-    }
-
-    let example = &loops[0];
-    Err(format!(
-        "loop '{}' not found. Example input: '{}' or '{}'",
-        trimmed,
-        example.name,
-        short_id(example)
-    ))
-}
-
-fn short_id(entry: &LoopRecord) -> &str {
-    if entry.short_id.is_empty() {
-        return &entry.id;
-    }
-    &entry.short_id
-}
-
-fn format_loop_match(entry: &LoopRecord) -> String {
-    format!("{} ({})", entry.name, short_id(entry))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{run_for_test, InMemoryLoopInternalBackend, LoopRecord};
+    use super::{run_for_test, InMemoryLoopInternalBackend, LoopRecord, LoopState};
 
     #[test]
     fn requires_run_subcommand() {
@@ -220,7 +110,7 @@ mod tests {
         assert_eq!(out.exit_code, 0);
         assert!(out.stdout.is_empty());
         assert!(out.stderr.is_empty());
-        assert_eq!(backend.ran_loops, vec!["loop-001"]);
+        assert_eq!(backend.ran, vec!["loop-001"]);
     }
 
     #[test]
@@ -236,6 +126,7 @@ mod tests {
             id: "loop-001".to_string(),
             short_id: "abc001".to_string(),
             name: "alpha".to_string(),
+            state: LoopState::Stopped,
         }])
     }
 
@@ -247,10 +138,11 @@ mod tests {
                 id: "loop-001".to_string(),
                 short_id: "abc001".to_string(),
                 name: "alpha".to_string(),
+                state: LoopState::Running,
             }])
         }
 
-        fn run_loop(&mut self, _loop_id: &str) -> Result<(), String> {
+        fn run_once(&mut self, _loop_id: &str) -> Result<(), String> {
             Err("runner crashed".to_string())
         }
     }

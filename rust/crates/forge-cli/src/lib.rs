@@ -231,7 +231,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             resume::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("rm") => {
-            let mut backend = rm::InMemoryLoopBackend::default();
+            let mut backend = rm::SqliteLoopBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             rm::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -290,7 +290,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             up::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("wait") => {
-            let backend = wait::InMemoryWaitBackend::default();
+            let backend = wait::SqliteWaitBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             wait::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
