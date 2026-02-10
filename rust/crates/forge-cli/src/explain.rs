@@ -1,6 +1,12 @@
 use std::io::Write;
+use std::path::PathBuf;
 
+use chrono::TimeZone;
+use rusqlite::OptionalExtension;
+use serde::Deserialize;
 use serde::Serialize;
+
+use crate::context::{ContextBackend, FilesystemContextBackend};
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -261,6 +267,468 @@ impl ExplainBackend for InMemoryExplainBackend {
             .find(|(id, _)| id == account_id)
             .map(|(_, acct)| acct.clone()))
     }
+}
+
+// ---------------------------------------------------------------------------
+// SQLite backend (production)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct SqliteExplainBackend {
+    db_path: PathBuf,
+    context_backend: FilesystemContextBackend,
+}
+
+impl SqliteExplainBackend {
+    pub fn open_from_env() -> Self {
+        let db_path = resolve_database_path();
+        let context_backend = FilesystemContextBackend::default();
+        Self {
+            db_path,
+            context_backend,
+        }
+    }
+
+    pub fn new(db_path: PathBuf, context_backend: FilesystemContextBackend) -> Self {
+        Self {
+            db_path,
+            context_backend,
+        }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
+}
+
+impl ExplainBackend for SqliteExplainBackend {
+    fn resolve_agent(&self, target: &str) -> Result<AgentRecord, String> {
+        let trimmed = target.trim();
+        if trimmed.is_empty() {
+            return Err("agent ID required".to_string());
+        }
+        if !self.db_path.exists() {
+            return Err(format!("agent '{trimmed}' not found"));
+        }
+
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let exact = conn
+            .query_row(
+                "SELECT
+                    id,
+                    type,
+                    state,
+                    COALESCE(state_reason, ''),
+                    COALESCE(state_confidence, ''),
+                    NULLIF(last_activity_at, ''),
+                    NULLIF(paused_until, ''),
+                    COALESCE(account_id, '')
+                FROM agents
+                WHERE id = ?1",
+                rusqlite::params![trimmed],
+                scan_agent_row,
+            )
+            .optional();
+        let exact = match exact {
+            Ok(value) => value,
+            Err(err) if err.to_string().contains("no such table: agents") => {
+                return Err(format!("agent '{trimmed}' not found"));
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+        if let Some(agent) = exact {
+            return Ok(agent);
+        }
+
+        let like = format!("{trimmed}%");
+        let mut stmt = match conn.prepare(
+            "SELECT
+                id,
+                type,
+                state,
+                COALESCE(state_reason, ''),
+                COALESCE(state_confidence, ''),
+                NULLIF(last_activity_at, ''),
+                NULLIF(paused_until, ''),
+                COALESCE(account_id, '')
+             FROM agents
+             WHERE id LIKE ?1
+             ORDER BY id
+             LIMIT 2",
+        ) {
+            Ok(stmt) => stmt,
+            Err(err) if err.to_string().contains("no such table: agents") => {
+                return Err(format!("agent '{trimmed}' not found"));
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let rows = stmt
+            .query_map(rusqlite::params![like], scan_agent_row)
+            .map_err(|err| err.to_string())?;
+        let mut matches = Vec::new();
+        for row in rows {
+            matches.push(row.map_err(|err| err.to_string())?);
+        }
+        match matches.len() {
+            0 => Err(format!("agent '{trimmed}' not found")),
+            1 => Ok(matches.remove(0)),
+            _ => Err(format!("agent '{trimmed}' is ambiguous")),
+        }
+    }
+
+    fn load_agent_context(&self) -> Result<Option<String>, String> {
+        let context = self.context_backend.load_context()?;
+        if context.agent_id.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(context.agent_id))
+    }
+
+    fn load_workspace_first_agent(&self) -> Result<Option<String>, String> {
+        let context = self.context_backend.load_context()?;
+        if context.workspace_id.is_empty() {
+            return Ok(None);
+        }
+        if !self.db_path.exists() {
+            return Ok(None);
+        }
+
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let row = conn
+            .query_row(
+                "SELECT id
+                 FROM agents
+                 WHERE workspace_id = ?1
+                 ORDER BY id
+                 LIMIT 1",
+                rusqlite::params![context.workspace_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional();
+        match row {
+            Ok(value) => Ok(value),
+            Err(err) if err.to_string().contains("no such table: agents") => Ok(None),
+            Err(err) => Err(err.to_string()),
+        }
+    }
+
+    fn list_queue(&self, agent_id: &str) -> Result<Vec<QueueItemRecord>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let mut stmt = match conn.prepare(
+            "SELECT
+                id,
+                agent_id,
+                type,
+                status,
+                position,
+                created_at,
+                payload_json
+             FROM queue_items
+             WHERE agent_id = ?1
+             ORDER BY position, id",
+        ) {
+            Ok(stmt) => stmt,
+            Err(err) if err.to_string().contains("no such table: queue_items") => {
+                return Ok(Vec::new());
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let rows = stmt
+            .query_map(rusqlite::params![agent_id], scan_queue_item_row)
+            .map_err(|err| err.to_string())?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|err| err.to_string())?);
+        }
+        Ok(out)
+    }
+
+    fn get_queue_item(&self, item_id: &str) -> Result<QueueItemRecord, String> {
+        if !self.db_path.exists() {
+            return Err(format!("queue item not found: {item_id}"));
+        }
+
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let row = conn
+            .query_row(
+                "SELECT
+                    id,
+                    agent_id,
+                    type,
+                    status,
+                    position,
+                    created_at,
+                    payload_json
+                 FROM queue_items
+                 WHERE id = ?1",
+                rusqlite::params![item_id],
+                scan_queue_item_row,
+            )
+            .optional();
+        match row {
+            Ok(Some(item)) => Ok(item),
+            Ok(None) => Err(format!("queue item not found: {item_id}")),
+            Err(err) if err.to_string().contains("no such table: queue_items") => {
+                Err(format!("queue item not found: {item_id}"))
+            }
+            Err(err) => Err(err.to_string()),
+        }
+    }
+
+    fn get_account(&self, account_id: &str) -> Result<Option<AccountRecord>, String> {
+        if account_id.trim().is_empty() {
+            return Ok(None);
+        }
+        if !self.db_path.exists() {
+            return Ok(None);
+        }
+
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let row = conn
+            .query_row(
+                "SELECT
+                    COALESCE(profile_name, ''),
+                    NULLIF(cooldown_until, '')
+                 FROM accounts
+                 WHERE id = ?1",
+                rusqlite::params![account_id],
+                |row| {
+                    let profile_name: String = row.get(0)?;
+                    let cooldown_until: Option<String> = row.get(1)?;
+                    Ok((profile_name, cooldown_until))
+                },
+            )
+            .optional();
+
+        match row {
+            Ok(Some((profile_name, cooldown_until))) => {
+                let is_in_cooldown = cooldown_until
+                    .as_deref()
+                    .and_then(parse_timestamp_utc)
+                    .is_some_and(|value| value > chrono::Utc::now());
+                Ok(Some(AccountRecord {
+                    profile_name,
+                    cooldown_until,
+                    is_in_cooldown,
+                }))
+            }
+            Ok(None) => Ok(None),
+            Err(err) if err.to_string().contains("no such table: accounts") => Ok(None),
+            Err(err) => Err(err.to_string()),
+        }
+    }
+}
+
+fn scan_agent_row(row: &rusqlite::Row) -> rusqlite::Result<AgentRecord> {
+    let id: String = row.get(0)?;
+    let agent_type: String = row.get(1)?;
+    let state: String = row.get(2)?;
+    let reason: String = row.get(3)?;
+    let confidence: String = row.get(4)?;
+    let last_activity: Option<String> = row.get(5)?;
+    let paused_until: Option<String> = row.get(6)?;
+    let account_id: String = row.get(7)?;
+    Ok(AgentRecord {
+        id,
+        agent_type: map_agent_type(&agent_type),
+        state: map_agent_state(&state),
+        state_info: StateInfo { reason, confidence },
+        last_activity,
+        paused_until,
+        account_id,
+    })
+}
+
+fn scan_queue_item_row(row: &rusqlite::Row) -> rusqlite::Result<QueueItemRecord> {
+    let id: String = row.get(0)?;
+    let agent_id: String = row.get(1)?;
+    let item_type: String = row.get(2)?;
+    let status: String = row.get(3)?;
+    let position: i64 = row.get(4)?;
+    let created_at: String = row.get(5)?;
+    let payload_json: String = row.get(6)?;
+
+    let typed_item = map_queue_item_type(&item_type);
+    let (content, condition) = parse_queue_payload(&typed_item, &payload_json);
+
+    Ok(QueueItemRecord {
+        id,
+        agent_id,
+        item_type: typed_item,
+        status: map_queue_item_status(&status),
+        position: i32::try_from(position).unwrap_or(i32::MAX),
+        created_at,
+        content,
+        condition,
+    })
+}
+
+fn map_agent_type(value: &str) -> AgentType {
+    match value {
+        "opencode" => AgentType::OpenCode,
+        "claude-code" => AgentType::ClaudeCode,
+        "codex" => AgentType::Codex,
+        "gemini" => AgentType::Gemini,
+        _ => AgentType::Generic,
+    }
+}
+
+fn map_agent_state(value: &str) -> AgentState {
+    match value {
+        "working" => AgentState::Working,
+        "idle" => AgentState::Idle,
+        "awaiting_approval" => AgentState::AwaitingApproval,
+        "rate_limited" => AgentState::RateLimited,
+        "error" => AgentState::Error,
+        "paused" => AgentState::Paused,
+        "starting" => AgentState::Starting,
+        _ => AgentState::Stopped,
+    }
+}
+
+fn map_queue_item_type(value: &str) -> QueueItemType {
+    match value {
+        "message" => QueueItemType::Message,
+        "pause" => QueueItemType::Pause,
+        _ => QueueItemType::Conditional,
+    }
+}
+
+fn map_queue_item_status(value: &str) -> QueueItemStatus {
+    match value {
+        "pending" => QueueItemStatus::Pending,
+        "dispatched" => QueueItemStatus::Dispatched,
+        "completed" => QueueItemStatus::Completed,
+        "failed" => QueueItemStatus::Failed,
+        "skipped" => QueueItemStatus::Skipped,
+        _ => QueueItemStatus::Pending,
+    }
+}
+
+fn map_condition_type(value: &str) -> ConditionType {
+    match value {
+        "when_idle" => ConditionType::WhenIdle,
+        "after_cooldown" => ConditionType::AfterCooldown,
+        "after_previous" => ConditionType::AfterPrevious,
+        _ => ConditionType::Custom,
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct MessagePayload {
+    text: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PausePayload {
+    duration_seconds: i64,
+    reason: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ConditionalPayloadJson {
+    condition_type: String,
+    expression: String,
+    message: String,
+}
+
+fn parse_queue_payload(
+    item_type: &QueueItemType,
+    payload_json: &str,
+) -> (Option<String>, Option<ConditionalPayload>) {
+    match item_type {
+        QueueItemType::Message => {
+            let payload = serde_json::from_str::<MessagePayload>(payload_json).ok();
+            let content = payload
+                .map(|value| truncate_string(&value.text, 100))
+                .filter(|value| !value.is_empty());
+            (content, None)
+        }
+        QueueItemType::Pause => {
+            let payload = serde_json::from_str::<PausePayload>(payload_json).ok();
+            let content = payload
+                .and_then(|value| {
+                    if value.duration_seconds <= 0 {
+                        return None;
+                    }
+                    if value.reason.trim().is_empty() {
+                        return Some(format!("{}s pause", value.duration_seconds));
+                    }
+                    Some(format!(
+                        "{}s pause ({})",
+                        value.duration_seconds, value.reason
+                    ))
+                })
+                .filter(|value| !value.is_empty());
+            (content, None)
+        }
+        QueueItemType::Conditional => {
+            let payload = serde_json::from_str::<ConditionalPayloadJson>(payload_json).ok();
+            match payload {
+                Some(value) => {
+                    let content = if value.message.is_empty() {
+                        None
+                    } else {
+                        Some(truncate_string(&value.message, 100))
+                    };
+                    let condition = Some(ConditionalPayload {
+                        condition_type: map_condition_type(&value.condition_type),
+                        expression: value.expression,
+                        message: value.message,
+                    });
+                    (content, condition)
+                }
+                None => (None, None),
+            }
+        }
+    }
+}
+
+fn parse_timestamp_utc(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        return Some(parsed.with_timezone(&chrono::Utc));
+    }
+    if let Ok(parsed) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S") {
+        return Some(chrono::Utc.from_utc_datetime(&parsed));
+    }
+    if let Ok(parsed) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S") {
+        return Some(chrono::Utc.from_utc_datetime(&parsed));
+    }
+    None
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
 }
 
 // ---------------------------------------------------------------------------
@@ -1791,5 +2259,188 @@ mod tests {
         // No content or condition
         assert!(parsed.get("content").is_none());
         assert!(parsed.get("condition").is_none());
+    }
+
+    #[test]
+    fn sqlite_backend_explain_uses_workspace_context_and_real_db_facts() {
+        let fixture = SqliteExplainFixture::new("sqlite_backend_explain_uses_workspace_context");
+        let backend = fixture.backend();
+        let out = run_for_test(&["explain", "--json"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stderr.is_empty());
+
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(parsed["agent_id"], "agent_12345678");
+        assert_eq!(parsed["type"], "codex");
+        assert_eq!(parsed["queue_status"]["total_items"], 3);
+        assert_eq!(parsed["queue_status"]["pending_items"], 3);
+        assert_eq!(parsed["account_status"]["profile_name"], "main-profile");
+        assert_eq!(parsed["account_status"]["is_in_cooldown"], true);
+        assert!(parsed["block_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str() == Some("account cooldown active")));
+    }
+
+    #[test]
+    fn sqlite_backend_queue_payload_parity() {
+        let fixture = SqliteExplainFixture::new("sqlite_backend_queue_payload_parity");
+        let backend = fixture.backend();
+
+        let conditional = run_for_test(&["explain", "qi_2"], &backend);
+        assert_eq!(conditional.exit_code, 0);
+        assert!(conditional.stdout.contains("Content: ship patch"));
+        assert!(conditional.stdout.contains("Condition:"));
+        assert!(conditional.stdout.contains("Type: when_idle"));
+        assert!(conditional.stdout.contains("Expression: state == idle"));
+
+        let pause = run_for_test(&["explain", "qi_3"], &backend);
+        assert_eq!(pause.exit_code, 0);
+        assert!(pause.stdout.contains("Content: 30s pause (cooldown)"));
+    }
+
+    struct SqliteExplainFixture {
+        _temp: TempDir,
+        db_path: std::path::PathBuf,
+        context_path: std::path::PathBuf,
+    }
+
+    impl SqliteExplainFixture {
+        fn new(name: &str) -> Self {
+            let temp = TempDir::new(name);
+            let db_path = temp.path.join("forge.db");
+            let context_path = temp.path.join(".config/forge/context.yaml");
+            let parent = context_path.parent().unwrap();
+            std::fs::create_dir_all(parent).unwrap();
+
+            std::fs::write(
+                &context_path,
+                "workspace: ws_1\nworkspace_name: alpha\nupdated_at: 2026-01-01T00:00:00Z\n",
+            )
+            .unwrap();
+
+            {
+                let mut db = forge_db::Db::open(forge_db::Config::new(&db_path)).unwrap();
+                db.migrate_up().unwrap();
+                let conn = db.conn();
+
+                conn.execute(
+                    "INSERT INTO nodes (id, name, is_local, status) VALUES (?1, ?2, 1, 'online')",
+                    rusqlite::params!["node_1", "local"],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO workspaces (id, name, node_id, repo_path, tmux_session, status)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 'active')",
+                    rusqlite::params![
+                        "ws_1",
+                        "alpha",
+                        "node_1",
+                        "/tmp/repo-alpha",
+                        "alpha-session"
+                    ],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO accounts (id, provider, profile_name, credential_ref, cooldown_until, is_active)
+                     VALUES (?1, 'anthropic', ?2, 'env:ANTHROPIC_API_KEY', ?3, 1)",
+                    rusqlite::params!["acct_1", "main-profile", "2999-01-01T00:00:00Z"],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO agents (
+                        id, workspace_id, type, tmux_pane, account_id,
+                        state, state_confidence, state_reason, last_activity_at
+                    ) VALUES (
+                        ?1, ?2, 'codex', 'alpha-session:1.1', 'acct_1',
+                        'idle', 'high', 'ready', '2026-01-01T00:00:00Z'
+                    )",
+                    rusqlite::params!["agent_12345678", "ws_1"],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO agents (
+                        id, workspace_id, type, tmux_pane, state, state_confidence
+                    ) VALUES (
+                        ?1, ?2, 'opencode', 'alpha-session:1.2', 'working', 'medium'
+                    )",
+                    rusqlite::params!["agent_99999999", "ws_1"],
+                )
+                .unwrap();
+
+                conn.execute(
+                    "INSERT INTO queue_items (
+                        id, agent_id, type, position, status, payload_json, attempts
+                    ) VALUES (
+                        'qi_1', 'agent_12345678', 'message', 1, 'pending',
+                        '{\"text\":\"hello from queue\"}', 0
+                    )",
+                    [],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO queue_items (
+                        id, agent_id, type, position, status, payload_json, attempts
+                    ) VALUES (
+                        'qi_2', 'agent_12345678', 'conditional', 2, 'pending',
+                        '{\"condition_type\":\"when_idle\",\"expression\":\"state == idle\",\"message\":\"ship patch\"}', 0
+                    )",
+                    [],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO queue_items (
+                        id, agent_id, type, position, status, payload_json, attempts
+                    ) VALUES (
+                        'qi_3', 'agent_12345678', 'pause', 3, 'pending',
+                        '{\"duration_seconds\":30,\"reason\":\"cooldown\"}', 0
+                    )",
+                    [],
+                )
+                .unwrap();
+            }
+
+            Self {
+                _temp: temp,
+                db_path,
+                context_path,
+            }
+        }
+
+        fn backend(&self) -> SqliteExplainBackend {
+            let context_backend =
+                FilesystemContextBackend::new(self.context_path.clone(), self.db_path.clone());
+            SqliteExplainBackend::new(self.db_path.clone(), context_backend)
+        }
+    }
+
+    struct TempDir {
+        path: std::path::PathBuf,
+    }
+
+    impl TempDir {
+        fn new(prefix: &str) -> Self {
+            let mut path = std::env::temp_dir();
+            let uniq = format!(
+                "{}-{}-{}",
+                prefix,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            );
+            path.push(uniq);
+            std::fs::create_dir_all(&path)
+                .unwrap_or_else(|err| panic!("mkdir {}: {err}", path.display()));
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
     }
 }

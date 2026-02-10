@@ -1,6 +1,10 @@
 use std::io::Write;
+use std::path::PathBuf;
 
+use rusqlite::OptionalExtension;
 use serde::Serialize;
+
+use crate::context::{ContextBackend, FilesystemContextBackend};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -262,6 +266,409 @@ impl SendBackend for InMemorySendBackend {
         items.sort_by_key(|qi| qi.position);
         Ok(items)
     }
+}
+
+// ---------------------------------------------------------------------------
+// SQLite backend (production)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct SqliteSendBackend {
+    db_path: PathBuf,
+    context_backend: FilesystemContextBackend,
+}
+
+impl SqliteSendBackend {
+    pub fn open_from_env() -> Self {
+        let db_path = resolve_database_path();
+        let context_backend = FilesystemContextBackend::default();
+        Self {
+            db_path,
+            context_backend,
+        }
+    }
+
+    pub fn new(db_path: PathBuf, context_backend: FilesystemContextBackend) -> Self {
+        Self {
+            db_path,
+            context_backend,
+        }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
+
+    fn ensure_agent_exists(
+        &self,
+        conn: &rusqlite::Connection,
+        agent_id: &str,
+    ) -> Result<(), String> {
+        let row = conn
+            .query_row(
+                "SELECT id FROM agents WHERE id = ?1",
+                rusqlite::params![agent_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        if row.is_some() {
+            return Ok(());
+        }
+        Err(format!("agent not found: {agent_id}"))
+    }
+
+    fn now_rfc3339() -> String {
+        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    }
+
+    fn next_item_id() -> String {
+        format!("qi_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn next_position(conn: &rusqlite::Connection, agent_id: &str) -> Result<i64, String> {
+        let current = conn
+            .query_row(
+                "SELECT COALESCE(MAX(position), 0) FROM queue_items WHERE agent_id = ?1",
+                rusqlite::params![agent_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|err| err.to_string())?;
+        Ok(current + 1)
+    }
+
+    fn insert_item(
+        conn: &rusqlite::Connection,
+        id: &str,
+        agent_id: &str,
+        item_type: &str,
+        position: i64,
+        payload: &str,
+    ) -> Result<(), String> {
+        conn.execute(
+            "INSERT INTO queue_items (
+                id, agent_id, type, position, status, attempts, payload_json, created_at
+            ) VALUES (
+                ?1, ?2, ?3, ?4, 'pending', 0, ?5, ?6
+            )",
+            rusqlite::params![
+                id,
+                agent_id,
+                item_type,
+                position,
+                payload,
+                SqliteSendBackend::now_rfc3339()
+            ],
+        )
+        .map_err(|err| err.to_string())?;
+        Ok(())
+    }
+
+    fn resolve_workspace_for_listing(&self) -> Result<Option<String>, String> {
+        let context = self.context_backend.load_context()?;
+        if !context.workspace_id.is_empty() {
+            return Ok(Some(context.workspace_id));
+        }
+        if !self.db_path.exists() {
+            return Ok(None);
+        }
+        let cwd = std::env::current_dir()
+            .map_err(|err| format!("resolve current directory: {err}"))?
+            .to_string_lossy()
+            .to_string();
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let workspace_id = conn
+            .query_row(
+                "SELECT id FROM workspaces WHERE repo_path = ?1 ORDER BY id LIMIT 1",
+                rusqlite::params![cwd],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        Ok(workspace_id)
+    }
+}
+
+impl SendBackend for SqliteSendBackend {
+    fn resolve_agent(&self, target: &str) -> Result<AgentRecord, String> {
+        let trimmed = target.trim();
+        if trimmed.is_empty() {
+            return Err("agent ID required".to_string());
+        }
+        if !self.db_path.exists() {
+            return Err(format!("agent not found: {trimmed}"));
+        }
+        let db = self.open_db()?;
+        let conn = db.conn();
+
+        let exact = conn
+            .query_row(
+                "SELECT id, workspace_id, state FROM agents WHERE id = ?1",
+                rusqlite::params![trimmed],
+                |row| {
+                    Ok(AgentRecord {
+                        id: row.get(0)?,
+                        workspace_id: row.get(1)?,
+                        state: row.get(2)?,
+                    })
+                },
+            )
+            .optional();
+        let exact = match exact {
+            Ok(value) => value,
+            Err(err) if err.to_string().contains("no such table: agents") => {
+                return Err(format!("agent not found: {trimmed}"));
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+        if let Some(agent) = exact {
+            return Ok(agent);
+        }
+
+        let like = format!("{trimmed}%");
+        let mut stmt = match conn.prepare(
+            "SELECT id, workspace_id, state
+             FROM agents
+             WHERE id LIKE ?1
+             ORDER BY id
+             LIMIT 2",
+        ) {
+            Ok(stmt) => stmt,
+            Err(err) if err.to_string().contains("no such table: agents") => {
+                return Err(format!("agent not found: {trimmed}"));
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let rows = stmt
+            .query_map(rusqlite::params![like], |row| {
+                Ok(AgentRecord {
+                    id: row.get(0)?,
+                    workspace_id: row.get(1)?,
+                    state: row.get(2)?,
+                })
+            })
+            .map_err(|err| err.to_string())?;
+
+        let mut matches = Vec::new();
+        for row in rows {
+            matches.push(row.map_err(|err| err.to_string())?);
+        }
+        match matches.len() {
+            0 => Err(format!("agent not found: {trimmed}")),
+            1 => Ok(matches.remove(0)),
+            _ => Err(format!(
+                "agent '{trimmed}' is ambiguous; use a longer prefix or full ID"
+            )),
+        }
+    }
+
+    fn load_agent_context(&self) -> Result<Option<String>, String> {
+        let context = self.context_backend.load_context()?;
+        if context.agent_id.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(context.agent_id))
+    }
+
+    fn list_workspace_agents(&self) -> Result<Vec<AgentRecord>, String> {
+        let Some(workspace_id) = self.resolve_workspace_for_listing()? else {
+            return Ok(Vec::new());
+        };
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let mut stmt = match conn.prepare(
+            "SELECT id, workspace_id, state
+             FROM agents
+             WHERE workspace_id = ?1
+             ORDER BY id",
+        ) {
+            Ok(stmt) => stmt,
+            Err(err) if err.to_string().contains("no such table: agents") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+        let rows = stmt
+            .query_map(rusqlite::params![workspace_id], |row| {
+                Ok(AgentRecord {
+                    id: row.get(0)?,
+                    workspace_id: row.get(1)?,
+                    state: row.get(2)?,
+                })
+            })
+            .map_err(|err| err.to_string())?;
+
+        let mut agents = Vec::new();
+        for row in rows {
+            agents.push(row.map_err(|err| err.to_string())?);
+        }
+        Ok(agents)
+    }
+
+    fn enqueue_message(&mut self, agent_id: &str, text: &str) -> Result<String, String> {
+        let db = self.open_db()?;
+        let conn = db.conn();
+        self.ensure_agent_exists(conn, agent_id)?;
+        let id = Self::next_item_id();
+        let payload = serde_json::json!({ "text": text }).to_string();
+        let position = Self::next_position(conn, agent_id)?;
+        Self::insert_item(conn, &id, agent_id, "message", position, &payload)?;
+        Ok(id)
+    }
+
+    fn enqueue_conditional(&mut self, agent_id: &str, text: &str) -> Result<String, String> {
+        let db = self.open_db()?;
+        let conn = db.conn();
+        self.ensure_agent_exists(conn, agent_id)?;
+        let id = Self::next_item_id();
+        let payload = serde_json::json!({
+            "condition_type": "when_idle",
+            "message": text
+        })
+        .to_string();
+        let position = Self::next_position(conn, agent_id)?;
+        Self::insert_item(conn, &id, agent_id, "conditional", position, &payload)?;
+        Ok(id)
+    }
+
+    fn enqueue_front(&mut self, agent_id: &str, text: &str) -> Result<String, String> {
+        let db = self.open_db()?;
+        let conn = db.conn();
+        self.ensure_agent_exists(conn, agent_id)?;
+        conn.execute(
+            "UPDATE queue_items
+             SET position = position + 1
+             WHERE agent_id = ?1",
+            rusqlite::params![agent_id],
+        )
+        .map_err(|err| err.to_string())?;
+        let id = Self::next_item_id();
+        let payload = serde_json::json!({ "text": text }).to_string();
+        Self::insert_item(conn, &id, agent_id, "message", 0, &payload)?;
+        Ok(id)
+    }
+
+    fn enqueue_front_conditional(&mut self, agent_id: &str, text: &str) -> Result<String, String> {
+        let db = self.open_db()?;
+        let conn = db.conn();
+        self.ensure_agent_exists(conn, agent_id)?;
+        conn.execute(
+            "UPDATE queue_items
+             SET position = position + 1
+             WHERE agent_id = ?1",
+            rusqlite::params![agent_id],
+        )
+        .map_err(|err| err.to_string())?;
+        let id = Self::next_item_id();
+        let payload = serde_json::json!({
+            "condition_type": "when_idle",
+            "message": text
+        })
+        .to_string();
+        Self::insert_item(conn, &id, agent_id, "conditional", 0, &payload)?;
+        Ok(id)
+    }
+
+    fn enqueue_after(
+        &mut self,
+        agent_id: &str,
+        after_id: &str,
+        text: &str,
+    ) -> Result<String, String> {
+        let db = self.open_db()?;
+        let conn = db.conn();
+        self.ensure_agent_exists(conn, agent_id)?;
+        let after_item = conn
+            .query_row(
+                "SELECT agent_id, position FROM queue_items WHERE id = ?1",
+                rusqlite::params![after_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        let Some((after_agent, after_pos)) = after_item else {
+            return Err(format!("failed to find queue item {after_id}: not found"));
+        };
+        if after_agent != agent_id {
+            return Err(format!(
+                "queue item {after_id} does not belong to agent {agent_id}"
+            ));
+        }
+
+        let insert_pos = after_pos + 1;
+        conn.execute(
+            "UPDATE queue_items
+             SET position = position + 1
+             WHERE agent_id = ?1 AND position >= ?2",
+            rusqlite::params![agent_id, insert_pos],
+        )
+        .map_err(|err| err.to_string())?;
+
+        let id = Self::next_item_id();
+        let payload = serde_json::json!({ "text": text }).to_string();
+        Self::insert_item(conn, &id, agent_id, "message", insert_pos, &payload)?;
+        Ok(id)
+    }
+
+    fn list_queue(&self, agent_id: &str) -> Result<Vec<QueueItem>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let mut stmt = match conn.prepare(
+            "SELECT id, agent_id, type, status, position, payload_json
+             FROM queue_items
+             WHERE agent_id = ?1
+             ORDER BY position, id",
+        ) {
+            Ok(stmt) => stmt,
+            Err(err) if err.to_string().contains("no such table: queue_items") => {
+                return Ok(Vec::new());
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+        let rows = stmt
+            .query_map(rusqlite::params![agent_id], |row| {
+                Ok(QueueItem {
+                    id: row.get(0)?,
+                    agent_id: row.get(1)?,
+                    item_type: row.get(2)?,
+                    status: row.get(3)?,
+                    position: row.get(4)?,
+                    payload: row.get(5)?,
+                })
+            })
+            .map_err(|err| err.to_string())?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|err| err.to_string())?);
+        }
+        Ok(out)
+    }
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
 }
 
 // ---------------------------------------------------------------------------
@@ -1205,6 +1612,181 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("does not belong to agent"));
+    }
+
+    #[test]
+    fn sqlite_send_explicit_agent_json_round_trip() {
+        let fixture = SqliteSendFixture::new("sqlite_send_explicit_agent_json_round_trip", 1);
+        let mut backend = fixture.backend();
+
+        let out = run(
+            &["send", "agent_12345678", "hello from sqlite", "--json"],
+            &mut backend,
+        );
+        assert_success(&out);
+
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(parsed["queued"], true);
+        assert_eq!(parsed["results"][0]["agent_id"], "agent_12345678");
+        assert_eq!(parsed["results"][0]["item_type"], "message");
+        assert_eq!(parsed["results"][0]["position"], 1);
+
+        let queue = backend.list_queue("agent_12345678").unwrap();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].item_type, "message");
+    }
+
+    #[test]
+    fn sqlite_send_auto_detect_single_agent_from_workspace_context() {
+        let fixture = SqliteSendFixture::new(
+            "sqlite_send_auto_detect_single_agent_from_workspace_context",
+            1,
+        );
+        let mut backend = fixture.backend();
+
+        let out = run(&["send", "autodetected message", "--json"], &mut backend);
+        assert_success(&out);
+
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(parsed["results"][0]["agent_id"], "agent_12345678");
+        assert_eq!(parsed["message"], "autodetected message");
+    }
+
+    #[test]
+    fn sqlite_send_after_inserts_at_expected_position() {
+        let fixture = SqliteSendFixture::new("sqlite_send_after_inserts_at_expected_position", 1);
+        let mut backend = fixture.backend();
+
+        let first = run(&["send", "agent_12345678", "first", "--json"], &mut backend);
+        assert_success(&first);
+        let first_id = serde_json::from_str::<serde_json::Value>(&first.stdout).unwrap()["results"]
+            [0]["item_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let second = run(
+            &["send", "agent_12345678", "second", "--json"],
+            &mut backend,
+        );
+        assert_success(&second);
+
+        let inserted = run(
+            &[
+                "send",
+                "--after",
+                &first_id,
+                "agent_12345678",
+                "inserted",
+                "--json",
+            ],
+            &mut backend,
+        );
+        assert_success(&inserted);
+        let parsed: serde_json::Value = serde_json::from_str(&inserted.stdout).unwrap();
+        assert_eq!(parsed["results"][0]["position"], 2);
+
+        let queue = backend.list_queue("agent_12345678").unwrap();
+        assert_eq!(queue.len(), 3);
+        let payloads: Vec<String> = queue.iter().map(|item| item.payload.clone()).collect();
+        assert!(payloads[0].contains("\"first\""));
+        assert!(payloads[1].contains("\"inserted\""));
+        assert!(payloads[2].contains("\"second\""));
+    }
+
+    struct SqliteSendFixture {
+        _temp: TempDir,
+        db_path: std::path::PathBuf,
+        context_path: std::path::PathBuf,
+    }
+
+    impl SqliteSendFixture {
+        fn new(name: &str, agent_count: usize) -> Self {
+            let temp = TempDir::new(name);
+            let db_path = temp.path.join("forge.db");
+            let context_path = temp.path.join(".config/forge/context.yaml");
+            std::fs::create_dir_all(context_path.parent().unwrap()).unwrap();
+            std::fs::write(
+                &context_path,
+                "workspace: ws_1\nworkspace_name: alpha\nupdated_at: 2026-01-01T00:00:00Z\n",
+            )
+            .unwrap();
+
+            {
+                let mut db = forge_db::Db::open(forge_db::Config::new(&db_path)).unwrap();
+                db.migrate_up().unwrap();
+                let conn = db.conn();
+                conn.execute(
+                    "INSERT INTO nodes (id, name, is_local, status) VALUES ('node_1', 'local', 1, 'online')",
+                    [],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO workspaces (id, name, node_id, repo_path, tmux_session, status)
+                     VALUES ('ws_1', 'alpha', 'node_1', '/tmp/repo-alpha', 'alpha-session', 'active')",
+                    [],
+                )
+                .unwrap();
+
+                for index in 0..agent_count {
+                    let id = if index == 0 {
+                        "agent_12345678".to_string()
+                    } else {
+                        format!("agent_1234567{index}")
+                    };
+                    let pane = format!("alpha-session:1.{}", index + 1);
+                    conn.execute(
+                        "INSERT INTO agents (
+                            id, workspace_id, type, tmux_pane, state, state_confidence
+                        ) VALUES (
+                            ?1, 'ws_1', 'codex', ?2, 'idle', 'high'
+                        )",
+                        rusqlite::params![id, pane],
+                    )
+                    .unwrap();
+                }
+            }
+
+            Self {
+                _temp: temp,
+                db_path,
+                context_path,
+            }
+        }
+
+        fn backend(&self) -> SqliteSendBackend {
+            let context_backend =
+                FilesystemContextBackend::new(self.context_path.clone(), self.db_path.clone());
+            SqliteSendBackend::new(self.db_path.clone(), context_backend)
+        }
+    }
+
+    struct TempDir {
+        path: std::path::PathBuf,
+    }
+
+    impl TempDir {
+        fn new(prefix: &str) -> Self {
+            let mut path = std::env::temp_dir();
+            let uniq = format!(
+                "{}-{}-{}",
+                prefix,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            );
+            path.push(uniq);
+            std::fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
     }
 
     fn _assert_backend_object_safe(_b: &mut dyn SendBackend) {}

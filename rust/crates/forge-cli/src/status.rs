@@ -1,7 +1,13 @@
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
+use std::path::PathBuf;
 
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
+use serde_json::Value;
 use tabwriter::TabWriter;
+
+const STATUS_ALERT_LIMIT: usize = 5;
 
 /// Alert severity levels matching Go's `models.AlertSeverity`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,6 +168,23 @@ pub trait StatusBackend {
     fn get_status(&self) -> Result<StatusSummary, String>;
 }
 
+#[derive(Debug, Clone)]
+pub struct SqliteStatusBackend {
+    db_path: PathBuf,
+}
+
+impl SqliteStatusBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+}
+
 /// In-memory backend for testing.
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryStatusBackend {
@@ -188,6 +211,157 @@ impl StatusBackend for InMemoryStatusBackend {
                 alerts: AlertSummary::default(),
             }),
         }
+    }
+}
+
+impl StatusBackend for SqliteStatusBackend {
+    fn get_status(&self) -> Result<StatusSummary, String> {
+        let now = Utc::now();
+        let timestamp = now.to_rfc3339_opts(SecondsFormat::Secs, true);
+        if !self.db_path.exists() {
+            return Ok(empty_summary(timestamp));
+        }
+
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let loops = match loop_repo.list() {
+            Ok(loops) => loops,
+            Err(err) if err.to_string().contains("no such table: loops") => {
+                return Ok(empty_summary(timestamp));
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let profile_cooldowns = load_profile_cooldowns(&profile_repo)?;
+        let mut queue_table_missing = false;
+
+        let mut nodes = NodeSummary::default();
+        let mut workspaces = HashSet::new();
+        let mut state_counts: HashMap<AgentState, u64> = HashMap::new();
+        let mut alerts = Vec::new();
+        let created_at = now.to_rfc3339_opts(SecondsFormat::Secs, true);
+
+        for loop_entry in &loops {
+            if !loop_entry.repo_path.is_empty() {
+                workspaces.insert(loop_entry.repo_path.clone());
+            }
+
+            let pending_queue =
+                count_pending_queue(&queue_repo, &loop_entry.id, &mut queue_table_missing)?;
+            let cooldown_active = profile_cooldowns
+                .get(&loop_entry.profile_id)
+                .map(|until| is_cooldown_active(until, &now))
+                .unwrap_or(false);
+
+            let health = runner_health(loop_entry.metadata.as_ref());
+            match health {
+                RunnerHealth::Online => {
+                    nodes.total += 1;
+                    nodes.online += 1;
+                }
+                RunnerHealth::Offline => {
+                    nodes.total += 1;
+                    nodes.offline += 1;
+                }
+                RunnerHealth::Unknown => {
+                    nodes.total += 1;
+                    nodes.unknown += 1;
+                }
+            }
+
+            let state = classify_agent_state(&loop_entry.state, pending_queue, cooldown_active);
+            increment_state_count(&mut state_counts, state);
+
+            let loop_ref = loop_short_id(loop_entry);
+            if matches!(
+                loop_entry.state,
+                forge_db::loop_repository::LoopState::Error
+            ) {
+                let message = if loop_entry.last_error.trim().is_empty() {
+                    format!("Loop '{}' error", loop_entry.name)
+                } else {
+                    format!(
+                        "Loop '{}' error: {}",
+                        loop_entry.name, loop_entry.last_error
+                    )
+                };
+                alerts.push(Alert {
+                    alert_type: AlertType::Error,
+                    severity: AlertSeverity::Error,
+                    message,
+                    agent_id: loop_ref.to_string(),
+                    created_at: created_at.clone(),
+                });
+            }
+
+            if cooldown_active {
+                alerts.push(Alert {
+                    alert_type: AlertType::Cooldown,
+                    severity: AlertSeverity::Info,
+                    message: format!("Loop '{}' profile cooldown active", loop_entry.name),
+                    agent_id: loop_ref.to_string(),
+                    created_at: created_at.clone(),
+                });
+            }
+
+            if pending_queue > 0
+                && matches!(
+                    loop_entry.state,
+                    forge_db::loop_repository::LoopState::Waiting
+                )
+            {
+                alerts.push(Alert {
+                    alert_type: AlertType::ApprovalNeeded,
+                    severity: AlertSeverity::Warning,
+                    message: format!(
+                        "Loop '{}' waiting with {pending_queue} pending queue item(s)",
+                        loop_entry.name
+                    ),
+                    agent_id: loop_ref.to_string(),
+                    created_at: created_at.clone(),
+                });
+            }
+
+            if matches!(health, RunnerHealth::Offline)
+                && !matches!(
+                    loop_entry.state,
+                    forge_db::loop_repository::LoopState::Stopped
+                )
+            {
+                alerts.push(Alert {
+                    alert_type: AlertType::Error,
+                    severity: AlertSeverity::Error,
+                    message: format!("Loop '{}' runner health check failed", loop_entry.name),
+                    agent_id: loop_ref.to_string(),
+                    created_at: created_at.clone(),
+                });
+            }
+        }
+
+        let by_state = AGENT_STATE_ORDER
+            .iter()
+            .map(|state| (state.clone(), *state_counts.get(state).unwrap_or(&0)))
+            .collect();
+        let top_alerts = select_top_alerts(&alerts, STATUS_ALERT_LIMIT);
+
+        Ok(StatusSummary {
+            timestamp,
+            nodes,
+            workspaces: workspaces.len() as u64,
+            agents: AgentSummary {
+                total: loops.len() as u64,
+                by_state,
+            },
+            alerts: AlertSummary {
+                total: alerts.len() as u64,
+                items: top_alerts,
+            },
+        })
     }
 }
 
@@ -385,6 +559,161 @@ fn format_agent_state_counts(by_state: &[(AgentState, u64)]) -> String {
     parts.join(" ")
 }
 
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
+fn empty_summary(timestamp: String) -> StatusSummary {
+    StatusSummary {
+        timestamp,
+        nodes: NodeSummary::default(),
+        workspaces: 0,
+        agents: AgentSummary::default(),
+        alerts: AlertSummary::default(),
+    }
+}
+
+fn load_profile_cooldowns(
+    profile_repo: &forge_db::profile_repository::ProfileRepository<'_>,
+) -> Result<HashMap<String, String>, String> {
+    let profiles = match profile_repo.list() {
+        Ok(profiles) => profiles,
+        Err(err) if err.to_string().contains("no such table: profiles") => {
+            return Ok(HashMap::new())
+        }
+        Err(err) => return Err(err.to_string()),
+    };
+
+    let mut out = HashMap::new();
+    for profile in profiles {
+        let Some(until) = profile.cooldown_until else {
+            continue;
+        };
+        if until.trim().is_empty() {
+            continue;
+        }
+        out.insert(profile.id, until);
+    }
+    Ok(out)
+}
+
+fn count_pending_queue(
+    queue_repo: &forge_db::loop_queue_repository::LoopQueueRepository<'_>,
+    loop_id: &str,
+    queue_table_missing: &mut bool,
+) -> Result<u64, String> {
+    if *queue_table_missing {
+        return Ok(0);
+    }
+    match queue_repo.list(loop_id) {
+        Ok(items) => Ok(items.iter().filter(|item| item.status == "pending").count() as u64),
+        Err(err) if err.to_string().contains("no such table: loop_queue_items") => {
+            *queue_table_missing = true;
+            Ok(0)
+        }
+        Err(err) => Err(format!("list queue items for loop {loop_id}: {err}")),
+    }
+}
+
+fn is_cooldown_active(until: &str, now: &DateTime<Utc>) -> bool {
+    chrono::DateTime::parse_from_rfc3339(until)
+        .map(|value| value.with_timezone(&Utc) > *now)
+        .unwrap_or(false)
+}
+
+fn classify_agent_state(
+    loop_state: &forge_db::loop_repository::LoopState,
+    pending_queue: u64,
+    cooldown_active: bool,
+) -> AgentState {
+    match loop_state {
+        forge_db::loop_repository::LoopState::Error => AgentState::Error,
+        forge_db::loop_repository::LoopState::Stopped => AgentState::Stopped,
+        forge_db::loop_repository::LoopState::Waiting => {
+            if cooldown_active {
+                AgentState::RateLimited
+            } else {
+                AgentState::AwaitingApproval
+            }
+        }
+        forge_db::loop_repository::LoopState::Sleeping => {
+            if cooldown_active {
+                AgentState::RateLimited
+            } else {
+                AgentState::Paused
+            }
+        }
+        forge_db::loop_repository::LoopState::Running => {
+            if cooldown_active {
+                AgentState::RateLimited
+            } else if pending_queue > 0 {
+                AgentState::Working
+            } else {
+                AgentState::Idle
+            }
+        }
+    }
+}
+
+fn increment_state_count(counts: &mut HashMap<AgentState, u64>, state: AgentState) {
+    let current = counts.entry(state).or_insert(0);
+    *current += 1;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunnerHealth {
+    Online,
+    Offline,
+    Unknown,
+}
+
+fn runner_health(metadata: Option<&HashMap<String, Value>>) -> RunnerHealth {
+    let pid_alive = metadata_nested_bool(metadata, "runner_liveness", "pid_alive");
+    let daemon_alive = metadata_nested_bool(metadata, "runner_liveness", "daemon_runner_alive")
+        .or_else(|| metadata_nested_bool(metadata, "runner_liveness", "daemon_alive"));
+
+    if matches!(pid_alive, Some(false)) || matches!(daemon_alive, Some(false)) {
+        return RunnerHealth::Offline;
+    }
+    if matches!(pid_alive, Some(true)) || matches!(daemon_alive, Some(true)) {
+        return RunnerHealth::Online;
+    }
+    RunnerHealth::Unknown
+}
+
+fn metadata_nested_bool(
+    metadata: Option<&HashMap<String, Value>>,
+    outer: &str,
+    inner: &str,
+) -> Option<bool> {
+    metadata
+        .and_then(|meta| meta.get(outer))
+        .and_then(Value::as_object)
+        .and_then(|nested| nested.get(inner))
+        .and_then(Value::as_bool)
+}
+
+fn loop_short_id(loop_entry: &forge_db::loop_repository::Loop) -> &str {
+    if loop_entry.short_id.is_empty() {
+        return loop_entry.id.as_str();
+    }
+    loop_entry.short_id.as_str()
+}
+
 /// Select top alerts sorted by severity (desc) then by created_at (desc).
 /// This matches Go's `selectTopAlerts`.
 pub fn select_top_alerts(alerts: &[Alert], limit: usize) -> Vec<Alert> {
@@ -463,6 +792,13 @@ Flags:
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use serde_json::json;
+
     use super::*;
 
     fn parse_ok(args: &[String]) -> ParsedArgs {
@@ -975,5 +1311,197 @@ mod tests {
         assert_eq!(out.exit_code, 0);
         assert!(out.stdout.contains("- [warning] Usage limit approaching"));
         assert!(!out.stdout.contains("(agent"));
+    }
+
+    fn temp_db_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-status-{tag}-{nanos}-{}-{suffix}.sqlite",
+            std::process::id(),
+        ))
+    }
+
+    fn find_state_count(summary: &StatusSummary, state: AgentState) -> u64 {
+        summary
+            .agents
+            .by_state
+            .iter()
+            .find(|(entry_state, _)| *entry_state == state)
+            .map(|(_, count)| *count)
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn status_sqlite_backend_summarizes_loops_queue_cooldown_and_runner_health() {
+        let db_path = temp_db_path("sqlite-summary");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+        let mut cooled_profile = forge_db::profile_repository::Profile {
+            name: "cooled".to_string(),
+            command_template: "echo run".to_string(),
+            cooldown_until: Some("2999-01-01T00:00:00Z".to_string()),
+            ..Default::default()
+        };
+        profile_repo
+            .create(&mut cooled_profile)
+            .unwrap_or_else(|err| panic!("create profile: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+
+        let mut running_metadata = HashMap::new();
+        running_metadata.insert(
+            "runner_liveness".to_string(),
+            json!({
+                "pid_alive": true,
+                "daemon_runner_alive": true
+            }),
+        );
+        let mut running_loop = forge_db::loop_repository::Loop {
+            name: "running-loop".to_string(),
+            repo_path: "/repo/a".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            metadata: Some(running_metadata),
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut running_loop)
+            .unwrap_or_else(|err| panic!("create running loop: {err}"));
+
+        let mut sleeping_metadata = HashMap::new();
+        sleeping_metadata.insert(
+            "runner_liveness".to_string(),
+            json!({
+                "daemon_alive": true
+            }),
+        );
+        let mut sleeping_loop = forge_db::loop_repository::Loop {
+            name: "cooldown-loop".to_string(),
+            repo_path: "/repo/b".to_string(),
+            profile_id: cooled_profile.id.clone(),
+            state: forge_db::loop_repository::LoopState::Sleeping,
+            metadata: Some(sleeping_metadata),
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut sleeping_loop)
+            .unwrap_or_else(|err| panic!("create sleeping loop: {err}"));
+
+        let mut waiting_loop = forge_db::loop_repository::Loop {
+            name: "waiting-loop".to_string(),
+            repo_path: "/repo/b".to_string(),
+            state: forge_db::loop_repository::LoopState::Waiting,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut waiting_loop)
+            .unwrap_or_else(|err| panic!("create waiting loop: {err}"));
+
+        let mut error_metadata = HashMap::new();
+        error_metadata.insert(
+            "runner_liveness".to_string(),
+            json!({
+                "pid_alive": false
+            }),
+        );
+        let mut error_loop = forge_db::loop_repository::Loop {
+            name: "error-loop".to_string(),
+            repo_path: "/repo/c".to_string(),
+            state: forge_db::loop_repository::LoopState::Error,
+            last_error: "runner crashed".to_string(),
+            metadata: Some(error_metadata),
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut error_loop)
+            .unwrap_or_else(|err| panic!("create error loop: {err}"));
+
+        let mut running_queue_items = vec![
+            forge_db::loop_queue_repository::LoopQueueItem {
+                item_type: "message_append".to_string(),
+                payload: "{\"text\":\"hello\"}".to_string(),
+                ..Default::default()
+            },
+            forge_db::loop_queue_repository::LoopQueueItem {
+                item_type: "message_append".to_string(),
+                payload: "{\"text\":\"world\"}".to_string(),
+                ..Default::default()
+            },
+        ];
+        queue_repo
+            .enqueue(&running_loop.id, &mut running_queue_items)
+            .unwrap_or_else(|err| panic!("enqueue running queue items: {err}"));
+
+        let mut waiting_queue_items = vec![forge_db::loop_queue_repository::LoopQueueItem {
+            item_type: "message_append".to_string(),
+            payload: "{\"text\":\"needs approval\"}".to_string(),
+            ..Default::default()
+        }];
+        queue_repo
+            .enqueue(&waiting_loop.id, &mut waiting_queue_items)
+            .unwrap_or_else(|err| panic!("enqueue waiting queue item: {err}"));
+
+        let backend = SqliteStatusBackend::new(db_path.clone());
+        let summary = backend
+            .get_status()
+            .unwrap_or_else(|err| panic!("get status summary: {err}"));
+
+        assert_eq!(summary.nodes.total, 4);
+        assert_eq!(summary.nodes.online, 2);
+        assert_eq!(summary.nodes.offline, 1);
+        assert_eq!(summary.nodes.unknown, 1);
+        assert_eq!(summary.workspaces, 3);
+
+        assert_eq!(summary.agents.total, 4);
+        assert_eq!(find_state_count(&summary, AgentState::Working), 1);
+        assert_eq!(find_state_count(&summary, AgentState::RateLimited), 1);
+        assert_eq!(find_state_count(&summary, AgentState::AwaitingApproval), 1);
+        assert_eq!(find_state_count(&summary, AgentState::Error), 1);
+
+        assert!(summary.alerts.total >= 4);
+        assert!(summary
+            .alerts
+            .items
+            .iter()
+            .any(|item| item.alert_type == AlertType::Cooldown));
+        assert!(summary
+            .alerts
+            .items
+            .iter()
+            .any(|item| item.alert_type == AlertType::ApprovalNeeded));
+        assert!(summary
+            .alerts
+            .items
+            .iter()
+            .any(|item| item.alert_type == AlertType::Error));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn status_sqlite_backend_missing_db_returns_empty_summary() {
+        let db_path = temp_db_path("sqlite-missing");
+        let _ = std::fs::remove_file(&db_path);
+
+        let backend = SqliteStatusBackend::new(db_path);
+        let summary = backend
+            .get_status()
+            .unwrap_or_else(|err| panic!("summary from missing db: {err}"));
+
+        assert!(!summary.timestamp.is_empty());
+        assert_eq!(summary.nodes.total, 0);
+        assert_eq!(summary.workspaces, 0);
+        assert_eq!(summary.agents.total, 0);
+        assert_eq!(summary.alerts.total, 0);
+        assert!(summary.alerts.items.is_empty());
     }
 }

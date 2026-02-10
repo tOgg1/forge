@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::json;
@@ -52,6 +53,7 @@ pub struct QueueItem {
 pub struct LoopSelector {
     pub all: bool,
     pub loop_ref: String,
+    pub repo: String,
     pub pool: String,
     pub profile: String,
     pub state: String,
@@ -59,7 +61,7 @@ pub struct LoopSelector {
 }
 
 pub trait MsgBackend {
-    fn list_loops(&self) -> Result<Vec<LoopRecord>, String>;
+    fn select_loops(&self, selector: &LoopSelector) -> Result<Vec<LoopRecord>, String>;
     fn enqueue_items(&mut self, loop_id: &str, items: &[QueueItem]) -> Result<(), String>;
     fn render_template(&self, name: &str, vars: &[(String, String)]) -> Result<String, String>;
     fn render_sequence(
@@ -68,6 +70,23 @@ pub trait MsgBackend {
         vars: &[(String, String)],
     ) -> Result<Vec<QueueItem>, String>;
     fn resolve_prompt_path(&self, repo: &str, prompt: &str) -> Result<String, String>;
+}
+
+#[derive(Debug, Clone)]
+pub struct SqliteMsgBackend {
+    db_path: PathBuf,
+}
+
+impl SqliteMsgBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -106,8 +125,8 @@ impl InMemoryMsgBackend {
 }
 
 impl MsgBackend for InMemoryMsgBackend {
-    fn list_loops(&self) -> Result<Vec<LoopRecord>, String> {
-        Ok(self.loops.clone())
+    fn select_loops(&self, selector: &LoopSelector) -> Result<Vec<LoopRecord>, String> {
+        Ok(filter_loops(self.loops.clone(), selector))
     }
 
     fn enqueue_items(&mut self, loop_id: &str, items: &[QueueItem]) -> Result<(), String> {
@@ -141,6 +160,132 @@ impl MsgBackend for InMemoryMsgBackend {
         if let Some(value) = self.prompt_paths.get(&key) {
             return Ok(value.clone());
         }
+        if prompt.starts_with('/') || repo.is_empty() {
+            return Ok(prompt.to_string());
+        }
+        let repo_trimmed = repo.trim_end_matches('/');
+        Ok(format!("{repo_trimmed}/{prompt}"))
+    }
+}
+
+impl MsgBackend for SqliteMsgBackend {
+    fn select_loops(&self, selector: &LoopSelector) -> Result<Vec<LoopRecord>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let loops = match loop_repo.list() {
+            Ok(loops) => loops,
+            Err(err) if err.to_string().contains("no such table: loops") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let repo_filter = if selector.repo.is_empty() {
+            String::new()
+        } else {
+            normalize_repo_filter(&selector.repo)?
+        };
+        let pool_filter = if selector.pool.is_empty() {
+            String::new()
+        } else {
+            resolve_pool_ref(&pool_repo, &selector.pool)?
+        };
+        let profile_filter = if selector.profile.is_empty() {
+            String::new()
+        } else {
+            resolve_profile_ref(&profile_repo, &selector.profile)?
+        };
+
+        let mut out = Vec::new();
+        for entry in loops {
+            if !repo_filter.is_empty() && entry.repo_path != repo_filter {
+                continue;
+            }
+            if !pool_filter.is_empty() && entry.pool_id != pool_filter {
+                continue;
+            }
+            if !profile_filter.is_empty() && entry.profile_id != profile_filter {
+                continue;
+            }
+            let state = map_loop_state(&entry.state);
+            if !selector.state.is_empty() && selector.state != state.as_str() {
+                continue;
+            }
+            if !selector.tag.is_empty() && !entry.tags.iter().any(|tag| tag == &selector.tag) {
+                continue;
+            }
+
+            let pool = if entry.pool_id.is_empty() {
+                String::new()
+            } else {
+                pool_repo
+                    .get(&entry.pool_id)
+                    .map(|pool| pool.name)
+                    .unwrap_or(entry.pool_id.clone())
+            };
+            let profile = if entry.profile_id.is_empty() {
+                String::new()
+            } else {
+                profile_repo
+                    .get(&entry.profile_id)
+                    .map(|profile| profile.name)
+                    .unwrap_or(entry.profile_id.clone())
+            };
+            out.push(LoopRecord {
+                id: entry.id.clone(),
+                short_id: if entry.short_id.is_empty() {
+                    entry.id
+                } else {
+                    entry.short_id
+                },
+                name: entry.name,
+                repo: entry.repo_path,
+                pool,
+                profile,
+                state,
+                tags: entry.tags,
+            });
+        }
+        Ok(out)
+    }
+
+    fn enqueue_items(&mut self, loop_id: &str, items: &[QueueItem]) -> Result<(), String> {
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+
+        let mut queue_items: Vec<forge_db::loop_queue_repository::LoopQueueItem> = items
+            .iter()
+            .map(|item| forge_db::loop_queue_repository::LoopQueueItem {
+                item_type: item.item_type.clone(),
+                payload: item.payload.clone(),
+                ..Default::default()
+            })
+            .collect();
+        queue_repo
+            .enqueue(loop_id, &mut queue_items)
+            .map_err(|err| format!("enqueue queue items: {err}"))
+    }
+
+    fn render_template(&self, name: &str, _vars: &[(String, String)]) -> Result<String, String> {
+        Err(format!("template '{}' not found", name))
+    }
+
+    fn render_sequence(
+        &self,
+        name: &str,
+        _vars: &[(String, String)],
+    ) -> Result<Vec<QueueItem>, String> {
+        Err(format!("sequence '{}' not found", name))
+    }
+
+    fn resolve_prompt_path(&self, repo: &str, prompt: &str) -> Result<String, String> {
         if prompt.starts_with('/') || repo.is_empty() {
             return Ok(prompt.to_string());
         }
@@ -221,8 +366,7 @@ fn execute(
         return Err("message, --seq, or --next-prompt required".to_string());
     }
 
-    let loops = backend.list_loops()?;
-    let mut matched = filter_loops(loops, &parsed.selector);
+    let mut matched = backend.select_loops(&parsed.selector)?;
     if !parsed.selector.loop_ref.is_empty() {
         matched = match_loop_ref(&matched, &parsed.selector.loop_ref)?;
     }
@@ -355,6 +499,10 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 selector.pool = take_value(args, index, "--pool")?;
                 index += 2;
             }
+            "--repo" => {
+                selector.repo = take_value(args, index, "--repo")?;
+                index += 2;
+            }
             "--profile" => {
                 selector.profile = take_value(args, index, "--profile")?;
                 index += 2;
@@ -390,6 +538,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
 
     let mut message = String::new();
     let selector_mode = selector.all
+        || !selector.repo.is_empty()
         || !selector.pool.is_empty()
         || !selector.profile.is_empty()
         || !selector.state.is_empty()
@@ -445,7 +594,8 @@ fn filter_loops(loops: Vec<LoopRecord>, selector: &LoopSelector) -> Vec<LoopReco
     loops
         .into_iter()
         .filter(|entry| {
-            (selector.pool.is_empty() || entry.pool == selector.pool)
+            (selector.repo.is_empty() || entry.repo == selector.repo)
+                && (selector.pool.is_empty() || entry.pool == selector.pool)
                 && (selector.profile.is_empty() || entry.profile == selector.profile)
                 && (selector.state.is_empty() || entry.state.as_str() == selector.state)
                 && (selector.tag.is_empty() || entry.tags.iter().any(|tag| tag == &selector.tag))
@@ -540,6 +690,72 @@ fn take_value(args: &[String], index: usize, flag: &str) -> Result<String, Strin
     }
 }
 
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
+fn normalize_repo_filter(value: &str) -> Result<String, String> {
+    let path = Path::new(value);
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("failed to resolve current directory: {err}"))?
+            .join(path)
+    };
+    Ok(abs.to_string_lossy().into_owned())
+}
+
+fn resolve_pool_ref(
+    repo: &forge_db::pool_repository::PoolRepository<'_>,
+    value: &str,
+) -> Result<String, String> {
+    if let Ok(pool) = repo.get(value) {
+        return Ok(pool.id);
+    }
+    if let Ok(pool) = repo.get_by_name(value) {
+        return Ok(pool.id);
+    }
+    Err(format!("pool {value:?} not found"))
+}
+
+fn resolve_profile_ref(
+    repo: &forge_db::profile_repository::ProfileRepository<'_>,
+    value: &str,
+) -> Result<String, String> {
+    if let Ok(profile) = repo.get(value) {
+        return Ok(profile.id);
+    }
+    if let Ok(profile) = repo.get_by_name(value) {
+        return Ok(profile.id);
+    }
+    Err(format!("profile {value:?} not found"))
+}
+
+fn map_loop_state(state: &forge_db::loop_repository::LoopState) -> LoopState {
+    match state {
+        forge_db::loop_repository::LoopState::Running
+        | forge_db::loop_repository::LoopState::Sleeping
+        | forge_db::loop_repository::LoopState::Waiting => LoopState::Running,
+        forge_db::loop_repository::LoopState::Stopped => LoopState::Stopped,
+        forge_db::loop_repository::LoopState::Error => LoopState::Error,
+    }
+}
+
 const HELP_TEXT: &str = "\
 Queue a message for loop(s)
 
@@ -550,6 +766,7 @@ Flags:
       --all               target all loops
       --now               interrupt and restart immediately
       --next-prompt path  override prompt for next iteration
+      --repo path         filter by repo path
       --template name     message template name
       --seq name          sequence name
       --var key=value     template/sequence variable (repeatable)
@@ -563,7 +780,15 @@ Flags:
 
 #[cfg(test)]
 mod tests {
-    use super::{run_for_test, InMemoryMsgBackend, LoopRecord, LoopState, MsgBackend, QueueItem};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{
+        run_for_test, InMemoryMsgBackend, LoopRecord, LoopState, MsgBackend, QueueItem,
+        SqliteMsgBackend,
+    };
+    use crate::msg::run_with_backend;
 
     #[test]
     fn parse_requires_selector() {
@@ -736,6 +961,18 @@ mod tests {
     }
 
     #[test]
+    fn msg_filters_by_repo() {
+        let mut backend = seeded();
+        let out = run_for_test(
+            &["msg", "--repo", "/repo/alpha", "hello alpha", "--json"],
+            &mut backend,
+        );
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(backend.enqueued.len(), 1);
+        assert_eq!(backend.enqueued[0].0, "loop-001");
+    }
+
+    #[test]
     fn msg_jsonl_output() {
         let mut backend = seeded();
         let out = run_for_test(&["msg", "oracle-loop", "hello", "--jsonl"], &mut backend);
@@ -781,6 +1018,95 @@ mod tests {
         let out = run_for_test(&["msg", "oracle-loop"], &mut backend);
         assert_eq!(out.exit_code, 1);
         assert_eq!(out.stderr, "message text required\n");
+    }
+
+    fn temp_db_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-msg-{tag}-{nanos}-{}-{suffix}.sqlite",
+            std::process::id(),
+        ))
+    }
+
+    #[test]
+    fn msg_sqlite_backend_enqueues_for_repo_scoped_match() {
+        let db_path = temp_db_path("sqlite-repo-scope");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+
+        let mut alpha = forge_db::loop_repository::Loop {
+            name: "alpha-loop".to_string(),
+            repo_path: "/tmp/alpha-repo".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut alpha)
+            .unwrap_or_else(|err| panic!("create alpha loop: {err}"));
+
+        let mut beta = forge_db::loop_repository::Loop {
+            name: "beta-loop".to_string(),
+            repo_path: "/tmp/beta-repo".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut beta)
+            .unwrap_or_else(|err| panic!("create beta loop: {err}"));
+
+        let mut backend = SqliteMsgBackend::new(db_path.clone());
+        let args = vec![
+            "msg".to_string(),
+            "--repo".to_string(),
+            "/tmp/alpha-repo".to_string(),
+            "hello alpha".to_string(),
+            "--json".to_string(),
+        ];
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let exit_code = run_with_backend(&args, &mut backend, &mut stdout, &mut stderr);
+        assert_eq!(exit_code, 0, "stderr: {}", String::from_utf8_lossy(&stderr));
+        assert!(
+            String::from_utf8_lossy(&stdout).contains("\"loops\": 1"),
+            "stdout: {}",
+            String::from_utf8_lossy(&stdout)
+        );
+
+        let alpha_items = queue_repo
+            .list(&alpha.id)
+            .unwrap_or_else(|err| panic!("list alpha queue: {err}"));
+        assert_eq!(alpha_items.len(), 1);
+        assert_eq!(alpha_items[0].item_type, "message_append");
+        assert_eq!(alpha_items[0].payload, "{\"text\":\"hello alpha\"}");
+
+        let beta_items = queue_repo
+            .list(&beta.id)
+            .unwrap_or_else(|err| panic!("list beta queue: {err}"));
+        assert_eq!(beta_items.len(), 0);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn msg_sqlite_backend_missing_db_reports_no_match() {
+        let db_path = temp_db_path("sqlite-missing");
+        let _ = std::fs::remove_file(&db_path);
+
+        let mut backend = SqliteMsgBackend::new(db_path);
+        let out = run_for_test(&["msg", "--all", "hello"], &mut backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stdout.is_empty());
+        assert_eq!(out.stderr, "no loops matched\n");
     }
 
     fn seeded() -> InMemoryMsgBackend {

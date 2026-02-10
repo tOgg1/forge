@@ -1,6 +1,11 @@
-use std::io::Write;
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::process::Command;
 
+use rusqlite::OptionalExtension;
 use serde::Serialize;
+
+use crate::context::{ContextBackend, FilesystemContextBackend};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -80,6 +85,340 @@ pub trait InjectBackend {
 
     /// Check whether the session is interactive (for confirmation prompts).
     fn is_interactive(&self) -> bool;
+}
+
+// ---------------------------------------------------------------------------
+// SQLite backend (production)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct SqliteAgentRecord {
+    id: String,
+    workspace_id: String,
+    tmux_pane: String,
+    state: AgentState,
+}
+
+trait InjectTransport {
+    fn send_to_pane(&self, pane: &str, message: &str) -> Result<(), String>;
+}
+
+struct ShellTmuxTransport;
+
+impl InjectTransport for ShellTmuxTransport {
+    fn send_to_pane(&self, pane: &str, message: &str) -> Result<(), String> {
+        let trimmed_pane = pane.trim();
+        if trimmed_pane.is_empty() {
+            return Err("agent has no tmux pane".to_string());
+        }
+
+        let escaped_target = escape_shell_arg(trimmed_pane);
+        let escaped_message = escape_shell_arg(message);
+        let send_cmd = format!("tmux send-keys -t {escaped_target} -l {escaped_message}");
+        run_shell_command(&send_cmd)?;
+
+        let enter_cmd = format!("tmux send-keys -t {escaped_target} Enter");
+        run_shell_command(&enter_cmd)
+    }
+}
+
+fn escape_shell_arg(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', "'\\''"))
+}
+
+fn run_shell_command(cmd: &str) -> Result<(), String> {
+    let output = Command::new("sh")
+        .args(["-c", cmd])
+        .output()
+        .map_err(|err| format!("failed to execute tmux command: {err}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        Err(format!(
+            "tmux command failed with exit code: {}",
+            output.status
+        ))
+    } else {
+        Err(format!(
+            "tmux command failed with exit code: {}: {}",
+            output.status, stderr
+        ))
+    }
+}
+
+fn parse_agent_state(raw: &str) -> AgentState {
+    match raw {
+        "idle" => AgentState::Idle,
+        "working" => AgentState::Working,
+        "stopped" => AgentState::Stopped,
+        "starting" => AgentState::Starting,
+        "awaiting_approval" => AgentState::AwaitingApproval,
+        "paused" => AgentState::Paused,
+        "rate_limited" => AgentState::RateLimited,
+        "error" => AgentState::Error,
+        _ => AgentState::Unknown,
+    }
+}
+
+pub struct SqliteInjectBackend {
+    db_path: PathBuf,
+    context_backend: FilesystemContextBackend,
+    transport: Box<dyn InjectTransport>,
+}
+
+impl SqliteInjectBackend {
+    pub fn open_from_env() -> Self {
+        Self::new(resolve_database_path(), FilesystemContextBackend::default())
+    }
+
+    pub fn new(db_path: PathBuf, context_backend: FilesystemContextBackend) -> Self {
+        Self {
+            db_path,
+            context_backend,
+            transport: Box::new(ShellTmuxTransport),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_transport(
+        db_path: PathBuf,
+        context_backend: FilesystemContextBackend,
+        transport: Box<dyn InjectTransport>,
+    ) -> Self {
+        Self {
+            db_path,
+            context_backend,
+            transport,
+        }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
+
+    fn find_agent_record(&self, target: &str) -> Result<SqliteAgentRecord, String> {
+        let trimmed = target.trim();
+        if trimmed.is_empty() {
+            return Err("agent ID required".to_string());
+        }
+
+        let db = self.open_db()?;
+        let conn = db.conn();
+
+        let exact = match conn
+            .query_row(
+                "SELECT id, workspace_id, COALESCE(tmux_pane, ''), state FROM agents WHERE id = ?1",
+                rusqlite::params![trimmed],
+                |row| {
+                    Ok(SqliteAgentRecord {
+                        id: row.get(0)?,
+                        workspace_id: row.get(1)?,
+                        tmux_pane: row.get(2)?,
+                        state: parse_agent_state(&row.get::<_, String>(3)?),
+                    })
+                },
+            )
+            .optional()
+        {
+            Ok(value) => value,
+            Err(err) if err.to_string().contains("no such table: agents") => {
+                return Err(format!("agent not found: {trimmed}"));
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+
+        if let Some(agent) = exact {
+            return Ok(agent);
+        }
+
+        let like = format!("{trimmed}%");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, workspace_id, COALESCE(tmux_pane, ''), state \
+                 FROM agents WHERE id LIKE ?1 ORDER BY id LIMIT 2",
+            )
+            .map_err(|err| {
+                if err.to_string().contains("no such table: agents") {
+                    format!("agent not found: {trimmed}")
+                } else {
+                    err.to_string()
+                }
+            })?;
+        let rows = stmt
+            .query_map(rusqlite::params![like], |row| {
+                Ok(SqliteAgentRecord {
+                    id: row.get(0)?,
+                    workspace_id: row.get(1)?,
+                    tmux_pane: row.get(2)?,
+                    state: parse_agent_state(&row.get::<_, String>(3)?),
+                })
+            })
+            .map_err(|err| err.to_string())?;
+
+        let mut found = Vec::new();
+        for row in rows {
+            found.push(row.map_err(|err| err.to_string())?);
+        }
+
+        match found.len() {
+            0 => Err(format!("agent not found: {trimmed}")),
+            1 => Ok(found.remove(0)),
+            _ => Err(format!(
+                "agent '{trimmed}' is ambiguous; use a longer prefix or full ID"
+            )),
+        }
+    }
+
+    fn list_agents(
+        &self,
+        workspace_filter: Option<&str>,
+    ) -> Result<Vec<SqliteAgentRecord>, String> {
+        let db = self.open_db()?;
+        let conn = db.conn();
+
+        let mut rows = Vec::new();
+        if let Some(workspace_id) = workspace_filter.filter(|value| !value.trim().is_empty()) {
+            let mut stmt = match conn.prepare(
+                "SELECT id, workspace_id, COALESCE(tmux_pane, ''), state \
+                 FROM agents WHERE workspace_id = ?1 ORDER BY id",
+            ) {
+                Ok(stmt) => stmt,
+                Err(err) if err.to_string().contains("no such table: agents") => {
+                    return Ok(Vec::new())
+                }
+                Err(err) => return Err(err.to_string()),
+            };
+
+            let mapped = stmt
+                .query_map(rusqlite::params![workspace_id], |row| {
+                    Ok(SqliteAgentRecord {
+                        id: row.get(0)?,
+                        workspace_id: row.get(1)?,
+                        tmux_pane: row.get(2)?,
+                        state: parse_agent_state(&row.get::<_, String>(3)?),
+                    })
+                })
+                .map_err(|err| err.to_string())?;
+            for row in mapped {
+                rows.push(row.map_err(|err| err.to_string())?);
+            }
+            return Ok(rows);
+        }
+
+        let mut stmt = match conn.prepare(
+            "SELECT id, workspace_id, COALESCE(tmux_pane, ''), state FROM agents ORDER BY id",
+        ) {
+            Ok(stmt) => stmt,
+            Err(err) if err.to_string().contains("no such table: agents") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let mapped = stmt
+            .query_map([], |row| {
+                Ok(SqliteAgentRecord {
+                    id: row.get(0)?,
+                    workspace_id: row.get(1)?,
+                    tmux_pane: row.get(2)?,
+                    state: parse_agent_state(&row.get::<_, String>(3)?),
+                })
+            })
+            .map_err(|err| err.to_string())?;
+        for row in mapped {
+            rows.push(row.map_err(|err| err.to_string())?);
+        }
+        Ok(rows)
+    }
+}
+
+impl InjectBackend for SqliteInjectBackend {
+    fn resolve_agent(&self, target: &str) -> Result<AgentRecord, String> {
+        let row = self.find_agent_record(target)?;
+        Ok(AgentRecord {
+            id: row.id,
+            workspace_id: row.workspace_id,
+            state: row.state,
+        })
+    }
+
+    fn load_agent_context(&self) -> Result<Option<String>, String> {
+        let ctx = self.context_backend.load_context()?;
+        let trimmed = ctx.agent_id.trim();
+        if trimmed.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(trimmed.to_string()))
+        }
+    }
+
+    fn list_workspace_agents(&self) -> Result<Vec<AgentRecord>, String> {
+        let workspace_filter = self
+            .context_backend
+            .load_context()
+            .ok()
+            .map(|ctx| ctx.workspace_id.trim().to_string())
+            .filter(|workspace_id| !workspace_id.is_empty());
+
+        let agents = self.list_agents(workspace_filter.as_deref())?;
+        Ok(agents
+            .into_iter()
+            .map(|agent| AgentRecord {
+                id: agent.id,
+                workspace_id: agent.workspace_id,
+                state: agent.state,
+            })
+            .collect())
+    }
+
+    fn send_message(&mut self, agent_id: &str, message: &str) -> Result<(), String> {
+        let agent = self.find_agent_record(agent_id)?;
+        self.transport.send_to_pane(&agent.tmux_pane, message)
+    }
+
+    fn read_file(&self, path: &str) -> Result<String, String> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|err| format!("failed to read message file \"{path}\": {err}"))?;
+        if content.is_empty() {
+            return Err(format!(
+                "message file \"{path}\" is empty (add content or use --editor/--stdin)"
+            ));
+        }
+        Ok(content)
+    }
+
+    fn read_stdin(&self) -> Result<String, String> {
+        let mut content = String::new();
+        std::io::stdin()
+            .read_to_string(&mut content)
+            .map_err(|err| format!("failed to read from stdin: {err}"))?;
+        Ok(content)
+    }
+
+    fn is_interactive(&self) -> bool {
+        false
+    }
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
 }
 
 // ---------------------------------------------------------------------------
@@ -598,6 +937,13 @@ fn write_help(stdout: &mut dyn Write) -> std::io::Result<()> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+    use std::rc::Rc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use crate::context::ContextRecord;
 
     fn idle_agent() -> AgentRecord {
         AgentRecord {
@@ -1182,6 +1528,180 @@ mod tests {
             "}\n",
         );
         assert_eq!(out.stdout, expected);
+    }
+
+    struct MockInjectTransport {
+        calls: Rc<RefCell<Vec<(String, String)>>>,
+        fail_message: Option<String>,
+    }
+
+    impl InjectTransport for MockInjectTransport {
+        fn send_to_pane(&self, pane: &str, message: &str) -> Result<(), String> {
+            self.calls
+                .borrow_mut()
+                .push((pane.to_string(), message.to_string()));
+            if pane.trim().is_empty() {
+                return Err("agent has no tmux pane".to_string());
+            }
+            if let Some(err) = &self.fail_message {
+                return Err(err.clone());
+            }
+            Ok(())
+        }
+    }
+
+    fn temp_path(tag: &str, ext: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-inject-{tag}-{nanos}-{}-{suffix}.{ext}",
+            std::process::id()
+        ))
+    }
+
+    fn setup_sqlite_backend_with_transport(
+        state: &str,
+        pane: &str,
+        context_agent_id: Option<&str>,
+        calls: Rc<RefCell<Vec<(String, String)>>>,
+        fail_message: Option<&str>,
+    ) -> (SqliteInjectBackend, PathBuf, PathBuf) {
+        let db_path = temp_path("db", "sqlite");
+        let ctx_path = temp_path("context", "yaml");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        db.conn()
+            .execute(
+                "INSERT INTO nodes (id, name, status, is_local) VALUES (?1, ?2, 'online', 1)",
+                rusqlite::params!["node-1", "local"],
+            )
+            .unwrap_or_else(|err| panic!("insert node: {err}"));
+        db.conn()
+            .execute(
+                "INSERT INTO workspaces (id, name, node_id, repo_path, tmux_session, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'active')",
+                rusqlite::params!["ws-1", "workspace-one", "node-1", "/tmp/repo", "forge-ws-1"],
+            )
+            .unwrap_or_else(|err| panic!("insert workspace: {err}"));
+        db.conn()
+            .execute(
+                "INSERT INTO agents (id, workspace_id, type, tmux_pane, state, state_confidence)
+                 VALUES (?1, ?2, 'codex', ?3, ?4, 'high')",
+                rusqlite::params!["agent-001", "ws-1", pane, state],
+            )
+            .unwrap_or_else(|err| panic!("insert agent: {err}"));
+
+        let context_backend = FilesystemContextBackend::new(ctx_path.clone(), db_path.clone());
+        if let Some(agent_id) = context_agent_id {
+            context_backend
+                .save_context(&ContextRecord {
+                    workspace_id: "ws-1".to_string(),
+                    workspace_name: "workspace-one".to_string(),
+                    agent_id: agent_id.to_string(),
+                    agent_name: String::new(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                })
+                .unwrap_or_else(|err| panic!("save context: {err}"));
+        }
+
+        let backend = SqliteInjectBackend::with_transport(
+            db_path.clone(),
+            context_backend,
+            Box::new(MockInjectTransport {
+                calls,
+                fail_message: fail_message.map(str::to_string),
+            }),
+        );
+        (backend, db_path, ctx_path)
+    }
+
+    #[test]
+    fn sqlite_inject_sends_message_to_agent_pane() {
+        let calls: Rc<RefCell<Vec<(String, String)>>> = Rc::new(RefCell::new(Vec::new()));
+        let (mut backend, db_path, ctx_path) = setup_sqlite_backend_with_transport(
+            "idle",
+            "forge-ws-1:0.1",
+            None,
+            calls.clone(),
+            None,
+        );
+
+        let out = run(
+            &["inject", "agent-001", "hello sqlite", "--json"],
+            &mut backend,
+        );
+        assert_success(&out);
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&out.stdout).unwrap_or_else(|err| panic!("parse json: {err}"));
+        assert_eq!(parsed["agent_id"], "agent-001");
+        assert_eq!(parsed["agent_state"], "idle");
+        assert_eq!(parsed["message"], "hello sqlite");
+
+        let sent = calls.borrow();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "forge-ws-1:0.1");
+        assert_eq!(sent[0].1, "hello sqlite");
+
+        let _ = std::fs::remove_file(db_path);
+        let _ = std::fs::remove_file(ctx_path);
+    }
+
+    #[test]
+    fn sqlite_inject_uses_agent_context_when_target_missing() {
+        let calls: Rc<RefCell<Vec<(String, String)>>> = Rc::new(RefCell::new(Vec::new()));
+        let (mut backend, db_path, ctx_path) = setup_sqlite_backend_with_transport(
+            "idle",
+            "forge-ws-1:0.2",
+            Some("agent-001"),
+            calls.clone(),
+            None,
+        );
+
+        let msg_path = temp_path("message", "txt");
+        std::fs::write(&msg_path, "from file").unwrap_or_else(|err| panic!("write message: {err}"));
+        let out = run(
+            &[
+                "inject",
+                "--file",
+                msg_path.to_str().unwrap_or(""),
+                "--json",
+            ],
+            &mut backend,
+        );
+        assert_success(&out);
+
+        let sent = calls.borrow();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "forge-ws-1:0.2");
+        assert_eq!(sent[0].1, "from file");
+
+        let _ = std::fs::remove_file(db_path);
+        let _ = std::fs::remove_file(ctx_path);
+        let _ = std::fs::remove_file(msg_path);
+    }
+
+    #[test]
+    fn sqlite_inject_missing_tmux_pane_returns_error() {
+        let calls: Rc<RefCell<Vec<(String, String)>>> = Rc::new(RefCell::new(Vec::new()));
+        let (mut backend, db_path, ctx_path) =
+            setup_sqlite_backend_with_transport("idle", "", None, calls, None);
+
+        let out = run(&["inject", "agent-001", "hello"], &mut backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out
+            .stderr
+            .contains("failed to inject message: agent has no tmux pane"));
+
+        let _ = std::fs::remove_file(db_path);
+        let _ = std::fs::remove_file(ctx_path);
     }
 
     fn _assert_backend_object_safe(_b: &mut dyn InjectBackend) {}

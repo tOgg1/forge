@@ -97,7 +97,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             hook::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("inject") => {
-            let mut backend = inject::InMemoryInjectBackend::default();
+            let mut backend = inject::SqliteInjectBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             inject::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -158,7 +158,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             doctor::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("explain") => {
-            let backend = explain::InMemoryExplainBackend::default();
+            let backend = explain::SqliteExplainBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             explain::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
@@ -211,7 +211,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             mem::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("msg") => {
-            let mut backend = msg::InMemoryMsgBackend::default();
+            let mut backend = msg::SqliteMsgBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             msg::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -251,7 +251,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             ps::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("send") => {
-            let mut backend = send::InMemorySendBackend::default();
+            let mut backend = send::SqliteSendBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             send::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -266,7 +266,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             skills::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("status") => {
-            let backend = status::InMemoryStatusBackend::default();
+            let backend = status::SqliteStatusBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             status::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn explain_module_is_accessible() {
-        let _ = explain::InMemoryExplainBackend::default();
+        let _ = explain::SqliteExplainBackend::open_from_env();
     }
 
     #[test]
