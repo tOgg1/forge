@@ -209,4 +209,3 @@ mod tests {
         assert_eq!(columns[3].width, 10);
     }
 }
-
