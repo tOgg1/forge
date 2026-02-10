@@ -84,3 +84,80 @@ in progress
   - targeted validation PASS: `cd rust && cargo fmt --check && cargo clippy -p forge-tui --all-targets -- -D warnings && cargo test -p forge-tui --lib`
 ```
 
+## 2026-02-10T05:40:37Z
+
+- run_id: 282d1f43-46d2-466b-bcb0-d86ed7478ec6
+- loop_name: rust-full-codex-a
+- status: success
+- profile: codex2
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-dev-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-10T05:18:09Z
+- finished_at: 2026-02-10T05:40:37Z
+- exit_code: 0
+
+```
+use forge_ftui_adapter::style::{ThemeKind, ThemeSpec};
+ use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
+ 
+-pub mod agents;
+ pub mod app;
+ pub mod bookmarks;
++pub mod compose;
+ pub mod dashboard;
+ pub mod graph;
+ pub mod heatmap;
+@@ -23,16 +23,17 @@
+ pub mod timeline;
+ pub mod topics;
+ 
+-pub use agents::{
+-    agent_presence_indicator, apply_agents_input, render_agents_frame, AgentDetail, AgentRecent,
+-    AgentRecord, AgentRow, AgentSearchResult, AgentSortKey, AgentsAction, AgentsMode,
+-    AgentsViewModel, TargetCount,
+-};
+ pub use app::{App, Command, LayoutMode, PlaceholderView, View, ViewId};
+ pub use bookmarks::{
+     apply_bookmarks_input, parse_bookmarks_filter, render_bookmarks_frame, BookmarkEntry,
+     BookmarksFilter, BookmarksViewModel,
+ };
++pub use compose::{
++    apply_compose_input, first_non_empty_line, normalize_priority, parse_quick_send_input,
++    parse_tag_csv, render_compose_frame, render_quick_send_bar, render_toast, ComposeAction,
++    ComposeDraft, ComposeField, ComposeReplySeed, ComposeState, ComposeViewModel, QuickSendState,
++    SendRequest, SendSource, QUICK_HISTORY_LIMIT,
++};
+ pub use dashboard::{
+     apply_dashboard_input, render_dashboard_frame, AgentEntry, DashboardFocus, DashboardViewModel,
+     FeedMessage, TopicEntry, DASHBOARD_FEED_LIMIT,
+diff --git a/scripts/bootstrap.sh.sha256 b/scripts/bootstrap.sh.sha256
+index 6866f36e68b5b7ebae27a7c0c6955a5467e43f19..9c8bdd000455d85d1ace6d99c765df53331fcd97
+--- a/scripts/bootstrap.sh.sha256
++++ b/scripts/bootstrap.sh.sha256
+@@ -1 +1 @@
+-a17900b22ad7e7bde489c3f815d39a67840a08ff29c046c42e4444b04dd635dc  bootstrap.sh
++1faa5796dd76a91266be77cc075d20f248dec91b1ed2899ad3e637d5c9e4de56  bootstrap.sh
+
+tokens used
+186,738
+Closed tasks (prj-vr0104gr):
+- `forge-mzr`: commit `e84b28e` (add `rust/crates/fmail-tui/src/graph.rs`, `rust/crates/fmail-tui/src/operator.rs`, exports); validated `cargo fmt/clippy/test --workspace` + `scripts/rust-fmail-tui-smoke.sh`
+- `forge-63f`: commit `6f904e6` (`docs/review/rust-post-release-verification-dry-run-2026-02-10.md`); validated `scripts/rust-loop-tui-smoke.sh` + `scripts/rust-fmail-tui-smoke.sh`
+- `forge-3g9`: commit `bc9304f` (`docs/rust-operator-migration-guide.md` + dry-run note)
+- `forge-3z1`: commit `97067ae` (doccheck-backed legacy drop verification); validated `env -u GOROOT -u GOTOOLDIR go test ./internal/doccheck -run TestLegacyDropListCoversAddLegacyRegistrations`
+- `forge-q5a`: commit `734fd7b` (verify legacy-only ports dropped in manifest); same doccheck validation
+- `forge-1s5`: commit `72591bf` (artifact/build parity rehearsal note); validated `scripts/rust-baseline-snapshot.sh ... --check`
+- `forge-074`: commit `3b516e8` (fix `scripts/bootstrap.sh.sha256` mismatch + rehearsal note); validated `bash -n` + `shasum -c`
+
+Blocked (kept `in_progress`, reported via `fmail`):
+- `forge-g4v`: commit `bf04841` adds `docs/rust-cutover-rehearsal-report-template.md`; needs staging/prod-like cutover+rollback run + logs
+- `forge-nbf`: rollback timing budget template + runbook link already landed; needs staging/prod-like rollback rehearsal + timings/logs
+
+Cleanup after accidental staging:
+- `fd4119c` removes mistakenly-added `fmail-tui` agents module from `a700372`; validation: `cd rust && cargo test -p fmail-tui --lib` PASS.
+
+No pushes to `main`.
+```
+
