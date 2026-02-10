@@ -56,7 +56,9 @@ pub use operator::{
     apply_operator_input, render_operator_frame, OperatorAgent, OperatorConversation,
     OperatorMessage, OperatorViewModel, OPERATOR_MESSAGE_LIMIT,
 };
-pub use replay::{apply_replay_input, render_replay_frame, ReplayEntry, ReplayViewModel};
+pub use replay::{
+    apply_replay_input, render_replay_frame, ReplayAction, ReplayEntry, ReplayMode, ReplayViewModel,
+};
 pub use search::{apply_search_input, render_search_frame, SearchResultEntry, SearchViewModel};
 pub use state_help::{
     default_keymap, render_help_frame, Bookmark, KeyBinding, PersistedState, UiPreferences,
