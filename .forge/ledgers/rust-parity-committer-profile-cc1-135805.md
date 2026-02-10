@@ -142,3 +142,34 @@ Validation: `cargo fmt --check` clean, `cargo clippy -D warnings` clean, all wor
 Remaining working tree has new changes from concurrent agents (audit.rs, lock.rs, lib.rs, fmail golden tests, new docs/scripts) — will evaluate in the next iteration.
 ```
 
+## 2026-02-10T14:31:18Z
+
+- run_id: bb293a42-eecb-4b32-aa91-821843ceb20e
+- loop_name: rust-parity-committer-profile-cc1-135805
+- status: success
+- profile: cc1
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-10T14:02:45Z
+- finished_at: 2026-02-10T14:31:18Z
+- exit_code: 0
+
+```
+Iteration complete. Summary of 3 commits landed:
+
+| Hash | Message |
+|------|---------|
+| `b8b14a9` | `feat(forge-cli): wire audit, doctor, lock, mail, mem, resume, work, workflow to real backends` |
+| `0e9aebd` | `feat(fmail-cli): update shell completion golden files for full command tree` |
+| `47e750d` | `chore: update docs, task tracking, ledgers, and release checklist` |
+
+**Validation**: `cargo fmt --check` clean, `cargo clippy -D warnings` clean, `cargo test --workspace` pass (890+ lib tests, all integration tests, all doctests).
+
+**Remaining in working tree** (not committed — agents still active):
+- `logs.rs` + `lib.rs` logs hunk — forge-13j (PAR-023) in-progress
+- `forge-tui.rs` + `app.rs` — forge-51g/forge-9vd in-progress
+- `.tasks/` snapshots — ephemeral, continuously updated
+```
+
