@@ -1,7 +1,7 @@
 use forge_cli::profile::{run_for_test, CommandOutput, InMemoryProfileBackend, ProfileBackend};
 
 #[test]
-fn profile_add_edit_list_remove_match_goldens() {
+fn profile_json_outputs_match_goldens() {
     let mut backend = InMemoryProfileBackend::default();
 
     let add = run(
@@ -42,6 +42,61 @@ fn profile_add_edit_list_remove_match_goldens() {
     let list = run(&["profile", "ls", "--json"], &mut backend);
     assert_success(&list);
     assert_eq!(list.stdout, include_str!("golden/profile/list_json.txt"));
+
+    let cooldown_set = run(
+        &[
+            "profile",
+            "cooldown",
+            "set",
+            "alpha",
+            "--until",
+            "2026-02-10T00:00:00Z",
+            "--json",
+        ],
+        &mut backend,
+    );
+    assert_success(&cooldown_set);
+    assert_eq!(
+        cooldown_set.stdout,
+        include_str!("golden/profile/cooldown_set_json.txt")
+    );
+
+    let cooldown_clear = run(
+        &["profile", "cooldown", "clear", "alpha", "--json"],
+        &mut backend,
+    );
+    assert_success(&cooldown_clear);
+    assert_eq!(
+        cooldown_clear.stdout,
+        include_str!("golden/profile/cooldown_clear_json.txt")
+    );
+
+    // Deterministic doctor report: avoid auth_home/command checks which depend on local FS/PATH.
+    let add_gamma = run(
+        &[
+            "profile",
+            "add",
+            "codex",
+            "--name",
+            "gamma",
+            "--command",
+            "",
+            "--json",
+        ],
+        &mut backend,
+    );
+    assert_success(&add_gamma);
+
+    let doctor = run(&["profile", "doctor", "gamma", "--json"], &mut backend);
+    assert_success(&doctor);
+    assert_eq!(
+        doctor.stdout,
+        include_str!("golden/profile/doctor_json.txt")
+    );
+
+    let init = run(&["profile", "init", "--json"], &mut backend);
+    assert_success(&init);
+    assert_eq!(init.stdout, include_str!("golden/profile/init_json.txt"));
 
     let remove = run(&["profile", "rm", "alpha", "--json"], &mut backend);
     assert_success(&remove);
