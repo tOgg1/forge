@@ -1,4 +1,5 @@
-use std::io::Write;
+use std::io::{IsTerminal, Write};
+use std::process::Command;
 
 use serde::Serialize;
 
@@ -42,11 +43,50 @@ impl TuiBackend for InMemoryTuiBackend {
     }
 }
 
+/// Production backend that launches the Rust `forge-tui` process.
+pub struct ProcessTuiBackend {
+    non_interactive: bool,
+    tui_bin: String,
+}
+
+impl Default for ProcessTuiBackend {
+    fn default() -> Self {
+        let non_interactive = !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal();
+        let tui_bin = std::env::var("FORGE_TUI_BIN").unwrap_or_else(|_| "forge-tui".to_string());
+        Self {
+            non_interactive,
+            tui_bin,
+        }
+    }
+}
+
+impl TuiBackend for ProcessTuiBackend {
+    fn is_non_interactive(&self) -> bool {
+        self.non_interactive
+    }
+
+    fn launch(&self) -> Result<(), String> {
+        let status = Command::new(&self.tui_bin)
+            .status()
+            .map_err(|err| format!("failed to launch {}: {err}", self.tui_bin))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{} exited with status {}",
+                self.tui_bin,
+                status
+                    .code()
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "signal".to_string())
+            ))
+        }
+    }
+}
+
 /// Run the `tui` command from the environment (production entry point).
 pub fn run_from_env(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
-    // In a real build, this would check for a TTY and launch the actual TUI.
-    // For now, delegate to the in-memory backend which stubs the launch.
-    let backend = InMemoryTuiBackend::default();
+    let backend = ProcessTuiBackend::default();
     run_with_backend(args, &backend, stdout, stderr)
 }
 

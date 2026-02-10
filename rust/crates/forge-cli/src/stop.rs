@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::path::PathBuf;
 
 use serde::Serialize;
 
@@ -82,6 +83,109 @@ impl StopBackend for InMemoryStopBackend {
         }
         self.enqueued.push(loop_id.to_string());
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SqliteStopBackend {
+    db_path: PathBuf,
+}
+
+impl SqliteStopBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+}
+
+impl StopBackend for SqliteStopBackend {
+    fn list_loops(&self) -> Result<Vec<LoopRecord>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+
+        let loops = match loop_repo.list() {
+            Ok(loops) => loops,
+            Err(err) if err.to_string().contains("no such table: loops") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let mut out = Vec::new();
+        for entry in loops {
+            let state = map_loop_state(&entry.state);
+            out.push(LoopRecord {
+                id: entry.id.clone(),
+                short_id: if entry.short_id.is_empty() {
+                    entry.id
+                } else {
+                    entry.short_id
+                },
+                name: entry.name,
+                repo: entry.repo_path,
+                pool: entry.pool_id,
+                profile: entry.profile_id,
+                state,
+                tags: entry.tags,
+            });
+        }
+        Ok(out)
+    }
+
+    fn enqueue_stop(&mut self, loop_id: &str) -> Result<(), String> {
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+
+        let mut items = vec![forge_db::loop_queue_repository::LoopQueueItem {
+            item_type: "stop_graceful".to_string(),
+            payload: r#"{"reason":"operator"}"#.to_string(),
+            ..Default::default()
+        }];
+
+        queue_repo
+            .enqueue(loop_id, &mut items)
+            .map_err(|err| format!("enqueue stop for {loop_id}: {err}"))?;
+
+        Ok(())
+    }
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
+fn map_loop_state(state: &forge_db::loop_repository::LoopState) -> LoopState {
+    match state {
+        forge_db::loop_repository::LoopState::Running => LoopState::Running,
+        forge_db::loop_repository::LoopState::Sleeping
+        | forge_db::loop_repository::LoopState::Waiting => LoopState::Running,
+        forge_db::loop_repository::LoopState::Stopped => LoopState::Stopped,
+        forge_db::loop_repository::LoopState::Error => LoopState::Error,
     }
 }
 
@@ -376,8 +480,11 @@ Flags:
       --tag string       filter by tag";
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use super::{parse_args, run_for_test, InMemoryStopBackend, LoopRecord, LoopState};
+    use super::{
+        parse_args, run_for_test, InMemoryStopBackend, LoopRecord, LoopState, SqliteStopBackend,
+    };
 
     #[test]
     fn parse_requires_selector_or_loop() {
@@ -605,5 +712,184 @@ mod tests {
         assert!(out
             .stderr
             .contains("loop 'abc' is ambiguous; matches: alpha (abc001), beta (abc002)"));
+    }
+
+    // -----------------------------------------------------------------------
+    // SQLite integration tests
+    // -----------------------------------------------------------------------
+
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_db_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(d) => d.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-stop-{tag}-{nanos}-{}-{suffix}.sqlite",
+            std::process::id(),
+        ))
+    }
+
+    #[test]
+    fn stop_sqlite_backend_enqueues_stop_graceful() {
+        let db_path = temp_db_path("sqlite-stop");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "stop-test-loop".to_string(),
+            repo_path: "/tmp/stop-test".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+
+        let mut backend = SqliteStopBackend::new(db_path.clone());
+        let out = run_for_test(&["stop", "stop-test-loop", "--json"], &mut backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        assert!(out.stderr.is_empty());
+        assert_eq!(
+            out.stdout,
+            "{\n  \"action\": \"stop_graceful\",\n  \"loops\": 1\n}\n"
+        );
+
+        // Verify stop_graceful was enqueued in the database.
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+        let items = queue_repo
+            .list(&loop_entry.id)
+            .unwrap_or_else(|err| panic!("list queue: {err}"));
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, "stop_graceful");
+        assert_eq!(items[0].status, "pending");
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn stop_sqlite_backend_lists_loops() {
+        let db_path = temp_db_path("sqlite-list");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut loop_a = forge_db::loop_repository::Loop {
+            name: "alpha-loop".to_string(),
+            repo_path: "/tmp/alpha".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            tags: vec!["team-a".to_string()],
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_a)
+            .unwrap_or_else(|err| panic!("create loop a: {err}"));
+        let mut loop_b = forge_db::loop_repository::Loop {
+            name: "beta-loop".to_string(),
+            repo_path: "/tmp/beta".to_string(),
+            state: forge_db::loop_repository::LoopState::Stopped,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_b)
+            .unwrap_or_else(|err| panic!("create loop b: {err}"));
+
+        let mut backend = SqliteStopBackend::new(db_path.clone());
+
+        // Stop only team-a tagged loops.
+        let out = run_for_test(&["stop", "--tag", "team-a", "--json"], &mut backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        assert_eq!(
+            out.stdout,
+            "{\n  \"action\": \"stop_graceful\",\n  \"loops\": 1\n}\n"
+        );
+
+        // Verify only alpha-loop got the stop item.
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+        let items_a = queue_repo
+            .list(&loop_a.id)
+            .unwrap_or_else(|err| panic!("list queue a: {err}"));
+        assert_eq!(items_a.len(), 1);
+
+        let items_b = queue_repo
+            .list(&loop_b.id)
+            .unwrap_or_else(|err| panic!("list queue b: {err}"));
+        assert!(items_b.is_empty());
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn stop_sqlite_backend_missing_db_returns_no_match() {
+        let db_path = std::env::temp_dir().join("forge-cli-stop-nonexistent.sqlite");
+        let _ = std::fs::remove_file(&db_path);
+
+        let mut backend = SqliteStopBackend::new(db_path);
+        let out = run_for_test(&["stop", "--all"], &mut backend);
+        assert_eq!(out.exit_code, 1);
+        assert_eq!(out.stderr, "no loops matched\n");
+    }
+
+    #[test]
+    fn stop_sqlite_all_enqueues_for_every_loop() {
+        let db_path = temp_db_path("sqlite-all");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut loop_a = forge_db::loop_repository::Loop {
+            name: "loop-one".to_string(),
+            repo_path: "/tmp/one".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_a)
+            .unwrap_or_else(|err| panic!("create loop a: {err}"));
+        let mut loop_b = forge_db::loop_repository::Loop {
+            name: "loop-two".to_string(),
+            repo_path: "/tmp/two".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_b)
+            .unwrap_or_else(|err| panic!("create loop b: {err}"));
+
+        let mut backend = SqliteStopBackend::new(db_path.clone());
+        let out = run_for_test(&["stop", "--all", "--json"], &mut backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        assert_eq!(
+            out.stdout,
+            "{\n  \"action\": \"stop_graceful\",\n  \"loops\": 2\n}\n"
+        );
+
+        // Verify both loops got stop items.
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+        let items_a = queue_repo
+            .list(&loop_a.id)
+            .unwrap_or_else(|err| panic!("list queue a: {err}"));
+        assert_eq!(items_a.len(), 1);
+        assert_eq!(items_a[0].item_type, "stop_graceful");
+
+        let items_b = queue_repo
+            .list(&loop_b.id)
+            .unwrap_or_else(|err| panic!("list queue b: {err}"));
+        assert_eq!(items_b.len(), 1);
+        assert_eq!(items_b[0].item_type, "stop_graceful");
+
+        let _ = std::fs::remove_file(db_path);
     }
 }

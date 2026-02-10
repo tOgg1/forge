@@ -132,7 +132,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             logs::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("clean") => {
-            let mut backend = clean::InMemoryLoopBackend::default();
+            let mut backend = clean::SqliteCleanBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             clean::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -246,7 +246,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             scale::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("ps") | Some("ls") => {
-            let backend = ps::InMemoryPsBackend::default();
+            let backend = ps::SqlitePsBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             ps::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
@@ -276,12 +276,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             template::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("tui") | Some("ui") => {
-            let backend = tui::InMemoryTuiBackend::default();
             let forwarded = forward_args(remaining, &flags);
-            tui::run_with_backend(&forwarded, &backend, stdout, stderr)
+            tui::run_from_env(&forwarded, stdout, stderr)
         }
         Some("stop") => {
-            let mut backend = stop::InMemoryStopBackend::default();
+            let mut backend = stop::SqliteStopBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             stop::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }

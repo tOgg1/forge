@@ -1,6 +1,9 @@
+use std::collections::HashMap;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use serde_json::Value;
 use tabwriter::TabWriter;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +67,135 @@ pub struct LoopSelector {
 
 pub trait PsBackend {
     fn list_loops(&self, selector: &LoopSelector) -> Result<Vec<LoopRecord>, String>;
+}
+
+#[derive(Debug, Clone)]
+pub struct SqlitePsBackend {
+    db_path: PathBuf,
+}
+
+impl SqlitePsBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+}
+
+impl PsBackend for SqlitePsBackend {
+    fn list_loops(&self, selector: &LoopSelector) -> Result<Vec<LoopRecord>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let run_repo = forge_db::loop_run_repository::LoopRunRepository::new(&db);
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let loops = match loop_repo.list() {
+            Ok(loops) => loops,
+            Err(err) if err.to_string().contains("no such table: loops") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let repo_filter = if selector.repo.is_empty() {
+            String::new()
+        } else {
+            normalize_repo_filter(&selector.repo)?
+        };
+        let pool_filter = if selector.pool.is_empty() {
+            String::new()
+        } else {
+            resolve_pool_ref(&pool_repo, &selector.pool)?
+        };
+        let profile_filter = if selector.profile.is_empty() {
+            String::new()
+        } else {
+            resolve_profile_ref(&profile_repo, &selector.profile)?
+        };
+
+        let mut out = Vec::new();
+        for entry in loops {
+            let state = map_loop_state(&entry.state);
+            if !repo_filter.is_empty() && entry.repo_path != repo_filter {
+                continue;
+            }
+            if !pool_filter.is_empty() && entry.pool_id != pool_filter {
+                continue;
+            }
+            if !profile_filter.is_empty() && entry.profile_id != profile_filter {
+                continue;
+            }
+            if !selector.state.is_empty() && state.as_str() != selector.state {
+                continue;
+            }
+            if !selector.tag.is_empty() && !entry.tags.iter().any(|tag| tag == &selector.tag) {
+                continue;
+            }
+
+            let run_count = run_repo
+                .count_by_loop(&entry.id)
+                .map_err(|err| format!("count loop runs: {err}"))?;
+            let queue_items = queue_repo
+                .list(&entry.id)
+                .map_err(|err| format!("list queue items: {err}"))?;
+            let pending_queue = queue_items
+                .iter()
+                .filter(|item| item.status == "pending")
+                .count() as u64;
+
+            let wait_until = if matches!(state, LoopState::Waiting) {
+                metadata_scalar(entry.metadata.as_ref(), "wait_until")
+            } else {
+                String::new()
+            };
+            let runner_owner = metadata_string(entry.metadata.as_ref(), "runner_owner");
+            let runner_instance_id = metadata_string(entry.metadata.as_ref(), "runner_instance_id");
+            let runner_pid_alive =
+                metadata_nested_bool(entry.metadata.as_ref(), "runner_liveness", "pid_alive");
+            let runner_daemon_alive = metadata_nested_bool(
+                entry.metadata.as_ref(),
+                "runner_liveness",
+                "daemon_runner_alive",
+            )
+            .or_else(|| {
+                metadata_nested_bool(entry.metadata.as_ref(), "runner_liveness", "daemon_alive")
+            });
+
+            out.push(LoopRecord {
+                id: entry.id.clone(),
+                short_id: if entry.short_id.is_empty() {
+                    entry.id
+                } else {
+                    entry.short_id
+                },
+                name: entry.name,
+                repo: entry.repo_path,
+                pool: entry.pool_id,
+                profile: entry.profile_id,
+                state,
+                tags: entry.tags,
+                runs: run_count as u64,
+                pending_queue,
+                last_run: entry.last_run_at.unwrap_or_default(),
+                wait_until,
+                runner_owner,
+                runner_instance_id,
+                runner_pid_alive,
+                runner_daemon_alive,
+            });
+        }
+        Ok(out)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -232,6 +364,114 @@ fn execute(args: &[String], backend: &dyn PsBackend, stdout: &mut dyn Write) -> 
     Ok(())
 }
 
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
+fn normalize_repo_filter(value: &str) -> Result<String, String> {
+    let path = Path::new(value);
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|err| format!("failed to resolve current directory: {err}"))?
+            .join(path)
+    };
+    Ok(abs.to_string_lossy().into_owned())
+}
+
+fn resolve_pool_ref(
+    repo: &forge_db::pool_repository::PoolRepository<'_>,
+    value: &str,
+) -> Result<String, String> {
+    if let Ok(pool) = repo.get(value) {
+        return Ok(pool.id);
+    }
+    if let Ok(pool) = repo.get_by_name(value) {
+        return Ok(pool.id);
+    }
+    Err(format!("pool {value:?} not found"))
+}
+
+fn resolve_profile_ref(
+    repo: &forge_db::profile_repository::ProfileRepository<'_>,
+    value: &str,
+) -> Result<String, String> {
+    if let Ok(profile) = repo.get(value) {
+        return Ok(profile.id);
+    }
+    if let Ok(profile) = repo.get_by_name(value) {
+        return Ok(profile.id);
+    }
+    Err(format!("profile {value:?} not found"))
+}
+
+fn map_loop_state(state: &forge_db::loop_repository::LoopState) -> LoopState {
+    match state {
+        forge_db::loop_repository::LoopState::Running => LoopState::Running,
+        forge_db::loop_repository::LoopState::Sleeping => LoopState::Sleeping,
+        forge_db::loop_repository::LoopState::Waiting => LoopState::Waiting,
+        forge_db::loop_repository::LoopState::Stopped => LoopState::Stopped,
+        forge_db::loop_repository::LoopState::Error => LoopState::Error,
+    }
+}
+
+fn metadata_string(metadata: Option<&HashMap<String, Value>>, key: &str) -> String {
+    metadata
+        .and_then(|meta| meta.get(key))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn metadata_scalar(metadata: Option<&HashMap<String, Value>>, key: &str) -> String {
+    let Some(value) = metadata.and_then(|meta| meta.get(key)) else {
+        return String::new();
+    };
+    if let Some(s) = value.as_str() {
+        return s.to_string();
+    }
+    if let Some(v) = value.as_i64() {
+        return v.to_string();
+    }
+    if let Some(v) = value.as_u64() {
+        return v.to_string();
+    }
+    if let Some(v) = value.as_f64() {
+        return v.to_string();
+    }
+    if let Some(v) = value.as_bool() {
+        return v.to_string();
+    }
+    value.to_string()
+}
+
+fn metadata_nested_bool(
+    metadata: Option<&HashMap<String, Value>>,
+    outer: &str,
+    inner: &str,
+) -> Option<bool> {
+    metadata
+        .and_then(|meta| meta.get(outer))
+        .and_then(Value::as_object)
+        .and_then(|nested| nested.get(inner))
+        .and_then(Value::as_bool)
+}
+
 fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut index = 0usize;
     if args
@@ -332,7 +572,17 @@ Flags:
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use super::{parse_args, run_for_test, InMemoryPsBackend, LoopRecord, LoopState, ParsedArgs};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use serde_json::json;
+
+    use super::{
+        parse_args, run_for_test, InMemoryPsBackend, LoopRecord, LoopState, ParsedArgs,
+        SqlitePsBackend,
+    };
 
     fn parse_ok(args: &[String]) -> ParsedArgs {
         match parse_args(args) {
@@ -640,6 +890,128 @@ mod tests {
         let second = parse_json(lines[1]);
         assert_eq!(first["name"], "oracle-loop");
         assert_eq!(second["name"], "second-loop");
+    }
+
+    #[test]
+    fn ps_sqlite_backend_lists_real_loop_rows() {
+        let db_path = temp_db_path("ps-sqlite");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let run_repo = forge_db::loop_run_repository::LoopRunRepository::new(&db);
+        let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
+
+        let mut profile = forge_db::profile_repository::Profile {
+            name: "ops".to_string(),
+            command_template: "codex exec".to_string(),
+            harness: "codex".to_string(),
+            ..Default::default()
+        };
+        profile_repo
+            .create(&mut profile)
+            .unwrap_or_else(|err| panic!("create profile: {err}"));
+
+        let mut pool = forge_db::pool_repository::Pool {
+            name: "default".to_string(),
+            strategy: "round_robin".to_string(),
+            ..Default::default()
+        };
+        pool_repo
+            .create(&mut pool)
+            .unwrap_or_else(|err| panic!("create pool: {err}"));
+
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("local"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-42"));
+        metadata.insert("wait_until".to_string(), json!("2026-02-10T12:00:00Z"));
+        metadata.insert(
+            "runner_liveness".to_string(),
+            json!({
+                "pid_alive": true,
+                "daemon_runner_alive": false
+            }),
+        );
+
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "sqlite-loop".to_string(),
+            repo_path: "/tmp/sqlite-loop".to_string(),
+            pool_id: pool.id.clone(),
+            profile_id: profile.id.clone(),
+            state: forge_db::loop_repository::LoopState::Waiting,
+            metadata: Some(metadata),
+            tags: vec!["team-a".to_string()],
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+
+        let mut run_one = forge_db::loop_run_repository::LoopRun {
+            loop_id: loop_entry.id.clone(),
+            profile_id: profile.id.clone(),
+            status: forge_db::loop_run_repository::LoopRunStatus::Success,
+            ..Default::default()
+        };
+        run_repo
+            .create(&mut run_one)
+            .unwrap_or_else(|err| panic!("create run one: {err}"));
+
+        let mut run_two = forge_db::loop_run_repository::LoopRun {
+            loop_id: loop_entry.id.clone(),
+            profile_id: profile.id.clone(),
+            status: forge_db::loop_run_repository::LoopRunStatus::Success,
+            ..Default::default()
+        };
+        run_repo
+            .create(&mut run_two)
+            .unwrap_or_else(|err| panic!("create run two: {err}"));
+
+        let mut queued = vec![forge_db::loop_queue_repository::LoopQueueItem {
+            item_type: "message_append".to_string(),
+            payload: r#"{"text":"hello"}"#.to_string(),
+            ..Default::default()
+        }];
+        queue_repo
+            .enqueue(&loop_entry.id, &mut queued)
+            .unwrap_or_else(|err| panic!("queue add: {err}"));
+
+        let backend = SqlitePsBackend::new(db_path.clone());
+        let out = run_for_test(&["ps", "--json", "--profile", "ops"], &backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stderr.is_empty());
+        let parsed = parse_json(&out.stdout);
+        let arr = match parsed.as_array() {
+            Some(array) => array,
+            None => panic!("json output must be an array"),
+        };
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "sqlite-loop");
+        assert_eq!(arr[0]["state"], "waiting");
+        assert_eq!(arr[0]["runs"], 2);
+        assert_eq!(arr[0]["pending_queue"], 1);
+        assert_eq!(arr[0]["runner_owner"], "local");
+        assert_eq!(arr[0]["runner_instance_id"], "inst-42");
+        assert_eq!(arr[0]["runner_pid_alive"], true);
+        assert_eq!(arr[0]["runner_daemon_alive"], false);
+        assert_eq!(arr[0]["wait_until"], "2026-02-10T12:00:00Z");
+    }
+
+    fn temp_db_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(d) => d.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-ps-{tag}-{nanos}-{}-{suffix}.sqlite",
+            std::process::id(),
+        ))
     }
 
     fn sample_loop() -> LoopRecord {
