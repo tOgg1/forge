@@ -12,6 +12,10 @@ path = "src/lib.rs"
 name = "forge-cli"
 path = "src/bin/forge-cli.rs"
 
+[[bin]]
+name = "rforge"
+path = "src/bin/rforge.rs"
+
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 fmail-core = { path = "../fmail-core" }

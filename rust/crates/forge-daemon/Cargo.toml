@@ -12,6 +12,10 @@ path = "src/lib.rs"
 name = "forge-daemon"
 path = "src/bin/forge-daemon.rs"
 
+[[bin]]
+name = "rforged"
+path = "src/bin/rforged.rs"
+
 [dependencies]
 chrono = "0.4"
 forge-core = { path = "../forge-core" }
