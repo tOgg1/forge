@@ -749,7 +749,8 @@ fn execute(
             Ok(())
         }
         Command::CooldownSet { name, until } => {
-            let profile = backend.set_cooldown(&name, &until)?;
+            let resolved = parse_time_or_duration(&until)?;
+            let profile = backend.set_cooldown(&name, &resolved)?;
             if parsed.json || parsed.jsonl {
                 write_serialized(stdout, &profile, parsed.jsonl)?;
                 return Ok(());
@@ -758,7 +759,7 @@ fn execute(
             writeln!(
                 stdout,
                 "Profile \"{}\" cooldown set to {}",
-                profile.name, until
+                profile.name, resolved
             )
             .map_err(|err| err.to_string())?;
             Ok(())
@@ -1151,6 +1152,118 @@ fn is_command_available(command: &str) -> bool {
     false
 }
 
+/// Parse a time value as either a Go-style duration (e.g. `1h`, `30m`, `2h30m5s`)
+/// or an RFC3339 timestamp. Returns a UTC RFC3339 string.
+///
+/// Mirrors Go `parseTimeOrDuration` from internal/cli/profile.go.
+fn parse_time_or_duration(value: &str) -> Result<String, String> {
+    if value.is_empty() {
+        return Err("time value is required".to_string());
+    }
+
+    // Try parsing as a Go-style duration first.
+    if let Some(duration) = parse_go_duration(value) {
+        let now = chrono::Utc::now();
+        let resolved = now + duration;
+        return Ok(resolved.format("%Y-%m-%dT%H:%M:%SZ").to_string());
+    }
+
+    // Try parsing as RFC3339.
+    match chrono::DateTime::parse_from_rfc3339(value) {
+        Ok(dt) => Ok(dt.to_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string()),
+        Err(_) => Err(format!("invalid time {value:?}")),
+    }
+}
+
+/// Parse a Go-style duration string (e.g. `1h`, `30m`, `2h30m5s`, `500ms`).
+/// Returns `None` if the string is not a valid Go duration.
+///
+/// Go's `time.ParseDuration` accepts: h, m, s, ms, us/µs, ns.
+fn parse_go_duration(s: &str) -> Option<chrono::Duration> {
+    if s.is_empty() {
+        return None;
+    }
+
+    let mut remaining = s;
+    let mut total_nanos: i64 = 0;
+    let mut found_any = false;
+
+    while !remaining.is_empty() {
+        // Parse optional leading sign or digits.
+        let (number, rest) = parse_float_prefix(remaining)?;
+        remaining = rest;
+
+        // Parse unit.
+        let (unit_nanos, rest) = parse_duration_unit(remaining)?;
+        remaining = rest;
+
+        total_nanos = total_nanos.checked_add((number * unit_nanos as f64) as i64)?;
+        found_any = true;
+    }
+
+    if !found_any {
+        return None;
+    }
+
+    Some(chrono::Duration::nanoseconds(total_nanos))
+}
+
+fn parse_float_prefix(s: &str) -> Option<(f64, &str)> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+
+    // Skip leading sign.
+    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+        i += 1;
+    }
+
+    let start = i;
+
+    // Integer part.
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+
+    // Fractional part.
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+    }
+
+    if i == start
+        && (s.is_empty() || (!bytes[0].is_ascii_digit() && bytes[0] != b'+' && bytes[0] != b'-'))
+    {
+        return None;
+    }
+    if i == 0 {
+        return None;
+    }
+
+    let num_str = &s[..i];
+    let number: f64 = num_str.parse().ok()?;
+    Some((number, &s[i..]))
+}
+
+fn parse_duration_unit(s: &str) -> Option<(i64, &str)> {
+    if let Some(rest) = s.strip_prefix("ns") {
+        Some((1, rest))
+    } else if let Some(rest) = s.strip_prefix("us").or_else(|| s.strip_prefix("µs")) {
+        Some((1_000, rest))
+    } else if let Some(rest) = s.strip_prefix("ms") {
+        Some((1_000_000, rest))
+    } else if let Some(rest) = s.strip_prefix('s') {
+        Some((1_000_000_000, rest))
+    } else if let Some(rest) = s.strip_prefix('m') {
+        Some((60_000_000_000, rest))
+    } else if let Some(rest) = s.strip_prefix('h') {
+        Some((3_600_000_000_000, rest))
+    } else {
+        None
+    }
+}
+
 fn write_serialized(
     out: &mut dyn Write,
     value: &impl Serialize,
@@ -1231,7 +1344,7 @@ fn write_table(out: &mut dyn Write, headers: &[&str], rows: &[Vec<String>]) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{run_for_test, InMemoryProfileBackend};
+    use super::{parse_go_duration, parse_time_or_duration, run_for_test, InMemoryProfileBackend};
 
     #[test]
     fn profile_add_list_edit_remove_flow() {
@@ -1350,5 +1463,127 @@ mod tests {
         let bad_cooldown = run_for_test(&["profile", "cooldown", "set", "alpha"], &mut backend);
         assert_eq!(bad_cooldown.exit_code, 1);
         assert_eq!(bad_cooldown.stderr, "--until is required\n");
+    }
+
+    fn assert_duration_secs(input: &str, expected_secs: i64) {
+        match parse_go_duration(input) {
+            Some(d) => assert_eq!(d.num_seconds(), expected_secs, "input: {input}"),
+            None => panic!("parse_go_duration({input:?}) returned None"),
+        }
+    }
+
+    #[test]
+    fn parse_go_duration_basic_units() {
+        assert_duration_secs("1h", 3600);
+        assert_duration_secs("30m", 1800);
+        assert_duration_secs("5s", 5);
+
+        match parse_go_duration("500ms") {
+            Some(d) => assert_eq!(d.num_milliseconds(), 500),
+            None => panic!("parse_go_duration(\"500ms\") returned None"),
+        }
+        match parse_go_duration("100us") {
+            Some(d) => assert_eq!(d.num_microseconds(), Some(100)),
+            None => panic!("parse_go_duration(\"100us\") returned None"),
+        }
+        match parse_go_duration("200ns") {
+            Some(d) => assert_eq!(d.num_nanoseconds(), Some(200)),
+            None => panic!("parse_go_duration(\"200ns\") returned None"),
+        }
+    }
+
+    #[test]
+    fn parse_go_duration_compound() {
+        assert_duration_secs("2h30m", 9000);
+        assert_duration_secs("1h30m45s", 5445);
+    }
+
+    #[test]
+    fn parse_go_duration_rejects_invalid() {
+        assert!(parse_go_duration("").is_none());
+        assert!(parse_go_duration("abc").is_none());
+        assert!(parse_go_duration("1d").is_none());
+        assert!(parse_go_duration("1w").is_none());
+    }
+
+    #[test]
+    fn parse_time_or_duration_rfc3339() {
+        match parse_time_or_duration("2026-12-31T00:00:00Z") {
+            Ok(result) => assert_eq!(result, "2026-12-31T00:00:00Z"),
+            Err(err) => panic!("parse_time_or_duration rfc3339 failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn parse_time_or_duration_duration_resolves_to_rfc3339() {
+        match parse_time_or_duration("1h") {
+            Ok(result) => {
+                assert!(result.ends_with('Z'));
+                assert!(
+                    chrono::DateTime::parse_from_rfc3339(&result).is_ok(),
+                    "not valid RFC3339: {result}"
+                );
+            }
+            Err(err) => panic!("parse_time_or_duration(\"1h\") failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn parse_time_or_duration_rejects_invalid() {
+        match parse_time_or_duration("not-a-time") {
+            Err(msg) => assert!(msg.contains("invalid time"), "unexpected error: {msg}"),
+            Ok(val) => panic!("expected error, got: {val}"),
+        }
+    }
+
+    #[test]
+    fn parse_time_or_duration_empty_fails() {
+        assert!(parse_time_or_duration("").is_err());
+    }
+
+    #[test]
+    fn cooldown_set_with_duration_resolves_to_timestamp() {
+        let mut backend = InMemoryProfileBackend::default();
+        let _ = run_for_test(
+            &["profile", "add", "claude", "--name", "gamma"],
+            &mut backend,
+        );
+
+        let set = run_for_test(
+            &["profile", "cooldown", "set", "gamma", "--until", "1h"],
+            &mut backend,
+        );
+        assert_eq!(set.exit_code, 0, "stderr: {}", set.stderr);
+        assert!(set.stderr.is_empty());
+        // The human output should contain a resolved RFC3339 timestamp, not "1h".
+        assert!(
+            !set.stdout.contains("1h"),
+            "should resolve duration to timestamp: {}",
+            set.stdout
+        );
+        assert!(set.stdout.contains("cooldown set to 20"));
+    }
+
+    #[test]
+    fn cooldown_set_with_invalid_time_fails() {
+        let mut backend = InMemoryProfileBackend::default();
+        let _ = run_for_test(
+            &["profile", "add", "claude", "--name", "delta"],
+            &mut backend,
+        );
+
+        let set = run_for_test(
+            &[
+                "profile",
+                "cooldown",
+                "set",
+                "delta",
+                "--until",
+                "not-a-time",
+            ],
+            &mut backend,
+        );
+        assert_eq!(set.exit_code, 1);
+        assert!(set.stderr.contains("invalid time"));
     }
 }
