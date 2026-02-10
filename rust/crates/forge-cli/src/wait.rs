@@ -1,6 +1,11 @@
 use std::io::Write;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
+use rusqlite::OptionalExtension;
 use serde::Serialize;
+
+use crate::context::{ContextBackend, FilesystemContextBackend};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -93,6 +98,422 @@ pub trait WaitBackend {
 
     /// Get the elapsed time as a human-readable string.
     fn elapsed(&self) -> String;
+
+    /// Configure timeout + poll interval before the wait loop starts.
+    fn configure_polling(&self, _timeout: Duration, _poll_interval: Duration) {}
+}
+
+#[derive(Debug, Clone)]
+struct PollingConfig {
+    started_at: Instant,
+    deadline: Option<Instant>,
+    poll_interval: Duration,
+}
+
+#[derive(Debug, Clone)]
+pub struct SqliteWaitBackend {
+    db_path: PathBuf,
+    context_backend: FilesystemContextBackend,
+    polling: std::cell::RefCell<PollingConfig>,
+}
+
+#[derive(Debug, Clone)]
+struct AgentStatus {
+    id: String,
+    state: String,
+    account_id: String,
+}
+
+impl SqliteWaitBackend {
+    pub fn open_from_env() -> Self {
+        Self::new(resolve_database_path(), FilesystemContextBackend::default())
+    }
+
+    pub fn new(db_path: PathBuf, context_backend: FilesystemContextBackend) -> Self {
+        let now = Instant::now();
+        Self {
+            db_path,
+            context_backend,
+            polling: std::cell::RefCell::new(PollingConfig {
+                started_at: now,
+                deadline: Some(now + Duration::from_secs(30 * 60)),
+                poll_interval: Duration::from_secs(2),
+            }),
+        }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
+
+    fn find_agent(&self, agent_ref: &str) -> Result<AgentStatus, String> {
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let trimmed = agent_ref.trim();
+        if trimmed.is_empty() {
+            return Err("agent ID required".to_string());
+        }
+
+        let exact = conn
+            .query_row(
+                "SELECT id, state, COALESCE(account_id, '') FROM agents WHERE id = ?1",
+                rusqlite::params![trimmed],
+                |row| {
+                    Ok(AgentStatus {
+                        id: row.get(0)?,
+                        state: row.get(1)?,
+                        account_id: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        if let Some(agent) = exact {
+            return Ok(agent);
+        }
+
+        let like = format!("{trimmed}%");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, state, COALESCE(account_id, '') \
+                 FROM agents WHERE id LIKE ?1 ORDER BY id LIMIT 2",
+            )
+            .map_err(|err| err.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![like], |row| {
+                Ok(AgentStatus {
+                    id: row.get(0)?,
+                    state: row.get(1)?,
+                    account_id: row.get(2)?,
+                })
+            })
+            .map_err(|err| err.to_string())?;
+
+        let mut found = Vec::new();
+        for row in rows {
+            found.push(row.map_err(|err| err.to_string())?);
+        }
+        match found.len() {
+            0 => Err(format!("agent not found: {trimmed}")),
+            1 => Ok(found.remove(0)),
+            _ => Err(format!(
+                "agent '{}' is ambiguous; use a longer prefix or full ID",
+                trimmed
+            )),
+        }
+    }
+
+    fn resolve_workspace_id(&self, workspace_ref: &str) -> Result<String, String> {
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let trimmed = workspace_ref.trim();
+        if trimmed.is_empty() {
+            return Err("workspace name or ID required".to_string());
+        }
+
+        let exact_id = conn
+            .query_row(
+                "SELECT id FROM workspaces WHERE id = ?1",
+                rusqlite::params![trimmed],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        if let Some(id) = exact_id {
+            return Ok(id);
+        }
+
+        let exact_name = conn
+            .query_row(
+                "SELECT id FROM workspaces WHERE name = ?1",
+                rusqlite::params![trimmed],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        if let Some(id) = exact_name {
+            return Ok(id);
+        }
+
+        let like = format!("{trimmed}%");
+        let mut stmt = conn
+            .prepare("SELECT id FROM workspaces WHERE id LIKE ?1 ORDER BY id LIMIT 2")
+            .map_err(|err| err.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![like], |row| row.get::<_, String>(0))
+            .map_err(|err| err.to_string())?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row.map_err(|err| err.to_string())?);
+        }
+        match ids.len() {
+            0 => Err(format!("workspace not found: {trimmed}")),
+            1 => Ok(ids.remove(0)),
+            _ => Err(format!(
+                "workspace '{}' is ambiguous; use a longer prefix or full ID",
+                trimmed
+            )),
+        }
+    }
+
+    fn pending_queue_items(&self, agent_id: &str) -> Result<i64, String> {
+        let db = self.open_db()?;
+        let conn = db.conn();
+        conn.query_row(
+            "SELECT COUNT(1) FROM queue_items WHERE agent_id = ?1 AND status = 'pending'",
+            rusqlite::params![agent_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|err| err.to_string())
+    }
+
+    fn cooldown_remaining_secs(&self, account_id: &str) -> Result<Option<i64>, String> {
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let value = conn
+            .query_row(
+                "SELECT cooldown_until FROM accounts WHERE id = ?1",
+                rusqlite::params![account_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        let Some(cooldown_until) = value else {
+            return Err(format!("failed to get account: {account_id}"));
+        };
+        let Some(cooldown_until) = cooldown_until else {
+            return Ok(None);
+        };
+        if cooldown_until.trim().is_empty() {
+            return Ok(None);
+        }
+
+        let parsed = chrono::DateTime::parse_from_rfc3339(&cooldown_until)
+            .map_err(|err| format!("failed to parse cooldown_until: {err}"))?
+            .with_timezone(&chrono::Utc);
+        let remaining = (parsed - chrono::Utc::now()).num_seconds();
+        if remaining <= 0 {
+            return Ok(None);
+        }
+        Ok(Some(remaining))
+    }
+
+    fn workspace_agents(&self, workspace_id: &str) -> Result<Vec<AgentStatus>, String> {
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, state, COALESCE(account_id, '') \
+                 FROM agents WHERE workspace_id = ?1 ORDER BY id",
+            )
+            .map_err(|err| err.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![workspace_id], |row| {
+                Ok(AgentStatus {
+                    id: row.get(0)?,
+                    state: row.get(1)?,
+                    account_id: row.get(2)?,
+                })
+            })
+            .map_err(|err| err.to_string())?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|err| err.to_string())?);
+        }
+        Ok(out)
+    }
+}
+
+impl WaitBackend for SqliteWaitBackend {
+    fn check_agent_condition(
+        &self,
+        agent: &str,
+        condition: WaitCondition,
+    ) -> Result<ConditionResult, String> {
+        let agent = self.find_agent(agent)?;
+
+        match condition {
+            WaitCondition::Idle => {
+                if agent.state == "idle" {
+                    Ok(ConditionResult {
+                        met: true,
+                        status: "idle".to_string(),
+                    })
+                } else {
+                    Ok(ConditionResult {
+                        met: false,
+                        status: format!("state: {}", agent.state),
+                    })
+                }
+            }
+            WaitCondition::QueueEmpty => {
+                let pending = self.pending_queue_items(&agent.id)?;
+                if pending == 0 {
+                    Ok(ConditionResult {
+                        met: true,
+                        status: "queue empty".to_string(),
+                    })
+                } else {
+                    Ok(ConditionResult {
+                        met: false,
+                        status: format!("queue: {pending} pending"),
+                    })
+                }
+            }
+            WaitCondition::CooldownOver => {
+                if agent.account_id.trim().is_empty() {
+                    return Ok(ConditionResult {
+                        met: true,
+                        status: "no account".to_string(),
+                    });
+                }
+                match self.cooldown_remaining_secs(&agent.account_id)? {
+                    None => Ok(ConditionResult {
+                        met: true,
+                        status: "no cooldown".to_string(),
+                    }),
+                    Some(remaining) => Ok(ConditionResult {
+                        met: false,
+                        status: format!("cooldown: {remaining}s remaining"),
+                    }),
+                }
+            }
+            WaitCondition::Ready => {
+                if agent.state != "idle" {
+                    return Ok(ConditionResult {
+                        met: false,
+                        status: format!("state: {}", agent.state),
+                    });
+                }
+                let pending = self.pending_queue_items(&agent.id)?;
+                if pending > 0 {
+                    return Ok(ConditionResult {
+                        met: false,
+                        status: format!("queue: {pending} pending"),
+                    });
+                }
+                if !agent.account_id.trim().is_empty() {
+                    if let Some(remaining) = self.cooldown_remaining_secs(&agent.account_id)? {
+                        return Ok(ConditionResult {
+                            met: false,
+                            status: format!("cooldown: {remaining}s remaining"),
+                        });
+                    }
+                }
+                Ok(ConditionResult {
+                    met: true,
+                    status: "ready".to_string(),
+                })
+            }
+            _ => Err(format!(
+                "condition '{}' requires a workspace, not an agent",
+                condition.as_str()
+            )),
+        }
+    }
+
+    fn check_workspace_condition(
+        &self,
+        workspace: &str,
+        condition: WaitCondition,
+    ) -> Result<ConditionResult, String> {
+        let workspace_id = self.resolve_workspace_id(workspace)?;
+        let agents = self.workspace_agents(&workspace_id)?;
+
+        match condition {
+            WaitCondition::AllIdle => {
+                if agents.is_empty() {
+                    return Ok(ConditionResult {
+                        met: true,
+                        status: "no agents".to_string(),
+                    });
+                }
+                let not_idle = agents.iter().filter(|agent| agent.state != "idle").count();
+                if not_idle == 0 {
+                    Ok(ConditionResult {
+                        met: true,
+                        status: "all idle".to_string(),
+                    })
+                } else {
+                    Ok(ConditionResult {
+                        met: false,
+                        status: format!("{}/{} agents not idle", not_idle, agents.len()),
+                    })
+                }
+            }
+            WaitCondition::AnyIdle => {
+                if agents.is_empty() {
+                    return Ok(ConditionResult {
+                        met: true,
+                        status: "no agents".to_string(),
+                    });
+                }
+                if let Some(agent) = agents.iter().find(|agent| agent.state == "idle") {
+                    return Ok(ConditionResult {
+                        met: true,
+                        status: format!("agent {} is idle", short_id(&agent.id)),
+                    });
+                }
+                Ok(ConditionResult {
+                    met: false,
+                    status: format!("0/{} agents idle", agents.len()),
+                })
+            }
+            _ => Err(format!(
+                "condition '{}' requires an agent, not a workspace",
+                condition.as_str()
+            )),
+        }
+    }
+
+    fn resolve_agent_context(&self) -> Result<String, String> {
+        let ctx = self
+            .context_backend
+            .load_context()
+            .map_err(|err| format!("failed to load context: {err}"))?;
+        if ctx.agent_id.trim().is_empty() {
+            return Err("no agent context set".to_string());
+        }
+        Ok(ctx.agent_id)
+    }
+
+    fn resolve_workspace_context(&self) -> Result<String, String> {
+        let ctx = self
+            .context_backend
+            .load_context()
+            .map_err(|err| format!("failed to load context: {err}"))?;
+        if ctx.workspace_id.trim().is_empty() {
+            return Err("no workspace context set".to_string());
+        }
+        Ok(ctx.workspace_id)
+    }
+
+    fn sleep_poll_interval(&self) {
+        let poll = self.polling.borrow().poll_interval;
+        std::thread::sleep(poll);
+    }
+
+    fn check_deadline(&self) -> Option<String> {
+        let deadline = self.polling.borrow().deadline?;
+        if Instant::now() >= deadline {
+            return Some(self.elapsed());
+        }
+        None
+    }
+
+    fn elapsed(&self) -> String {
+        let elapsed = self.polling.borrow().started_at.elapsed();
+        format_elapsed(elapsed)
+    }
+
+    fn configure_polling(&self, timeout: Duration, poll_interval: Duration) {
+        let now = Instant::now();
+        let mut polling = self.polling.borrow_mut();
+        polling.started_at = now;
+        polling.deadline = Some(now + timeout);
+        polling.poll_interval = poll_interval;
+    }
 }
 
 /// Agent state for the in-memory backend.
@@ -363,6 +784,8 @@ struct ParsedArgs {
     until: String,
     agent: String,
     workspace: String,
+    timeout: Duration,
+    poll_interval: Duration,
 }
 
 #[derive(Debug, Serialize)]
@@ -454,6 +877,8 @@ fn execute(
     } else {
         String::new()
     };
+
+    backend.configure_polling(parsed.timeout, parsed.poll_interval);
 
     if !parsed.quiet && !parsed.json && !parsed.jsonl {
         writeln!(stdout, "Waiting for condition '{}'...", condition.as_str())
@@ -547,6 +972,8 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut until = String::new();
     let mut agent = String::new();
     let mut workspace = String::new();
+    let mut timeout = Duration::from_secs(30 * 60);
+    let mut poll_interval = Duration::from_secs(2);
 
     while let Some(token) = args.get(index) {
         match token.as_str() {
@@ -578,13 +1005,13 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 index += 2;
             }
             "--timeout" | "-t" => {
-                // Accept but consumed by real backend; skip value.
-                let _val = take_value(args, index, "--timeout")?;
+                let raw = take_value(args, index, "--timeout")?;
+                timeout = parse_duration_flag(&raw, "--timeout")?;
                 index += 2;
             }
             "--poll-interval" => {
-                // Accept but consumed by real backend; skip value.
-                let _val = take_value(args, index, "--poll-interval")?;
+                let raw = take_value(args, index, "--poll-interval")?;
+                poll_interval = parse_duration_flag(&raw, "--poll-interval")?;
                 index += 2;
             }
             flag if flag.starts_with('-') => {
@@ -611,6 +1038,8 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         until,
         agent,
         workspace,
+        timeout,
+        poll_interval,
     })
 }
 
@@ -618,6 +1047,168 @@ fn take_value(args: &[String], index: usize, flag: &str) -> Result<String, Strin
     args.get(index + 1)
         .cloned()
         .ok_or_else(|| format!("error: missing value for {flag}"))
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
+fn short_id(id: &str) -> &str {
+    if id.len() > 8 {
+        &id[..8]
+    } else {
+        id
+    }
+}
+
+fn format_elapsed(elapsed: Duration) -> String {
+    let total = elapsed.as_secs();
+    let hours = total / 3600;
+    let minutes = (total % 3600) / 60;
+    let seconds = total % 60;
+    if hours > 0 {
+        return format!("{hours}h{minutes}m{seconds}s");
+    }
+    if minutes > 0 {
+        return format!("{minutes}m{seconds}s");
+    }
+    format!("{seconds}s")
+}
+
+fn parse_duration_flag(raw: &str, flag: &str) -> Result<Duration, String> {
+    let parsed =
+        parse_go_duration(raw).map_err(|err| format!("error: invalid value for {flag}: {err}"))?;
+    if parsed.is_zero() {
+        return Err(format!(
+            "error: invalid value for {flag}: duration must be > 0"
+        ));
+    }
+    Ok(parsed)
+}
+
+fn parse_go_duration(raw: &str) -> Result<Duration, String> {
+    let seconds = parse_go_duration_seconds(raw)?;
+    if seconds < 0.0 {
+        return Err("duration must be non-negative".to_string());
+    }
+    Duration::try_from_secs_f64(seconds).map_err(|_| "duration out of range".to_string())
+}
+
+fn parse_go_duration_seconds(raw: &str) -> Result<f64, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("empty duration".to_string());
+    }
+
+    let (negative, mut rest) = if let Some(value) = trimmed.strip_prefix('-') {
+        (true, value)
+    } else if let Some(value) = trimmed.strip_prefix('+') {
+        (false, value)
+    } else {
+        (false, trimmed)
+    };
+
+    if rest.is_empty() {
+        return Err("empty duration".to_string());
+    }
+
+    if rest == "0" {
+        return Ok(0.0);
+    }
+
+    let mut total_seconds = 0.0f64;
+    while !rest.is_empty() {
+        let num_len = number_prefix_len(rest);
+        if num_len == 0 {
+            return Err("invalid duration value".to_string());
+        }
+
+        let number_raw = &rest[..num_len];
+        let value = number_raw
+            .parse::<f64>()
+            .map_err(|_| "invalid duration value".to_string())?;
+        if !value.is_finite() {
+            return Err("invalid duration value".to_string());
+        }
+
+        rest = &rest[num_len..];
+        let (unit, scale_seconds) = duration_unit(rest)?;
+        total_seconds += value * scale_seconds;
+        rest = &rest[unit.len()..];
+    }
+
+    if negative {
+        total_seconds = -total_seconds;
+    }
+    Ok(total_seconds)
+}
+
+fn number_prefix_len(input: &str) -> usize {
+    let mut bytes = 0usize;
+    let mut saw_digit = false;
+    let mut saw_dot = false;
+
+    for ch in input.chars() {
+        if ch.is_ascii_digit() {
+            saw_digit = true;
+            bytes += ch.len_utf8();
+            continue;
+        }
+        if ch == '.' && !saw_dot {
+            saw_dot = true;
+            bytes += ch.len_utf8();
+            continue;
+        }
+        break;
+    }
+
+    if saw_digit {
+        bytes
+    } else {
+        0
+    }
+}
+
+fn duration_unit(input: &str) -> Result<(&'static str, f64), String> {
+    if input.starts_with("ns") {
+        return Ok(("ns", 1e-9));
+    }
+    if input.starts_with("us") {
+        return Ok(("us", 1e-6));
+    }
+    if input.starts_with("µs") {
+        return Ok(("µs", 1e-6));
+    }
+    if input.starts_with("μs") {
+        return Ok(("μs", 1e-6));
+    }
+    if input.starts_with("ms") {
+        return Ok(("ms", 1e-3));
+    }
+    if input.starts_with('s') {
+        return Ok(("s", 1.0));
+    }
+    if input.starts_with('m') {
+        return Ok(("m", 60.0));
+    }
+    if input.starts_with('h') {
+        return Ok(("h", 3600.0));
+    }
+    Err("missing duration unit".to_string())
 }
 
 const HELP_TEXT: &str = "\
@@ -1267,5 +1858,113 @@ mod tests {
         assert_eq!(out.exit_code, 1);
         assert!(out.stderr.contains("Wait for a condition to be met"));
         assert!(out.stderr.contains("--until"));
+    }
+
+    // --- sqlite backend live parity ---
+
+    fn setup_sqlite_wait_backend(
+        label: &str,
+        state: &str,
+        pending_queue: usize,
+    ) -> (SqliteWaitBackend, PathBuf) {
+        let root =
+            std::env::temp_dir().join(format!("forge-wait-{label}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let db_path = root.join("forge.db");
+        let ctx_path = root.join("context.yaml");
+
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path)).unwrap();
+        db.migrate_up().unwrap();
+
+        let conn = db.conn();
+        conn.execute(
+            "INSERT INTO nodes (id, name, status, is_local) VALUES (?1, ?2, 'online', 1)",
+            rusqlite::params!["node-1", "node-1"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO workspaces (id, name, node_id, repo_path, tmux_session, status) VALUES (?1, ?2, ?3, ?4, ?5, 'active')",
+            rusqlite::params!["ws-1", "workspace-1", "node-1", "/tmp/repo", "forge-ws-1"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO agents (id, workspace_id, type, tmux_pane, state) VALUES (?1, ?2, 'codex', ?3, ?4)",
+            rusqlite::params!["agent-001", "ws-1", "forge-ws-1:0.1", state],
+        )
+        .unwrap();
+        for idx in 0..pending_queue {
+            conn.execute(
+                "INSERT INTO queue_items (id, agent_id, type, position, status, payload_json) VALUES (?1, ?2, 'message', ?3, 'pending', ?4)",
+                rusqlite::params![
+                    format!("qi-{idx}"),
+                    "agent-001",
+                    idx as i64 + 1,
+                    r#"{"message":"hello"}"#
+                ],
+            )
+            .unwrap();
+        }
+
+        let context_backend = FilesystemContextBackend::new(ctx_path, db_path.clone());
+        context_backend
+            .save_context(&crate::context::ContextRecord {
+                workspace_id: "ws-1".to_string(),
+                workspace_name: "workspace-1".to_string(),
+                agent_id: "agent-001".to_string(),
+                agent_name: String::new(),
+                updated_at: "2026-02-10T00:00:00Z".to_string(),
+            })
+            .unwrap();
+
+        (SqliteWaitBackend::new(db_path, context_backend), root)
+    }
+
+    #[test]
+    fn sqlite_idle_condition_met() {
+        let (backend, root) = setup_sqlite_wait_backend("idle", "idle", 0);
+        let out = run_for_test(
+            &["wait", "--until", "idle", "--agent", "agent-001", "--json"],
+            &backend,
+        );
+        assert_eq!(out.exit_code, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(parsed["success"], true);
+        assert_eq!(parsed["condition"], "idle");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sqlite_queue_not_empty_times_out() {
+        let (backend, root) = setup_sqlite_wait_backend("queue", "idle", 1);
+        let out = run_for_test(
+            &[
+                "wait",
+                "--until",
+                "queue-empty",
+                "--agent",
+                "agent-001",
+                "--timeout",
+                "10ms",
+                "--poll-interval",
+                "2ms",
+                "--json",
+            ],
+            &backend,
+        );
+        assert_eq!(out.exit_code, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(parsed["success"], false);
+        assert_eq!(parsed["reason"], "timeout");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sqlite_resolves_agent_from_context() {
+        let (backend, root) = setup_sqlite_wait_backend("context", "idle", 0);
+        let out = run_for_test(&["wait", "--until", "idle", "--json"], &backend);
+        assert_eq!(out.exit_code, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(parsed["success"], true);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
