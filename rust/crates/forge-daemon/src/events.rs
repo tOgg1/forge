@@ -343,8 +343,22 @@ fn datetime_to_timestamp(dt: DateTime<Utc>) -> prost_types::Timestamp {
 /// Parse a cursor string to i64. Parity with Go `parseInt64`.
 #[allow(clippy::result_large_err)]
 fn parse_cursor(s: &str) -> Result<i64, tonic::Status> {
-    s.parse::<i64>()
-        .map_err(|e| tonic::Status::invalid_argument(format!("invalid cursor: {e}")))
+    if s.is_empty() {
+        return Err(tonic::Status::invalid_argument("invalid cursor: empty"));
+    }
+
+    let mut result: i64 = 0;
+    for ch in s.chars() {
+        if !ch.is_ascii_digit() {
+            return Err(tonic::Status::invalid_argument(format!(
+                "invalid cursor: invalid character: {ch}"
+            )));
+        }
+        result = result
+            .wrapping_mul(10)
+            .wrapping_add(i64::from(ch as u8 - b'0'));
+    }
+    Ok(result)
 }
 
 // -- RwLock helpers with poison recovery --
@@ -839,6 +853,7 @@ mod tests {
     fn parse_cursor_invalid() {
         assert!(parse_cursor("abc").is_err());
         assert!(parse_cursor("12.5").is_err());
+        assert!(parse_cursor("-1").is_err());
         assert!(parse_cursor("").is_err());
     }
 
