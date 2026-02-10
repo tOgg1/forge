@@ -172,4 +172,24 @@ mod tests {
         assert_eq!(record.reconciled_at_rfc3339, "2026-02-09T18:00:00Z");
         assert_eq!(record.reason, LOOP_STALE_RUNNER_REASON);
     }
+
+    #[test]
+    fn reconnect_recovery_clears_stale_marking_when_daemon_runner_is_alive() {
+        let mut info = RunnerLiveness {
+            owner: "local".to_string(),
+            instance_id: "inst-42".to_string(),
+            pid_alive: Some(false),
+            daemon_alive: Some(false),
+        };
+
+        assert!(should_mark_loop_stale(&LoopState::Running, &info, true));
+
+        let daemon_runner = DaemonRunner {
+            instance_id: "inst-42".to_string(),
+            state: DaemonRunnerState::Running,
+        };
+        info.daemon_alive = Some(daemon_runner_alive(Some(&daemon_runner), "inst-42"));
+
+        assert!(!should_mark_loop_stale(&LoopState::Running, &info, true));
+    }
 }

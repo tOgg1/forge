@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "name": "go transcript fixture: claude idle stays in continue path",
+      "transcript_fixture": "internal/testutil/testdata/transcripts/claude_code_idle.txt",
+      "on_invalid": "continue",
+      "exit_code": 0,
+      "err_text": null,
+      "ledger_tail": "- run_id: run-claude-idle\n- status: completed\n",
+      "primary_output_enabled": true,
+      "expected_parse_signal": null,
+      "expected_should_stop": false,
+      "expected_status": "success",
+      "expected_output_tail_source": "primary"
+    },
+    {
+      "name": "go transcript fixture: awaiting approval can map to stop on invalid",
+      "transcript_fixture": "internal/testutil/testdata/transcripts/awaiting_approval.txt",
+      "on_invalid": "stop",
+      "exit_code": 0,
+      "err_text": null,
+      "ledger_tail": "- run_id: run-awaiting-approval\n- status: completed\n",
+      "primary_output_enabled": true,
+      "expected_parse_signal": null,
+      "expected_should_stop": true,
+      "expected_status": "success",
+      "expected_output_tail_source": "primary"
+    },
+    {
+      "name": "explicit qual continue signal (1) overrides on_invalid=stop",
+      "transcript_inline": "1\n",
+      "on_invalid": "stop",
+      "exit_code": 0,
+      "err_text": null,
+      "ledger_tail": "- run_id: run-explicit-continue\n- status: completed\n",
+      "primary_output_enabled": true,
+      "expected_parse_signal": 1,
+      "expected_should_stop": false,
+      "expected_status": "success",
+      "expected_output_tail_source": "primary"
+    },
+    {
+      "name": "empty primary output falls back to ledger tail for persisted run",
+      "transcript_inline": "",
+      "on_invalid": "continue",
+      "exit_code": 1,
+      "err_text": "runner crashed",
+      "ledger_tail": "- run_id: run-fallback\n- status: error\n",
+      "primary_output_enabled": false,
+      "expected_parse_signal": null,
+      "expected_should_stop": false,
+      "expected_status": "error",
+      "expected_output_tail_source": "fallback"
+    }
+  ]
+}

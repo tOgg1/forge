@@ -10,9 +10,12 @@ pub mod prompt_composition;
 pub mod queue_interactions;
 pub mod runner_metadata;
 pub mod runtime_limits;
+pub mod runtime_tick;
+pub mod scheduler_semantics;
 pub mod stale_runner;
 pub mod state_machine;
 pub mod stop_rules;
+pub mod wait_until;
 
 /// Stable crate label used by bootstrap smoke tests.
 pub fn crate_label() -> &'static str {
