@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,6 +76,16 @@ func TestResolveCredential_Literal(t *testing.T) {
 	}
 	if got != "literal" {
 		t.Fatalf("expected literal, got %q", got)
+	}
+}
+
+func TestResolveCredential_CaamPrefixRejected(t *testing.T) {
+	_, err := ResolveCredential("caam:claude/alice@example.com")
+	if err == nil {
+		t.Fatal("expected error for legacy caam credential reference")
+	}
+	if !strings.Contains(err.Error(), "no longer supported") {
+		t.Fatalf("expected migration hint, got %q", err.Error())
 	}
 }
 
