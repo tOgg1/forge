@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+mod filesystem_backend;
+pub use filesystem_backend::FilesystemSeqBackend;
+
 // ---------------------------------------------------------------------------
 // Data models (mirror Go sequences.Sequence for JSON output parity)
 // ---------------------------------------------------------------------------

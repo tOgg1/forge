@@ -127,7 +127,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             loop_internal::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("logs") | Some("log") => {
-            let mut backend = logs::InMemoryLogsBackend::default();
+            let mut backend = logs::SqliteLogsBackend::open_from_env();
             let forwarded = remaining.to_vec();
             logs::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -228,7 +228,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             rm::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("run") => {
-            let mut backend = run::InMemoryRunBackend::default();
+            let mut backend = run::SqliteRunBackend::open_from_env();
             let forwarded = remaining.to_vec();
             run::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -248,7 +248,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             send::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("seq") | Some("sequence") => {
-            let mut backend = seq::InMemorySeqBackend::default();
+            let mut backend = seq::FilesystemSeqBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             seq::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -263,7 +263,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             status::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("template") | Some("tmpl") => {
-            let backend = template::InMemoryTemplateBackend::default();
+            let backend = template::FilesystemTemplateBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             template::run_with_backend(&forwarded, &backend, stdout, stderr)
         }

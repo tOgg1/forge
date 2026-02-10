@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::path::PathBuf;
+
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -104,26 +107,7 @@ impl LogsBackend for InMemoryLogsBackend {
         let Some(content) = self.logs.get(path) else {
             return Err(format!("open {path}: no such file or directory"));
         };
-
-        let limit = if lines <= 0 { 50 } else { lines as usize };
-        let since_marker = parse_since_marker(since);
-        let mut filtered = Vec::new();
-
-        for line in content.lines() {
-            if let Some(marker) = since_marker.as_deref() {
-                if let Some(ts) = parse_log_timestamp(line) {
-                    if ts < marker {
-                        continue;
-                    }
-                }
-            }
-            filtered.push(line.to_string());
-        }
-
-        if filtered.len() > limit {
-            filtered = filtered.split_off(filtered.len() - limit);
-        }
-        Ok(filtered.join("\n"))
+        Ok(filter_log_content(content, lines, since))
     }
 
     fn follow_log(&mut self, path: &str, lines: i32, stdout: &mut dyn Write) -> Result<(), String> {
@@ -140,10 +124,142 @@ impl LogsBackend for InMemoryLogsBackend {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SqliteLogsBackend {
+    db_path: PathBuf,
+    data_dir: String,
+}
+
+impl SqliteLogsBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+            data_dir: resolve_data_dir(),
+        }
+    }
+
+    pub fn new(db_path: PathBuf, data_dir: String) -> Self {
+        Self { db_path, data_dir }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
+}
+
+impl LogsBackend for SqliteLogsBackend {
+    fn data_dir(&self) -> &str {
+        &self.data_dir
+    }
+
+    fn repo_path(&self) -> Result<String, String> {
+        std::env::current_dir()
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(|err| format!("resolve current directory: {err}"))
+    }
+
+    fn list_loops(&self) -> Result<Vec<LoopRecord>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let db = self.open_db()?;
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let loops = match loop_repo.list() {
+            Ok(value) => value,
+            Err(err) if err.to_string().contains("no such table: loops") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+
+        Ok(loops
+            .into_iter()
+            .map(|entry| LoopRecord {
+                id: entry.id.clone(),
+                short_id: if entry.short_id.is_empty() {
+                    entry.id
+                } else {
+                    entry.short_id
+                },
+                name: entry.name,
+                repo: entry.repo_path,
+                log_path: entry
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.get("log_path"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            })
+            .collect())
+    }
+
+    fn read_log(&self, path: &str, lines: i32, since: &str) -> Result<String, String> {
+        let content = std::fs::read_to_string(path).map_err(|err| format!("open {path}: {err}"))?;
+        Ok(filter_log_content(&content, lines, since))
+    }
+
+    fn follow_log(&mut self, path: &str, lines: i32, stdout: &mut dyn Write) -> Result<(), String> {
+        let tail = self.read_log(path, lines, "")?;
+        if !tail.is_empty() {
+            writeln!(stdout, "{tail}").map_err(|err| err.to_string())?;
+        }
+        Ok(())
+    }
+}
+
 pub fn default_log_path(data_dir: &str, name: &str, id: &str) -> String {
     let slug = loop_slug(name);
     let file_stem = if slug.is_empty() { id } else { slug.as_str() };
     format!("{data_dir}/logs/loops/{file_stem}.log")
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    let mut path = PathBuf::from(resolve_data_dir());
+    path.push("forge.db");
+    path
+}
+
+fn resolve_data_dir() -> String {
+    if let Some(path) = std::env::var_os("FORGE_DATA_DIR") {
+        return PathBuf::from(path).to_string_lossy().into_owned();
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        return path.to_string_lossy().into_owned();
+    }
+    ".forge-data".to_string()
+}
+
+fn filter_log_content(content: &str, lines: i32, since: &str) -> String {
+    let limit = if lines <= 0 { 50 } else { lines as usize };
+    let since_marker = parse_since_marker(since);
+    let mut filtered = Vec::new();
+
+    for line in content.lines() {
+        if let Some(marker) = since_marker.as_deref() {
+            if let Some(ts) = parse_log_timestamp(line) {
+                if ts < marker {
+                    continue;
+                }
+            }
+        }
+        filtered.push(line.to_string());
+    }
+
+    if filtered.len() > limit {
+        filtered = filtered.split_off(filtered.len() - limit);
+    }
+    filtered.join("\n")
 }
 
 pub fn run_for_test(args: &[&str], backend: &mut dyn LogsBackend) -> CommandOutput {

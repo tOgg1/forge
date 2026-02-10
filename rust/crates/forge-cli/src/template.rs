@@ -1,7 +1,14 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::env;
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command as ProcessCommand;
 
+use crate::context::ContextBackend;
+use crate::context::FilesystemContextBackend;
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -152,6 +159,311 @@ impl TemplateBackend for InMemoryTemplateBackend {
         self.enqueue_result
             .clone()
             .ok_or_else(|| "enqueue not configured in test backend".to_string())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FilesystemTemplateBackend {
+    project_dir: PathBuf,
+    db_path: PathBuf,
+    context_backend: FilesystemContextBackend,
+}
+
+impl FilesystemTemplateBackend {
+    pub fn open_from_env() -> Self {
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let project_dir = discover_project_dir(&cwd);
+        let db_path = resolve_database_path();
+        let context_backend = FilesystemContextBackend::default();
+        Self {
+            project_dir,
+            db_path,
+            context_backend,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn for_paths(project_dir: PathBuf, db_path: PathBuf, context_path: PathBuf) -> Self {
+        let context_backend = FilesystemContextBackend::new(context_path, db_path.clone());
+        Self {
+            project_dir,
+            db_path,
+            context_backend,
+        }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
+
+    fn resolve_workspace_id(&self) -> Result<Option<String>, String> {
+        let context = self.context_backend.load_context()?;
+        if !context.workspace_id.is_empty() {
+            return Ok(Some(context.workspace_id));
+        }
+        if !self.db_path.exists() {
+            return Ok(None);
+        }
+
+        let db = self.open_db()?;
+        let repo = self.project_dir.to_string_lossy().to_string();
+        let workspace_id = db
+            .conn()
+            .query_row(
+                "SELECT id FROM workspaces WHERE repo_path = ?1 ORDER BY id LIMIT 1",
+                rusqlite::params![repo],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        Ok(workspace_id)
+    }
+
+    fn list_workspace_agents(&self) -> Result<Vec<String>, String> {
+        let Some(workspace_id) = self.resolve_workspace_id()? else {
+            return Ok(Vec::new());
+        };
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let mut stmt = match conn
+            .prepare("SELECT id FROM agents WHERE workspace_id = ?1 ORDER BY id")
+        {
+            Ok(value) => value,
+            Err(err) if err.to_string().contains("no such table: agents") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let rows = stmt
+            .query_map(rusqlite::params![workspace_id], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|err| err.to_string())?;
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|err| err.to_string())?);
+        }
+        Ok(items)
+    }
+
+    fn resolve_agent(&self, target: &str) -> Result<String, String> {
+        let trimmed = target.trim();
+        if trimmed.is_empty() {
+            return Err("agent ID required".to_string());
+        }
+        if !self.db_path.exists() {
+            return Err(format!("agent not found: {trimmed}"));
+        }
+
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let exact = conn
+            .query_row(
+                "SELECT id FROM agents WHERE id = ?1",
+                rusqlite::params![trimmed],
+                |row| row.get::<_, String>(0),
+            )
+            .optional();
+        let exact = match exact {
+            Ok(value) => value,
+            Err(err) if err.to_string().contains("no such table: agents") => {
+                return Err(format!("agent not found: {trimmed}"));
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+        if let Some(agent_id) = exact {
+            return Ok(agent_id);
+        }
+
+        let mut stmt =
+            match conn.prepare("SELECT id FROM agents WHERE id LIKE ?1 ORDER BY id LIMIT 2") {
+                Ok(value) => value,
+                Err(err) if err.to_string().contains("no such table: agents") => {
+                    return Err(format!("agent not found: {trimmed}"));
+                }
+                Err(err) => return Err(err.to_string()),
+            };
+        let like = format!("{trimmed}%");
+        let rows = stmt
+            .query_map(rusqlite::params![like], |row| row.get::<_, String>(0))
+            .map_err(|err| err.to_string())?;
+        let mut matches = Vec::new();
+        for row in rows {
+            matches.push(row.map_err(|err| err.to_string())?);
+        }
+        match matches.len() {
+            0 => Err(format!("agent not found: {trimmed}")),
+            1 => Ok(matches.remove(0)),
+            _ => Err(format!(
+                "agent '{trimmed}' is ambiguous; use a longer prefix or full ID"
+            )),
+        }
+    }
+
+    fn resolve_agent_for_template(&self, agent_flag: &str) -> Result<String, String> {
+        if !agent_flag.trim().is_empty() {
+            return self.resolve_agent(agent_flag);
+        }
+
+        let context = self.context_backend.load_context()?;
+        if !context.agent_id.is_empty() {
+            return self.resolve_agent(&context.agent_id);
+        }
+
+        let agents = self.list_workspace_agents()?;
+        if agents.len() == 1 {
+            return Ok(agents[0].clone());
+        }
+        if agents.is_empty() {
+            return Err(
+                "no agents in workspace; spawn one with 'forge up' or 'forge agent spawn'"
+                    .to_string(),
+            );
+        }
+        Err(
+            "agent required: pass --agent <id> or set context with 'forge use --agent <id>'"
+                .to_string(),
+        )
+    }
+
+    fn enqueue_message(&self, agent_id: &str, text: &str) -> Result<String, String> {
+        if !self.db_path.exists() {
+            return Err("database not found".to_string());
+        }
+
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let exists = conn
+            .query_row(
+                "SELECT 1 FROM agents WHERE id = ?1",
+                rusqlite::params![agent_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        if exists.is_none() {
+            return Err(format!("agent not found: {agent_id}"));
+        }
+
+        let position = conn
+            .query_row(
+                "SELECT COALESCE(MAX(position), 0) FROM queue_items WHERE agent_id = ?1",
+                rusqlite::params![agent_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|err| err.to_string())?
+            + 1;
+
+        let uuid = uuid::Uuid::new_v4().simple().to_string();
+        let item_id = format!("q-{}", &uuid[..8]);
+        let payload = serde_json::json!({ "text": text }).to_string();
+        conn.execute(
+            "INSERT INTO queue_items (
+                id, agent_id, type, position, status, attempts, payload_json, created_at
+            ) VALUES (
+                ?1, ?2, 'message', ?3, 'pending', 0, ?4, ?5
+            )",
+            rusqlite::params![
+                item_id,
+                agent_id,
+                position,
+                payload,
+                chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            ],
+        )
+        .map_err(|err| err.to_string())?;
+
+        Ok(item_id)
+    }
+}
+
+impl TemplateBackend for FilesystemTemplateBackend {
+    fn load_templates(&self) -> Result<Vec<Template>, String> {
+        let user_dir = self.user_template_dir()?;
+        let project_dir = self.project_template_dir()?.unwrap_or_default();
+        let search_paths = template_search_paths(&project_dir, &user_dir);
+
+        let mut seen = HashSet::new();
+        let mut items = Vec::new();
+
+        for dir in &search_paths {
+            for tmpl in load_templates_from_dir(dir)? {
+                if seen.insert(tmpl.name.clone()) {
+                    items.push(tmpl);
+                }
+            }
+        }
+
+        for builtin in load_builtin_templates()? {
+            if seen.insert(builtin.name.clone()) {
+                items.push(builtin);
+            }
+        }
+
+        Ok(items)
+    }
+
+    fn user_template_dir(&self) -> Result<PathBuf, String> {
+        if let Some(home) = env::var_os("HOME") {
+            let mut path = PathBuf::from(home);
+            path.push(".config");
+            path.push("forge");
+            path.push("templates");
+            return Ok(path);
+        }
+        Ok(PathBuf::from(".config/forge/templates"))
+    }
+
+    fn project_template_dir(&self) -> Result<Option<PathBuf>, String> {
+        Ok(Some(self.project_dir.join(".forge").join("templates")))
+    }
+
+    fn file_exists(&self, path: &Path) -> bool {
+        path.exists()
+    }
+
+    fn create_dir_all(&self, path: &Path) -> Result<(), String> {
+        fs::create_dir_all(path).map_err(|err| err.to_string())
+    }
+
+    fn write_file(&self, path: &Path, contents: &str) -> Result<(), String> {
+        fs::write(path, contents).map_err(|err| err.to_string())
+    }
+
+    fn remove_file(&self, path: &Path) -> Result<(), String> {
+        fs::remove_file(path).map_err(|err| err.to_string())
+    }
+
+    fn open_editor(&self, path: &Path) -> Result<(), String> {
+        let editor = env::var("EDITOR")
+            .or_else(|_| env::var("VISUAL"))
+            .map_err(|_| "EDITOR is not set (set $EDITOR or use --file/--stdin)".to_string())?;
+        let mut parts = editor.split_whitespace();
+        let binary = parts.next().ok_or_else(|| "EDITOR is empty".to_string())?;
+        let status = ProcessCommand::new(binary)
+            .args(parts)
+            .arg(path)
+            .status()
+            .map_err(|err| format!("failed to run editor {binary:?}: {err}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("failed to run editor {binary:?}: exit {status}"))
+        }
+    }
+
+    fn enqueue_template(
+        &self,
+        message: &str,
+        agent_flag: &str,
+    ) -> Result<(String, String), String> {
+        let agent_id = self.resolve_agent_for_template(agent_flag)?;
+        let item_id = self.enqueue_message(&agent_id, message)?;
+        Ok((agent_id, item_id))
     }
 }
 
@@ -768,6 +1080,145 @@ fn split_comma_list(value: &str) -> Vec<&str> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+fn discover_project_dir(cwd: &Path) -> PathBuf {
+    for ancestor in cwd.ancestors() {
+        if ancestor.join(".git").exists() {
+            return ancestor.to_path_buf();
+        }
+    }
+    cwd.to_path_buf()
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
+fn template_search_paths(project_dir: &Path, user_dir: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if !project_dir.as_os_str().is_empty() {
+        paths.push(project_dir.to_path_buf());
+    }
+    if !user_dir.as_os_str().is_empty() {
+        paths.push(user_dir.to_path_buf());
+    }
+    paths.push(PathBuf::from("/usr/share/forge/templates"));
+    paths
+}
+
+fn load_templates_from_dir(dir: &Path) -> Result<Vec<Template>, String> {
+    if dir.as_os_str().is_empty() {
+        return Ok(Vec::new());
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(value) => value,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(format!("read templates dir {}: {err}", dir.display())),
+    };
+
+    let mut templates = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read templates dir {}: {err}", dir.display()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|err| format!("read templates dir {}: {err}", dir.display()))?;
+        if file_type.is_dir() {
+            continue;
+        }
+
+        let path = entry.path();
+        let ext = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        if !ext.eq_ignore_ascii_case("yaml") && !ext.eq_ignore_ascii_case("yml") {
+            continue;
+        }
+        templates.push(load_template_from_path(&path)?);
+    }
+
+    templates.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(templates)
+}
+
+fn load_template_from_path(path: &Path) -> Result<Template, String> {
+    let source = path.to_string_lossy().to_string();
+    let data = fs::read_to_string(path)
+        .map_err(|err| format!("read template {}: {err}", path.display()))?;
+    parse_template_yaml(&data, &source)
+}
+
+fn parse_template_yaml(data: &str, source: &str) -> Result<Template, String> {
+    let mut tmpl: Template =
+        serde_yaml::from_str(data).map_err(|err| format!("parse template {source}: {err}"))?;
+    tmpl.name = tmpl.name.trim().to_string();
+    if tmpl.name.is_empty() {
+        return Err("template name is required".to_string());
+    }
+    if tmpl.message.trim().is_empty() {
+        return Err("template message is required".to_string());
+    }
+
+    let mut seen = HashSet::new();
+    for variable in &mut tmpl.variables {
+        variable.name = variable.name.trim().to_string();
+        if variable.name.is_empty() {
+            return Err("template variable name is required".to_string());
+        }
+        if !seen.insert(variable.name.clone()) {
+            return Err(format!("duplicate template variable {:?}", variable.name));
+        }
+    }
+
+    tmpl.source = source.to_string();
+    Ok(tmpl)
+}
+
+fn load_builtin_templates() -> Result<Vec<Template>, String> {
+    let builtins = [
+        (
+            "commit",
+            include_str!("../../../../internal/templates/builtin/commit.yaml"),
+        ),
+        (
+            "continue",
+            include_str!("../../../../internal/templates/builtin/continue.yaml"),
+        ),
+        (
+            "explain",
+            include_str!("../../../../internal/templates/builtin/explain.yaml"),
+        ),
+        (
+            "review",
+            include_str!("../../../../internal/templates/builtin/review.yaml"),
+        ),
+        (
+            "test",
+            include_str!("../../../../internal/templates/builtin/test.yaml"),
+        ),
+    ];
+
+    let mut templates = Vec::new();
+    for (_, body) in builtins {
+        templates.push(parse_template_yaml(body, "builtin")?);
+    }
+    templates.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(templates)
 }
 
 fn render_template(tmpl: &Template, vars: &HashMap<String, String>) -> Result<String, String> {

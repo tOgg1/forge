@@ -1,0 +1,5 @@
+{
+  "template": "deploy",
+  "agent_id": "agent_oracle",
+  "item_id": "item-001"
+}
