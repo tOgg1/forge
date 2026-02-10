@@ -107,7 +107,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             init::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("audit") => {
-            let backend = audit::InMemoryAuditBackend::default();
+            let backend = audit::SqliteAuditBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             audit::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
@@ -117,7 +117,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             kill::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("lock") => {
-            let backend = lock::InMemoryLockBackend::default();
+            let backend = lock::FilesystemLockBackend::default();
             let forwarded = forward_args(remaining, &flags);
             lock::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
@@ -153,7 +153,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             config::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("doctor") => {
-            let backend = doctor::InMemoryDoctorBackend::default();
+            let backend = doctor::FilesystemDoctorBackend::default();
             let forwarded = forward_args(remaining, &flags);
             doctor::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
@@ -178,7 +178,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             migrate::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("work") => {
-            let mut backend = work::InMemoryWorkBackend::default();
+            let mut backend = work::SqliteWorkBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             work::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -193,12 +193,12 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             queue::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("mail") => {
-            let backend = mail::InMemoryMailBackend::default();
+            let backend = mail::FilesystemMailBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             mail::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("mem") => {
-            let mut backend = mem::InMemoryMemBackend::default();
+            let mut backend = mem::SqliteMemBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             mem::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -218,7 +218,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             profile::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("resume") => {
-            let mut backend = resume::InMemoryResumeBackend::default();
+            let mut backend = resume::SqliteResumeBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             resume::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -233,7 +233,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             run::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("scale") => {
-            let mut backend = scale::InMemoryScaleBackend::default();
+            let mut backend = scale::SqliteScaleBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             scale::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
@@ -287,7 +287,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             wait::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("workflow") | Some("wf") => {
-            let backend = workflow::InMemoryWorkflowBackend::default();
+            let backend = workflow::FilesystemWorkflowBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             workflow::run_with_backend(&forwarded, &backend, stdout, stderr)
         }

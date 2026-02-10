@@ -1,7 +1,11 @@
 use std::cell::RefCell;
-use std::io::Write;
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::{Read, Write};
+use std::path::PathBuf;
 
-use serde::Serialize;
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -287,6 +291,426 @@ impl MailBackend for InMemoryMailBackend {
             return result.clone();
         }
         Err("stdin was empty (pipe a message or use --file/--body)".to_string())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FilesystemMailBackend {
+    root_override: Option<PathBuf>,
+}
+
+impl FilesystemMailBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            root_override: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn for_root(root: PathBuf) -> Self {
+        Self {
+            root_override: Some(root),
+        }
+    }
+
+    fn project_root(&self) -> Result<PathBuf, String> {
+        if let Some(root) = &self.root_override {
+            return Ok(root.clone());
+        }
+        fmail_core::root::discover_project_root(None)
+    }
+
+    fn store(&self) -> Result<fmail_core::store::Store, String> {
+        let root = self.project_root()?;
+        fmail_core::store::Store::new(&root)
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct MailIndex {
+    next_id: i64,
+    ids: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct MailStatusEntry {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    read_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    acked_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct MailStatusState {
+    entries: BTreeMap<String, MailStatusEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct MailEnvelope {
+    #[serde(default)]
+    subject: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    priority: String,
+    #[serde(default)]
+    ack_required: bool,
+    #[serde(default)]
+    thread_id: String,
+}
+
+fn index_path(store: &fmail_core::store::Store) -> PathBuf {
+    store.root().join("forge-mail-index.json")
+}
+
+fn status_path(store: &fmail_core::store::Store, agent: &str) -> Result<PathBuf, String> {
+    let normalized = fmail_core::validate::normalize_agent_name(agent)?;
+    Ok(store
+        .root()
+        .join("forge-mail-status")
+        .join(format!("{normalized}.json")))
+}
+
+fn load_index(store: &fmail_core::store::Store) -> Result<MailIndex, String> {
+    let path = index_path(store);
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Ok(MailIndex::default());
+    };
+    serde_json::from_str::<MailIndex>(&raw).map_err(|err| format!("parse mail index: {err}"))
+}
+
+fn save_index(store: &fmail_core::store::Store, index: &MailIndex) -> Result<(), String> {
+    let path = index_path(store);
+    let data =
+        serde_json::to_string_pretty(index).map_err(|err| format!("encode mail index: {err}"))?;
+    fs::write(&path, data).map_err(|err| format!("write mail index {}: {err}", path.display()))
+}
+
+fn load_statuses(store: &fmail_core::store::Store, agent: &str) -> Result<MailStatusState, String> {
+    let path = status_path(store, agent)?;
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Ok(MailStatusState::default());
+    };
+    serde_json::from_str::<MailStatusState>(&raw).map_err(|err| format!("parse mail status: {err}"))
+}
+
+fn save_statuses(
+    store: &fmail_core::store::Store,
+    agent: &str,
+    statuses: &MailStatusState,
+) -> Result<(), String> {
+    let path = status_path(store, agent)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("create status dir {}: {err}", parent.display()))?;
+    }
+    let data = serde_json::to_string_pretty(statuses)
+        .map_err(|err| format!("encode mail statuses: {err}"))?;
+    fs::write(&path, data).map_err(|err| format!("write mail status {}: {err}", path.display()))
+}
+
+fn local_id_for_message(index: &mut MailIndex, message_id: &str) -> i64 {
+    if let Some(existing) = index.ids.get(message_id) {
+        return *existing;
+    }
+    index.next_id = index.next_id.saturating_add(1).max(1);
+    let assigned = index.next_id;
+    index.ids.insert(message_id.to_string(), assigned);
+    assigned
+}
+
+fn parse_since_cutoff(raw: Option<&str>) -> Result<Option<DateTime<Utc>>, String> {
+    let Some(value) = raw else {
+        return Ok(None);
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.eq_ignore_ascii_case("now") {
+        return Ok(Some(Utc::now()));
+    }
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(trimmed) {
+        return Ok(Some(parsed.with_timezone(&Utc)));
+    }
+    if let Some(amount) = trimmed.strip_suffix('s') {
+        let seconds: i64 = amount
+            .parse()
+            .map_err(|_| format!("invalid --since value: {trimmed}"))?;
+        return Ok(Some(Utc::now() - Duration::seconds(seconds.max(0))));
+    }
+    if let Some(amount) = trimmed.strip_suffix('m') {
+        let minutes: i64 = amount
+            .parse()
+            .map_err(|_| format!("invalid --since value: {trimmed}"))?;
+        return Ok(Some(Utc::now() - Duration::minutes(minutes.max(0))));
+    }
+    if let Some(amount) = trimmed.strip_suffix('h') {
+        let hours: i64 = amount
+            .parse()
+            .map_err(|_| format!("invalid --since value: {trimmed}"))?;
+        return Ok(Some(Utc::now() - Duration::hours(hours.max(0))));
+    }
+    if let Some(amount) = trimmed.strip_suffix('d') {
+        let days: i64 = amount
+            .parse()
+            .map_err(|_| format!("invalid --since value: {trimmed}"))?;
+        return Ok(Some(Utc::now() - Duration::days(days.max(0))));
+    }
+    Err(format!("invalid --since value: {trimmed}"))
+}
+
+fn decode_envelope(message: &fmail_core::message::Message) -> MailEnvelope {
+    match &message.body {
+        serde_json::Value::Object(_) => {
+            serde_json::from_value::<MailEnvelope>(message.body.clone()).unwrap_or_else(|_| {
+                MailEnvelope {
+                    subject: "(no subject)".to_string(),
+                    body: message.body.to_string(),
+                    ..MailEnvelope::default()
+                }
+            })
+        }
+        serde_json::Value::String(text) => MailEnvelope {
+            subject: "(no subject)".to_string(),
+            body: text.clone(),
+            ..MailEnvelope::default()
+        },
+        other => MailEnvelope {
+            subject: "(no subject)".to_string(),
+            body: other.to_string(),
+            ..MailEnvelope::default()
+        },
+    }
+}
+
+fn to_mail_message(
+    message: &fmail_core::message::Message,
+    local_id: i64,
+    status: Option<&MailStatusEntry>,
+) -> MailMessage {
+    let envelope = decode_envelope(message);
+    MailMessage {
+        id: local_id,
+        thread_id: if !envelope.thread_id.trim().is_empty() {
+            Some(envelope.thread_id)
+        } else if !message.reply_to.trim().is_empty() {
+            Some(message.reply_to.clone())
+        } else {
+            None
+        },
+        from: message.from.clone(),
+        subject: if envelope.subject.trim().is_empty() {
+            "(no subject)".to_string()
+        } else {
+            envelope.subject
+        },
+        body: if envelope.body.is_empty() {
+            None
+        } else {
+            Some(envelope.body)
+        },
+        created_at: message.time.to_rfc3339(),
+        importance: if envelope.priority.trim().is_empty() {
+            None
+        } else {
+            Some(envelope.priority)
+        },
+        ack_required: envelope.ack_required,
+        read_at: status.and_then(|entry| entry.read_at.clone()),
+        acked_at: status.and_then(|entry| entry.acked_at.clone()),
+        backend: Some("local".to_string()),
+    }
+}
+
+impl MailBackend for FilesystemMailBackend {
+    fn send_message(&self, req: &MailSendRequest) -> Result<Vec<i64>, String> {
+        let store = self.store()?;
+        store.ensure_root()?;
+        let now = Utc::now();
+        let mut index = load_index(&store)?;
+        let mut ids = Vec::new();
+
+        for recipient in &req.to {
+            let body = MailEnvelope {
+                subject: req.subject.clone(),
+                body: req.body.clone(),
+                priority: req.priority.clone(),
+                ack_required: req.ack_required,
+                thread_id: String::new(),
+            };
+            let mut message = fmail_core::message::Message {
+                id: String::new(),
+                from: req.from.clone(),
+                to: format!("@{}", recipient.trim()),
+                time: now,
+                body: serde_json::to_value(body).map_err(|err| format!("encode message: {err}"))?,
+                reply_to: String::new(),
+                priority: String::new(),
+                host: String::new(),
+                tags: Vec::new(),
+            };
+            let saved_id = store
+                .save_message(&mut message, now)
+                .map_err(|err| format!("save message: {err}"))?;
+            let local_id = local_id_for_message(&mut index, &saved_id);
+            ids.push(local_id);
+        }
+
+        save_index(&store, &index)?;
+        Ok(ids)
+    }
+
+    fn fetch_inbox(&self, req: &MailInboxRequest) -> Result<Vec<MailMessage>, String> {
+        let store = self.store()?;
+        let cutoff = parse_since_cutoff(req.since.as_deref())?;
+        let mut index = load_index(&store)?;
+        let statuses = load_statuses(&store, &req.agent)?;
+        let mut dirty_index = false;
+
+        let normalized_agent = fmail_core::validate::normalize_agent_name(&req.agent)?;
+        let mut messages = Vec::new();
+        let paths = store
+            .list_dm_message_files(&normalized_agent)
+            .map_err(|err| format!("list inbox: {err}"))?;
+
+        for path in paths {
+            let message = store
+                .read_message(&path)
+                .map_err(|err| format!("read message {}: {err}", path.display()))?;
+            let local_id = if let Some(existing) = index.ids.get(&message.id) {
+                *existing
+            } else {
+                dirty_index = true;
+                local_id_for_message(&mut index, &message.id)
+            };
+
+            if let Some(since) = cutoff {
+                if message.time < since {
+                    continue;
+                }
+            }
+
+            let status = statuses.entries.get(&local_id.to_string());
+            let mail_message = to_mail_message(&message, local_id, status);
+            if req.unread_only && mail_message.read_at.is_some() {
+                continue;
+            }
+            messages.push(mail_message);
+        }
+
+        messages.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        if req.limit > 0 && messages.len() > req.limit as usize {
+            messages.truncate(req.limit as usize);
+        }
+
+        if dirty_index {
+            save_index(&store, &index)?;
+        }
+        Ok(messages)
+    }
+
+    fn get_message(
+        &self,
+        _project: &str,
+        agent: &str,
+        message_id: i64,
+    ) -> Result<MailMessage, String> {
+        let inbox = self.fetch_inbox(&MailInboxRequest {
+            project: String::new(),
+            agent: agent.to_string(),
+            limit: i32::MAX,
+            since: None,
+            unread_only: false,
+        })?;
+        inbox
+            .into_iter()
+            .find(|message| message.id == message_id)
+            .ok_or_else(|| format!("message m-{message_id} not found"))
+    }
+
+    fn mark_read(&self, _project: &str, agent: &str, message_id: i64) -> Result<String, String> {
+        let store = self.store()?;
+        let mut statuses = load_statuses(&store, agent)?;
+        let now = Utc::now().to_rfc3339();
+        let entry = statuses
+            .entries
+            .entry(message_id.to_string())
+            .or_insert_with(MailStatusEntry::default);
+        entry.read_at = Some(now.clone());
+        save_statuses(&store, agent, &statuses)?;
+        Ok(now)
+    }
+
+    fn acknowledge(&self, _project: &str, agent: &str, message_id: i64) -> Result<String, String> {
+        let store = self.store()?;
+        let mut statuses = load_statuses(&store, agent)?;
+        let now = Utc::now().to_rfc3339();
+        let entry = statuses
+            .entries
+            .entry(message_id.to_string())
+            .or_insert_with(MailStatusEntry::default);
+        entry.acked_at = Some(now.clone());
+        save_statuses(&store, agent, &statuses)?;
+        Ok(now)
+    }
+
+    fn resolve_project(&self) -> Result<String, String> {
+        if let Ok(project) = std::env::var("FORGE_AGENT_MAIL_PROJECT") {
+            let trimmed = project.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(trimmed);
+            }
+        }
+        if let Ok(project) = std::env::var(fmail_core::constants::ENV_PROJECT) {
+            let trimmed = project.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(trimmed);
+            }
+        }
+        let root = self.project_root()?;
+        Ok(root.to_string_lossy().to_string())
+    }
+
+    fn resolve_agent(&self) -> Result<Option<String>, String> {
+        if let Ok(agent) = std::env::var("FORGE_AGENT_MAIL_AGENT") {
+            let trimmed = agent.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed));
+            }
+        }
+        if let Ok(agent) = std::env::var(fmail_core::constants::ENV_AGENT) {
+            let trimmed = agent.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed));
+            }
+        }
+        Ok(None)
+    }
+
+    fn backend_kind(&self) -> &str {
+        "local"
+    }
+
+    fn read_body_file(&self, path: &str) -> Result<String, String> {
+        fs::read_to_string(path)
+            .map_err(|err| format!("failed to read message file \"{path}\": {err}"))
+    }
+
+    fn read_body_stdin(&self) -> Result<String, String> {
+        let mut input = String::new();
+        std::io::stdin()
+            .read_to_string(&mut input)
+            .map_err(|err| format!("failed to read stdin: {err}"))?;
+        if input.trim().is_empty() {
+            return Err("stdin was empty (pipe a message or use --file/--body)".to_string());
+        }
+        Ok(input)
     }
 }
 
@@ -1164,6 +1588,9 @@ fn write_help(stdout: &mut dyn Write) -> std::io::Result<()> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn default_backend() -> InMemoryMailBackend {
         InMemoryMailBackend::default()
@@ -1207,6 +1634,19 @@ mod tests {
     fn assert_success(out: &CommandOutput) {
         assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
         assert!(out.stderr.is_empty(), "unexpected stderr: {}", out.stderr);
+    }
+
+    fn temp_project_root(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(d) => d.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-mail-{tag}-{nanos}-{}-{suffix}",
+            std::process::id(),
+        ))
     }
 
     // --- Help ---
@@ -1640,6 +2080,108 @@ mod tests {
         let out = run(&["mail", "ack", "m-1", "--agent", "test-agent"], &backend);
         assert_success(&out);
         assert!(out.stdout.contains("Acknowledged message m-1"));
+    }
+
+    #[test]
+    fn filesystem_backend_round_trip_send_inbox_read_ack() {
+        let root = temp_project_root("filesystem");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let backend = FilesystemMailBackend::for_root(root.clone());
+        let send = run(
+            &[
+                "mail",
+                "send",
+                "--project",
+                "proj-mail",
+                "--from",
+                "sender-a",
+                "--to",
+                "agent-x",
+                "--subject",
+                "handoff",
+                "--body",
+                "please review",
+                "--priority",
+                "high",
+                "--ack-required",
+                "--json",
+            ],
+            &backend,
+        );
+        assert_success(&send);
+
+        let inbox = run(
+            &[
+                "mail",
+                "inbox",
+                "--project",
+                "proj-mail",
+                "--agent",
+                "agent-x",
+                "--json",
+            ],
+            &backend,
+        );
+        assert_success(&inbox);
+        let inbox_json: serde_json::Value = serde_json::from_str(&inbox.stdout).unwrap();
+        let id = inbox_json[0]["id"].as_i64().unwrap();
+        assert_eq!(inbox_json[0]["subject"], "handoff");
+        assert_eq!(inbox_json[0]["ack_required"], true);
+        assert_eq!(inbox_json[0]["importance"], "high");
+
+        let read = run(
+            &[
+                "mail",
+                "read",
+                &format!("m-{id}"),
+                "--project",
+                "proj-mail",
+                "--agent",
+                "agent-x",
+                "--json",
+            ],
+            &backend,
+        );
+        assert_success(&read);
+        let read_json: serde_json::Value = serde_json::from_str(&read.stdout).unwrap();
+        assert!(read_json["read_at"].is_string());
+
+        let ack = run(
+            &[
+                "mail",
+                "ack",
+                &format!("m-{id}"),
+                "--project",
+                "proj-mail",
+                "--agent",
+                "agent-x",
+                "--json",
+            ],
+            &backend,
+        );
+        assert_success(&ack);
+        let ack_json: serde_json::Value = serde_json::from_str(&ack.stdout).unwrap();
+        assert_eq!(ack_json["acknowledged"], true);
+
+        let inbox_after_ack = run(
+            &[
+                "mail",
+                "inbox",
+                "--project",
+                "proj-mail",
+                "--agent",
+                "agent-x",
+                "--json",
+            ],
+            &backend,
+        );
+        assert_success(&inbox_after_ack);
+        let after_json: serde_json::Value = serde_json::from_str(&inbox_after_ack.stdout).unwrap();
+        assert!(after_json[0]["read_at"].is_string());
+        assert!(after_json[0]["acked_at"].is_string());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     // --- Parsing ---

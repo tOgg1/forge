@@ -1,6 +1,7 @@
 use std::io::Write;
+use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tabwriter::TabWriter;
 
 // ---------------------------------------------------------------------------
@@ -14,7 +15,7 @@ pub struct CommandOutput {
     pub exit_code: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileReservation {
     pub id: i64,
     pub agent: String,
@@ -209,6 +210,325 @@ impl LockBackend for InMemoryLockBackend {
     ) -> Result<Vec<FileReservation>, String> {
         Ok(self.reservations.clone())
     }
+}
+
+// ---------------------------------------------------------------------------
+// Filesystem backend (production)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct FilesystemLockBackend {
+    store_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct LockStore {
+    next_id: i64,
+    reservations: Vec<StoredReservation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredReservation {
+    project: String,
+    reservation: FileReservation,
+}
+
+impl Default for FilesystemLockBackend {
+    fn default() -> Self {
+        Self {
+            store_path: resolve_default_lock_store_path(),
+        }
+    }
+}
+
+impl FilesystemLockBackend {
+    pub fn new(store_path: PathBuf) -> Self {
+        Self { store_path }
+    }
+
+    fn now_ts() -> String {
+        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    }
+
+    fn load_store(&self) -> Result<LockStore, String> {
+        let raw = match std::fs::read_to_string(&self.store_path) {
+            Ok(value) => value,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(LockStore::default())
+            }
+            Err(err) => {
+                return Err(format!(
+                    "failed to read lock store {}: {err}",
+                    self.store_path.display()
+                ))
+            }
+        };
+        serde_json::from_str(&raw).map_err(|err| {
+            format!(
+                "failed to parse lock store {}: {err}",
+                self.store_path.display()
+            )
+        })
+    }
+
+    fn save_store(&self, store: &LockStore) -> Result<(), String> {
+        if let Some(parent) = self.store_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "failed to create lock store directory {}: {err}",
+                    parent.display()
+                )
+            })?;
+        }
+        let body = serde_json::to_string_pretty(store)
+            .map_err(|err| format!("failed to serialize lock store: {err}"))?;
+        std::fs::write(&self.store_path, body).map_err(|err| {
+            format!(
+                "failed to write lock store {}: {err}",
+                self.store_path.display()
+            )
+        })
+    }
+
+    fn cleanup_expired(store: &mut LockStore) {
+        let now = chrono::Utc::now();
+        for entry in &mut store.reservations {
+            if !entry.reservation.released_ts.trim().is_empty() {
+                continue;
+            }
+            if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&entry.reservation.expires_ts)
+            {
+                if parsed.with_timezone(&chrono::Utc) <= now {
+                    entry.reservation.released_ts =
+                        now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                }
+            }
+        }
+    }
+}
+
+impl LockBackend for FilesystemLockBackend {
+    fn resolve_project(&self) -> Result<String, String> {
+        if let Ok(value) = std::env::var("FORGE_AGENT_MAIL_PROJECT") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+        std::env::current_dir()
+            .map(|path| path.display().to_string())
+            .map_err(|_| {
+                "agent mail project not configured (set FORGE_AGENT_MAIL_PROJECT or run inside a git repo)"
+                    .to_string()
+            })
+    }
+
+    fn resolve_agent(&self, flag_value: &str) -> Result<String, String> {
+        let trimmed = flag_value.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+        if let Ok(value) = std::env::var("FORGE_AGENT_MAIL_AGENT") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+        Err("agent name is required (use --agent or set FORGE_AGENT_MAIL_AGENT)".to_string())
+    }
+
+    fn claim_locks(
+        &self,
+        project: &str,
+        agent: &str,
+        paths: &[String],
+        ttl_seconds: i64,
+        exclusive: bool,
+        reason: &str,
+    ) -> Result<LockClaimResponse, String> {
+        let mut store = self.load_store()?;
+        Self::cleanup_expired(&mut store);
+
+        let mut conflicts = Vec::new();
+        for requested_path in paths {
+            let holders: Vec<FileReservationHolder> = store
+                .reservations
+                .iter()
+                .filter(|entry| entry.project == project)
+                .filter(|entry| entry.reservation.released_ts.trim().is_empty())
+                .filter(|entry| {
+                    matches_path_pattern(requested_path, &entry.reservation.path_pattern)
+                        && (exclusive || entry.reservation.exclusive)
+                })
+                .map(|entry| FileReservationHolder {
+                    id: entry.reservation.id,
+                    agent: entry.reservation.agent.clone(),
+                    path_pattern: entry.reservation.path_pattern.clone(),
+                    exclusive: entry.reservation.exclusive,
+                    expires_ts: entry.reservation.expires_ts.clone(),
+                })
+                .collect();
+            if !holders.is_empty() {
+                conflicts.push(FileReservationConflict {
+                    path: requested_path.clone(),
+                    holders,
+                });
+            }
+        }
+
+        if !conflicts.is_empty() {
+            self.save_store(&store)?;
+            return Ok(LockClaimResponse {
+                granted: Vec::new(),
+                conflicts,
+            });
+        }
+
+        let now = chrono::Utc::now();
+        let expires = now + chrono::Duration::seconds(ttl_seconds);
+        let created_ts = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let expires_ts = expires.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+        let mut granted = Vec::with_capacity(paths.len());
+        for requested_path in paths {
+            store.next_id += 1;
+            let id = store.next_id;
+            let reservation = FileReservation {
+                id,
+                agent: agent.to_string(),
+                path_pattern: requested_path.clone(),
+                exclusive,
+                reason: reason.to_string(),
+                created_ts: created_ts.clone(),
+                expires_ts: expires_ts.clone(),
+                released_ts: String::new(),
+            };
+            store.reservations.push(StoredReservation {
+                project: project.to_string(),
+                reservation: reservation.clone(),
+            });
+            granted.push(FileReservationGrant {
+                id,
+                path_pattern: reservation.path_pattern,
+                exclusive,
+                reason: reservation.reason,
+                expires_ts: reservation.expires_ts,
+            });
+        }
+
+        self.save_store(&store)?;
+        Ok(LockClaimResponse {
+            granted,
+            conflicts: Vec::new(),
+        })
+    }
+
+    fn force_release(
+        &self,
+        project: &str,
+        _agent: &str,
+        lock_ids: &[i64],
+        reason: &str,
+    ) -> Result<(), String> {
+        let mut store = self.load_store()?;
+        let now = Self::now_ts();
+        for entry in &mut store.reservations {
+            if entry.project != project {
+                continue;
+            }
+            if lock_ids.contains(&entry.reservation.id)
+                && entry.reservation.released_ts.trim().is_empty()
+            {
+                entry.reservation.released_ts = now.clone();
+                if !reason.trim().is_empty() {
+                    entry.reservation.reason = reason.to_string();
+                }
+            }
+        }
+        self.save_store(&store)
+    }
+
+    fn release_locks(
+        &self,
+        project: &str,
+        agent: &str,
+        paths: &[String],
+        lock_ids: &[i64],
+    ) -> Result<LockReleaseResponse, String> {
+        let mut store = self.load_store()?;
+        let released_at = Self::now_ts();
+        let mut released = 0i64;
+
+        for entry in &mut store.reservations {
+            if entry.project != project {
+                continue;
+            }
+            if entry.reservation.agent != agent {
+                continue;
+            }
+            if !entry.reservation.released_ts.trim().is_empty() {
+                continue;
+            }
+
+            let by_id = !lock_ids.is_empty() && lock_ids.contains(&entry.reservation.id);
+            let by_path = !paths.is_empty()
+                && paths
+                    .iter()
+                    .any(|path| matches_path_pattern(path, &entry.reservation.path_pattern));
+            let release_all_for_agent = lock_ids.is_empty() && paths.is_empty();
+            if by_id || by_path || release_all_for_agent {
+                entry.reservation.released_ts = released_at.clone();
+                released += 1;
+            }
+        }
+
+        self.save_store(&store)?;
+        Ok(LockReleaseResponse {
+            released,
+            released_at,
+        })
+    }
+
+    fn list_reservations(
+        &self,
+        project: &str,
+        active_only: bool,
+    ) -> Result<Vec<FileReservation>, String> {
+        let mut store = self.load_store()?;
+        Self::cleanup_expired(&mut store);
+        self.save_store(&store)?;
+
+        let reservations = store
+            .reservations
+            .into_iter()
+            .filter(|entry| entry.project == project)
+            .filter(|entry| {
+                if !active_only {
+                    return true;
+                }
+                entry.reservation.released_ts.trim().is_empty()
+            })
+            .map(|entry| entry.reservation)
+            .collect();
+        Ok(reservations)
+    }
+}
+
+fn resolve_default_lock_store_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_LOCK_STORE_PATH") {
+        return PathBuf::from(path);
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("file-locks.json");
+        return path;
+    }
+
+    PathBuf::from("file-locks.json")
 }
 
 // ---------------------------------------------------------------------------
@@ -1156,6 +1476,71 @@ mod tests {
 
     fn test_backend() -> InMemoryLockBackend {
         InMemoryLockBackend::with_project_and_agent("test-project", "test-agent")
+    }
+
+    fn fs_backend(name: &str) -> FilesystemLockBackend {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("forge-lock-test-{name}-{nanos}.json"));
+        FilesystemLockBackend::new(path)
+    }
+
+    #[test]
+    fn filesystem_backend_claim_release_round_trip() {
+        let backend = fs_backend("roundtrip");
+        let claim = backend
+            .claim_locks(
+                "proj",
+                "agent-a",
+                &["src/main.rs".to_string()],
+                300,
+                true,
+                "edit",
+            )
+            .unwrap_or_else(|err| panic!("claim should succeed: {err}"));
+        assert_eq!(claim.conflicts.len(), 0);
+        assert_eq!(claim.granted.len(), 1);
+
+        let active = backend
+            .list_reservations("proj", true)
+            .unwrap_or_else(|err| panic!("list reservations: {err}"));
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].path_pattern, "src/main.rs");
+
+        let released = backend
+            .release_locks("proj", "agent-a", &["src/main.rs".to_string()], &[])
+            .unwrap_or_else(|err| panic!("release should succeed: {err}"));
+        assert_eq!(released.released, 1);
+
+        let after = backend
+            .list_reservations("proj", true)
+            .unwrap_or_else(|err| panic!("list reservations: {err}"));
+        assert!(after.is_empty());
+    }
+
+    #[test]
+    fn filesystem_backend_reports_conflicts_for_overlapping_paths() {
+        let backend = fs_backend("conflicts");
+        backend
+            .claim_locks("proj", "agent-a", &["src/*.rs".to_string()], 300, true, "")
+            .unwrap_or_else(|err| panic!("initial claim should succeed: {err}"));
+
+        let second = backend
+            .claim_locks(
+                "proj",
+                "agent-b",
+                &["src/main.rs".to_string()],
+                300,
+                true,
+                "",
+            )
+            .unwrap_or_else(|err| panic!("second claim should return conflicts: {err}"));
+
+        assert_eq!(second.granted.len(), 0);
+        assert_eq!(second.conflicts.len(), 1);
+        assert_eq!(second.conflicts[0].holders[0].agent, "agent-a");
     }
 
     fn assert_success(out: &CommandOutput) {

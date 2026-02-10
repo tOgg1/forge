@@ -4,6 +4,9 @@ use std::io::Write;
 
 use serde::Serialize;
 
+mod sqlite_backend;
+pub use sqlite_backend::SqliteMemBackend;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LoopKVEntry {
     pub created_at: String,
@@ -540,9 +543,12 @@ fn write_help(stdout: &mut dyn Write) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::env;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Mutex, OnceLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{run_for_test, InMemoryMemBackend};
+    use super::{run_for_test, InMemoryMemBackend, SqliteMemBackend};
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -593,6 +599,137 @@ mod tests {
         assert_eq!(
             out.stderr,
             "loop required (pass --loop or set FORGE_LOOP_ID)\n"
+        );
+    }
+
+    fn temp_db_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-mem-{tag}-{nanos}-{}-{suffix}.sqlite",
+            std::process::id(),
+        ))
+    }
+
+    #[test]
+    fn mem_sqlite_backend_round_trip_set_get_ls_rm() {
+        let db_path = temp_db_path("round-trip");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "oracle-loop".to_string(),
+            repo_path: "/tmp/oracle".to_string(),
+            state: forge_db::loop_repository::LoopState::Stopped,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+
+        let mut backend = SqliteMemBackend::new(db_path.clone());
+
+        let set = run_for_test(
+            &[
+                "mem",
+                "--loop",
+                "oracle-loop",
+                "set",
+                "blocked_on",
+                "agent-b",
+                "--json",
+            ],
+            &mut backend,
+        );
+        assert_eq!(set.exit_code, 0, "stderr: {}", set.stderr);
+        assert!(set.stderr.is_empty());
+
+        let get = run_for_test(
+            &[
+                "mem",
+                "--loop",
+                "oracle-loop",
+                "get",
+                "blocked_on",
+                "--json",
+            ],
+            &mut backend,
+        );
+        assert_eq!(get.exit_code, 0, "stderr: {}", get.stderr);
+        assert!(get.stderr.is_empty());
+        let get_json: serde_json::Value =
+            serde_json::from_str(&get.stdout).unwrap_or_else(|err| panic!("parse get json: {err}"));
+        assert_eq!(
+            get_json.get("key").and_then(serde_json::Value::as_str),
+            Some("blocked_on")
+        );
+        assert_eq!(
+            get_json.get("value").and_then(serde_json::Value::as_str),
+            Some("agent-b")
+        );
+        assert_eq!(
+            get_json.get("loop_id").and_then(serde_json::Value::as_str),
+            Some(loop_entry.id.as_str())
+        );
+
+        let ls = run_for_test(
+            &["mem", "--loop", "oracle-loop", "ls", "--json"],
+            &mut backend,
+        );
+        assert_eq!(ls.exit_code, 0, "stderr: {}", ls.stderr);
+        assert!(ls.stderr.is_empty());
+        let list_json: serde_json::Value =
+            serde_json::from_str(&ls.stdout).unwrap_or_else(|err| panic!("parse ls json: {err}"));
+        let items = list_json
+            .as_array()
+            .unwrap_or_else(|| panic!("expected array from mem ls --json"));
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0].get("key").and_then(serde_json::Value::as_str),
+            Some("blocked_on")
+        );
+        assert_eq!(
+            items[0].get("value").and_then(serde_json::Value::as_str),
+            Some("agent-b")
+        );
+
+        let rm = run_for_test(
+            &["mem", "--loop", "oracle-loop", "rm", "blocked_on", "--json"],
+            &mut backend,
+        );
+        assert_eq!(rm.exit_code, 0, "stderr: {}", rm.stderr);
+        assert!(rm.stderr.is_empty());
+
+        let missing = run_for_test(
+            &["mem", "--loop", "oracle-loop", "get", "blocked_on"],
+            &mut backend,
+        );
+        assert_eq!(missing.exit_code, 1);
+        assert!(missing.stdout.is_empty());
+        assert_eq!(missing.stderr, "loop kv not found\n");
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn mem_sqlite_backend_missing_db_reports_loop_not_found() {
+        let db_path = temp_db_path("missing-db");
+        let _ = std::fs::remove_file(&db_path);
+        let mut backend = SqliteMemBackend::new(db_path);
+
+        let out = run_for_test(&["mem", "--loop", "oracle-loop", "ls"], &mut backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stdout.is_empty());
+        assert_eq!(
+            out.stderr,
+            "loop 'oracle-loop' not found (no loops registered yet)\n"
         );
     }
 }

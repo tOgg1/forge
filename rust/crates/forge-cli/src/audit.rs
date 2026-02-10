@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -150,6 +151,74 @@ impl AuditBackend for InMemoryAuditBackend {
         Ok(EventPage {
             events: filtered,
             next_cursor: String::new(),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SqliteAuditBackend {
+    db_path: PathBuf,
+}
+
+impl SqliteAuditBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+}
+
+impl AuditBackend for SqliteAuditBackend {
+    fn query_events(&self, query: &EventQuery) -> Result<EventPage, String> {
+        if !self.db_path.exists() {
+            return Ok(EventPage::default());
+        }
+
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+        let event_repo = forge_db::event_repository::EventRepository::new(&db);
+
+        let db_query = forge_db::event_repository::EventQuery {
+            event_type: query.event_type.clone(),
+            entity_type: query.entity_type.clone(),
+            entity_id: query.entity_id.clone(),
+            since: query.since.clone(),
+            until: query.until.clone(),
+            cursor: query.cursor.clone(),
+            limit: query.limit,
+        };
+
+        let page = match event_repo.query(db_query) {
+            Ok(page) => page,
+            Err(err) if err.to_string().contains("no such table: events") => {
+                return Ok(EventPage::default());
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let events = page
+            .events
+            .into_iter()
+            .map(|event| AuditEvent {
+                id: event.id,
+                timestamp: event.timestamp,
+                event_type: event.event_type,
+                entity_type: event.entity_type,
+                entity_id: event.entity_id,
+                payload: event.payload,
+                metadata: event
+                    .metadata
+                    .map(|metadata| metadata.into_iter().collect::<BTreeMap<String, String>>()),
+            })
+            .collect();
+
+        Ok(EventPage {
+            events,
+            next_cursor: page.next_cursor,
         })
     }
 }
@@ -722,6 +791,24 @@ fn now_epoch_seconds() -> i64 {
     }
 }
 
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
 const HELP_TEXT: &str = "View the Forge audit log
 
 Usage:
@@ -748,8 +835,11 @@ Flags:
 mod tests {
     use super::{
         parse_event_types, parse_since, run_for_test, AuditEvent, CommandOutput,
-        InMemoryAuditBackend,
+        InMemoryAuditBackend, SqliteAuditBackend,
     };
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn parse_event_types_rejects_empty_filter() {
@@ -810,6 +900,83 @@ mod tests {
         assert_success(&out);
         assert!(out.stdout.contains("\"type\":\"agent.state_changed\""));
         assert!(out.stdout.ends_with('\n'));
+    }
+
+    fn temp_db_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(d) => d.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-audit-{tag}-{nanos}-{}-{suffix}.sqlite",
+            std::process::id(),
+        ))
+    }
+
+    #[test]
+    fn audit_sqlite_backend_queries_events_with_filters() {
+        let db_path = temp_db_path("sqlite-filter");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let repo = forge_db::event_repository::EventRepository::new(&db);
+        let mut matching = forge_db::event_repository::Event {
+            id: "evt-match".to_string(),
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "agent.state_changed".to_string(),
+            entity_type: "agent".to_string(),
+            entity_id: "agent-1".to_string(),
+            payload: r#"{"state":"running"}"#.to_string(),
+            metadata: None,
+        };
+        repo.create(&mut matching)
+            .unwrap_or_else(|err| panic!("create matching event: {err}"));
+        let mut non_matching = forge_db::event_repository::Event {
+            id: "evt-other".to_string(),
+            timestamp: "2026-01-01T00:00:10Z".to_string(),
+            event_type: "message.dispatched".to_string(),
+            entity_type: "queue".to_string(),
+            entity_id: "queue-1".to_string(),
+            payload: "{}".to_string(),
+            metadata: None,
+        };
+        repo.create(&mut non_matching)
+            .unwrap_or_else(|err| panic!("create non-matching event: {err}"));
+
+        let backend = SqliteAuditBackend::new(db_path.clone());
+        let out = run_for_test(
+            &[
+                "audit",
+                "--json",
+                "--type",
+                "agent.state_changed",
+                "--entity-type",
+                "agent",
+            ],
+            &backend,
+        );
+        assert_success(&out);
+        assert!(out.stdout.contains("\"id\": \"evt-match\""));
+        assert!(!out.stdout.contains("\"id\": \"evt-other\""));
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn audit_sqlite_backend_missing_db_reports_no_matches() {
+        let db_path = temp_db_path("sqlite-missing");
+        let _ = std::fs::remove_file(&db_path);
+
+        let backend = SqliteAuditBackend::new(db_path);
+        let out = run_for_test(&["audit"], &backend);
+        assert_success(&out);
+        assert!(out
+            .stdout
+            .contains("No events matched the current filters."));
     }
 
     fn assert_success(out: &CommandOutput) {

@@ -5,6 +5,10 @@
 - `forge-cli ps` now uses SQLite (`forge_db`) instead of in-memory stubs.
 - `forge-cli status` now uses SQLite (`forge_db`) instead of in-memory stubs.
 - `forge-cli msg` now uses SQLite (`forge_db`) instead of in-memory stubs.
+- `forge-cli audit` now uses SQLite (`forge_db`) instead of in-memory stubs.
+- `forge-cli mail` now uses a filesystem-backed `fmail-core` bridge instead of in-memory stubs.
+- `forge-cli mem` now uses SQLite (`forge_db`) instead of in-memory stubs.
+- `forge-cli workflow` now uses filesystem-backed workflow definitions from `.forge/workflows` instead of in-memory stubs.
 - `forge-cli ps` now reads:
   - loop rows from `loops`,
   - run counts from `loop_runs`,
@@ -19,6 +23,22 @@
   - selects loops from `loops`,
   - supports repo/pool/profile/state/tag selectors against persisted rows,
   - enqueues queue items into `loop_queue_items`.
+- `forge-cli audit` now:
+  - reads event rows from `events`,
+  - applies persisted cursor/since/until/entity/event-type filters,
+  - preserves table/json/jsonl output behavior from command parser.
+- `forge-cli mail` now:
+  - sends messages via `fmail_core::store::Store::save_message`,
+  - reads inbox/read views from DM files under `.fmail`,
+  - persists read/ack status in local metadata files under `.fmail`.
+- `forge-cli mem` now:
+  - resolves loop references from `loops`,
+  - persists loop memory via `loop_kv`,
+  - supports set/get/ls/rm against real DB rows.
+- `forge-cli workflow` now:
+  - lists workflow TOML files from `<repo>/.forge/workflows`,
+  - resolves `show` / `validate` by workflow name against real files,
+  - preserves validation diagnostics and JSON/human output behavior.
 - `forge-cli inject` now uses SQLite + live tmux transport:
   - resolves agent from `agents` (ID/prefix + context fallback),
   - reads context from `~/.config/forge/context.yaml`,
@@ -44,6 +64,12 @@
 - `cargo test -p forge-cli ps::`
 - `cargo test -p forge-cli status::`
 - `cargo test -p forge-cli msg::`
+- `cargo test -p forge-cli audit::`
+- `cargo test -p forge-cli mail::`
+- `cargo test -p forge-cli mem::tests::`
+- `cargo test -p forge-cli --test mem_command_test`
+- `cargo test -p forge-cli --test workflow_filesystem_backend_test`
+- `cargo test -p forge-cli --test workflow_command_test`
 - `cargo test -p forge-cli inject::`
 - `cargo test -p forge-cli explain::`
 - `cargo test -p forge-cli send::`
@@ -60,7 +86,7 @@
 
 ## Still not complete parity
 
-- Many `forge-cli` commands still route through in-memory backends (`run`, `scale`, `queue`, `mail`, `mem`, `workflow`, etc.).
+- Many `forge-cli` commands still route through in-memory backends (`run`, `scale`, `queue`, etc.).
 - `forge-tui` / `fmail-tui` are now live-data shells, but not feature-complete interactive parity with Go TUI yet.
 
 ## Immediate next wiring target

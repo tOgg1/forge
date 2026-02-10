@@ -1,4 +1,7 @@
+use std::ffi::OsString;
 use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::Serialize;
 use tabwriter::TabWriter;
@@ -99,6 +102,346 @@ impl DoctorBackend for InMemoryDoctorBackend {
             self.timestamp.clone()
         }
     }
+}
+
+/// Filesystem backend for real environment diagnostics.
+#[derive(Debug, Clone)]
+pub struct FilesystemDoctorBackend {
+    home_dir: Option<PathBuf>,
+    path: Option<OsString>,
+}
+
+impl Default for FilesystemDoctorBackend {
+    fn default() -> Self {
+        Self {
+            home_dir: std::env::var_os("HOME").map(PathBuf::from),
+            path: std::env::var_os("PATH"),
+        }
+    }
+}
+
+impl FilesystemDoctorBackend {
+    pub fn new(home_dir: Option<PathBuf>, path: Option<OsString>) -> Self {
+        Self { home_dir, path }
+    }
+
+    fn run_command(&self, binary: &str, args: &[&str]) -> Result<String, String> {
+        let mut cmd = Command::new(binary);
+        cmd.args(args);
+        if let Some(path) = &self.path {
+            cmd.env("PATH", path);
+        }
+
+        let output = cmd
+            .output()
+            .map_err(|err| format!("command failed: {err}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let combined = if stdout.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if stderr.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            format!("{}\n{}", stdout.trim(), stderr.trim())
+        };
+
+        if output.status.success() {
+            Ok(combined)
+        } else if combined.is_empty() {
+            Err(format!("command exited with {}", output.status))
+        } else {
+            Err(combined)
+        }
+    }
+
+    fn binary_exists(&self, name: &str) -> bool {
+        let Some(path) = &self.path else {
+            return std::env::var_os("PATH")
+                .as_ref()
+                .is_some_and(|value| lookup_path(value, name));
+        };
+        lookup_path(path, name)
+    }
+
+    fn dependency_checks(&self) -> Vec<DoctorCheck> {
+        vec![
+            self.check_tmux(),
+            self.check_opencode(),
+            self.check_git(),
+            self.check_ssh(),
+        ]
+    }
+
+    fn check_tmux(&self) -> DoctorCheck {
+        let mut check = DoctorCheck {
+            category: "dependencies".to_string(),
+            name: "tmux".to_string(),
+            status: CheckStatus::Warn,
+            details: None,
+            error: None,
+        };
+
+        match self.run_command("tmux", &["-V"]) {
+            Ok(output) => {
+                if let Some(version) = output.trim().strip_prefix("tmux ") {
+                    if version >= "3.0" {
+                        check.status = CheckStatus::Pass;
+                        check.details = Some(version.to_string());
+                    } else {
+                        check.status = CheckStatus::Warn;
+                        check.details = Some(format!("version {version} (3.0+ recommended)"));
+                    }
+                } else if output.trim().is_empty() {
+                    check.status = CheckStatus::Warn;
+                    check.details = Some("version output unavailable".to_string());
+                } else {
+                    check.status = CheckStatus::Warn;
+                    check.details = Some(output.trim().to_string());
+                }
+            }
+            Err(err) => {
+                if self.binary_exists("tmux") {
+                    check.status = CheckStatus::Warn;
+                    check.error = Some(err);
+                } else {
+                    check.status = CheckStatus::Fail;
+                    check.error = Some("not found in PATH".to_string());
+                }
+            }
+        }
+
+        check
+    }
+
+    fn check_opencode(&self) -> DoctorCheck {
+        let mut check = DoctorCheck {
+            category: "dependencies".to_string(),
+            name: "opencode".to_string(),
+            status: CheckStatus::Warn,
+            details: None,
+            error: None,
+        };
+
+        let output = self
+            .run_command("opencode", &["--version"])
+            .or_else(|_| self.run_command("opencode", &["version"]));
+        match output {
+            Ok(output) => {
+                let first_line = output.lines().next().unwrap_or_default().trim().to_string();
+                if first_line.is_empty() {
+                    check.status = CheckStatus::Warn;
+                    check.details = Some("installed".to_string());
+                } else {
+                    check.status = CheckStatus::Pass;
+                    check.details = Some(first_line);
+                }
+            }
+            Err(err) => {
+                if self.binary_exists("opencode") {
+                    check.status = CheckStatus::Warn;
+                    check.error = Some(err);
+                } else {
+                    check.status = CheckStatus::Fail;
+                    check.error = Some("not found in PATH".to_string());
+                }
+            }
+        }
+        check
+    }
+
+    fn check_git(&self) -> DoctorCheck {
+        let mut check = DoctorCheck {
+            category: "dependencies".to_string(),
+            name: "git".to_string(),
+            status: CheckStatus::Warn,
+            details: None,
+            error: None,
+        };
+
+        match self.run_command("git", &["--version"]) {
+            Ok(output) => {
+                if let Some(version) = output.trim().strip_prefix("git version ") {
+                    check.status = CheckStatus::Pass;
+                    check.details = Some(version.to_string());
+                } else if output.trim().is_empty() {
+                    check.status = CheckStatus::Warn;
+                    check.details = Some("version output unavailable".to_string());
+                } else {
+                    check.status = CheckStatus::Warn;
+                    check.details = Some(output.trim().to_string());
+                }
+            }
+            Err(err) => {
+                if self.binary_exists("git") {
+                    check.status = CheckStatus::Warn;
+                    check.error = Some(err);
+                } else {
+                    check.status = CheckStatus::Fail;
+                    check.error = Some("not found in PATH".to_string());
+                }
+            }
+        }
+        check
+    }
+
+    fn check_ssh(&self) -> DoctorCheck {
+        let mut check = DoctorCheck {
+            category: "dependencies".to_string(),
+            name: "ssh".to_string(),
+            status: CheckStatus::Warn,
+            details: None,
+            error: None,
+        };
+
+        match self.run_command("ssh", &["-V"]) {
+            Ok(output) => {
+                if output.contains("OpenSSH") || output.contains("SSH") {
+                    check.status = CheckStatus::Pass;
+                    check.details = Some(output.trim().to_string());
+                } else if output.trim().is_empty() {
+                    check.status = CheckStatus::Warn;
+                    check.details = Some("version output unavailable".to_string());
+                } else {
+                    check.status = CheckStatus::Warn;
+                    check.details = Some(output.trim().to_string());
+                }
+            }
+            Err(err) => {
+                if self.binary_exists("ssh") {
+                    check.status = CheckStatus::Warn;
+                    check.error = Some(err);
+                } else {
+                    check.status = CheckStatus::Fail;
+                    check.error = Some("not found in PATH".to_string());
+                }
+            }
+        }
+        check
+    }
+
+    fn configuration_checks(&self) -> Vec<DoctorCheck> {
+        let mut checks = Vec::new();
+        let Some(home_dir) = self.home_dir.clone() else {
+            checks.push(DoctorCheck {
+                category: "config".to_string(),
+                name: "home_directory".to_string(),
+                status: CheckStatus::Fail,
+                details: None,
+                error: Some("unable to resolve HOME directory".to_string()),
+            });
+            return checks;
+        };
+
+        let config_path = home_dir.join(".config").join("forge").join("config.yaml");
+        checks.push(if config_path.exists() {
+            DoctorCheck {
+                category: "config".to_string(),
+                name: "config_file".to_string(),
+                status: CheckStatus::Pass,
+                details: Some(config_path.display().to_string()),
+                error: None,
+            }
+        } else {
+            DoctorCheck {
+                category: "config".to_string(),
+                name: "config_file".to_string(),
+                status: CheckStatus::Warn,
+                details: Some("not found (using defaults)".to_string()),
+                error: None,
+            }
+        });
+
+        let data_dir = home_dir.join(".local").join("share").join("forge");
+        checks.push(match std::fs::metadata(&data_dir) {
+            Ok(meta) if meta.is_dir() => DoctorCheck {
+                category: "config".to_string(),
+                name: "data_directory".to_string(),
+                status: CheckStatus::Pass,
+                details: Some(data_dir.display().to_string()),
+                error: None,
+            },
+            Ok(_) => DoctorCheck {
+                category: "config".to_string(),
+                name: "data_directory".to_string(),
+                status: CheckStatus::Fail,
+                details: None,
+                error: Some("path exists but is not a directory".to_string()),
+            },
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                match std::fs::create_dir_all(&data_dir) {
+                    Ok(()) => DoctorCheck {
+                        category: "config".to_string(),
+                        name: "data_directory".to_string(),
+                        status: CheckStatus::Pass,
+                        details: Some(format!("{} (created)", data_dir.display())),
+                        error: None,
+                    },
+                    Err(create_err) => DoctorCheck {
+                        category: "config".to_string(),
+                        name: "data_directory".to_string(),
+                        status: CheckStatus::Fail,
+                        details: None,
+                        error: Some(format!("cannot create: {create_err}")),
+                    },
+                }
+            }
+            Err(err) => DoctorCheck {
+                category: "config".to_string(),
+                name: "data_directory".to_string(),
+                status: CheckStatus::Fail,
+                details: None,
+                error: Some(err.to_string()),
+            },
+        });
+
+        let db_path = data_dir.join("forge.db");
+        checks.push(if db_path.exists() {
+            DoctorCheck {
+                category: "database".to_string(),
+                name: "connection".to_string(),
+                status: CheckStatus::Pass,
+                details: Some(db_path.display().to_string()),
+                error: None,
+            }
+        } else {
+            DoctorCheck {
+                category: "database".to_string(),
+                name: "connection".to_string(),
+                status: CheckStatus::Warn,
+                details: Some(format!(
+                    "{} (not found; run forge migrate up)",
+                    db_path.display()
+                )),
+                error: None,
+            }
+        });
+
+        checks
+    }
+}
+
+impl DoctorBackend for FilesystemDoctorBackend {
+    fn run_checks(&self) -> Vec<DoctorCheck> {
+        let mut checks = self.dependency_checks();
+        checks.extend(self.configuration_checks());
+        checks
+    }
+
+    fn now_utc(&self) -> String {
+        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    }
+}
+
+fn lookup_path(path_value: &OsString, binary: &str) -> bool {
+    std::env::split_paths(path_value).any(|dir| {
+        let candidate = dir.join(binary);
+        is_executable_file(&candidate)
+            || cfg!(windows) && is_executable_file(&dir.join(format!("{binary}.exe")))
+    })
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|meta| meta.is_file())
 }
 
 /// Test-only command output.
@@ -361,6 +704,8 @@ Flags:
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
 
     fn default_backend() -> InMemoryDoctorBackend {
         InMemoryDoctorBackend::default()
@@ -481,6 +826,40 @@ mod tests {
     fn assert_success(out: &CommandOutput) {
         assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
         assert!(out.stderr.is_empty(), "unexpected stderr: {}", out.stderr);
+    }
+
+    fn find_check<'a>(checks: &'a [DoctorCheck], category: &str, name: &str) -> &'a DoctorCheck {
+        checks
+            .iter()
+            .find(|check| check.category == category && check.name == name)
+            .unwrap_or_else(|| panic!("missing check {category}/{name}"))
+    }
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(prefix: &str) -> Self {
+            let unique = format!(
+                "{prefix}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            );
+            let path = std::env::temp_dir().join(unique);
+            std::fs::create_dir_all(&path)
+                .unwrap_or_else(|err| panic!("create temp dir {}: {err}", path.display()));
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
     }
 
     // --- parse_args tests ---
@@ -910,5 +1289,63 @@ mod tests {
         assert!(check.get("category").is_some());
         assert!(check.get("name").is_some());
         assert!(check.get("status").is_some());
+    }
+
+    #[test]
+    fn filesystem_backend_missing_binaries_report_failures() {
+        let temp = TempDir::new("doctor-missing-binaries");
+        let backend =
+            FilesystemDoctorBackend::new(Some(temp.path.clone()), Some(OsString::from("")));
+        let checks = backend.run_checks();
+
+        for binary in ["tmux", "opencode", "git", "ssh"] {
+            let check = find_check(&checks, "dependencies", binary);
+            assert_eq!(check.status, CheckStatus::Fail);
+            assert_eq!(check.error.as_deref(), Some("not found in PATH"));
+        }
+    }
+
+    #[test]
+    fn filesystem_backend_reports_config_and_database_paths() {
+        let temp = TempDir::new("doctor-config-db");
+        let config_dir = temp.path.join(".config").join("forge");
+        let data_dir = temp.path.join(".local").join("share").join("forge");
+        std::fs::create_dir_all(&config_dir)
+            .unwrap_or_else(|err| panic!("create config dir {}: {err}", config_dir.display()));
+        std::fs::create_dir_all(&data_dir)
+            .unwrap_or_else(|err| panic!("create data dir {}: {err}", data_dir.display()));
+
+        let config_file = config_dir.join("config.yaml");
+        std::fs::write(&config_file, "default_profile: codex\n")
+            .unwrap_or_else(|err| panic!("write config file {}: {err}", config_file.display()));
+
+        let database_file = data_dir.join("forge.db");
+        std::fs::write(&database_file, "")
+            .unwrap_or_else(|err| panic!("write db file {}: {err}", database_file.display()));
+
+        let backend =
+            FilesystemDoctorBackend::new(Some(temp.path.clone()), Some(OsString::from("")));
+        let checks = backend.run_checks();
+
+        let config = find_check(&checks, "config", "config_file");
+        assert_eq!(config.status, CheckStatus::Pass);
+        assert_eq!(
+            config.details.as_deref(),
+            Some(config_file.to_string_lossy().as_ref())
+        );
+
+        let data = find_check(&checks, "config", "data_directory");
+        assert_eq!(data.status, CheckStatus::Pass);
+        assert_eq!(
+            data.details.as_deref(),
+            Some(data_dir.to_string_lossy().as_ref())
+        );
+
+        let db = find_check(&checks, "database", "connection");
+        assert_eq!(db.status, CheckStatus::Pass);
+        assert_eq!(
+            db.details.as_deref(),
+            Some(database_file.to_string_lossy().as_ref())
+        );
     }
 }

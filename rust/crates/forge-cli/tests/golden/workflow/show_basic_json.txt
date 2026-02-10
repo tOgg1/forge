@@ -1,0 +1,11 @@
+{
+  "name": "basic",
+  "description": "Basic workflow",
+  "steps": [
+    {
+      "id": "plan",
+      "type": "agent",
+      "prompt": "Plan work"
+    }
+  ]
+}

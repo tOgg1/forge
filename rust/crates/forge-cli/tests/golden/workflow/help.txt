@@ -1,0 +1,15 @@
+List, inspect, and validate workflow definitions.
+
+Usage:
+  forge workflow <command> [options]
+
+Aliases:
+  workflow, wf
+
+Commands:
+  ls          List workflows
+  show        Show workflow details
+  validate    Validate a workflow
+
+Flags:
+  -h, --help  help for workflow

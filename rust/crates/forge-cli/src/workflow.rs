@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -289,6 +290,92 @@ impl WorkflowBackend for InMemoryWorkflowBackend {
 
     fn project_dir(&self) -> Option<&Path> {
         self.project_dir.as_deref()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FilesystemWorkflowBackend {
+    project_dir: PathBuf,
+}
+
+impl FilesystemWorkflowBackend {
+    pub fn open_from_env() -> Self {
+        let project_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self { project_dir }
+    }
+
+    #[cfg(test)]
+    pub fn for_project_dir(project_dir: PathBuf) -> Self {
+        Self { project_dir }
+    }
+
+    fn load_workflow_from_path(path: &Path) -> Result<Workflow, String> {
+        let source = path.to_string_lossy().to_string();
+        let data = fs::read_to_string(path)
+            .map_err(|err| format!("read workflow {}: {err}", path.display()))?;
+        parse_workflow_toml(&data, &source).map_err(|errors| {
+            errors
+                .iter()
+                .map(WorkflowError::human_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+    }
+
+    fn workflow_dir(&self) -> PathBuf {
+        self.project_dir.join(".forge").join("workflows")
+    }
+}
+
+impl WorkflowBackend for FilesystemWorkflowBackend {
+    fn load_workflows(&self) -> Result<Vec<Workflow>, String> {
+        let dir = self.workflow_dir();
+        let entries = match fs::read_dir(&dir) {
+            Ok(value) => value,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(format!("read workflows dir {}: {err}", dir.display())),
+        };
+
+        let mut items = Vec::new();
+        for entry in entries {
+            let entry =
+                entry.map_err(|err| format!("read workflows dir {}: {err}", dir.display()))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|err| format!("read workflows dir {}: {err}", dir.display()))?;
+            if file_type.is_dir() {
+                continue;
+            }
+            let path = entry.path();
+            let is_toml = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"));
+            if !is_toml {
+                continue;
+            }
+            items.push(Self::load_workflow_from_path(&path)?);
+        }
+
+        items.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(items)
+    }
+
+    fn load_workflow_by_name(&self, name: &str) -> Result<Workflow, String> {
+        let clean = normalize_workflow_name(name)?;
+        let candidate = self.workflow_dir().join(format!("{clean}.toml"));
+        if candidate.is_file() {
+            return Self::load_workflow_from_path(&candidate);
+        }
+
+        self.load_workflows()?
+            .into_iter()
+            .find(|wf| wf.name.eq_ignore_ascii_case(&clean))
+            .ok_or_else(|| format!("workflow {clean:?} not found"))
+    }
+
+    fn project_dir(&self) -> Option<&Path> {
+        Some(&self.project_dir)
     }
 }
 

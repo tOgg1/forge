@@ -171,6 +171,89 @@ fn mem_missing_key_errors_with_exit_code_1() {
     assert_eq!(out.stderr, "loop kv not found\n");
 }
 
+#[test]
+fn mem_set_overwrites_existing_key_value() {
+    let mut backend = seeded();
+
+    let _ = run(
+        &[
+            "mem",
+            "--loop",
+            "oracle-loop",
+            "set",
+            "blocked_on",
+            "agent-a",
+            "--json",
+        ],
+        &mut backend,
+    );
+
+    let _ = run(
+        &[
+            "mem",
+            "--loop",
+            "oracle-loop",
+            "set",
+            "blocked_on",
+            "agent-b",
+            "--json",
+        ],
+        &mut backend,
+    );
+
+    let get = run(
+        &["mem", "--loop", "oracle-loop", "get", "blocked_on"],
+        &mut backend,
+    );
+    assert_success(&get);
+    assert_eq!(get.stdout, "agent-b\n");
+}
+
+#[test]
+fn mem_keys_are_scoped_per_loop() {
+    let mut backend = seeded();
+    backend.seed_loop("loop-999", "second-loop");
+
+    let _ = run(
+        &[
+            "mem",
+            "--loop",
+            "oracle-loop",
+            "set",
+            "blocked_on",
+            "agent-a",
+            "--json",
+        ],
+        &mut backend,
+    );
+    let _ = run(
+        &[
+            "mem",
+            "--loop",
+            "second-loop",
+            "set",
+            "blocked_on",
+            "agent-b",
+            "--json",
+        ],
+        &mut backend,
+    );
+
+    let get_oracle = run(
+        &["mem", "--loop", "oracle-loop", "get", "blocked_on"],
+        &mut backend,
+    );
+    assert_success(&get_oracle);
+    assert_eq!(get_oracle.stdout, "agent-a\n");
+
+    let get_second = run(
+        &["mem", "--loop", "second-loop", "get", "blocked_on"],
+        &mut backend,
+    );
+    assert_success(&get_second);
+    assert_eq!(get_second.stdout, "agent-b\n");
+}
+
 fn seeded() -> InMemoryMemBackend {
     let mut backend = InMemoryMemBackend::default();
     backend.seed_loop("loop-123", "oracle-loop");

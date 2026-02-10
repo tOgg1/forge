@@ -1,0 +1,2 @@
+- .forge/workflows/bad-dep.toml: step build: depends_on: unknown dependency "missing"
+

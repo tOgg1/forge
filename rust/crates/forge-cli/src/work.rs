@@ -4,6 +4,9 @@ use std::io::Write;
 
 use serde::Serialize;
 
+mod sqlite_backend;
+pub use sqlite_backend::SqliteWorkBackend;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
     pub stdout: String,
@@ -1108,6 +1111,146 @@ mod tests {
         assert!(show.stdout.contains("\"task_id\": \"sv-900\""));
         assert!(show.stdout.contains("\"status\": \"blocked\""));
         assert!(show.stderr.is_empty());
+    }
+
+    #[test]
+    fn set_relinks_existing_task_and_updates_status() {
+        let mut backend = InMemoryWorkBackend::default();
+        backend.seed_loop("oracle-loop-id", "oracle-loop", 7);
+        let env = [
+            ("FORGE_LOOP_NAME", "oracle-loop"),
+            ("FMAIL_AGENT", "oracle-agent"),
+        ];
+
+        let first = run_for_test_with_env(
+            &[
+                "work",
+                "set",
+                "sv-100",
+                "--status",
+                "blocked",
+                "--detail",
+                "needs review",
+                "--json",
+            ],
+            &env,
+            &mut backend,
+        );
+        assert_eq!(first.exit_code, 0);
+        let first_json: serde_json::Value = match serde_json::from_str(&first.stdout) {
+            Ok(value) => value,
+            Err(err) => panic!("failed to parse first set output as json: {err}"),
+        };
+        let first_id = match first_json.get("id").and_then(serde_json::Value::as_str) {
+            Some(value) => value.to_string(),
+            None => panic!("first set output missing id"),
+        };
+
+        let second = run_for_test_with_env(
+            &["work", "set", "sv-200", "--status", "in_progress", "--json"],
+            &env,
+            &mut backend,
+        );
+        assert_eq!(second.exit_code, 0);
+
+        let relink = run_for_test_with_env(
+            &[
+                "work", "set", "sv-100", "--status", "done", "--detail", "merged", "--json",
+            ],
+            &env,
+            &mut backend,
+        );
+        assert_eq!(relink.exit_code, 0);
+        let relink_json: serde_json::Value = match serde_json::from_str(&relink.stdout) {
+            Ok(value) => value,
+            Err(err) => panic!("failed to parse relink output as json: {err}"),
+        };
+        let relink_id = match relink_json.get("id").and_then(serde_json::Value::as_str) {
+            Some(value) => value,
+            None => panic!("relink output missing id"),
+        };
+        assert_eq!(relink_id, first_id);
+        assert_eq!(
+            relink_json
+                .get("status")
+                .and_then(serde_json::Value::as_str),
+            Some("done")
+        );
+        assert_eq!(
+            relink_json
+                .get("detail")
+                .and_then(serde_json::Value::as_str),
+            Some("merged")
+        );
+    }
+
+    #[test]
+    fn ls_lists_current_first_for_task_status_history() {
+        let mut backend = InMemoryWorkBackend::default();
+        backend.seed_loop("oracle-loop-id", "oracle-loop", 11);
+        let env = [
+            ("FORGE_LOOP_NAME", "oracle-loop"),
+            ("FMAIL_AGENT", "oracle-agent"),
+        ];
+
+        for args in [
+            ["work", "set", "sv-100", "--status", "blocked"],
+            ["work", "set", "sv-200", "--status", "in_progress"],
+            ["work", "set", "sv-100", "--status", "done"],
+        ] {
+            let out = run_for_test_with_env(&args, &env, &mut backend);
+            assert_eq!(out.exit_code, 0);
+            assert!(out.stderr.is_empty(), "unexpected stderr: {}", out.stderr);
+        }
+
+        let json = run_for_test_with_env(&["work", "ls", "--json"], &env, &mut backend);
+        assert_eq!(json.exit_code, 0);
+        let list_json: serde_json::Value = match serde_json::from_str(&json.stdout) {
+            Ok(value) => value,
+            Err(err) => panic!("failed to parse list output as json: {err}"),
+        };
+        let items = match list_json.as_array() {
+            Some(value) => value,
+            None => panic!("work ls --json did not return an array"),
+        };
+        assert_eq!(items.len(), 2);
+
+        assert_eq!(
+            items[0].get("task_id").and_then(serde_json::Value::as_str),
+            Some("sv-100")
+        );
+        assert_eq!(
+            items[0].get("status").and_then(serde_json::Value::as_str),
+            Some("done")
+        );
+        assert_eq!(
+            items[0]
+                .get("is_current")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+
+        assert_eq!(
+            items[1].get("task_id").and_then(serde_json::Value::as_str),
+            Some("sv-200")
+        );
+        assert_eq!(
+            items[1].get("status").and_then(serde_json::Value::as_str),
+            Some("in_progress")
+        );
+        assert_eq!(
+            items[1]
+                .get("is_current")
+                .and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
+
+        let human = run_for_test_with_env(&["work", "ls"], &env, &mut backend);
+        assert_eq!(human.exit_code, 0);
+        let lines: Vec<&str> = human.stdout.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].starts_with("* sv-100 [done]"));
+        assert!(lines[1].starts_with("  sv-200 [in_progress]"));
     }
 
     fn normalize_newlines(value: &str) -> String {
