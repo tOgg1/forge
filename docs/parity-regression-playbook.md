@@ -67,6 +67,20 @@ Baseline snapshot drift check:
 scripts/rust-baseline-snapshot.sh build/rust-baseline/latest --check
 ```
 
+Loop lifecycle side-by-side harness (Go vs Rust binaries):
+
+```bash
+go build -o /tmp/forge-go ./cmd/forge
+(cd rust && cargo build -p forge-cli --bin rforge)
+
+go run ./cmd/parity-loop-lifecycle \
+  --scenario internal/parity/testdata/lifecycle_harness/scenario.json \
+  --fixture . \
+  --go-bin /tmp/forge-go \
+  --rust-bin ./rust/target/debug/rforge \
+  --out build/parity-loop-lifecycle-report.json
+```
+
 ## Intentional drift
 
 - Drift is never “silent”: update the relevant gate docs + baseline artifacts in the same PR.

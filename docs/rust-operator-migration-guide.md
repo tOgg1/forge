@@ -44,10 +44,13 @@ What should not change (goal):
 
 Fill exact commands for your environment before running.
 
+Automation helper:
+- `docs/rust-final-switch-automation.md`
+
 | Step | Command / Action | Result | Evidence |
 |---|---|---|---|
 | Stop/hold running loops (if required) | _TBD_ | _TBD_ | _TBD_ |
-| Upgrade/switch to Rust artifact | _TBD_ | _TBD_ | _TBD_ |
+| Upgrade/switch to Rust artifact | `scripts/rust-final-switch.sh cutover --cutover-cmd '<switch-to-rust-command>' --hook 'scripts/rust-final-switch-checklist-hook.sh docs/review/rust-final-switch-checklist-log.md' --log-file docs/review/rust-final-switch-run.log` | _TBD_ | _TBD_ |
 | Verify version | `forge --version` | _TBD_ | _TBD_ |
 | Run doctor | `forge doctor` | _TBD_ | _TBD_ |
 | Run smoke checklist | see runbook | _TBD_ | _TBD_ |
@@ -64,6 +67,75 @@ First 24h:
 - execute post-release verification checklist:
   `docs/rust-post-release-verification-checklist.md`
 
+## Rust-first day-2 workflow
+
+Use these commands as the default operator loop after cutover.
+
+### 1. Spawn / scale
+
+```bash
+# initialize repo once
+forge init
+
+# start one loop
+forge up --name review-loop --profile codex --prompt prompts/review.md --interval 60s
+
+# scale profile/prompt cohort to target count
+forge scale --name-prefix review --count 3 --profile codex --prompt prompts/review.md
+```
+
+### 2. Health checks
+
+```bash
+# environment and dependency diagnostics
+forge doctor
+
+# fleet summary
+forge status
+
+# per-loop live state
+forge ps
+forge ps --json
+
+# wait until a loop is ready for next instruction
+forge wait --until ready --agent review-loop --timeout 2m
+```
+
+### 3. Stop controls
+
+```bash
+# graceful stop (end of current iteration)
+forge stop review-loop
+
+# immediate stop
+forge kill review-loop
+
+# stop cohort by selector
+forge stop --profile codex
+```
+
+### 4. Recovery playbooks
+
+```bash
+# inspect recent run output for failure reason
+forge logs review-loop --lines 200
+
+# resume stopped/errored loop
+forge resume review-loop
+
+# force-remove broken or stale loop record
+forge rm review-loop --force
+
+# remove inactive loop records in bulk (stopped/error)
+forge clean --json
+```
+
+Recommended incident breadcrumbs per recovery action:
+- failing command and exit code
+- loop id/name
+- key log excerpt (`forge logs --lines 200`)
+- whether recovery used `resume`, `kill`, `rm --force`, or `clean`
+
 ## Rollback
 
 Rollback triggers + procedure:
@@ -72,4 +144,3 @@ Rollback triggers + procedure:
 If you rollback:
 - preserve logs + DB snapshot
 - open tasks per surface owner, with exact file/line/repro evidence
-

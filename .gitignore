@@ -26,3 +26,4 @@ rust/.cargo-home-local/
 rust/.cargo-home-loop/
 rust/target-loop/
 rust/coverage/
+.fmail/

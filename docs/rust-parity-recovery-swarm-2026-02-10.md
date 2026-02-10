@@ -37,9 +37,9 @@ go run ./cmd/forge up --name rust-parity-proof-claude --profile cc2 --prompt rus
 
 ```bash
 # codex continuous workers
-go run ./cmd/forge up --name rust-parity-dev-codex2-a --profile codex2 --prompt rust-swarm-dev-codex-continuous --max-iterations 0 --interval 45s --quantitative-stop-cmd 'test "$(sv task count --project prj-vr0104gr --status open --json | jq -r ".data.total")" -eq 0' --quantitative-stop-exit-codes 0 --quantitative-stop-decision stop --quantitative-stop-when before --quantitative-stop-every 1 --tags rust-rewrite,parity,swarm,dev,codex
+go run ./cmd/forge up --name rust-parity-dev-codex2-a --profile codex2 --prompt rust-swarm-dev-codex-continuous --max-iterations 0 --interval 45s --quantitative-stop-cmd 'scripts/swarm-quant-stop.sh --project prj-vr0104gr --open-max 0 --in-progress-max 0 --quiet' --quantitative-stop-exit-codes 0 --quantitative-stop-decision stop --quantitative-stop-when before --quantitative-stop-every 1 --tags rust-rewrite,parity,swarm,dev,codex
 
-go run ./cmd/forge up --name rust-parity-dev-codex3-a --profile codex3 --prompt rust-swarm-dev-codex-continuous --max-iterations 0 --interval 45s --quantitative-stop-cmd 'test "$(sv task count --project prj-vr0104gr --status open --json | jq -r ".data.total")" -eq 0' --quantitative-stop-exit-codes 0 --quantitative-stop-decision stop --quantitative-stop-when before --quantitative-stop-every 1 --tags rust-rewrite,parity,swarm,dev,codex
+go run ./cmd/forge up --name rust-parity-dev-codex3-a --profile codex3 --prompt rust-swarm-dev-codex-continuous --max-iterations 0 --interval 45s --quantitative-stop-cmd 'scripts/swarm-quant-stop.sh --project prj-vr0104gr --open-max 0 --in-progress-max 0 --quiet' --quantitative-stop-exit-codes 0 --quantitative-stop-decision stop --quantitative-stop-when before --quantitative-stop-every 1 --tags rust-rewrite,parity,swarm,dev,codex
 
 # claude single-task workers
 go run ./cmd/forge up --name rust-parity-dev-claude1-a --profile cc1 --prompt rust-swarm-dev-claude-single-task --max-iterations 1 --interval 75s --tags rust-rewrite,parity,swarm,dev,claude
@@ -107,4 +107,3 @@ Profile availability notes:
 
 - Some spawn attempts failed with `pinned profile <name> unavailable` (observed on `codex2`, `cc1`, `cc2`, `cc3` depending on timing).
 - Retry spawn on a free profile when one task-loop completes (Claude loops are single-task and should free profile on completion).
-

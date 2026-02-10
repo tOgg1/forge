@@ -81,6 +81,28 @@ forge up --name rust-committer-1 --profile <COMMIT_PROFILE> --prompt rust-swarm-
 forge up --name rust-orchestrator-1 --profile <ORCH_PROFILE> --prompt rust-swarm-orchestrator --max-iterations 0 --tags rust-rewrite,swarm,orchestrator
 ```
 
+Quantitative stop helper (project backlog thresholds):
+
+```bash
+scripts/swarm-quant-stop.sh --project prj-vr0104gr --open-max 0 --in-progress-max 0
+```
+
+Use in loop spawn:
+
+```bash
+forge up \
+  --name rust-dev-codex-1 \
+  --profile <CODEX_DEV_PROFILE_1> \
+  --prompt rust-swarm-dev-codex-continuous \
+  --max-iterations 0 \
+  --quantitative-stop-cmd 'scripts/swarm-quant-stop.sh --project prj-vr0104gr --open-max 0 --in-progress-max 0 --quiet' \
+  --quantitative-stop-exit-codes 0 \
+  --quantitative-stop-decision stop \
+  --quantitative-stop-when before \
+  --quantitative-stop-every 1 \
+  --tags rust-rewrite,swarm,dev,codex
+```
+
 Claude respawn pattern (optional):
 
 ```bash
