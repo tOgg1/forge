@@ -1,6 +1,6 @@
 {
   "schema_version": "sv.tasks.v1",
-  "generated_at": "2026-02-10T06:13:11.269004Z",
+  "generated_at": "2026-02-10T06:15:15.145191Z",
   "tasks": [
     {
       "id": "forge-7a3",
@@ -8,9 +8,9 @@
       "status": "closed",
       "priority": "P2",
       "created_at": "2026-02-09T15:37:07.189146Z",
-      "updated_at": "2026-02-10T06:13:11.227689Z",
+      "updated_at": "2026-02-10T06:15:15.134332Z",
       "created_by": "codex",
-      "updated_by": "rust-clean-codex-a",
+      "updated_by": "rust-clean-claude-a",
       "body": "Scope:\n- Port fmail TUI capability: replay view parity.\n\nDeliverables:\n- Rust/FrankenTUI behavior aligned with current fmail TUI.\n\nAcceptance:\n- Parity validated for replay view parity.\n\nTests:\n- View-model tests + snapshot/smoke checks.",
       "epic": "forge-180",
       "project": "prj-vr0104gr",
@@ -19,8 +19,27 @@
       "branch": "main",
       "started_at": "2026-02-10T06:10:20.134656Z",
       "started_by": "rust-clean-claude-a",
-      "closed_at": "2026-02-10T06:13:11.227689Z",
-      "closed_by": "rust-clean-codex-a",
+      "closed_at": "2026-02-10T06:15:15.134332Z",
+      "closed_by": "rust-clean-claude-a",
+      "comments_count": 0
+    },
+    {
+      "id": "forge-c18",
+      "title": "Legacy cleanup: strip dead compatibility shims after cutover",
+      "status": "in_progress",
+      "priority": "P3",
+      "created_at": "2026-02-09T15:37:11.214246Z",
+      "updated_at": "2026-02-10T06:13:49.875771Z",
+      "created_by": "codex",
+      "updated_by": "rust-clean-codex-b",
+      "body": "Scope:\n- Execute post-parity cleanup item: strip dead compatibility shims after cutover.\n\nDeliverables:\n- Code/docs cleanup artifact for strip dead compatibility shims after cutover.\n\nAcceptance:\n- No required behavior lost after strip dead compatibility shims after cutover.\n\nTests:\n- Regression suite after cleanup.",
+      "epic": "forge-180",
+      "project": "prj-vr0104gr",
+      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
+      "workspace": "forge",
+      "branch": "main",
+      "started_at": "2026-02-10T06:13:49.875771Z",
+      "started_by": "rust-clean-codex-b",
       "comments_count": 0
     },
     {
@@ -82,25 +101,6 @@
       "started_by": "rust-clean-codex-b",
       "closed_at": "2026-02-10T06:07:06.485406Z",
       "closed_by": "rust-clean-codex-b",
-      "comments_count": 0
-    },
-    {
-      "id": "forge-c18",
-      "title": "Legacy cleanup: strip dead compatibility shims after cutover",
-      "status": "in_progress",
-      "priority": "P3",
-      "created_at": "2026-02-09T15:37:11.214246Z",
-      "updated_at": "2026-02-10T06:04:05.683426Z",
-      "created_by": "codex",
-      "updated_by": "rust-clean-codex-b",
-      "body": "Scope:\n- Execute post-parity cleanup item: strip dead compatibility shims after cutover.\n\nDeliverables:\n- Code/docs cleanup artifact for strip dead compatibility shims after cutover.\n\nAcceptance:\n- No required behavior lost after strip dead compatibility shims after cutover.\n\nTests:\n- Regression suite after cleanup.",
-      "epic": "forge-180",
-      "project": "prj-vr0104gr",
-      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
-      "workspace": "forge",
-      "branch": "main",
-      "started_at": "2026-02-10T06:04:05.683426Z",
-      "started_by": "rust-clean-codex-b",
       "comments_count": 0
     },
     {

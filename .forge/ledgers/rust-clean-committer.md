@@ -70,3 +70,34 @@ There are new unstaged changes (other agents' ledgers and `replay.rs`). The repl
 **Remaining unstaged**: Other agents' ledgers and `replay.rs` — not coherent candidates for this committer iteration (in-progress work by other loops). No push.
 ```
 
+## 2026-02-10T06:14:10Z
+
+- run_id: 93bbc1ae-c6d1-4875-b8ec-eec858113f2b
+- loop_name: rust-clean-committer
+- status: success
+- profile: cc3
+- harness: claude
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/rust-swarm-committer.md
+- prompt_override: false
+- started_at: 2026-02-10T06:10:55Z
+- finished_at: 2026-02-10T06:14:10Z
+- exit_code: 0
+
+```
+Iteration complete. Summary:
+
+**Committed 2 changes:**
+
+1. **`dcbc77a`** `feat(fmail-tui): add replay view parity with timeline, marks, scrubber, and export`
+   - 2 files changed, 1038 insertions, 142 deletions
+   - Full replay view port from Go: feed/timeline modes, mark/jump navigation, time-aware scrubber, presence lines, seek-by-seconds, speed presets, markdown export, comprehensive tests
+   - Fixed formatting issues before committing (cargo fmt applied)
+
+2. **`d798271`** `chore: update ledgers and task tracking for replay parity work`
+   - 6 files changed, 380 insertions, 39 deletions
+   - Ledger entries for claude-a, claude-b, codex-b, committer + task tracking updates
+
+**Validation:** `cargo fmt --check` PASS, `cargo clippy --workspace --all-targets -- -D warnings` PASS, `cargo test --workspace` PASS (412 tests, 0 failures)
+```
+
