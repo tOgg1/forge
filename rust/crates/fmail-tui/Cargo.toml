@@ -13,6 +13,7 @@ name = "fmail-tui"
 path = "src/bin/fmail-tui.rs"
 
 [dependencies]
+fmail-core = { path = "../fmail-core" }
 forge-ftui-adapter = { path = "../forge-ftui-adapter" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
