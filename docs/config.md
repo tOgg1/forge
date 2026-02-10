@@ -20,7 +20,6 @@ You can also pass an explicit path with `--config`.
 ## Environment variable overrides
 
 Environment variables use the prefix `FORGE_` and replace dots with underscores.
-Legacy `SWARM_` variables are still accepted as deprecated aliases.
 
 Examples:
 

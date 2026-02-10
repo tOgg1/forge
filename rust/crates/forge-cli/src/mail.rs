@@ -1071,10 +1071,6 @@ fn write_help(stdout: &mut dyn Write) -> std::io::Result<()> {
         stdout,
         "Otherwise, Forge falls back to a local mail store in ~/.config/forge/mail.db."
     )?;
-    writeln!(
-        stdout,
-        "Legacy SWARM_AGENT_MAIL_* environment variables are still accepted."
-    )?;
     writeln!(stdout)?;
     writeln!(stdout, "Usage:")?;
     writeln!(stdout, "  forge mail <command> [flags]")?;

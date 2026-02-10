@@ -50,7 +50,7 @@ func progressEnabled() bool {
 	if noProgress {
 		return false
 	}
-	if getEnvWithFallback("FORGE_NO_PROGRESS", "SWARM_NO_PROGRESS") != "" {
+	if getEnvTrim("FORGE_NO_PROGRESS") != "" {
 		return false
 	}
 	if _, ok := os.LookupEnv("NO_PROGRESS"); ok {

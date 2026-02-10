@@ -121,9 +121,9 @@ func TestListPanePaths_NoServer(t *testing.T) {
 	}
 }
 
-func TestNewTmuxClient(t *testing.T) {
+func TestNewClient(t *testing.T) {
 	exec := &fakeExecutor{stdout: []byte("alpha|1\n")}
-	client := NewTmuxClient(exec)
+	client := NewClient(exec)
 
 	sessions, err := client.ListSessions(context.Background())
 	if err != nil {

@@ -13,7 +13,7 @@ func IsNonInteractive() bool {
 	if nonInteractive {
 		return true
 	}
-	if getEnvWithFallback("FORGE_NON_INTERACTIVE", "SWARM_NON_INTERACTIVE") != "" {
+	if getEnvTrim("FORGE_NON_INTERACTIVE") != "" {
 		return true
 	}
 	return !hasTTY()

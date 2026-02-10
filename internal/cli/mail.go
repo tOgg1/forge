@@ -86,8 +86,7 @@ var mailCmd = &cobra.Command{
 	Long: `Forge Mail provides lightweight agent-to-agent messaging.
 
 If Agent Mail MCP is configured, messages are sent through the MCP server.
-Otherwise, Forge falls back to a local mail store in ~/.config/forge/mail.db.
-Legacy SWARM_AGENT_MAIL_* environment variables are still accepted.`,
+Otherwise, Forge falls back to a local mail store in ~/.config/forge/mail.db.`,
 }
 
 var mailSendCmd = &cobra.Command{
@@ -568,9 +567,9 @@ func resolveMailConfig() (mailConfig, mailBackendKind, error) {
 		useMCP = true
 	}
 	if !useMCP {
-		if getEnvWithFallback("FORGE_AGENT_MAIL_URL", "SWARM_AGENT_MAIL_URL") != "" ||
-			getEnvWithFallback("FORGE_AGENT_MAIL_PROJECT", "SWARM_AGENT_MAIL_PROJECT") != "" ||
-			getEnvWithFallback("FORGE_AGENT_MAIL_AGENT", "SWARM_AGENT_MAIL_AGENT") != "" {
+		if getEnvTrim("FORGE_AGENT_MAIL_URL") != "" ||
+			getEnvTrim("FORGE_AGENT_MAIL_PROJECT") != "" ||
+			getEnvTrim("FORGE_AGENT_MAIL_AGENT") != "" {
 			useMCP = true
 		}
 	}
@@ -589,18 +588,18 @@ func resolveMailConfig() (mailConfig, mailBackendKind, error) {
 
 func mailConfigFromEnv() mailConfig {
 	cfg := mailConfig{
-		URL:     getEnvWithFallback("FORGE_AGENT_MAIL_URL", "SWARM_AGENT_MAIL_URL"),
-		Project: getEnvWithFallback("FORGE_AGENT_MAIL_PROJECT", "SWARM_AGENT_MAIL_PROJECT"),
-		Agent:   getEnvWithFallback("FORGE_AGENT_MAIL_AGENT", "SWARM_AGENT_MAIL_AGENT"),
+		URL:     getEnvTrim("FORGE_AGENT_MAIL_URL"),
+		Project: getEnvTrim("FORGE_AGENT_MAIL_PROJECT"),
+		Agent:   getEnvTrim("FORGE_AGENT_MAIL_AGENT"),
 	}
 
-	if value := getEnvWithFallback("FORGE_AGENT_MAIL_LIMIT", "SWARM_AGENT_MAIL_LIMIT"); value != "" {
+	if value := getEnvTrim("FORGE_AGENT_MAIL_LIMIT"); value != "" {
 		if limit, err := strconv.Atoi(value); err == nil && limit > 0 {
 			cfg.Limit = limit
 		}
 	}
 
-	if value := getEnvWithFallback("FORGE_AGENT_MAIL_TIMEOUT", "SWARM_AGENT_MAIL_TIMEOUT"); value != "" {
+	if value := getEnvTrim("FORGE_AGENT_MAIL_TIMEOUT"); value != "" {
 		if parsed, ok := parseEnvDuration(value); ok {
 			cfg.Timeout = parsed
 		}

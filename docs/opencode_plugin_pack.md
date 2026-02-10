@@ -98,7 +98,7 @@ Configuration should be simple and session-scoped:
 
 Suggested inputs:
 
-- Environment variables: FORGE_AGENT_ID, FORGE_WORKSPACE_ID, FORGE_NODE_ID (legacy SWARM_* still accepted)
+- Environment variables: FORGE_AGENT_ID, FORGE_WORKSPACE_ID, FORGE_NODE_ID
 - Optional JSON config file path
 
 ## Security and Privacy

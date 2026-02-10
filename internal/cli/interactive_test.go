@@ -97,33 +97,6 @@ func TestSkipConfirmation_EnvVar(t *testing.T) {
 	}
 }
 
-func TestSkipConfirmation_LegacyEnvVar(t *testing.T) {
-	origVal := os.Getenv("SWARM_NON_INTERACTIVE")
-	defer os.Setenv("SWARM_NON_INTERACTIVE", origVal)
-
-	origYes := yesFlag
-	origNonInteractive := nonInteractive
-	origJSON := jsonOutput
-	origJSONL := jsonlOutput
-	defer func() {
-		yesFlag = origYes
-		nonInteractive = origNonInteractive
-		jsonOutput = origJSON
-		jsonlOutput = origJSONL
-	}()
-
-	yesFlag = false
-	nonInteractive = false
-	jsonOutput = false
-	jsonlOutput = false
-
-	os.Setenv("SWARM_NON_INTERACTIVE", "1")
-
-	if !SkipConfirmation() {
-		t.Error("SkipConfirmation() should return true when SWARM_NON_INTERACTIVE is set")
-	}
-}
-
 func TestGetActionVerb(t *testing.T) {
 	tests := []struct {
 		resourceType string

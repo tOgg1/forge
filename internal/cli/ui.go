@@ -60,12 +60,9 @@ func hasTTY() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
-// getEnvWithFallback returns the value of the primary env var, or falls back to legacy.
-func getEnvWithFallback(primary, legacy string) string {
-	if value := strings.TrimSpace(os.Getenv(primary)); value != "" {
-		return value
-	}
-	return strings.TrimSpace(os.Getenv(legacy))
+// getEnvTrim returns a trimmed env var value.
+func getEnvTrim(name string) string {
+	return strings.TrimSpace(os.Getenv(name))
 }
 
 func parseEnvDuration(value string) (time.Duration, bool) {

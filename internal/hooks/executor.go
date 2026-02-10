@@ -134,26 +134,26 @@ func eventEnv(event *models.Event) []string {
 
 	env := []string{}
 	if event.ID != "" {
-		env = append(env, "FORGE_EVENT_ID="+event.ID, "SWARM_EVENT_ID="+event.ID)
+		env = append(env, "FORGE_EVENT_ID="+event.ID)
 	}
 	if !event.Timestamp.IsZero() {
 		timestamp := event.Timestamp.UTC().Format(time.RFC3339)
-		env = append(env, "FORGE_EVENT_TIMESTAMP="+timestamp, "SWARM_EVENT_TIMESTAMP="+timestamp)
+		env = append(env, "FORGE_EVENT_TIMESTAMP="+timestamp)
 	}
 	if event.Type != "" {
 		eventType := string(event.Type)
-		env = append(env, "FORGE_EVENT_TYPE="+eventType, "SWARM_EVENT_TYPE="+eventType)
+		env = append(env, "FORGE_EVENT_TYPE="+eventType)
 	}
 	if event.EntityType != "" {
 		entityType := string(event.EntityType)
-		env = append(env, "FORGE_ENTITY_TYPE="+entityType, "SWARM_ENTITY_TYPE="+entityType)
+		env = append(env, "FORGE_ENTITY_TYPE="+entityType)
 	}
 	if event.EntityID != "" {
-		env = append(env, "FORGE_ENTITY_ID="+event.EntityID, "SWARM_ENTITY_ID="+event.EntityID)
+		env = append(env, "FORGE_ENTITY_ID="+event.EntityID)
 	}
 	if len(event.Payload) > 0 {
 		payload := string(event.Payload)
-		env = append(env, "FORGE_EVENT_PAYLOAD="+payload, "SWARM_EVENT_PAYLOAD="+payload)
+		env = append(env, "FORGE_EVENT_PAYLOAD="+payload)
 	}
 	return env
 }

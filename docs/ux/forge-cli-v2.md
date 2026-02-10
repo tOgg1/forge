@@ -154,7 +154,7 @@ These are global so you can do: `forge --workspace myrepo send "continue"`.
 - `--profile, -p <profile>`: default account profile
 - `--json | --jsonl`: output mode
 - `--watch`: for commands that can stream
-- `--non-interactive`: disable prompts (also `FORGE_NON_INTERACTIVE=1`, legacy `SWARM_NON_INTERACTIVE=1`)
+- `--non-interactive`: disable prompts (also `FORGE_NON_INTERACTIVE=1`)
 - `--no-color`: disable ANSI output (also `NO_COLOR=1`)
 - `--config <path>`: explicit config file
 - `--db <path>`: explicit local DB path (advanced)

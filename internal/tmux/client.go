@@ -46,11 +46,6 @@ func NewClient(exec Executor) *Client {
 	return &Client{exec: exec}
 }
 
-// NewTmuxClient is an alias for NewClient for backward compatibility.
-func NewTmuxClient(exec Executor) *Client {
-	return NewClient(exec)
-}
-
 // NewLocalClient creates a new tmux client that executes commands locally.
 func NewLocalClient() *Client {
 	return &Client{exec: &LocalExecutor{}}
