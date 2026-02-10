@@ -191,6 +191,7 @@ mod tests {
 
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use fmail_core::message::Message;
@@ -274,11 +275,14 @@ mod tests {
     }
 
     fn temp_project_dir(tag: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
             .unwrap_or_default();
-        let dir = std::env::temp_dir().join(format!("fmail-tui-{tag}-{nanos}"));
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let dir = std::env::temp_dir().join(format!("fmail-tui-{tag}-{pid}-{nanos}-{seq}"));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }
