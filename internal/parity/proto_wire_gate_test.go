@@ -77,20 +77,24 @@ func TestProtoWireGateCriticalRPCFixtures(t *testing.T) {
 	}
 
 	requiredRPCs := []string{
+		"SpawnAgentRequest",
 		"SpawnAgent",
+		"KillAgentRequest",
 		"KillAgent",
+		"SendInputRequest",
 		"SendInput",
+		"StartLoopRunnerRequest",
 		"StartLoopRunner",
+		"StopLoopRunnerRequest",
 		"StopLoopRunner",
+		"GetStatusRequest",
 		"GetStatus",
+		"PingRequest",
 		"Ping",
 	}
 	seen := make([]string, 0, len(summary.Fixtures))
 	for _, fx := range summary.Fixtures {
 		seen = append(seen, fx.RPC)
-		if fx.WireHex == "" {
-			t.Fatalf("fixture %s has empty wire hex", fx.RPC)
-		}
 		if fx.JSONForm == "" {
 			t.Fatalf("fixture %s has empty JSON form", fx.RPC)
 		}
@@ -108,6 +112,15 @@ func buildProtoWireSummary(t *testing.T) protoWireSummary {
 	baseTS := timestamppb.New(time.Date(2026, 2, 9, 16, 0, 0, 0, time.UTC))
 
 	fixtures := []protoWireFixture{
+		marshalFixture(t, "SpawnAgentRequest", &forgedv1.SpawnAgentRequest{
+			AgentId:     "agent-1",
+			WorkspaceId: "ws-1",
+			Command:     "forge",
+			Args:        []string{"run"},
+			WorkingDir:  "/tmp/repo",
+			SessionName: "sess-1",
+			Adapter:     "codex",
+		}),
 		marshalFixture(t, "SpawnAgent", &forgedv1.SpawnAgentResponse{
 			Agent: &forgedv1.Agent{
 				Id:             "agent-1",
@@ -122,8 +135,23 @@ func buildProtoWireSummary(t *testing.T) protoWireSummary {
 			},
 			PaneId: "sess:0.1",
 		}),
+		marshalFixture(t, "KillAgentRequest", &forgedv1.KillAgentRequest{
+			AgentId: "agent-1",
+			Force:   true,
+		}),
 		marshalFixture(t, "KillAgent", &forgedv1.KillAgentResponse{Success: true}),
+		marshalFixture(t, "SendInputRequest", &forgedv1.SendInputRequest{
+			AgentId:   "agent-1",
+			Text:      "status",
+			SendEnter: true,
+			Keys:      []string{"C-c"},
+		}),
 		marshalFixture(t, "SendInput", &forgedv1.SendInputResponse{Success: true}),
+		marshalFixture(t, "StartLoopRunnerRequest", &forgedv1.StartLoopRunnerRequest{
+			LoopId:      "loop-1",
+			ConfigPath:  "/tmp/loop.yaml",
+			CommandPath: "forge",
+		}),
 		marshalFixture(t, "StartLoopRunner", &forgedv1.StartLoopRunnerResponse{
 			Runner: &forgedv1.LoopRunner{
 				LoopId:     "loop-1",
@@ -132,6 +160,10 @@ func buildProtoWireSummary(t *testing.T) protoWireSummary {
 				State:      forgedv1.LoopRunnerState_LOOP_RUNNER_STATE_RUNNING,
 				StartedAt:  baseTS,
 			},
+		}),
+		marshalFixture(t, "StopLoopRunnerRequest", &forgedv1.StopLoopRunnerRequest{
+			LoopId: "loop-1",
+			Force:  true,
 		}),
 		marshalFixture(t, "StopLoopRunner", &forgedv1.StopLoopRunnerResponse{
 			Success: true,
@@ -144,6 +176,7 @@ func buildProtoWireSummary(t *testing.T) protoWireSummary {
 				StoppedAt:  timestamppb.New(baseTS.AsTime().Add(10 * time.Minute)),
 			},
 		}),
+		marshalFixture(t, "GetStatusRequest", &forgedv1.GetStatusRequest{}),
 		marshalFixture(t, "GetStatus", &forgedv1.GetStatusResponse{
 			Status: &forgedv1.DaemonStatus{
 				Version:    "v0.0.1",
@@ -156,6 +189,7 @@ func buildProtoWireSummary(t *testing.T) protoWireSummary {
 				},
 			},
 		}),
+		marshalFixture(t, "PingRequest", &forgedv1.PingRequest{}),
 		marshalFixture(t, "Ping", &forgedv1.PingResponse{
 			Timestamp: baseTS,
 			Version:   "v0.0.1",

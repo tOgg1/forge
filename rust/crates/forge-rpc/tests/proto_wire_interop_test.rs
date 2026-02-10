@@ -35,6 +35,22 @@ fn rust_wire_encoding_matches_go_oracle_fixtures() {
 
     assert_wire_eq(
         &by_rpc,
+        "SpawnAgentRequest",
+        &proto::SpawnAgentRequest {
+            agent_id: "agent-1".to_string(),
+            workspace_id: "ws-1".to_string(),
+            command: "forge".to_string(),
+            args: vec!["run".to_string()],
+            env: HashMap::new(),
+            working_dir: "/tmp/repo".to_string(),
+            session_name: "sess-1".to_string(),
+            adapter: "codex".to_string(),
+            resource_limits: None,
+        },
+    );
+
+    assert_wire_eq(
+        &by_rpc,
         "SpawnAgent",
         &proto::SpawnAgentResponse {
             agent: Some(proto::Agent {
@@ -57,14 +73,45 @@ fn rust_wire_encoding_matches_go_oracle_fixtures() {
 
     assert_wire_eq(
         &by_rpc,
+        "KillAgentRequest",
+        &proto::KillAgentRequest {
+            agent_id: "agent-1".to_string(),
+            force: true,
+            grace_period: None,
+        },
+    );
+
+    assert_wire_eq(
+        &by_rpc,
         "KillAgent",
         &proto::KillAgentResponse { success: true },
     );
 
     assert_wire_eq(
         &by_rpc,
+        "SendInputRequest",
+        &proto::SendInputRequest {
+            agent_id: "agent-1".to_string(),
+            text: "status".to_string(),
+            send_enter: true,
+            keys: vec!["C-c".to_string()],
+        },
+    );
+
+    assert_wire_eq(
+        &by_rpc,
         "SendInput",
         &proto::SendInputResponse { success: true },
+    );
+
+    assert_wire_eq(
+        &by_rpc,
+        "StartLoopRunnerRequest",
+        &proto::StartLoopRunnerRequest {
+            loop_id: "loop-1".to_string(),
+            config_path: "/tmp/loop.yaml".to_string(),
+            command_path: "forge".to_string(),
+        },
     );
 
     assert_wire_eq(
@@ -82,6 +129,15 @@ fn rust_wire_encoding_matches_go_oracle_fixtures() {
                 started_at: Some(base_ts),
                 stopped_at: None,
             }),
+        },
+    );
+
+    assert_wire_eq(
+        &by_rpc,
+        "StopLoopRunnerRequest",
+        &proto::StopLoopRunnerRequest {
+            loop_id: "loop-1".to_string(),
+            force: true,
         },
     );
 
@@ -107,6 +163,8 @@ fn rust_wire_encoding_matches_go_oracle_fixtures() {
         },
     );
 
+    assert_wire_eq(&by_rpc, "GetStatusRequest", &proto::GetStatusRequest {});
+
     assert_wire_eq(
         &by_rpc,
         "GetStatus",
@@ -129,6 +187,8 @@ fn rust_wire_encoding_matches_go_oracle_fixtures() {
         },
     );
 
+    assert_wire_eq(&by_rpc, "PingRequest", &proto::PingRequest {});
+
     assert_wire_eq(
         &by_rpc,
         "Ping",
@@ -148,12 +208,19 @@ fn rust_can_decode_go_wire_fixtures() {
         .map(|f| (f.rpc, f.wire_hex))
         .collect();
 
+    decode_roundtrip::<proto::SpawnAgentRequest>(&by_rpc, "SpawnAgentRequest");
     decode_roundtrip::<proto::SpawnAgentResponse>(&by_rpc, "SpawnAgent");
+    decode_roundtrip::<proto::KillAgentRequest>(&by_rpc, "KillAgentRequest");
     decode_roundtrip::<proto::KillAgentResponse>(&by_rpc, "KillAgent");
+    decode_roundtrip::<proto::SendInputRequest>(&by_rpc, "SendInputRequest");
     decode_roundtrip::<proto::SendInputResponse>(&by_rpc, "SendInput");
+    decode_roundtrip::<proto::StartLoopRunnerRequest>(&by_rpc, "StartLoopRunnerRequest");
     decode_roundtrip::<proto::StartLoopRunnerResponse>(&by_rpc, "StartLoopRunner");
+    decode_roundtrip::<proto::StopLoopRunnerRequest>(&by_rpc, "StopLoopRunnerRequest");
     decode_roundtrip::<proto::StopLoopRunnerResponse>(&by_rpc, "StopLoopRunner");
+    decode_roundtrip::<proto::GetStatusRequest>(&by_rpc, "GetStatusRequest");
     decode_roundtrip::<proto::GetStatusResponse>(&by_rpc, "GetStatus");
+    decode_roundtrip::<proto::PingRequest>(&by_rpc, "PingRequest");
     decode_roundtrip::<proto::PingResponse>(&by_rpc, "Ping");
 }
 
