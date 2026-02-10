@@ -8,9 +8,11 @@ use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 pub mod app;
 pub mod bookmarks;
 pub mod dashboard;
+pub mod graph;
 pub mod heatmap;
 pub mod live_tail;
 pub mod notifications;
+pub mod operator;
 pub mod replay;
 pub mod search;
 pub mod state_help;
@@ -29,6 +31,10 @@ pub use dashboard::{
     apply_dashboard_input, render_dashboard_frame, AgentEntry, DashboardFocus, DashboardViewModel,
     FeedMessage, TopicEntry, DASHBOARD_FEED_LIMIT,
 };
+pub use graph::{
+    apply_graph_input, build_graph_snapshot, render_graph_frame, GraphEdge, GraphMessage,
+    GraphNode, GraphSnapshot, GraphTopic, GraphViewModel, GRAPH_MAX_NODES,
+};
 pub use heatmap::{apply_heatmap_input, render_heatmap_frame, HeatmapViewModel};
 pub use live_tail::{
     apply_live_tail_input, parse_live_tail_filter, render_live_tail_frame, LiveTailFilter,
@@ -37,6 +43,10 @@ pub use live_tail::{
 pub use notifications::{
     apply_notifications_input, render_notifications_frame, NotificationItem, NotificationRule,
     NotificationsFocus, NotificationsViewModel, NOTIFICATION_MEMORY_LIMIT,
+};
+pub use operator::{
+    apply_operator_input, render_operator_frame, OperatorAgent, OperatorConversation,
+    OperatorMessage, OperatorViewModel, OPERATOR_MESSAGE_LIMIT,
 };
 pub use replay::{apply_replay_input, render_replay_frame, ReplayEntry, ReplayViewModel};
 pub use search::{apply_search_input, render_search_frame, SearchResultEntry, SearchViewModel};
