@@ -22,9 +22,10 @@ Per-iteration protocol
 4. For each stale task:
 - check recent claims/progress: `fmail log task -n 200`
 - send nudge: `fmail send task "stale-check: <id> no update >=45m; please post status/owner"`
+- send nudge: `fmail send task "stale-check: <id> no update >=45m; please post status/owner" || true`
 5. If clearly abandoned and open backlog exists:
 - move back to open: `sv task status <id> open`
-- announce: `fmail send task "stale-reopen: <id> reopened for reassignment"`
-- notify orchestrator: `fmail send @forge-orchestrator "stale-reopen: <id>"`
+- announce: `fmail send task "stale-reopen: <id> reopened for reassignment" || true`
+- notify orchestrator: `fmail send @forge-orchestrator "stale-reopen: <id>" || true`
 6. Publish short audit summary each iteration:
-- `fmail send @forge-orchestrator "stale-audit: <n stale> <n reopened> <n nudged>"`
+- `fmail send @forge-orchestrator "stale-audit: <n stale> <n reopened> <n nudged>" || true`
