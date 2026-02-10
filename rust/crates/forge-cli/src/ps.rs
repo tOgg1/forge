@@ -232,6 +232,7 @@ struct ParsedArgs {
     json: bool,
     jsonl: bool,
     quiet: bool,
+    no_color: bool,
     selector: LoopSelector,
 }
 
@@ -333,6 +334,10 @@ fn execute(args: &[String], backend: &dyn PsBackend, stdout: &mut dyn Write) -> 
         return Ok(());
     }
 
+    let use_color = color_enabled(parsed.no_color);
+    let display_ids: Vec<&str> = loops.iter().map(display_short_id).collect();
+    let unique_prefixes = loop_unique_prefix_lengths(&display_ids);
+
     let mut tw = TabWriter::new(&mut *stdout).padding(2);
     writeln!(
         tw,
@@ -340,14 +345,15 @@ fn execute(args: &[String], backend: &dyn PsBackend, stdout: &mut dyn Write) -> 
     )
     .map_err(|err| err.to_string())?;
     for entry in &loops {
+        let display_id = display_short_id(entry);
+        let unique_len = unique_prefixes
+            .get(display_id)
+            .copied()
+            .unwrap_or(display_id.len());
         writeln!(
             tw,
             "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            if entry.short_id.is_empty() {
-                &entry.id
-            } else {
-                &entry.short_id
-            },
+            format_loop_short_id(display_id, unique_len, use_color),
             entry.name,
             entry.runs,
             entry.state.as_str(),
@@ -472,6 +478,73 @@ fn metadata_nested_bool(
         .and_then(Value::as_bool)
 }
 
+const COLOR_RESET: &str = "\x1b[0m";
+const COLOR_YELLOW: &str = "\x1b[33m";
+const COLOR_CYAN: &str = "\x1b[36m";
+
+fn display_short_id(entry: &LoopRecord) -> &str {
+    if entry.short_id.is_empty() {
+        return &entry.id;
+    }
+    &entry.short_id
+}
+
+fn color_enabled(no_color: bool) -> bool {
+    if no_color {
+        return false;
+    }
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    true
+}
+
+fn colorize(value: &str, color: &str, enabled: bool) -> String {
+    if !enabled || color.is_empty() || value.is_empty() {
+        return value.to_string();
+    }
+    format!("{color}{value}{COLOR_RESET}")
+}
+
+fn loop_unique_prefix_lengths(ids: &[&str]) -> HashMap<String, usize> {
+    let mut out = HashMap::with_capacity(ids.len());
+    for (index, id) in ids.iter().enumerate() {
+        if id.is_empty() {
+            continue;
+        }
+        let max_len = id.len();
+        for len in 1..=max_len {
+            let prefix = &id[..len];
+            let unique = ids
+                .iter()
+                .enumerate()
+                .all(|(other_index, other)| other_index == index || !other.starts_with(prefix));
+            if unique {
+                out.insert((*id).to_string(), len);
+                break;
+            }
+        }
+        out.entry((*id).to_string()).or_insert(max_len);
+    }
+    out
+}
+
+fn format_loop_short_id(id: &str, unique_len: usize, use_color: bool) -> String {
+    if id.is_empty() {
+        return String::new();
+    }
+    let prefix_len = unique_len.clamp(1, id.len());
+    let prefix = &id[..prefix_len];
+    if !use_color {
+        return id.to_string();
+    }
+    let mut out = colorize(prefix, COLOR_YELLOW, true);
+    if prefix_len < id.len() {
+        out.push_str(&colorize(&id[prefix_len..], COLOR_CYAN, true));
+    }
+    out
+}
+
 fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut index = 0usize;
     if args
@@ -484,6 +557,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut json = false;
     let mut jsonl = false;
     let mut quiet = false;
+    let mut no_color = false;
     let mut selector = LoopSelector::default();
 
     while let Some(token) = args.get(index) {
@@ -501,6 +575,10 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             }
             "--quiet" => {
                 quiet = true;
+                index += 1;
+            }
+            "--no-color" => {
+                no_color = true;
                 index += 1;
             }
             "--repo" => {
@@ -542,6 +620,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         json,
         jsonl,
         quiet,
+        no_color,
         selector,
     })
 }
@@ -563,6 +642,7 @@ Aliases:
 
 Flags:
   -h, --help             help for ps
+      --no-color         disable colored ID output
       --pool string      filter by pool
       --profile string   filter by profile
       --repo string      filter by repo path
@@ -580,8 +660,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        parse_args, run_for_test, InMemoryPsBackend, LoopRecord, LoopState, ParsedArgs,
-        SqlitePsBackend,
+        format_loop_short_id, loop_unique_prefix_lengths, parse_args, run_for_test,
+        InMemoryPsBackend, LoopRecord, LoopState, ParsedArgs, SqlitePsBackend, COLOR_CYAN,
+        COLOR_YELLOW,
     };
 
     fn parse_ok(args: &[String]) -> ParsedArgs {
@@ -612,6 +693,7 @@ mod tests {
         assert!(!parsed.json);
         assert!(!parsed.jsonl);
         assert!(!parsed.quiet);
+        assert!(!parsed.no_color);
         assert!(parsed.selector.repo.is_empty());
     }
 
@@ -620,6 +702,13 @@ mod tests {
         let args = vec!["ls".to_string(), "--json".to_string()];
         let parsed = parse_ok(&args);
         assert!(parsed.json);
+    }
+
+    #[test]
+    fn parse_accepts_no_color_flag() {
+        let args = vec!["ps".to_string(), "--no-color".to_string()];
+        let parsed = parse_ok(&args);
+        assert!(parsed.no_color);
     }
 
     #[test]
@@ -890,6 +979,28 @@ mod tests {
         let second = parse_json(lines[1]);
         assert_eq!(first["name"], "oracle-loop");
         assert_eq!(second["name"], "second-loop");
+    }
+
+    #[test]
+    fn unique_prefix_lengths_match_go_behavior() {
+        let ids = vec!["ab123456", "ad123547", "zxy99999"];
+        let prefixes = loop_unique_prefix_lengths(&ids);
+        assert_eq!(prefixes.get("ab123456"), Some(&2));
+        assert_eq!(prefixes.get("ad123547"), Some(&2));
+        assert_eq!(prefixes.get("zxy99999"), Some(&1));
+    }
+
+    #[test]
+    fn format_loop_short_id_colors_unique_prefix_and_suffix() {
+        let formatted = format_loop_short_id("ab123456", 2, true);
+        assert!(formatted.contains(COLOR_YELLOW));
+        assert!(formatted.contains(COLOR_CYAN));
+    }
+
+    #[test]
+    fn format_loop_short_id_respects_no_color() {
+        let formatted = format_loop_short_id("ab123456", 2, false);
+        assert_eq!(formatted, "ab123456");
     }
 
     #[test]

@@ -1,5 +1,8 @@
+use std::collections::HashMap;
 use std::io::Write;
+use std::path::PathBuf;
 
+use rusqlite::Connection;
 use serde::Serialize;
 use tabwriter::TabWriter;
 
@@ -197,6 +200,378 @@ impl ExportBackend for InMemoryExportBackend {
         // In-memory returns all at once (no pagination).
         Ok((filtered, String::new()))
     }
+}
+
+// ---------------------------------------------------------------------------
+// SQLite backend for runtime wiring
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct SqliteExportBackend {
+    db_path: PathBuf,
+}
+
+impl SqliteExportBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+}
+
+impl ExportBackend for SqliteExportBackend {
+    fn build_status(&self) -> Result<ExportStatus, String> {
+        if !self.db_path.exists() {
+            return Ok(empty_status());
+        }
+
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+        let conn = db.conn();
+
+        let mut nodes = load_nodes(conn)?;
+        let mut workspaces = load_workspaces(conn)?;
+        let mut agents = load_agents(conn)?;
+        let queues = load_queue_items(conn)?;
+        let alert_rows = load_alert_rows(conn)?;
+
+        let mut workspace_agent_counts: HashMap<String, usize> = HashMap::new();
+        for agent in &agents {
+            *workspace_agent_counts
+                .entry(agent.workspace_id.clone())
+                .or_default() += 1;
+        }
+
+        let mut queue_lengths: HashMap<String, usize> = HashMap::new();
+        for item in &queues {
+            if item.status == "pending" {
+                *queue_lengths.entry(item.agent_id.clone()).or_default() += 1;
+            }
+        }
+        for agent in &mut agents {
+            agent.queue_length = queue_lengths.get(&agent.id).copied().unwrap_or(0);
+        }
+
+        let agent_workspace: HashMap<String, String> = agents
+            .iter()
+            .map(|agent| (agent.id.clone(), agent.workspace_id.clone()))
+            .collect();
+        let mut workspace_alerts: HashMap<String, Vec<ExportAlert>> = HashMap::new();
+        let mut alerts = Vec::with_capacity(alert_rows.len());
+        for row in alert_rows {
+            let alert = row.alert.clone();
+            if let Some(workspace_id) = row.workspace_id.or_else(|| {
+                row.alert
+                    .agent_id
+                    .as_ref()
+                    .and_then(|agent_id| agent_workspace.get(agent_id).cloned())
+            }) {
+                workspace_alerts
+                    .entry(workspace_id)
+                    .or_default()
+                    .push(alert);
+            }
+            alerts.push(row.alert);
+        }
+
+        for workspace in &mut workspaces {
+            workspace.agent_count = workspace_agent_counts
+                .get(&workspace.id)
+                .copied()
+                .unwrap_or(0);
+            workspace.alerts = workspace_alerts.remove(&workspace.id).unwrap_or_default();
+        }
+
+        let mut node_agent_counts: HashMap<String, usize> = HashMap::new();
+        for workspace in &workspaces {
+            *node_agent_counts
+                .entry(workspace.node_id.clone())
+                .or_default() += workspace.agent_count;
+        }
+        for node in &mut nodes {
+            node.agent_count = node_agent_counts.get(&node.id).copied().unwrap_or(0);
+        }
+
+        Ok(ExportStatus {
+            nodes,
+            workspaces,
+            agents,
+            queues,
+            alerts,
+        })
+    }
+
+    fn query_events(
+        &self,
+        cursor: &str,
+        since: Option<&str>,
+        until: Option<&str>,
+        event_types: &[String],
+        entity_types: &[String],
+        entity_id: &str,
+        limit: usize,
+    ) -> Result<(Vec<ExportEvent>, String), String> {
+        if !self.db_path.exists() {
+            return Ok((Vec::new(), String::new()));
+        }
+
+        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+        let event_repo = forge_db::event_repository::EventRepository::new(&db);
+
+        let mut query = forge_db::event_repository::EventQuery {
+            cursor: cursor.to_string(),
+            since: since.map(|value| value.to_string()),
+            until: until.map(|value| value.to_string()),
+            limit: limit as i64,
+            ..Default::default()
+        };
+        if event_types.len() == 1 {
+            query.event_type = Some(event_types[0].clone());
+        }
+        if entity_types.len() == 1 {
+            query.entity_type = Some(entity_types[0].clone());
+            if !entity_id.is_empty() {
+                query.entity_id = Some(entity_id.to_string());
+            }
+        }
+
+        let page = match event_repo.query(query) {
+            Ok(page) => page,
+            Err(err) if is_missing_table_error(&err.to_string()) => {
+                return Ok((Vec::new(), String::new()));
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let events = page
+            .events
+            .into_iter()
+            .map(|event| ExportEvent {
+                id: event.id,
+                timestamp: event.timestamp,
+                event_type: event.event_type,
+                entity_type: event.entity_type,
+                entity_id: event.entity_id,
+                payload: parse_payload(&event.payload),
+                metadata: event.metadata,
+            })
+            .collect();
+
+        Ok((events, page.next_cursor))
+    }
+}
+
+fn parse_payload(raw: &str) -> Option<serde_json::Value> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    serde_json::from_str(trimmed)
+        .ok()
+        .or_else(|| Some(serde_json::Value::String(raw.to_string())))
+}
+
+fn empty_status() -> ExportStatus {
+    ExportStatus {
+        nodes: Vec::new(),
+        workspaces: Vec::new(),
+        agents: Vec::new(),
+        queues: Vec::new(),
+        alerts: Vec::new(),
+    }
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
+fn is_missing_table_error(message: &str) -> bool {
+    message.contains("no such table:")
+}
+
+fn prep_statement<'a>(
+    conn: &'a Connection,
+    sql: &str,
+) -> Result<Option<rusqlite::Statement<'a>>, String> {
+    match conn.prepare(sql) {
+        Ok(stmt) => Ok(Some(stmt)),
+        Err(err) if is_missing_table_error(&err.to_string()) => Ok(None),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn load_nodes(conn: &Connection) -> Result<Vec<ExportNode>, String> {
+    let Some(mut stmt) = prep_statement(
+        conn,
+        "SELECT id, name, status, ssh_target, is_local FROM nodes ORDER BY name, id",
+    )?
+    else {
+        return Ok(Vec::new());
+    };
+
+    let rows = stmt
+        .query_map([], |row| {
+            let is_local: i64 = row.get(4)?;
+            Ok(ExportNode {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                status: row.get(2)?,
+                ssh_target: row.get(3)?,
+                is_local: is_local != 0,
+                agent_count: 0,
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut nodes = Vec::new();
+    for row in rows {
+        nodes.push(row.map_err(|err| err.to_string())?);
+    }
+    Ok(nodes)
+}
+
+fn load_workspaces(conn: &Connection) -> Result<Vec<ExportWorkspace>, String> {
+    let Some(mut stmt) = prep_statement(
+        conn,
+        "SELECT id, name, node_id, status FROM workspaces ORDER BY name, id",
+    )?
+    else {
+        return Ok(Vec::new());
+    };
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(ExportWorkspace {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                node_id: row.get(2)?,
+                status: row.get(3)?,
+                agent_count: 0,
+                alerts: Vec::new(),
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut workspaces = Vec::new();
+    for row in rows {
+        workspaces.push(row.map_err(|err| err.to_string())?);
+    }
+    Ok(workspaces)
+}
+
+fn load_agents(conn: &Connection) -> Result<Vec<ExportAgent>, String> {
+    let Some(mut stmt) = prep_statement(
+        conn,
+        "SELECT id, workspace_id, state, type FROM agents ORDER BY id",
+    )?
+    else {
+        return Ok(Vec::new());
+    };
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(ExportAgent {
+                id: row.get(0)?,
+                workspace_id: row.get(1)?,
+                state: row.get(2)?,
+                agent_type: row.get(3)?,
+                queue_length: 0,
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut agents = Vec::new();
+    for row in rows {
+        agents.push(row.map_err(|err| err.to_string())?);
+    }
+    Ok(agents)
+}
+
+fn load_queue_items(conn: &Connection) -> Result<Vec<ExportQueueItem>, String> {
+    let Some(mut stmt) = prep_statement(
+        conn,
+        "SELECT id, agent_id, type, position, status FROM queue_items ORDER BY agent_id, position",
+    )?
+    else {
+        return Ok(Vec::new());
+    };
+
+    let rows = stmt
+        .query_map([], |row| {
+            let position: i64 = row.get(3)?;
+            Ok(ExportQueueItem {
+                id: row.get(0)?,
+                agent_id: row.get(1)?,
+                item_type: row.get(2)?,
+                position: if position < 0 { 0 } else { position as usize },
+                status: row.get(4)?,
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut queue_items = Vec::new();
+    for row in rows {
+        queue_items.push(row.map_err(|err| err.to_string())?);
+    }
+    Ok(queue_items)
+}
+
+#[derive(Debug, Clone)]
+struct AlertRow {
+    workspace_id: Option<String>,
+    alert: ExportAlert,
+}
+
+fn load_alert_rows(conn: &Connection) -> Result<Vec<AlertRow>, String> {
+    let Some(mut stmt) = prep_statement(
+        conn,
+        "SELECT workspace_id, agent_id, type, severity, message
+         FROM alerts
+         WHERE is_resolved = 0
+         ORDER BY created_at, id",
+    )?
+    else {
+        return Ok(Vec::new());
+    };
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(AlertRow {
+                workspace_id: row.get(0)?,
+                alert: ExportAlert {
+                    alert_type: row.get(2)?,
+                    severity: row.get(3)?,
+                    message: row.get(4)?,
+                    agent_id: row.get(1)?,
+                },
+            })
+        })
+        .map_err(|err| err.to_string())?;
+
+    let mut alerts = Vec::new();
+    for row in rows {
+        alerts.push(row.map_err(|err| err.to_string())?);
+    }
+    Ok(alerts)
 }
 
 // ---------------------------------------------------------------------------
