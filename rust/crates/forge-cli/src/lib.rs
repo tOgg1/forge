@@ -208,7 +208,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             msg::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("pool") => {
-            let mut backend = pool::InMemoryPoolBackend::default();
+            let mut backend = pool::SqlitePoolBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             pool::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::io::Write;
+use std::path::PathBuf;
 
 use serde::Serialize;
 
@@ -176,6 +177,194 @@ impl PoolBackend for InMemoryPoolBackend {
         }
         Ok(self.pools[target].clone())
     }
+}
+
+// ---------------------------------------------------------------------------
+// SQLite-backed pool backend
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct SqlitePoolBackend {
+    db_path: PathBuf,
+}
+
+impl SqlitePoolBackend {
+    pub fn open_from_env() -> Self {
+        Self {
+            db_path: resolve_database_path(),
+        }
+    }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
+
+    fn resolve_pool(
+        repo: &forge_db::pool_repository::PoolRepository,
+        reference: &str,
+    ) -> Result<forge_db::pool_repository::Pool, String> {
+        match repo.get_by_name(reference) {
+            Ok(pool) => Ok(pool),
+            Err(_) => repo
+                .get(reference)
+                .map_err(|_| format!("pool not found: {reference}")),
+        }
+    }
+
+    fn resolve_profile(
+        repo: &forge_db::profile_repository::ProfileRepository,
+        reference: &str,
+    ) -> Result<forge_db::profile_repository::Profile, String> {
+        match repo.get_by_name(reference) {
+            Ok(profile) => Ok(profile),
+            Err(_) => repo
+                .get(reference)
+                .map_err(|_| format!("profile not found: {reference}")),
+        }
+    }
+
+    fn db_pool_to_cli(p: &forge_db::pool_repository::Pool) -> Pool {
+        Pool {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            strategy: p.strategy.clone(),
+            is_default: p.is_default,
+        }
+    }
+}
+
+impl PoolBackend for SqlitePoolBackend {
+    fn list_pools(&self) -> Result<Vec<Pool>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+        let db = self.open_db()?;
+        let repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let pools = match repo.list() {
+            Ok(pools) => pools,
+            Err(err) if err.to_string().contains("no such table: pools") => return Ok(Vec::new()),
+            Err(err) => return Err(err.to_string()),
+        };
+        Ok(pools.iter().map(Self::db_pool_to_cli).collect())
+    }
+
+    fn create_pool(&mut self, name: &str, strategy: &str) -> Result<Pool, String> {
+        let db = self.open_db()?;
+        let repo = forge_db::pool_repository::PoolRepository::new(&db);
+
+        let is_default = repo.get_default().is_err();
+
+        let mut db_pool = forge_db::pool_repository::Pool {
+            name: name.to_string(),
+            strategy: strategy.to_string(),
+            is_default,
+            ..forge_db::pool_repository::Pool::default()
+        };
+
+        repo.create(&mut db_pool).map_err(|err| {
+            if err.to_string().contains("already exists") {
+                format!("pool \"{name}\" already exists")
+            } else {
+                err.to_string()
+            }
+        })?;
+
+        Ok(Self::db_pool_to_cli(&db_pool))
+    }
+
+    fn add_profiles(
+        &mut self,
+        pool_ref: &str,
+        profile_refs: &[String],
+    ) -> Result<(Pool, Vec<String>), String> {
+        let db = self.open_db()?;
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let pool = Self::resolve_pool(&pool_repo, pool_ref)?;
+
+        let members = pool_repo
+            .list_members(&pool.id)
+            .map_err(|e| e.to_string())?;
+        let mut position: i64 = members.iter().map(|m| m.position).max().unwrap_or(0);
+
+        let mut added = Vec::new();
+        for pr in profile_refs {
+            let profile = Self::resolve_profile(&profile_repo, pr)?;
+            position += 1;
+            let mut member = forge_db::pool_repository::PoolMember {
+                pool_id: pool.id.clone(),
+                profile_id: profile.id.clone(),
+                position,
+                ..forge_db::pool_repository::PoolMember::default()
+            };
+            pool_repo
+                .add_member(&mut member)
+                .map_err(|e| e.to_string())?;
+            added.push(profile.name);
+        }
+
+        Ok((Self::db_pool_to_cli(&pool), added))
+    }
+
+    fn show_pool(&self, pool_ref: &str) -> Result<PoolView, String> {
+        let db = self.open_db()?;
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let pool = Self::resolve_pool(&pool_repo, pool_ref)?;
+        let members = pool_repo
+            .list_members(&pool.id)
+            .map_err(|e| e.to_string())?;
+
+        let mut rendered = Vec::new();
+        for member in &members {
+            if let Ok(profile) = profile_repo.get(&member.profile_id) {
+                rendered.push(PoolMemberView {
+                    profile_id: profile.id,
+                    profile_name: profile.name,
+                    harness: profile.harness,
+                    auth_kind: profile.auth_kind,
+                });
+            }
+        }
+
+        Ok(PoolView {
+            pool: Self::db_pool_to_cli(&pool),
+            members: rendered,
+        })
+    }
+
+    fn set_default(&mut self, pool_ref: &str) -> Result<Pool, String> {
+        let db = self.open_db()?;
+        let repo = forge_db::pool_repository::PoolRepository::new(&db);
+
+        let pool = Self::resolve_pool(&repo, pool_ref)?;
+        repo.set_default(&pool.id).map_err(|e| e.to_string())?;
+
+        // Re-read to get updated state
+        let updated = repo.get(&pool.id).map_err(|e| e.to_string())?;
+        Ok(Self::db_pool_to_cli(&updated))
+    }
+}
+
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
