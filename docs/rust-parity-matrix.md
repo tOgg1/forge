@@ -32,6 +32,7 @@ Version: `v0` (2026-02-09)
 - Baseline refresh protocol artifact published (`rust-baseline-refresh-protocol`).
 - Rust coverage policy locked and enforced (`docs/rust-coverage-policy.md`).
 - Release gate checklist completed for final switch (`docs/rust-release-gate-checklist.md`).
+- Parity exception register present and empty (`docs/rust-parity-exception-register.md`).
 
 ## Daemon/Proto Gate Criteria (`forge-ynh`)
 
