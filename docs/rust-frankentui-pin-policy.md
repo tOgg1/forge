@@ -19,8 +19,12 @@ Task: `forge-mjm`
 
 ## Update procedure
 
-1. Change `rev` in `rust/crates/forge-ftui-adapter/Cargo.toml`.
-2. Run `cd rust && cargo update -p ftui`.
-3. Run `cd rust && cargo check --workspace`.
-4. Run `scripts/rust-frankentui-pin-check.sh`.
-5. Commit `Cargo.toml` + `Cargo.lock` + policy doc updates together.
+Canonical workflow: `scripts/rust-frankentui-pin-maintenance.sh`
+
+1. Pin update + validation:
+   - `scripts/rust-frankentui-pin-maintenance.sh --rev <new-sha>`
+2. Validation-only rerun:
+   - `scripts/rust-frankentui-pin-maintenance.sh --check-only`
+3. Commit `Cargo.toml` + `Cargo.lock` + policy/workflow doc updates together.
+
+Detailed runbook: `docs/rust-frankentui-pin-workflow.md`.
