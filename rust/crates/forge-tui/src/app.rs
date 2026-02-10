@@ -329,6 +329,19 @@ pub enum ActionKind {
     Create { wizard: Vec<(String, String)> },
 }
 
+/// Result of an asynchronous action execution. Matches Go's `actionResultMsg`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionResult {
+    pub kind: ActionType,
+    pub loop_id: String,
+    /// For create actions, the ID of the newly selected loop.
+    pub selected_loop_id: String,
+    /// Human-readable success message.
+    pub message: String,
+    /// Error message, if the action failed.
+    pub error: Option<String>,
+}
+
 fn wizard_field_count(step: usize) -> usize {
     match step {
         1 => 3,
@@ -1858,6 +1871,38 @@ impl App {
             }),
             _ => Command::None,
         }
+    }
+
+    /// Handle the result of an asynchronous action.
+    ///
+    /// Matches Go `actionResultMsg` handling: clears busy flag, shows
+    /// success/error status, resets wizard on create success, and
+    /// triggers a data refresh.
+    pub fn handle_action_result(&mut self, result: ActionResult) -> Command {
+        self.action_busy = false;
+
+        if let Some(ref err) = result.error {
+            self.set_status(StatusKind::Err, err);
+            if result.kind == ActionType::Create {
+                self.mode = UiMode::Wizard;
+                self.wizard.error = err.clone();
+            }
+            return Command::None;
+        }
+
+        if result.kind == ActionType::Create {
+            self.mode = UiMode::Main;
+            self.wizard.error.clear();
+            if !result.selected_loop_id.is_empty() {
+                self.selected_id = result.selected_loop_id;
+            }
+        }
+
+        if !result.message.is_empty() {
+            self.set_status(StatusKind::Ok, &result.message);
+        }
+
+        Command::Fetch
     }
 
     // -- render --------------------------------------------------------------
@@ -3448,5 +3493,90 @@ mod tests {
         };
         assert!(confirm.prompt.contains("Delete loop record"));
         assert!(!confirm.prompt.contains("Force"));
+    }
+
+    // -- handle_action_result --
+
+    #[test]
+    fn action_result_success_clears_busy_and_sets_ok_status() {
+        let mut app = app_with_loops(3);
+        app.set_action_busy(true);
+        let cmd = app.handle_action_result(ActionResult {
+            kind: ActionType::Stop,
+            loop_id: "loop-0".into(),
+            selected_loop_id: String::new(),
+            message: "Stop requested for loop loop-0".into(),
+            error: None,
+        });
+        assert!(!app.action_busy());
+        assert!(app.status_text().contains("Stop requested"));
+        assert_eq!(cmd, Command::Fetch);
+    }
+
+    #[test]
+    fn action_result_error_sets_err_status() {
+        let mut app = app_with_loops(3);
+        app.set_action_busy(true);
+        let cmd = app.handle_action_result(ActionResult {
+            kind: ActionType::Kill,
+            loop_id: "loop-0".into(),
+            selected_loop_id: String::new(),
+            message: String::new(),
+            error: Some("loop not found".into()),
+        });
+        assert!(!app.action_busy());
+        assert!(app.status_text().contains("loop not found"));
+        assert_eq!(cmd, Command::None);
+    }
+
+    #[test]
+    fn action_result_create_error_returns_to_wizard() {
+        let mut app = app_with_loops(3);
+        app.set_action_busy(true);
+        app.mode = UiMode::Main;
+        app.handle_action_result(ActionResult {
+            kind: ActionType::Create,
+            loop_id: String::new(),
+            selected_loop_id: String::new(),
+            message: String::new(),
+            error: Some("invalid count".into()),
+        });
+        assert_eq!(app.mode(), UiMode::Wizard);
+        assert_eq!(app.wizard().error, "invalid count");
+    }
+
+    #[test]
+    fn action_result_create_success_selects_new_loop() {
+        let mut app = app_with_loops(3);
+        app.set_action_busy(true);
+        app.mode = UiMode::Wizard;
+        let cmd = app.handle_action_result(ActionResult {
+            kind: ActionType::Create,
+            loop_id: String::new(),
+            selected_loop_id: "new-loop-42".into(),
+            message: "Created 1 loop".into(),
+            error: None,
+        });
+        assert_eq!(app.mode(), UiMode::Main);
+        assert_eq!(app.selected_id(), "new-loop-42");
+        assert!(app.wizard().error.is_empty());
+        assert!(app.status_text().contains("Created 1 loop"));
+        assert_eq!(cmd, Command::Fetch);
+    }
+
+    #[test]
+    fn action_result_resume_success() {
+        let mut app = app_with_loops(3);
+        app.set_action_busy(true);
+        let cmd = app.handle_action_result(ActionResult {
+            kind: ActionType::Resume,
+            loop_id: "loop-1".into(),
+            selected_loop_id: String::new(),
+            message: "Loop \"my-loop\" resumed (loop-1)".into(),
+            error: None,
+        });
+        assert!(!app.action_busy());
+        assert!(app.status_text().contains("resumed"));
+        assert_eq!(cmd, Command::Fetch);
     }
 }
