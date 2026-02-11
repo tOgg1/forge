@@ -1,10 +1,18 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use forge_loop::stale_runner::{
+    self, DaemonRunner, DaemonRunnerState, LoopState as StaleLoopState, RunnerLiveness,
+    LOOP_STALE_RUNNER_REASON,
+};
+use forge_rpc::forged::v1 as proto;
+use forge_rpc::forged::v1::forged_service_client::ForgedServiceClient;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tabwriter::TabWriter;
+use tonic::transport::Endpoint;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -69,20 +77,32 @@ pub trait PsBackend {
     fn list_loops(&self, selector: &LoopSelector) -> Result<Vec<LoopRecord>, String>;
 }
 
+type DaemonLister = fn() -> (HashMap<String, DaemonRunner>, bool);
+
 #[derive(Debug, Clone)]
 pub struct SqlitePsBackend {
     db_path: PathBuf,
+    daemon_lister: DaemonLister,
 }
 
 impl SqlitePsBackend {
     pub fn open_from_env() -> Self {
         Self {
             db_path: resolve_database_path(),
+            daemon_lister: list_daemon_runners,
         }
     }
 
     pub fn new(db_path: PathBuf) -> Self {
-        Self { db_path }
+        Self {
+            db_path,
+            daemon_lister: list_daemon_runners,
+        }
+    }
+
+    pub fn with_daemon_lister(mut self, daemon_lister: DaemonLister) -> Self {
+        self.daemon_lister = daemon_lister;
+        self
     }
 }
 
@@ -123,7 +143,7 @@ impl PsBackend for SqlitePsBackend {
             resolve_profile_ref(&profile_repo, &selector.profile)?
         };
 
-        let mut out = Vec::new();
+        let mut selected = Vec::new();
         for entry in loops {
             let state = map_loop_state(&entry.state);
             if !repo_filter.is_empty() && entry.repo_path != repo_filter {
@@ -141,7 +161,15 @@ impl PsBackend for SqlitePsBackend {
             if !selector.tag.is_empty() && !entry.tags.iter().any(|tag| tag == &selector.tag) {
                 continue;
             }
+            selected.push(entry);
+        }
 
+        let liveness_by_loop =
+            reconcile_loop_liveness(&loop_repo, &mut selected, self.daemon_lister)?;
+
+        let mut out = Vec::new();
+        for entry in selected {
+            let state = map_loop_state(&entry.state);
             let run_count = run_repo
                 .count_by_loop(&entry.id)
                 .map_err(|err| format!("count loop runs: {err}"))?;
@@ -158,18 +186,16 @@ impl PsBackend for SqlitePsBackend {
             } else {
                 String::new()
             };
-            let runner_owner = metadata_string(entry.metadata.as_ref(), "runner_owner");
-            let runner_instance_id = metadata_string(entry.metadata.as_ref(), "runner_instance_id");
-            let runner_pid_alive =
-                metadata_nested_bool(entry.metadata.as_ref(), "runner_liveness", "pid_alive");
-            let runner_daemon_alive = metadata_nested_bool(
-                entry.metadata.as_ref(),
-                "runner_liveness",
-                "daemon_runner_alive",
-            )
-            .or_else(|| {
-                metadata_nested_bool(entry.metadata.as_ref(), "runner_liveness", "daemon_alive")
-            });
+            let liveness =
+                liveness_by_loop
+                    .get(&entry.id)
+                    .cloned()
+                    .unwrap_or_else(|| RunnerLiveness {
+                        owner: String::new(),
+                        instance_id: String::new(),
+                        pid_alive: None,
+                        daemon_alive: None,
+                    });
 
             out.push(LoopRecord {
                 id: entry.id.clone(),
@@ -188,10 +214,10 @@ impl PsBackend for SqlitePsBackend {
                 pending_queue,
                 last_run: entry.last_run_at.unwrap_or_default(),
                 wait_until,
-                runner_owner,
-                runner_instance_id,
-                runner_pid_alive,
-                runner_daemon_alive,
+                runner_owner: liveness.owner,
+                runner_instance_id: liveness.instance_id,
+                runner_pid_alive: liveness.pid_alive,
+                runner_daemon_alive: liveness.daemon_alive,
             });
         }
         Ok(out)
@@ -436,6 +462,198 @@ fn map_loop_state(state: &forge_db::loop_repository::LoopState) -> LoopState {
     }
 }
 
+fn map_stale_loop_state(state: &forge_db::loop_repository::LoopState) -> StaleLoopState {
+    match state {
+        forge_db::loop_repository::LoopState::Running => StaleLoopState::Running,
+        forge_db::loop_repository::LoopState::Sleeping => StaleLoopState::Sleeping,
+        forge_db::loop_repository::LoopState::Waiting => StaleLoopState::Waiting,
+        forge_db::loop_repository::LoopState::Stopped => StaleLoopState::Stopped,
+        forge_db::loop_repository::LoopState::Error => StaleLoopState::Error,
+    }
+}
+
+fn reconcile_loop_liveness(
+    loop_repo: &forge_db::loop_repository::LoopRepository<'_>,
+    loops: &mut [forge_db::loop_repository::Loop],
+    daemon_lister: DaemonLister,
+) -> Result<HashMap<String, RunnerLiveness>, String> {
+    let mut result = HashMap::with_capacity(loops.len());
+    let (daemon_runners, daemon_reachable) = daemon_lister();
+
+    for loop_entry in loops.iter_mut() {
+        let mut info = RunnerLiveness {
+            owner: metadata_string(loop_entry.metadata.as_ref(), "runner_owner"),
+            instance_id: metadata_string(loop_entry.metadata.as_ref(), "runner_instance_id"),
+            pid_alive: None,
+            daemon_alive: None,
+        };
+
+        if let Some(pid) = loop_pid(loop_entry.metadata.as_ref()) {
+            info.pid_alive = Some(is_process_alive(pid));
+        }
+
+        if daemon_reachable {
+            let daemon_alive = stale_runner::daemon_runner_alive(
+                daemon_runners.get(&loop_entry.id),
+                &info.instance_id,
+            );
+            info.daemon_alive = Some(daemon_alive);
+        }
+
+        if stale_runner::should_mark_loop_stale(
+            &map_stale_loop_state(&loop_entry.state),
+            &info,
+            daemon_reachable,
+        ) {
+            mark_loop_stale(loop_repo, loop_entry, &info)?;
+        }
+
+        result.insert(loop_entry.id.clone(), info);
+    }
+
+    Ok(result)
+}
+
+fn mark_loop_stale(
+    loop_repo: &forge_db::loop_repository::LoopRepository<'_>,
+    loop_entry: &mut forge_db::loop_repository::Loop,
+    info: &RunnerLiveness,
+) -> Result<(), String> {
+    loop_entry.state = forge_db::loop_repository::LoopState::Stopped;
+    loop_entry.last_error = LOOP_STALE_RUNNER_REASON.to_string();
+
+    let reconciled_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let stale_record = stale_runner::stale_reconciliation_record(info, &reconciled_at);
+
+    let mut metadata = loop_entry.metadata.take().unwrap_or_default();
+    metadata.insert(
+        "runner_liveness".to_string(),
+        json!({
+            "pid_alive": stale_record.pid_alive,
+            "daemon_runner_alive": stale_record.daemon_runner_alive,
+            "reconciled_at": stale_record.reconciled_at_rfc3339,
+            "reason": stale_record.reason,
+        }),
+    );
+    loop_entry.metadata = Some(metadata);
+
+    loop_repo
+        .update(loop_entry)
+        .map_err(|err| format!("update loop {}: {err}", loop_entry.id))
+}
+
+fn loop_pid(metadata: Option<&HashMap<String, Value>>) -> Option<i32> {
+    let value = metadata.and_then(|meta| meta.get("pid"))?;
+    if let Some(pid) = value.as_i64() {
+        return i32::try_from(pid).ok();
+    }
+    if let Some(pid) = value.as_u64() {
+        return i32::try_from(pid).ok();
+    }
+    if let Some(pid) = value.as_str() {
+        return pid.trim().parse::<i32>().ok();
+    }
+    None
+}
+
+#[cfg(unix)]
+fn is_process_alive(pid: i32) -> bool {
+    if pid <= 0 {
+        return false;
+    }
+    let target = nix::unistd::Pid::from_raw(pid);
+    match nix::sys::signal::kill(target, None) {
+        Ok(()) => true,
+        Err(nix::errno::Errno::EPERM) => true,
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn is_process_alive(_pid: i32) -> bool {
+    false
+}
+
+pub(crate) fn list_daemon_runners() -> (HashMap<String, DaemonRunner>, bool) {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(value) => value,
+        Err(_) => return (HashMap::new(), false),
+    };
+    match runtime.block_on(list_daemon_runners_async()) {
+        Ok(runners) => (runners, true),
+        Err(_) => (HashMap::new(), false),
+    }
+}
+
+async fn list_daemon_runners_async() -> Result<HashMap<String, DaemonRunner>, String> {
+    let target = resolved_daemon_target();
+    let endpoint = Endpoint::from_shared(target.clone())
+        .map_err(|err| format!("forged daemon unavailable: {err}"))?
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(2));
+    let channel = endpoint
+        .connect()
+        .await
+        .map_err(|err| format!("forged daemon unavailable: {err}"))?;
+
+    let mut client = ForgedServiceClient::new(channel);
+    let response = client
+        .list_loop_runners(proto::ListLoopRunnersRequest {})
+        .await
+        .map_err(|err| format!("forged daemon unavailable: {err}"))?
+        .into_inner();
+
+    let mut runners = HashMap::with_capacity(response.runners.len());
+    for runner in response.runners {
+        let loop_id = runner.loop_id.trim();
+        if loop_id.is_empty() {
+            continue;
+        }
+        runners.insert(
+            loop_id.to_string(),
+            DaemonRunner {
+                instance_id: runner.instance_id.trim().to_string(),
+                state: map_daemon_runner_state(runner.state),
+            },
+        );
+    }
+    Ok(runners)
+}
+
+fn map_daemon_runner_state(value: i32) -> DaemonRunnerState {
+    match proto::LoopRunnerState::try_from(value).unwrap_or(proto::LoopRunnerState::Unspecified) {
+        proto::LoopRunnerState::Running => DaemonRunnerState::Running,
+        proto::LoopRunnerState::Stopped => DaemonRunnerState::Stopped,
+        _ => DaemonRunnerState::Unknown,
+    }
+}
+
+fn resolved_daemon_target() -> String {
+    let env_target = std::env::var("FORGE_DAEMON_TARGET")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("FORGED_ADDR")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        });
+    if let Some(target) = env_target {
+        return normalize_daemon_target(&target);
+    }
+    "http://127.0.0.1:50051".to_string()
+}
+
+fn normalize_daemon_target(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.contains("://") {
+        return trimmed.to_string();
+    }
+    format!("http://{trimmed}")
+}
+
 fn metadata_string(metadata: Option<&HashMap<String, Value>>, key: &str) -> String {
     metadata
         .and_then(|meta| meta.get(key))
@@ -464,18 +682,6 @@ fn metadata_scalar(metadata: Option<&HashMap<String, Value>>, key: &str) -> Stri
         return v.to_string();
     }
     value.to_string()
-}
-
-fn metadata_nested_bool(
-    metadata: Option<&HashMap<String, Value>>,
-    outer: &str,
-    inner: &str,
-) -> Option<bool> {
-    metadata
-        .and_then(|meta| meta.get(outer))
-        .and_then(Value::as_object)
-        .and_then(|nested| nested.get(inner))
-        .and_then(Value::as_bool)
 }
 
 const COLOR_RESET: &str = "\x1b[0m";
@@ -660,9 +866,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        format_loop_short_id, loop_unique_prefix_lengths, parse_args, run_for_test,
-        InMemoryPsBackend, LoopRecord, LoopState, ParsedArgs, SqlitePsBackend, COLOR_CYAN,
-        COLOR_YELLOW,
+        format_loop_short_id, loop_unique_prefix_lengths, parse_args, run_for_test, DaemonRunner,
+        DaemonRunnerState, InMemoryPsBackend, LoopRecord, LoopState, ParsedArgs, SqlitePsBackend,
+        COLOR_CYAN, COLOR_YELLOW, LOOP_STALE_RUNNER_REASON,
     };
 
     fn parse_ok(args: &[String]) -> ParsedArgs {
@@ -1040,13 +1246,7 @@ mod tests {
         metadata.insert("runner_owner".to_string(), json!("local"));
         metadata.insert("runner_instance_id".to_string(), json!("inst-42"));
         metadata.insert("wait_until".to_string(), json!("2026-02-10T12:00:00Z"));
-        metadata.insert(
-            "runner_liveness".to_string(),
-            json!({
-                "pid_alive": true,
-                "daemon_runner_alive": false
-            }),
-        );
+        metadata.insert("pid".to_string(), json!(std::process::id()));
 
         let mut loop_entry = forge_db::loop_repository::Loop {
             name: "sqlite-loop".to_string(),
@@ -1091,7 +1291,8 @@ mod tests {
             .enqueue(&loop_entry.id, &mut queued)
             .unwrap_or_else(|err| panic!("queue add: {err}"));
 
-        let backend = SqlitePsBackend::new(db_path.clone());
+        let backend =
+            SqlitePsBackend::new(db_path.clone()).with_daemon_lister(daemon_reachable_no_runners);
         let out = run_for_test(&["ps", "--json", "--profile", "ops"], &backend);
         assert_eq!(out.exit_code, 0);
         assert!(out.stderr.is_empty());
@@ -1110,6 +1311,249 @@ mod tests {
         assert_eq!(arr[0]["runner_pid_alive"], true);
         assert_eq!(arr[0]["runner_daemon_alive"], false);
         assert_eq!(arr[0]["wait_until"], "2026-02-10T12:00:00Z");
+    }
+
+    #[test]
+    fn ps_sqlite_backend_marks_stale_when_daemon_runner_missing() {
+        let db_path = temp_db_path("ps-stale-mark");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+
+        let mut profile = forge_db::profile_repository::Profile {
+            name: "ops".to_string(),
+            command_template: "codex exec".to_string(),
+            harness: "codex".to_string(),
+            ..Default::default()
+        };
+        profile_repo
+            .create(&mut profile)
+            .unwrap_or_else(|err| panic!("create profile: {err}"));
+
+        let mut pool = forge_db::pool_repository::Pool {
+            name: "default".to_string(),
+            strategy: "round_robin".to_string(),
+            ..Default::default()
+        };
+        pool_repo
+            .create(&mut pool)
+            .unwrap_or_else(|err| panic!("create pool: {err}"));
+
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("local"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-stale"));
+
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "stale-loop".to_string(),
+            repo_path: "/tmp/stale-loop".to_string(),
+            pool_id: pool.id.clone(),
+            profile_id: profile.id.clone(),
+            state: forge_db::loop_repository::LoopState::Running,
+            metadata: Some(metadata),
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+
+        let backend =
+            SqlitePsBackend::new(db_path.clone()).with_daemon_lister(daemon_reachable_no_runners);
+        let out = run_for_test(&["ps", "--json"], &backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+        let parsed = parse_json(&out.stdout);
+        let arr = match parsed.as_array() {
+            Some(array) => array,
+            None => panic!("json output must be an array"),
+        };
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "stale-loop");
+        assert_eq!(arr[0]["state"], "stopped");
+        assert_eq!(arr[0]["runner_daemon_alive"], false);
+
+        let updated = loop_repo
+            .get(&loop_entry.id)
+            .unwrap_or_else(|err| panic!("get loop: {err}"));
+        assert_eq!(updated.state, forge_db::loop_repository::LoopState::Stopped);
+        assert_eq!(updated.last_error, LOOP_STALE_RUNNER_REASON);
+        let metadata = updated
+            .metadata
+            .unwrap_or_else(|| panic!("expected metadata to be present"));
+        let liveness = metadata
+            .get("runner_liveness")
+            .and_then(serde_json::Value::as_object)
+            .unwrap_or_else(|| panic!("expected runner_liveness object"));
+        assert_eq!(
+            liveness.get("reason").and_then(serde_json::Value::as_str),
+            Some(LOOP_STALE_RUNNER_REASON)
+        );
+        assert_eq!(
+            liveness.get("daemon_runner_alive"),
+            Some(&serde_json::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn ps_sqlite_backend_skips_daemon_owned_when_daemon_unreachable() {
+        let db_path = temp_db_path("ps-daemon-unreachable");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+
+        let mut profile = forge_db::profile_repository::Profile {
+            name: "ops".to_string(),
+            command_template: "codex exec".to_string(),
+            harness: "codex".to_string(),
+            ..Default::default()
+        };
+        profile_repo
+            .create(&mut profile)
+            .unwrap_or_else(|err| panic!("create profile: {err}"));
+
+        let mut pool = forge_db::pool_repository::Pool {
+            name: "default".to_string(),
+            strategy: "round_robin".to_string(),
+            ..Default::default()
+        };
+        pool_repo
+            .create(&mut pool)
+            .unwrap_or_else(|err| panic!("create pool: {err}"));
+
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("daemon"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-daemon"));
+
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "daemon-loop".to_string(),
+            repo_path: "/tmp/daemon-loop".to_string(),
+            pool_id: pool.id.clone(),
+            profile_id: profile.id.clone(),
+            state: forge_db::loop_repository::LoopState::Running,
+            metadata: Some(metadata),
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+
+        let backend = SqlitePsBackend::new(db_path.clone()).with_daemon_lister(daemon_unreachable);
+        let out = run_for_test(&["ps", "--json"], &backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+        let parsed = parse_json(&out.stdout);
+        let arr = match parsed.as_array() {
+            Some(array) => array,
+            None => panic!("json output must be an array"),
+        };
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "daemon-loop");
+        assert_eq!(arr[0]["state"], "running");
+        assert_eq!(arr[0]["runner_owner"], "daemon");
+
+        let updated = loop_repo
+            .get(&loop_entry.id)
+            .unwrap_or_else(|err| panic!("get loop: {err}"));
+        assert_eq!(updated.state, forge_db::loop_repository::LoopState::Running);
+    }
+
+    #[test]
+    fn ps_sqlite_backend_daemon_runner_alive_prevents_stale_mark() {
+        let db_path = temp_db_path("ps-daemon-live");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+        let pool_repo = forge_db::pool_repository::PoolRepository::new(&db);
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+
+        let mut profile = forge_db::profile_repository::Profile {
+            name: "ops".to_string(),
+            command_template: "codex exec".to_string(),
+            harness: "codex".to_string(),
+            ..Default::default()
+        };
+        profile_repo
+            .create(&mut profile)
+            .unwrap_or_else(|err| panic!("create profile: {err}"));
+
+        let mut pool = forge_db::pool_repository::Pool {
+            name: "default".to_string(),
+            strategy: "round_robin".to_string(),
+            ..Default::default()
+        };
+        pool_repo
+            .create(&mut pool)
+            .unwrap_or_else(|err| panic!("create pool: {err}"));
+
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("daemon"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-live"));
+
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            id: "loop-live".to_string(),
+            name: "daemon-live-loop".to_string(),
+            repo_path: "/tmp/daemon-live-loop".to_string(),
+            pool_id: pool.id.clone(),
+            profile_id: profile.id.clone(),
+            state: forge_db::loop_repository::LoopState::Running,
+            metadata: Some(metadata),
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+
+        let backend =
+            SqlitePsBackend::new(db_path.clone()).with_daemon_lister(daemon_reachable_live_runner);
+        let out = run_for_test(&["ps", "--json"], &backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+        let parsed = parse_json(&out.stdout);
+        let arr = match parsed.as_array() {
+            Some(array) => array,
+            None => panic!("json output must be an array"),
+        };
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "daemon-live-loop");
+        assert_eq!(arr[0]["state"], "running");
+        assert_eq!(arr[0]["runner_daemon_alive"], true);
+
+        let updated = loop_repo
+            .get(&loop_entry.id)
+            .unwrap_or_else(|err| panic!("get loop: {err}"));
+        assert_eq!(updated.state, forge_db::loop_repository::LoopState::Running);
+    }
+
+    fn daemon_reachable_no_runners() -> (HashMap<String, DaemonRunner>, bool) {
+        (HashMap::new(), true)
+    }
+
+    fn daemon_unreachable() -> (HashMap<String, DaemonRunner>, bool) {
+        (HashMap::new(), false)
+    }
+
+    fn daemon_reachable_live_runner() -> (HashMap<String, DaemonRunner>, bool) {
+        let mut runners = HashMap::new();
+        runners.insert(
+            "loop-live".to_string(),
+            DaemonRunner {
+                instance_id: "inst-live".to_string(),
+                state: DaemonRunnerState::Running,
+            },
+        );
+        (runners, true)
     }
 
     fn temp_db_path(tag: &str) -> PathBuf {
