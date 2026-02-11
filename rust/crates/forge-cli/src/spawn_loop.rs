@@ -170,7 +170,7 @@ fn spawn_daemon(loop_id: &str, options: &SpawnOptions) -> Result<SpawnResult, St
     if skip_spawn_for_test_harness() {
         return Ok(SpawnResult {
             owner: "daemon".to_string(),
-            instance_id: format!("resume-{}", uuid::Uuid::new_v4().simple()),
+            instance_id: format!("daemon-{}", uuid::Uuid::new_v4().simple()),
             pid: None,
         });
     }
@@ -277,8 +277,8 @@ fn skip_spawn_for_test_harness() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_start_loop_runner_request, start_loop_runner_with_spawner, LoopSpawner, SpawnOptions,
-        SpawnResult,
+        build_start_loop_runner_request, spawn_daemon, start_loop_runner_with_spawner, LoopSpawner,
+        SpawnOptions, SpawnResult,
     };
     use std::io::Write;
 
@@ -580,6 +580,20 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[test]
+    fn daemon_spawn_in_test_harness_uses_daemon_instance_id_prefix() {
+        let result = spawn_daemon("loop-1", &SpawnOptions::default())
+            .unwrap_or_else(|err| panic!("spawn_daemon should succeed in test harness: {err}"));
+
+        assert_eq!(result.owner, "daemon");
+        assert!(
+            result.instance_id.starts_with("daemon-"),
+            "expected daemon-prefixed instance id, got {}",
+            result.instance_id
+        );
+        assert_eq!(result.pid, None);
+    }
+
     // ── Regression suite: spawn branch success/failure matrix ──
 
     #[test]
@@ -667,7 +681,10 @@ mod tests {
         assert_eq!(result.instance_id, "daemon-inst");
         assert_eq!(result.pid, None);
         assert_eq!(spawner.daemon_calls, 1);
-        assert_eq!(spawner.local_calls, 0, "daemon succeeded so local not called");
+        assert_eq!(
+            spawner.local_calls, 0,
+            "daemon succeeded so local not called"
+        );
         assert!(warning.is_empty(), "no warning when daemon succeeds");
     }
 
@@ -739,14 +756,9 @@ mod tests {
             ..Default::default()
         };
 
-        let result = start_loop_runner_with_spawner(
-            "loop-1",
-            "auto",
-            &options,
-            &mut warning,
-            &mut spawner,
-        )
-        .expect("auto fallback should succeed even with suppressed warning");
+        let result =
+            start_loop_runner_with_spawner("loop-1", "auto", &options, &mut warning, &mut spawner)
+                .expect("auto fallback should succeed even with suppressed warning");
 
         assert_eq!(result.owner, "local");
         assert!(warning.is_empty());

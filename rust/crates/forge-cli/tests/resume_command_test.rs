@@ -32,6 +32,11 @@ fn resume_human_and_json_outputs_match_goldens() {
     );
     assert_success(&json);
     assert_eq!(json.stdout, include_str!("golden/resume/resume_json.txt"));
+    let loops = backend
+        .list_loops()
+        .unwrap_or_else(|err| panic!("list_loops should work: {err}"));
+    assert_eq!(loops[0].runner_owner, "daemon");
+    assert_eq!(loops[0].runner_instance_id, "daemon-001");
 }
 
 #[test]

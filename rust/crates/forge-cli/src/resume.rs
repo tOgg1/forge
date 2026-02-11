@@ -72,8 +72,11 @@ impl InMemoryResumeBackend {
         Self { loops, tick: 0 }
     }
 
-    fn next_instance_id(&mut self) -> String {
+    fn next_instance_id(&mut self, owner: &str) -> String {
         self.tick += 1;
+        if owner == "daemon" {
+            return format!("daemon-{:03}", self.tick);
+        }
         format!("resume-{:03}", self.tick)
     }
 }
@@ -107,7 +110,7 @@ impl ResumeBackend for InMemoryResumeBackend {
         }
 
         let owner = resolve_spawn_owner(spawn_owner)?;
-        let instance_id = self.next_instance_id();
+        let instance_id = self.next_instance_id(&owner);
 
         let loop_entry = &mut self.loops[index];
         loop_entry.state = LoopState::Running;
@@ -137,10 +140,6 @@ impl SqliteResumeBackend {
     fn open_db(&self) -> Result<forge_db::Db, String> {
         forge_db::Db::open(forge_db::Config::new(&self.db_path))
             .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
-    }
-
-    fn next_instance_id(&self) -> String {
-        format!("resume-{}", uuid::Uuid::new_v4().simple())
     }
 }
 
@@ -204,11 +203,10 @@ impl ResumeBackend for SqliteResumeBackend {
 
         loop_entry.state = forge_db::loop_repository::LoopState::Running;
         let mut metadata = loop_entry.metadata.unwrap_or_default();
-        let instance_id = if spawn_result.instance_id.is_empty() {
-            self.next_instance_id()
-        } else {
-            spawn_result.instance_id
-        };
+        let instance_id = spawn_result.instance_id.trim().to_string();
+        if instance_id.is_empty() {
+            return Err("resume spawn returned empty instance_id".to_string());
+        }
         metadata.insert(
             "runner_owner".to_string(),
             Value::String(spawn_result.owner.clone()),
@@ -537,7 +535,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        parse_args, run_for_test, InMemoryResumeBackend, LoopRecord, LoopState, SqliteResumeBackend,
+        parse_args, run_for_test, InMemoryResumeBackend, LoopRecord, LoopState, ResumeBackend,
+        SqliteResumeBackend,
     };
 
     #[test]
@@ -655,6 +654,10 @@ mod tests {
             .unwrap_or_default()
             .to_string();
         assert!(!instance_id.trim().is_empty());
+        assert!(
+            instance_id.starts_with("daemon-"),
+            "daemon instance id should come from daemon path; got {instance_id}"
+        );
     }
 
     #[test]
@@ -690,6 +693,40 @@ mod tests {
             Some(&json!("2026-02-10T00:00:00Z"))
         );
         assert_eq!(metadata.get("loop_iteration_count"), Some(&json!(42)));
+    }
+
+    #[test]
+    fn sqlite_resume_daemon_metadata_matches_resume_result_instance_id() {
+        let (db_path, _tmp, loop_id) = setup_sqlite_resume_fixture();
+        let mut backend = SqliteResumeBackend::new(db_path.clone());
+
+        let result = backend
+            .resume_loop(
+                &loop_id,
+                "daemon",
+                &crate::spawn_loop::SpawnOptions::default(),
+                &mut std::io::sink(),
+            )
+            .unwrap_or_else(|err| panic!("resume loop: {err}"));
+
+        let db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+        let repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let entry = repo
+            .get(&loop_id)
+            .unwrap_or_else(|err| panic!("get loop {loop_id}: {err}"));
+        let metadata = entry.metadata.unwrap_or_default();
+        let stored_instance_id = metadata
+            .get("runner_instance_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        assert_eq!(stored_instance_id, result.instance_id);
+        assert!(
+            stored_instance_id.starts_with("daemon-"),
+            "daemon resume should persist daemon instance id; got {stored_instance_id}"
+        );
     }
 
     fn setup_sqlite_resume_fixture() -> (PathBuf, TempDir, String) {
