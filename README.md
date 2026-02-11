@@ -35,7 +35,13 @@ Key features:
 
 ## Install
 
-Linux (x86_64/arm64):
+Homebrew (macOS/Linux):
+
+```bash
+brew install trmdy/tap/forge
+```
+
+Linux script (x86_64/arm64):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/trmdy/forge/main/scripts/install-linux.sh | bash
@@ -47,8 +53,6 @@ Optional overrides:
 FORGE_VERSION=v0.0.0 FORGE_INSTALL_DIR="$HOME/.local/bin" FORGE_BINARIES="forge" \
   bash -c 'curl -fsSL https://raw.githubusercontent.com/trmdy/forge/main/scripts/install-linux.sh | bash'
 ```
-
-Homebrew (macOS) can be wired once a tap repo is chosen.
 
 ## Quick Start
 
