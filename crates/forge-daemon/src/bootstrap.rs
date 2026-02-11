@@ -4,7 +4,7 @@
 //! `internal/logging/logger.go`, and `internal/logging/redact.go`.
 
 use std::fmt;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 
 // ---------------------------------------------------------------------------
 // Constants (mirrors Go internal/forged/constants.go)
@@ -231,6 +231,46 @@ pub struct Logger {
     fields: Vec<(String, String)>,
 }
 
+const ANSI_RESET: &str = "\x1b[0m";
+const ANSI_DIM: &str = "\x1b[2m";
+const ANSI_KEY: &str = "\x1b[36m";
+
+fn level_ansi(level: LogLevel) -> &'static str {
+    match level {
+        LogLevel::Trace => "\x1b[90m",
+        LogLevel::Debug => "\x1b[36m",
+        LogLevel::Info => "\x1b[32m",
+        LogLevel::Warn => "\x1b[33m",
+        LogLevel::Error | LogLevel::Fatal => "\x1b[31m",
+    }
+}
+
+fn format_console_level(level: LogLevel, color: bool) -> String {
+    if color {
+        format!("{}{}{}", level_ansi(level), level, ANSI_RESET)
+    } else {
+        level.to_string()
+    }
+}
+
+fn format_console_field(key: &str, value: &str, color: bool) -> String {
+    if color {
+        format!("{ANSI_KEY}{key}{ANSI_RESET}={value}")
+    } else {
+        format!("{key}={value}")
+    }
+}
+
+fn should_colorize_console() -> bool {
+    if std::env::var_os("FORGE_FORCE_COLOR").is_some() {
+        return true;
+    }
+    if std::env::var_os("FORGE_NO_COLOR").is_some() || std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    std::io::stderr().is_terminal()
+}
+
 impl Logger {
     /// Create a new logger from the given config.
     pub fn new(cfg: &LoggingConfig) -> Self {
@@ -286,12 +326,21 @@ impl Logger {
         match self.format {
             LogFormat::Console => {
                 let now = chrono::Utc::now().format("%H:%M:%S");
-                let _ = write!(handle, "{now} {level} ");
+                let color = should_colorize_console();
+                if color {
+                    let _ = write!(
+                        handle,
+                        "{ANSI_DIM}{now}{ANSI_RESET} {} ",
+                        format_console_level(level, true),
+                    );
+                } else {
+                    let _ = write!(handle, "{now} {} ", format_console_level(level, false));
+                }
                 for (k, v) in &self.fields {
-                    let _ = write!(handle, "{k}={v} ");
+                    let _ = write!(handle, "{} ", format_console_field(k, v, color));
                 }
                 for (k, v) in extra {
-                    let _ = write!(handle, "{k}={v} ");
+                    let _ = write!(handle, "{} ", format_console_field(k, v, color));
                 }
                 let _ = writeln!(handle, "{msg}");
             }
@@ -859,5 +908,29 @@ mod tests {
             .fields
             .iter()
             .any(|(k, v)| k == "component" && v == "forged"));
+    }
+
+    #[test]
+    fn console_level_formatting_colorized() {
+        let out = format_console_level(LogLevel::Warn, true);
+        assert_eq!(out, "\x1b[33mWARN\x1b[0m");
+    }
+
+    #[test]
+    fn console_level_formatting_plain() {
+        let out = format_console_level(LogLevel::Info, false);
+        assert_eq!(out, "INFO");
+    }
+
+    #[test]
+    fn console_field_formatting_colorized() {
+        let out = format_console_field("component", "forged", true);
+        assert_eq!(out, "\x1b[36mcomponent\x1b[0m=forged");
+    }
+
+    #[test]
+    fn console_field_formatting_plain() {
+        let out = format_console_field("component", "forged", false);
+        assert_eq!(out, "component=forged");
     }
 }
