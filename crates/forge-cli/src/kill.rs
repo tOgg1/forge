@@ -172,9 +172,25 @@ impl KillBackend for SqliteKillBackend {
         loop_repo
             .update(&mut loop_entry)
             .map_err(|err| format!("persist stop state for {loop_id}: {err}"))?;
+        reconcile_running_runs(&db, loop_id)?;
 
         Ok(())
     }
+}
+
+fn reconcile_running_runs(db: &forge_db::Db, loop_id: &str) -> Result<(), String> {
+    db.conn()
+        .execute(
+            "UPDATE loop_runs
+             SET status = 'killed',
+                 finished_at = COALESCE(NULLIF(finished_at, ''), strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                 exit_code = COALESCE(exit_code, -9)
+             WHERE loop_id = ?1
+               AND status = 'running'",
+            rusqlite::params![loop_id],
+        )
+        .map_err(|err| format!("reconcile running runs for {loop_id}: {err}"))?;
+    Ok(())
 }
 
 fn resolve_database_path() -> PathBuf {
@@ -812,6 +828,53 @@ mod tests {
             .get(&loop_entry.id)
             .unwrap_or_else(|err| panic!("get loop: {err}"));
         assert_eq!(updated.state, forge_db::loop_repository::LoopState::Stopped);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn kill_sqlite_backend_marks_running_loop_runs_as_killed() {
+        let db_path = temp_db_path("sqlite-kill-runs");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let run_repo = forge_db::loop_run_repository::LoopRunRepository::new(&db);
+
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "kill-run-reconcile-loop".to_string(),
+            repo_path: "/tmp/kill-run-reconcile".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+
+        let mut run_entry = forge_db::loop_run_repository::LoopRun {
+            loop_id: loop_entry.id.clone(),
+            status: forge_db::loop_run_repository::LoopRunStatus::Running,
+            ..Default::default()
+        };
+        run_repo
+            .create(&mut run_entry)
+            .unwrap_or_else(|err| panic!("create run: {err}"));
+
+        let mut backend = SqliteKillBackend::new(db_path.clone());
+        let out = run_for_test(&["kill", "kill-run-reconcile-loop"], &mut backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+        let updated_run = run_repo
+            .get(&run_entry.id)
+            .unwrap_or_else(|err| panic!("get run: {err}"));
+        assert_eq!(
+            updated_run.status,
+            forge_db::loop_run_repository::LoopRunStatus::Killed
+        );
+        assert!(updated_run.finished_at.is_some());
+        assert_eq!(updated_run.exit_code, Some(-9));
 
         let _ = std::fs::remove_file(db_path);
     }
