@@ -26,6 +26,7 @@ BINARY_FMAIL := fmail
 RUST_BINARY_CLI := rforge
 RUST_BINARY_DAEMON := rforged
 RUST_BINARY_FMAIL := rfmail
+RUST_META_ENV := env FORGE_VERSION="$(VERSION)" FORGE_COMMIT="$(COMMIT)" FORGE_BUILD_DATE="$(DATE)"
 
 # Directories
 BUILD_DIR := ./build
@@ -66,7 +67,7 @@ build-cli:
 	@mkdir -p $(BUILD_DIR)
 ifeq ($(RUST_FIRST),1)
 	@echo "RUST_FIRST=1: using Rust $(RUST_BINARY_CLI) as $(BINARY_CLI)"
-	@cd $(RUST_DIR) && cargo build --release -p forge-cli --bin $(RUST_BINARY_CLI)
+	@cd $(RUST_DIR) && $(RUST_META_ENV) cargo build --release -p forge-cli --bin $(RUST_BINARY_CLI)
 	@cp $(RUST_DIR)/target/release/$(RUST_BINARY_CLI) $(BUILD_DIR)/$(BINARY_CLI)
 else
 	@cd $(GO_SRC_DIR) && $(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_CLI) $(CMD_CLI)
@@ -78,7 +79,7 @@ build-daemon:
 	@mkdir -p $(BUILD_DIR)
 ifeq ($(RUST_FIRST),1)
 	@echo "RUST_FIRST=1: using Rust $(RUST_BINARY_DAEMON) as $(BINARY_DAEMON)"
-	@cd $(RUST_DIR) && cargo build --release -p forge-daemon --bin $(RUST_BINARY_DAEMON)
+	@cd $(RUST_DIR) && $(RUST_META_ENV) cargo build --release -p forge-daemon --bin $(RUST_BINARY_DAEMON)
 	@cp $(RUST_DIR)/target/release/$(RUST_BINARY_DAEMON) $(BUILD_DIR)/$(BINARY_DAEMON)
 else
 	@cd $(GO_SRC_DIR) && $(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_DAEMON) $(CMD_DAEMON)
@@ -90,7 +91,7 @@ build-runner:
 	@mkdir -p $(BUILD_DIR)
 ifeq ($(RUST_FIRST),1)
 	@echo "RUST_FIRST=1: using Rust $(BINARY_RUNNER)"
-	@cd $(RUST_DIR) && cargo build --release -p forge-runner --bin $(BINARY_RUNNER)
+	@cd $(RUST_DIR) && $(RUST_META_ENV) cargo build --release -p forge-runner --bin $(BINARY_RUNNER)
 	@cp $(RUST_DIR)/target/release/$(BINARY_RUNNER) $(BUILD_DIR)/$(BINARY_RUNNER)
 else
 	@cd $(GO_SRC_DIR) && $(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_RUNNER) $(CMD_RUNNER)
@@ -102,7 +103,7 @@ build-fmail:
 	@mkdir -p $(BUILD_DIR)
 ifeq ($(RUST_FIRST),1)
 	@echo "RUST_FIRST=1: using Rust $(RUST_BINARY_FMAIL) as $(BINARY_FMAIL)"
-	@cd $(RUST_DIR) && cargo build --release -p fmail-cli --bin $(RUST_BINARY_FMAIL)
+	@cd $(RUST_DIR) && $(RUST_META_ENV) cargo build --release -p fmail-cli --bin $(RUST_BINARY_FMAIL)
 	@cp $(RUST_DIR)/target/release/$(RUST_BINARY_FMAIL) $(BUILD_DIR)/$(BINARY_FMAIL)
 else
 	@cd $(GO_SRC_DIR) && $(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_FMAIL) $(CMD_FMAIL)
@@ -132,26 +133,26 @@ build-rust: build-rust-cli build-rust-daemon build-rust-fmail
 build-rust-cli:
 	@echo "Building $(RUST_BINARY_CLI) (Rust)..."
 	@mkdir -p $(BUILD_DIR)
-	@cd $(RUST_DIR) && cargo build --release -p forge-cli --bin $(RUST_BINARY_CLI)
+	@cd $(RUST_DIR) && $(RUST_META_ENV) cargo build --release -p forge-cli --bin $(RUST_BINARY_CLI)
 	@cp $(RUST_DIR)/target/release/$(RUST_BINARY_CLI) $(BUILD_DIR)/$(RUST_BINARY_CLI)
 
 build-rust-daemon:
 	@echo "Building $(RUST_BINARY_DAEMON) (Rust)..."
 	@mkdir -p $(BUILD_DIR)
-	@cd $(RUST_DIR) && cargo build --release -p forge-daemon --bin $(RUST_BINARY_DAEMON)
+	@cd $(RUST_DIR) && $(RUST_META_ENV) cargo build --release -p forge-daemon --bin $(RUST_BINARY_DAEMON)
 	@cp $(RUST_DIR)/target/release/$(RUST_BINARY_DAEMON) $(BUILD_DIR)/$(RUST_BINARY_DAEMON)
 
 build-rust-fmail:
 	@echo "Building $(RUST_BINARY_FMAIL) (Rust)..."
 	@mkdir -p $(BUILD_DIR)
-	@cd $(RUST_DIR) && cargo build --release -p fmail-cli --bin $(RUST_BINARY_FMAIL)
+	@cd $(RUST_DIR) && $(RUST_META_ENV) cargo build --release -p fmail-cli --bin $(RUST_BINARY_FMAIL)
 	@cp $(RUST_DIR)/target/release/$(RUST_BINARY_FMAIL) $(BUILD_DIR)/$(RUST_BINARY_FMAIL)
 
 ## Development targets
 
 # Run the CLI in development mode
 dev:
-	@cargo run -p forge-cli --bin rforge -- --help >/dev/null
+	@$(RUST_META_ENV) cargo run -p forge-cli --bin rforge -- --help >/dev/null
 	@echo "Rust dev surface ready: use 'cargo run -p forge-cli --bin rforge -- <args>'"
 
 ## Installation targets
