@@ -7,7 +7,6 @@ pub mod clean;
 pub mod completion;
 pub mod config;
 pub mod context;
-mod daemon_client;
 pub mod doctor;
 pub mod error_envelope;
 pub mod explain;
