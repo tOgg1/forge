@@ -63,9 +63,11 @@ Define strict, testable gate criteria for daemon/proto parity before Rust cutove
 - `parity` workflow job runs:
   - `go test ./internal/parity -run '^TestDaemonProtoGate' -count=1`
   - `go test ./internal/parity -run '^TestProtoWireGate' -count=1`
+  - `scripts/rust-daemon-runtime-parity.sh`
 - Local Rust validation command:
   - `cargo test -p forge-daemon loop_runner`
   - `cargo test -p forge-daemon loop_runner_lifecycle_via_rpc_handlers`
+  - `cargo test -p forge-daemon --test rforged_binary_test`
   - `cargo test -p forge-runner runner`
   - `cargo test -p forge-loop stale_runner`
 - This baseline gate is required in PR CI.

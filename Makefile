@@ -44,7 +44,7 @@ RUST_INSTALL_DIR ?= $(GOBIN)
 # Platforms for cross-compilation
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: all build go-layout-guard build-cli build-daemon build-runner build-fmail build-rust build-rust-cli build-rust-daemon build-rust-fmail clean test lint fmt vet tidy install install-local install-system install-rust install-rust-system uninstall uninstall-rust uninstall-rust-system dev help proto proto-lint
+.PHONY: all build go-layout-guard build-cli build-daemon build-runner build-fmail build-rust build-rust-cli build-rust-daemon build-rust-fmail clean test lint fmt vet tidy install install-local install-system install-rust install-rust-system uninstall uninstall-rust uninstall-rust-system dev help proto proto-lint rust-daemon-runtime-parity
 .PHONY: perf-smoke perf-bench
 
 # Default target
@@ -266,6 +266,10 @@ test-coverage:
 test-short:
 	$(GOTEST) -v -short ./...
 
+# Run Rust daemon runtime parity bring-up suite.
+rust-daemon-runtime-parity:
+	@scripts/rust-daemon-runtime-parity.sh
+
 ## Perf targets (gated; opt-in via build tags)
 
 # Perf smoke: runs fast-ish budget checks on a synthetic fmail mailbox.
@@ -383,6 +387,7 @@ help:
 	@echo "  test           Run all tests with race detector"
 	@echo "  test-coverage  Run tests with HTML coverage report"
 	@echo "  test-short     Run short tests only"
+	@echo "  rust-daemon-runtime-parity Run Rust daemon runtime parity bring-up suite"
 	@echo "  lint           Run golangci-lint"
 	@echo "  fmt            Format code with gofmt"
 	@echo "  vet            Run go vet"

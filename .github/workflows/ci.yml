@@ -57,6 +57,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: dtolnay/rust-toolchain@stable
       - name: Run oracle parity harness
         id: oracle_fixture_parity
         run: go test ./internal/parity -run '^TestOracleFixtureParity$' -count=1
@@ -78,6 +79,9 @@ jobs:
       - name: Run runtime parity gate baseline test
         id: runtime_gate_loop_queue_smart_stop_ledger
         run: go test ./internal/parity -run '^TestRuntimeGateLoopQueueSmartStopLedger$' -count=1
+      - name: Run rforged daemon runtime parity suite
+        id: rforged_daemon_runtime_parity
+        run: scripts/rust-daemon-runtime-parity.sh
       - name: Run fmail parity gate baseline test
         id: fmail_gate_command_and_tui_baseline
         run: go test ./internal/parity -run '^TestFmailGateCommandAndTUIBaseline$' -count=1
@@ -128,6 +132,7 @@ jobs:
               { "id": "daemon_proto_gate", "name": "Daemon/proto gate", "outcome": "${{ steps.daemon_proto_gate.outcome }}" },
               { "id": "proto_wire_gate", "name": "Proto wire gate", "outcome": "${{ steps.proto_wire_gate.outcome }}" },
               { "id": "runtime_gate_loop_queue_smart_stop_ledger", "name": "Runtime gate baseline", "outcome": "${{ steps.runtime_gate_loop_queue_smart_stop_ledger.outcome }}" },
+              { "id": "rforged_daemon_runtime_parity", "name": "rforged daemon runtime parity suite", "outcome": "${{ steps.rforged_daemon_runtime_parity.outcome }}" },
               { "id": "fmail_gate_command_and_tui_baseline", "name": "Fmail gate baseline", "outcome": "${{ steps.fmail_gate_command_and_tui_baseline.outcome }}" },
               { "id": "parity_diff_artifacts", "name": "Parity diff artifacts (on drift)", "outcome": "${{ steps.parity_diff_artifacts.outcome }}" }
             ]
