@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$repo_root/rust"
+cd "$repo_root"
 
 threshold_file="${1:-coverage-thresholds.txt}"
 waiver_file="${2:-coverage-waivers.txt}"
@@ -142,12 +142,18 @@ awk -F: '
 ' "$lcov_path" > "$tmp_lcov_index"
 
 while IFS= read -r path; do
+  if [[ "$path" =~ ^crates/([^/]+)/src/.+\\.rs$ ]]; then
+    crate="${BASH_REMATCH[1]}"
+    abs="$repo_root/$path"
+    printf '%s\t%s\n' "$crate" "$abs" >> "$tmp_modified_files"
+    continue
+  fi
   if [[ "$path" =~ ^rust/crates/([^/]+)/src/.+\\.rs$ ]]; then
     crate="${BASH_REMATCH[1]}"
     abs="$repo_root/$path"
     printf '%s\t%s\n' "$crate" "$abs" >> "$tmp_modified_files"
   fi
-done < <(git -C "$repo_root" diff --name-only "${diff_base}...HEAD" -- rust/crates)
+done < <(git -C "$repo_root" diff --name-only "${diff_base}...HEAD" -- crates rust/crates)
 
 file_pct() {
   local abs="$1"
@@ -173,7 +179,7 @@ while IFS=$'\t' read -r crate threshold; do
 
   files="$(awk -F'\t' -v c="$crate" '$1==c {print $2}' "$tmp_modified_files" || true)"
   if [[ -z "$(trim "${files:-}")" ]]; then
-    echo "skipping $crate: no modified rust source files in rust/crates/$crate/src/"
+    echo "skipping $crate: no modified rust source files in crates/$crate/src/"
     {
       echo "crate=$crate (SKIP: no modified files)"
       echo ""

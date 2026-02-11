@@ -103,6 +103,10 @@ Forge keeps committed repo state in `.forge/`:
 
 Runtime data (sqlite, logs, pids) stays in the machine-local data dir.
 
+Code layout:
+- Rust primary workspace at repo root (`Cargo.toml`, `crates/*`)
+- Legacy Go tree under `old/go/`
+
 ## Configuration
 
 Global config lives at `~/.config/forge/config.yaml`. Repo config lives at `.forge/forge.yaml`.

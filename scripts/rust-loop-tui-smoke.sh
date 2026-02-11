@@ -5,11 +5,13 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 # Go loop TUI workflow + failure-state probes.
-env -u GOROOT -u GOTOOLDIR go test ./internal/looptui -run '^(TestMainModeTabAndThemeShortcuts|TestRunSelectionAndLogSourceCycle|TestMainModeMultiLogsPagingKeys|TestMainModePgUpScrollsLogs|TestModeTransitions|TestFilterModeRealtimeTextAndStatus|TestSelectionChoosesNearestRowWhenLoopDisappears|TestDeleteConfirmPromptMatchesPRD|TestViewRendersErrorStateWithoutCrashing|TestWizardStepValidation|TestCreateLoopsWizardPath)$' -count=1
+(
+  cd "$repo_root/old/go"
+  env -u GOROOT -u GOTOOLDIR go test ./internal/looptui -run '^(TestMainModeTabAndThemeShortcuts|TestRunSelectionAndLogSourceCycle|TestMainModeMultiLogsPagingKeys|TestMainModePgUpScrollsLogs|TestModeTransitions|TestFilterModeRealtimeTextAndStatus|TestSelectionChoosesNearestRowWhenLoopDisappears|TestDeleteConfirmPromptMatchesPRD|TestViewRendersErrorStateWithoutCrashing|TestWizardStepValidation|TestCreateLoopsWizardPath)$' -count=1
+)
 
 # Rust forge-tui workflow + failure-state probes.
 (
-  cd rust
   cargo test -p forge-tui --lib app::tests::bracket_keys_cycle_tabs
   cargo test -p forge-tui --lib app::tests::help_returns_to_previous_mode
   cargo test -p forge-tui --lib app::tests::comma_dot_move_run_selection

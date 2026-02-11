@@ -7,8 +7,8 @@ usage: scripts/go-layout-guard.sh [--repo-root <path>] [--mode <root|mixed|legac
 
 Modes:
   root    current layout only (Go sources at repo root, legacy/old-go absent)
-  mixed   transition layout (root + legacy/old-go both present)
-  legacy  post-move layout (legacy/old-go present; root Go tree removed)
+  mixed   transition layout (root + old/go both present)
+  legacy  post-move layout (old/go present; root Go tree removed)
 USAGE
 }
 
@@ -53,11 +53,11 @@ root_required=(
 )
 
 legacy_required=(
-  "legacy/old-go/cmd"
-  "legacy/old-go/internal"
-  "legacy/old-go/pkg"
-  "legacy/old-go/proto"
-  "legacy/old-go/go.mod"
+  "old/go/cmd"
+  "old/go/internal"
+  "old/go/pkg"
+  "old/go/proto"
+  "old/go/go.mod"
 )
 
 missing=()
@@ -81,10 +81,26 @@ require_absent() {
   done
 }
 
+require_absent_or_compat_link() {
+  local path target expected
+  for path in "$@"; do
+    target="$repo_root/$path"
+    expected="old/go/$path"
+    if [[ -L "$target" ]]; then
+      if [[ "$(readlink "$target")" == "$expected" ]]; then
+        continue
+      fi
+    fi
+    if [[ -e "$target" ]]; then
+      unexpected+=("$path")
+    fi
+  done
+}
+
 case "$mode" in
   root)
     require_paths "${root_required[@]}"
-    require_absent "legacy/old-go"
+    require_absent "old/go"
     ;;
   mixed)
     require_paths "${root_required[@]}"
@@ -92,7 +108,7 @@ case "$mode" in
     ;;
   legacy)
     require_paths "${legacy_required[@]}"
-    require_absent "${root_required[@]}"
+    require_absent_or_compat_link "${root_required[@]}"
     ;;
   *)
     echo "invalid --mode: $mode (expected root|mixed|legacy)" >&2

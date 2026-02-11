@@ -14,9 +14,9 @@ GOTEST := $(GOCMD) test
 GOVET := $(GOCMD) vet
 GOFMT := gofmt
 GOMOD := $(GOCMD) mod
-GO_LAYOUT_MODE ?= root
+GO_LAYOUT_MODE ?= legacy
 GO_LAYOUT_GUARD := ./scripts/go-layout-guard.sh
-RUST_FIRST ?= 0
+RUST_FIRST ?= 1
 
 # Binary names
 BINARY_CLI := forge
@@ -29,11 +29,12 @@ RUST_BINARY_FMAIL := rfmail
 
 # Directories
 BUILD_DIR := ./build
+GO_SRC_DIR := ./old/go
 CMD_CLI := ./cmd/forge
 CMD_DAEMON := ./cmd/forged
 CMD_RUNNER := ./cmd/forge-agent-runner
 CMD_FMAIL := ./cmd/fmail
-RUST_DIR := ./rust
+RUST_DIR := .
 
 # Installation directories
 PREFIX ?= /usr/local
@@ -68,7 +69,7 @@ ifeq ($(RUST_FIRST),1)
 	@cd $(RUST_DIR) && cargo build --release -p forge-cli --bin $(RUST_BINARY_CLI)
 	@cp $(RUST_DIR)/target/release/$(RUST_BINARY_CLI) $(BUILD_DIR)/$(BINARY_CLI)
 else
-	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_CLI) $(CMD_CLI)
+	@cd $(GO_SRC_DIR) && $(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_CLI) $(CMD_CLI)
 endif
 
 # Build the daemon binary
@@ -80,7 +81,7 @@ ifeq ($(RUST_FIRST),1)
 	@cd $(RUST_DIR) && cargo build --release -p forge-daemon --bin $(RUST_BINARY_DAEMON)
 	@cp $(RUST_DIR)/target/release/$(RUST_BINARY_DAEMON) $(BUILD_DIR)/$(BINARY_DAEMON)
 else
-	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_DAEMON) $(CMD_DAEMON)
+	@cd $(GO_SRC_DIR) && $(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_DAEMON) $(CMD_DAEMON)
 endif
 
 # Build the agent runner binary
@@ -92,7 +93,7 @@ ifeq ($(RUST_FIRST),1)
 	@cd $(RUST_DIR) && cargo build --release -p forge-runner --bin $(BINARY_RUNNER)
 	@cp $(RUST_DIR)/target/release/$(BINARY_RUNNER) $(BUILD_DIR)/$(BINARY_RUNNER)
 else
-	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_RUNNER) $(CMD_RUNNER)
+	@cd $(GO_SRC_DIR) && $(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_RUNNER) $(CMD_RUNNER)
 endif
 
 # Build the fmail binary
@@ -104,7 +105,7 @@ ifeq ($(RUST_FIRST),1)
 	@cd $(RUST_DIR) && cargo build --release -p fmail-cli --bin $(RUST_BINARY_FMAIL)
 	@cp $(RUST_DIR)/target/release/$(RUST_BINARY_FMAIL) $(BUILD_DIR)/$(BINARY_FMAIL)
 else
-	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_FMAIL) $(CMD_FMAIL)
+	@cd $(GO_SRC_DIR) && $(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_FMAIL) $(CMD_FMAIL)
 endif
 
 # Build for all platforms
@@ -113,14 +114,14 @@ ifeq ($(RUST_FIRST),1)
 	@echo "build-all does not yet support RUST_FIRST=1; use make build RUST_FIRST=1" && exit 1
 else
 	@for platform in $(PLATFORMS); do \
-		GOOS=$${platform%/*} GOARCH=$${platform#*/} \
-		$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_CLI)-$${platform%/*}-$${platform#*/} $(CMD_CLI); \
-		GOOS=$${platform%/*} GOARCH=$${platform#*/} \
-		$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_DAEMON)-$${platform%/*}-$${platform#*/} $(CMD_DAEMON); \
-		GOOS=$${platform%/*} GOARCH=$${platform#*/} \
-		$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_RUNNER)-$${platform%/*}-$${platform#*/} $(CMD_RUNNER); \
-		GOOS=$${platform%/*} GOARCH=$${platform#*/} \
-		$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_FMAIL)-$${platform%/*}-$${platform#*/} $(CMD_FMAIL); \
+		(cd $(GO_SRC_DIR) && GOOS=$${platform%/*} GOARCH=$${platform#*/} \
+		$(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_CLI)-$${platform%/*}-$${platform#*/} $(CMD_CLI)); \
+		(cd $(GO_SRC_DIR) && GOOS=$${platform%/*} GOARCH=$${platform#*/} \
+		$(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_DAEMON)-$${platform%/*}-$${platform#*/} $(CMD_DAEMON)); \
+		(cd $(GO_SRC_DIR) && GOOS=$${platform%/*} GOARCH=$${platform#*/} \
+		$(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_RUNNER)-$${platform%/*}-$${platform#*/} $(CMD_RUNNER)); \
+		(cd $(GO_SRC_DIR) && GOOS=$${platform%/*} GOARCH=$${platform#*/} \
+		$(GOBUILD) $(LDFLAGS) -o $(abspath $(BUILD_DIR))/$(BINARY_FMAIL)-$${platform%/*}-$${platform#*/} $(CMD_FMAIL)); \
 	done
 endif
 
@@ -150,7 +151,8 @@ build-rust-fmail:
 
 # Run the CLI in development mode
 dev:
-	@$(GOCMD) run $(CMD_CLI)
+	@cargo run -p forge-cli --bin rforge -- --help >/dev/null
+	@echo "Rust dev surface ready: use 'cargo run -p forge-cli --bin rforge -- <args>'"
 
 ## Installation targets
 
@@ -238,13 +240,13 @@ uninstall-rust-system:
 # Install using go install (builds and installs in one step)
 go-install:
 	@echo "Installing $(BINARY_CLI) via go install..."
-	$(GOCMD) install $(LDFLAGS) $(CMD_CLI)
+	@cd $(GO_SRC_DIR) && $(GOCMD) install $(LDFLAGS) $(CMD_CLI)
 	@echo "Installing $(BINARY_DAEMON) via go install..."
-	$(GOCMD) install $(LDFLAGS) $(CMD_DAEMON)
+	@cd $(GO_SRC_DIR) && $(GOCMD) install $(LDFLAGS) $(CMD_DAEMON)
 	@echo "Installing $(BINARY_RUNNER) via go install..."
-	$(GOCMD) install $(LDFLAGS) $(CMD_RUNNER)
+	@cd $(GO_SRC_DIR) && $(GOCMD) install $(LDFLAGS) $(CMD_RUNNER)
 	@echo "Installing $(BINARY_FMAIL) via go install..."
-	$(GOCMD) install $(LDFLAGS) $(CMD_FMAIL)
+	@cd $(GO_SRC_DIR) && $(GOCMD) install $(LDFLAGS) $(CMD_FMAIL)
 	@echo "Installed to $(GOBIN)"
 
 ## Test targets
@@ -252,19 +254,19 @@ go-install:
 # Run all tests
 test:
 	@echo "Running tests..."
-	$(GOTEST) -v -race -cover ./...
+	@cd $(GO_SRC_DIR) && $(GOTEST) -v -race -cover ./...
 
 # Run tests with coverage report
 test-coverage:
 	@echo "Running tests with coverage..."
 	@mkdir -p $(BUILD_DIR)
-	$(GOTEST) -v -race -coverprofile=$(BUILD_DIR)/coverage.out ./...
+	@cd $(GO_SRC_DIR) && $(GOTEST) -v -race -coverprofile=$(abspath $(BUILD_DIR))/coverage.out ./...
 	$(GOCMD) tool cover -html=$(BUILD_DIR)/coverage.out -o $(BUILD_DIR)/coverage.html
 	@echo "Coverage report: $(BUILD_DIR)/coverage.html"
 
 # Run short tests only
 test-short:
-	$(GOTEST) -v -short ./...
+	@cd $(GO_SRC_DIR) && $(GOTEST) -v -short ./...
 
 # Run Rust daemon runtime parity bring-up suite.
 rust-daemon-runtime-parity:
@@ -275,12 +277,12 @@ rust-daemon-runtime-parity:
 # Perf smoke: runs fast-ish budget checks on a synthetic fmail mailbox.
 perf-smoke:
 	@echo "Running fmail TUI perf smoke (tags=perf)..."
-	@env -u GOROOT -u GOTOOLDIR $(GOTEST) -tags=perf ./internal/fmailtui/... -run TestPerfSmokeBudgets -count=1
+	@cd $(GO_SRC_DIR) && env -u GOROOT -u GOTOOLDIR $(GOTEST) -tags=perf ./internal/fmailtui/... -run TestPerfSmokeBudgets -count=1
 
 # Perf benchmarks: captures baseline numbers for hot paths (provider/search).
 perf-bench:
 	@echo "Running fmail TUI perf benchmarks (tags=perf)..."
-	@env -u GOROOT -u GOTOOLDIR $(GOTEST) -tags=perf ./internal/fmailtui/... -run '^$$' -bench Perf -benchmem -count=1
+	@cd $(GO_SRC_DIR) && env -u GOROOT -u GOTOOLDIR $(GOTEST) -tags=perf ./internal/fmailtui/... -run '^$$' -bench Perf -benchmem -count=1
 
 ## Code quality targets
 
@@ -288,27 +290,27 @@ perf-bench:
 lint:
 	@echo "Running linter..."
 	@which golangci-lint > /dev/null || (echo "golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest" && exit 1)
-	golangci-lint run ./...
+	@cd $(GO_SRC_DIR) && golangci-lint run ./...
 
 # Format code
 fmt:
 	@echo "Formatting code..."
-	$(GOFMT) -s -w .
+	@cd $(GO_SRC_DIR) && $(GOFMT) -s -w .
 
 # Check formatting
 fmt-check:
 	@echo "Checking formatting..."
-	@test -z "$$($(GOFMT) -l .)" || (echo "Code is not formatted. Run 'make fmt'" && exit 1)
+	@cd $(GO_SRC_DIR) && test -z "$$($(GOFMT) -l .)" || (echo "Code is not formatted. Run 'make fmt'" && exit 1)
 
 # Run go vet
 vet:
 	@echo "Running vet..."
-	$(GOVET) ./...
+	@cd $(GO_SRC_DIR) && $(GOVET) ./...
 
 # Tidy dependencies
 tidy:
 	@echo "Tidying dependencies..."
-	$(GOMOD) tidy
+	@cd $(GO_SRC_DIR) && $(GOMOD) tidy
 
 # Run all checks (for CI)
 check: fmt-check vet lint test
@@ -319,19 +321,19 @@ check: fmt-check vet lint test
 proto:
 	@echo "Generating protobuf code..."
 	@which buf > /dev/null || (echo "buf not installed. Run: go install github.com/bufbuild/buf/cmd/buf@latest" && exit 1)
-	buf generate
-	@echo "Generated code in gen/"
+	@cd $(GO_SRC_DIR) && buf generate
+	@echo "Generated code in $(GO_SRC_DIR)/gen/"
 
 # Lint protobuf files
 proto-lint:
 	@echo "Linting protobuf files..."
 	@which buf > /dev/null || (echo "buf not installed. Run: go install github.com/bufbuild/buf/cmd/buf@latest" && exit 1)
-	buf lint
+	@cd $(GO_SRC_DIR) && buf lint
 
 # Update buf dependencies
 proto-deps:
 	@echo "Updating buf dependencies..."
-	buf dep update
+	@cd $(GO_SRC_DIR) && buf dep update
 
 ## Cleanup
 
@@ -391,7 +393,7 @@ help:
 	@echo "  lint           Run golangci-lint"
 	@echo "  fmt            Format code with gofmt"
 	@echo "  vet            Run go vet"
-	@echo "  tidy           Tidy go.mod dependencies"
+	@echo "  tidy           Tidy legacy Go dependencies (old/go/go.mod)"
 	@echo "  check          Run all checks (fmt, vet, lint, test)"
 	@echo ""
 	@echo "Protobuf Targets:"
@@ -401,7 +403,7 @@ help:
 	@echo ""
 	@echo "Quick Start:"
 	@echo "  make build                    # Build to ./build/"
-	@echo "  make build RUST_FIRST=1       # Build default binaries from Rust targets"
+	@echo "  make build RUST_FIRST=0       # Build default binaries from legacy Go targets (old/go)"
 	@echo "  make install                  # Build + install to GOPATH/bin"
 	@echo "  sudo make install-system      # Build + install to /usr/local/bin"
 	@echo ""

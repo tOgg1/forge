@@ -4,9 +4,10 @@ This guide walks through the loop-first workflow.
 
 ## Prerequisites
 
-- Go 1.25+ (see `go.mod`)
+- Rust toolchain (workspace root `Cargo.toml`)
 - Git
 - A supported harness: `pi`, `opencode`, `codex`, or `claude`
+- Optional (legacy parity tooling only): Go 1.25+ in `old/go/go.mod`
 
 ## Build
 
@@ -79,7 +80,7 @@ Ownership modes for runner spawn:
 - `--spawn-owner auto`: prefer local `forged`; fallback to detached local spawn if daemon unavailable.
 - `--spawn-owner daemon`: require daemon; fail if unavailable.
 
-## Start loops with `rforged` daemon mode (Rust parity path)
+## Start loops with `rforged` daemon mode
 
 Build side-by-side Rust binaries:
 

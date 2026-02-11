@@ -16,12 +16,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: old/go/go.mod
           cache: true
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
       - name: Run golangci-lint
-        run: $(go env GOPATH)/bin/golangci-lint run --timeout=5m
+        run: cd old/go && $(go env GOPATH)/bin/golangci-lint run --timeout=5m
 
   test:
     runs-on: ubuntu-latest
@@ -29,10 +29,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: old/go/go.mod
           cache: true
       - name: Run tests
-        run: go test -race -coverprofile=coverage.out ./...
+        run: cd old/go && go test -race -coverprofile="$GITHUB_WORKSPACE/coverage.out" ./...
       - name: Summarize coverage
         run: |
           go tool cover -func=coverage.out | tee coverage.txt
@@ -55,44 +55,44 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: old/go/go.mod
           cache: true
       - uses: dtolnay/rust-toolchain@stable
       - name: Run oracle parity harness
         id: oracle_fixture_parity
-        run: go test ./internal/parity -run '^TestOracleFixtureParity$' -count=1
+        run: cd old/go && go test ./internal/parity -run '^TestOracleFixtureParity$' -count=1
       - name: Run CLI gate baseline test
         id: cli_gate_root_oracle_baseline
-        run: go test ./internal/parity -run '^TestCLIGateRootOracleBaseline$' -count=1
+        run: cd old/go && go test ./internal/parity -run '^TestCLIGateRootOracleBaseline$' -count=1
       - name: Run synthetic drift detection test
         id: synthetic_drift_detection
-        run: go test ./internal/parity -run '^TestCompareTreesDetectsSyntheticDrift$' -count=1
+        run: cd old/go && go test ./internal/parity -run '^TestCompareTreesDetectsSyntheticDrift$' -count=1
       - name: Run schema fingerprint baseline test
         id: schema_fingerprint_baseline
-        run: go test ./internal/parity -run '^TestSchemaFingerprintBaseline$' -count=1
+        run: cd old/go && go test ./internal/parity -run '^TestSchemaFingerprintBaseline$' -count=1
       - name: Run daemon/proto parity gate baseline tests
         id: daemon_proto_gate
-        run: go test ./internal/parity -run '^TestDaemonProtoGate' -count=1
+        run: cd old/go && go test ./internal/parity -run '^TestDaemonProtoGate' -count=1
       - name: Run proto wire baseline gate tests
         id: proto_wire_gate
-        run: go test ./internal/parity -run '^TestProtoWireGate' -count=1
+        run: cd old/go && go test ./internal/parity -run '^TestProtoWireGate' -count=1
       - name: Run runtime parity gate baseline test
         id: runtime_gate_loop_queue_smart_stop_ledger
-        run: go test ./internal/parity -run '^TestRuntimeGateLoopQueueSmartStopLedger$' -count=1
+        run: cd old/go && go test ./internal/parity -run '^TestRuntimeGateLoopQueueSmartStopLedger$' -count=1
       - name: Run rforged daemon runtime parity suite
         id: rforged_daemon_runtime_parity
         run: scripts/rust-daemon-runtime-parity.sh
       - name: Run fmail parity gate baseline test
         id: fmail_gate_command_and_tui_baseline
-        run: go test ./internal/parity -run '^TestFmailGateCommandAndTUIBaseline$' -count=1
+        run: cd old/go && go test ./internal/parity -run '^TestFmailGateCommandAndTUIBaseline$' -count=1
       - name: Generate parity diff artifacts on drift
         id: parity_diff_artifacts
         if: failure()
         run: |
-          go run ./cmd/parity-artifacts \
+          cd old/go && go run ./cmd/parity-artifacts \
             --expected internal/parity/testdata/oracle/expected \
             --actual internal/parity/testdata/oracle/actual \
-            --out parity-artifacts || true
+            --out "$GITHUB_WORKSPACE/parity-artifacts" || true
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -138,7 +138,7 @@ jobs:
             ]
           }
           JSON
-          go run ./cmd/parity-dashboard --input parity-dashboard-input.json --out parity-dashboard
+          cd old/go && go run ./cmd/parity-dashboard --input "$GITHUB_WORKSPACE/parity-dashboard-input.json" --out "$GITHUB_WORKSPACE/parity-dashboard"
           cat parity-dashboard/parity-dashboard.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -153,7 +153,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: old/go/go.mod
           cache: true
       - name: Generate baseline snapshot and check drift
         run: scripts/rust-baseline-snapshot.sh build/rust-baseline/latest --check
@@ -169,7 +169,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: old/go/go.mod
           cache: true
       - name: Baseline refresh protocol dry-run
         run: |
@@ -189,7 +189,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: old/go/go.mod
           cache: true
       - name: rust boundary check
         run: scripts/rust-boundary-check.sh
@@ -204,13 +204,13 @@ jobs:
       - name: rust frankentui pin check
         run: scripts/rust-frankentui-pin-check.sh
       - name: rust fmt
-        working-directory: rust
+        working-directory: .
         run: cargo fmt --all --check
       - name: rust clippy
-        working-directory: rust
+        working-directory: .
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: rust test
-        working-directory: rust
+        working-directory: .
         run: cargo test --workspace
 
   db-compat:
@@ -219,7 +219,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: old/go/go.mod
           cache: true
       - uses: dtolnay/rust-toolchain@stable
       - name: run db compatibility gate checks
@@ -239,7 +239,7 @@ jobs:
           base="${GITHUB_BASE_REF:-main}"
           git fetch --no-tags --prune origin "+refs/heads/${base}:refs/remotes/origin/${base}" --depth=1
       - name: rust coverage (lcov)
-        working-directory: rust
+        working-directory: .
         run: |
           cargo llvm-cov \
             --workspace \
@@ -249,13 +249,13 @@ jobs:
       - name: Enforce per-crate coverage thresholds and waivers
         run: scripts/rust-coverage-gate.sh
       - name: Summarize rust coverage
-        working-directory: rust
+        working-directory: .
         run: |
           {
             echo "## Rust Coverage"
             echo ""
-            echo "Per-crate thresholds: rust/coverage-thresholds.txt"
-            echo "Waivers: rust/coverage-waivers.txt"
+            echo "Per-crate thresholds: coverage-thresholds.txt"
+            echo "Waivers: coverage-waivers.txt"
             echo ""
             cargo llvm-cov report --summary-only
             echo ""
@@ -267,8 +267,8 @@ jobs:
         with:
           name: rust-coverage
           path: |
-            rust/coverage/lcov.info
-            rust/coverage/per-crate-summary.txt
+            coverage/lcov.info
+            coverage/per-crate-summary.txt
           if-no-files-found: error
 
   build:
@@ -280,13 +280,13 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: old/go/go.mod
           cache: true
       - name: Build release artifacts
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: build --snapshot --clean
+          args: build --snapshot --clean --config old/go/.goreleaser.yaml
       - uses: actions/upload-artifact@v4
         with:
           name: dist

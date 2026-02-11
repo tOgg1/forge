@@ -5,14 +5,19 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 # Parity gate baseline for command surface + TUI baseline fixtures.
-env -u GOROOT -u GOTOOLDIR go test ./internal/parity -run '^TestFmailGateCommandAndTUIBaseline$' -count=1
+(
+  cd "$repo_root/old/go"
+  env -u GOROOT -u GOTOOLDIR go test ./internal/parity -run '^TestFmailGateCommandAndTUIBaseline$' -count=1
+)
 
 # Go fmailtui behavior probes for operator/topic/timeline/layout workflows.
-env -u GOROOT -u GOTOOLDIR go test ./internal/fmailtui -run '^(TestTopicsViewComposeWritesMessageAndMarksRead|TestTopicsViewRebuildItemsHonorsStarFilterAndSort|TestTimelineLoadMergesTopicsAndDMsChronologically|TestOperatorSlashCommandsApplyPriorityTagsAndDM|TestLayoutControlsAndPersistence)$' -count=1
+(
+  cd "$repo_root/old/go"
+  env -u GOROOT -u GOTOOLDIR go test ./internal/fmailtui -run '^(TestTopicsViewComposeWritesMessageAndMarksRead|TestTopicsViewRebuildItemsHonorsStarFilterAndSort|TestTimelineLoadMergesTopicsAndDMsChronologically|TestOperatorSlashCommandsApplyPriorityTagsAndDM|TestLayoutControlsAndPersistence)$' -count=1
+)
 
 # Rust fmail-tui workflow probes (topic/operator/timeline/thread snapshots).
 (
-  cd rust
   cargo test -p fmail-tui --lib topics::tests::topics_snapshot_render
   cargo test -p fmail-tui --lib operator::tests::render_with_conversations_and_messages
   cargo test -p fmail-tui --lib timeline::tests::timeline_snapshot_chronological

@@ -21,7 +21,7 @@ jobs:
         run: |
           git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main" --depth=1
       - name: rust coverage (lcov)
-        working-directory: rust
+        working-directory: .
         run: |
           cargo llvm-cov \
             --workspace \
@@ -31,13 +31,13 @@ jobs:
       - name: Enforce per-crate coverage thresholds and waivers
         run: scripts/rust-coverage-gate.sh
       - name: Summarize rust coverage
-        working-directory: rust
+        working-directory: .
         run: |
           {
             echo "## Rust Coverage (Nightly)"
             echo ""
-            echo "Per-crate thresholds: rust/coverage-thresholds.txt"
-            echo "Waivers: rust/coverage-waivers.txt"
+            echo "Per-crate thresholds: coverage-thresholds.txt"
+            echo "Waivers: coverage-waivers.txt"
             echo ""
             cargo llvm-cov report --summary-only
             echo ""
@@ -49,6 +49,6 @@ jobs:
         with:
           name: rust-coverage-nightly
           path: |
-            rust/coverage/lcov.info
-            rust/coverage/per-crate-summary.txt
+            coverage/lcov.info
+            coverage/per-crate-summary.txt
           if-no-files-found: error

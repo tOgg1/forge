@@ -19,6 +19,9 @@ schema-fingerprint
 rust-boundary-check
 
 # Rust build outputs
+target/
+target-local/
+target-fxt/
 rust/target/
 rust/target-local/
 rust/target-fxt/

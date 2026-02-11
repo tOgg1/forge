@@ -36,11 +36,14 @@ done
 mkdir -p "$out_dir"
 
 echo "==> Running surface gate test..."
-env -u GOROOT -u GOTOOLDIR go test ./internal/parity \
-  -run TestSurfaceGateGoVsRust \
-  -count=1 \
-  -v \
-  -timeout 300s 2>&1 | tee "$out_dir/gate-output.txt"
+(
+  cd "$repo_root/old/go"
+  env -u GOROOT -u GOTOOLDIR go test ./internal/parity \
+    -run TestSurfaceGateGoVsRust \
+    -count=1 \
+    -v \
+    -timeout 300s
+) 2>&1 | tee "$out_dir/gate-output.txt"
 
 gate_exit=${PIPESTATUS[0]}
 

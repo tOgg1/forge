@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: old/go/go.mod
           cache: true
       - name: Run parity suite
         id: parity
@@ -33,28 +33,30 @@ jobs:
           runtime_outcome=success
           fmail_outcome=success
 
-          go test ./internal/parity -run '^TestOracleFixtureParity$' -count=1 | tee -a parity-nightly.log
+          cd old/go
+
+          go test ./internal/parity -run '^TestOracleFixtureParity$' -count=1 | tee -a "$GITHUB_WORKSPACE/parity-nightly.log"
           if [ "${PIPESTATUS[0]}" != "0" ]; then oracle_outcome=failure; fail=1; fi
 
-          go test ./internal/parity -run '^TestCLIGateRootOracleBaseline$' -count=1 | tee -a parity-nightly.log
+          go test ./internal/parity -run '^TestCLIGateRootOracleBaseline$' -count=1 | tee -a "$GITHUB_WORKSPACE/parity-nightly.log"
           if [ "${PIPESTATUS[0]}" != "0" ]; then cli_gate_outcome=failure; fail=1; fi
 
-          go test ./internal/parity -run '^TestCompareTreesDetectsSyntheticDrift$' -count=1 | tee -a parity-nightly.log
+          go test ./internal/parity -run '^TestCompareTreesDetectsSyntheticDrift$' -count=1 | tee -a "$GITHUB_WORKSPACE/parity-nightly.log"
           if [ "${PIPESTATUS[0]}" != "0" ]; then synthetic_drift_outcome=failure; fail=1; fi
 
-          go test ./internal/parity -run '^TestSchemaFingerprintBaseline$' -count=1 | tee -a parity-nightly.log
+          go test ./internal/parity -run '^TestSchemaFingerprintBaseline$' -count=1 | tee -a "$GITHUB_WORKSPACE/parity-nightly.log"
           if [ "${PIPESTATUS[0]}" != "0" ]; then schema_outcome=failure; fail=1; fi
 
-          go test ./internal/parity -run '^TestDaemonProtoGate' -count=1 | tee -a parity-nightly.log
+          go test ./internal/parity -run '^TestDaemonProtoGate' -count=1 | tee -a "$GITHUB_WORKSPACE/parity-nightly.log"
           if [ "${PIPESTATUS[0]}" != "0" ]; then daemon_proto_outcome=failure; fail=1; fi
 
-          go test ./internal/parity -run '^TestProtoWireGate' -count=1 | tee -a parity-nightly.log
+          go test ./internal/parity -run '^TestProtoWireGate' -count=1 | tee -a "$GITHUB_WORKSPACE/parity-nightly.log"
           if [ "${PIPESTATUS[0]}" != "0" ]; then proto_wire_outcome=failure; fail=1; fi
 
-          go test ./internal/parity -run '^TestRuntimeGateLoopQueueSmartStopLedger$' -count=1 | tee -a parity-nightly.log
+          go test ./internal/parity -run '^TestRuntimeGateLoopQueueSmartStopLedger$' -count=1 | tee -a "$GITHUB_WORKSPACE/parity-nightly.log"
           if [ "${PIPESTATUS[0]}" != "0" ]; then runtime_outcome=failure; fail=1; fi
 
-          go test ./internal/parity -run '^TestFmailGateCommandAndTUIBaseline$' -count=1 | tee -a parity-nightly.log
+          go test ./internal/parity -run '^TestFmailGateCommandAndTUIBaseline$' -count=1 | tee -a "$GITHUB_WORKSPACE/parity-nightly.log"
           if [ "${PIPESTATUS[0]}" != "0" ]; then fmail_outcome=failure; fail=1; fi
 
           echo "exit_code=$fail" >> "$GITHUB_OUTPUT"
@@ -88,10 +90,10 @@ jobs:
       - name: Generate parity diff artifacts on drift
         if: steps.parity.outputs.exit_code != '0'
         run: |
-          go run ./cmd/parity-artifacts \
+          cd old/go && go run ./cmd/parity-artifacts \
             --expected internal/parity/testdata/oracle/expected \
             --actual internal/parity/testdata/oracle/actual \
-            --out parity-artifacts || true
+            --out "$GITHUB_WORKSPACE/parity-artifacts" || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -141,7 +143,7 @@ jobs:
             ]
           }
           JSON
-          go run ./cmd/parity-dashboard --input parity-dashboard-input.json --out parity-dashboard
+          cd old/go && go run ./cmd/parity-dashboard --input "$GITHUB_WORKSPACE/parity-dashboard-input.json" --out "$GITHUB_WORKSPACE/parity-dashboard"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

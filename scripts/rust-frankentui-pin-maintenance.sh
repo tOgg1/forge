@@ -12,7 +12,7 @@ Options:
   -h, --help       show help
 
 Workflow:
-  1) (optional) update pin rev in rust/crates/forge-ftui-adapter/Cargo.toml
+  1) (optional) update pin rev in crates/forge-ftui-adapter/Cargo.toml
   2) cargo update -p ftui
   3) cargo check --workspace
   4) scripts/rust-frankentui-pin-check.sh
@@ -21,7 +21,7 @@ USAGE
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cargo_toml="$repo_root/rust/crates/forge-ftui-adapter/Cargo.toml"
+cargo_toml="$repo_root/crates/forge-ftui-adapter/Cargo.toml"
 
 new_rev=""
 check_only=0
@@ -75,7 +75,7 @@ print(f"updated frankentui rev to {new_rev}")
 PY
 fi
 
-cd "$repo_root/rust"
+cd "$repo_root"
 
 if [[ "$check_only" -eq 0 ]]; then
   cargo update -p ftui
