@@ -79,6 +79,54 @@ Ownership modes for runner spawn:
 - `--spawn-owner auto`: prefer local `forged`; fallback to detached local spawn if daemon unavailable.
 - `--spawn-owner daemon`: require daemon; fail if unavailable.
 
+## Start loops with `rforged` daemon mode (Rust parity path)
+
+Build side-by-side Rust binaries:
+
+```bash
+make build-rust-cli build-rust-daemon
+```
+
+Start daemon in terminal A (use explicit port to avoid conflicts):
+
+```bash
+./build/rforged --config ~/.config/forge/config.yaml --port 50061
+```
+
+Run loops in terminal B through that daemon:
+
+```bash
+export FORGE_DAEMON_TARGET=http://127.0.0.1:50061
+./build/rforge migrate up
+./build/rforge up \
+  --name daemon-quickstart \
+  --profile <profile> \
+  --prompt-msg "daemon quickstart check" \
+  --max-iterations 2 \
+  --interval 1s \
+  --spawn-owner daemon \
+  --json
+```
+
+Health-check daemon ownership/liveness:
+
+```bash
+./build/rforge ps --json | jq '.[]? | {name,state,runs,runner_owner,runner_daemon_alive,runner_instance_id}'
+```
+
+Expected:
+- `runner_owner` is `daemon`
+- `runner_daemon_alive` is `true` while daemon is reachable
+
+Recovery/stop path:
+
+```bash
+./build/rforge stop daemon-quickstart
+./build/rforge resume daemon-quickstart --spawn-owner daemon
+# stop daemon when done (or Ctrl-C if foreground):
+kill -TERM <rforged-pid>
+```
+
 ## Smart stop (optional)
 
 Quantitative stop (command-based):

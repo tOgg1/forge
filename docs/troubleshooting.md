@@ -111,6 +111,57 @@ Then stop/kill and resume as needed:
 ./build/forge resume <loop-name>
 ```
 
+## Daemon unavailable (`--spawn-owner daemon`)
+
+Symptoms:
+- `forged daemon unavailable: ...`
+- `up`/`resume` fails when `--spawn-owner daemon` is set
+
+Fix:
+```bash
+make build-rust-cli build-rust-daemon
+./build/rforged --config ~/.config/forge/config.yaml --port 50061
+export FORGE_DAEMON_TARGET=http://127.0.0.1:50061
+./build/rforge up --name daemon-retry --profile <profile> --spawn-owner daemon
+```
+
+If daemon ownership is optional, use fallback mode:
+```bash
+./build/rforge up --name daemon-auto --profile <profile> --spawn-owner auto
+```
+
+## Daemon port already in use
+
+Symptoms:
+- `failed to listen on 127.0.0.1:50051: address already in use`
+- `rforged failed` immediately on startup
+
+Fix:
+```bash
+./build/rforged --port 50061
+export FORGE_DAEMON_TARGET=http://127.0.0.1:50061
+```
+
+If you expect default port `50051`, stop the conflicting daemon/process first.
+
+## Daemon-owned loop becomes stopped unexpectedly
+
+Symptoms:
+- loop was running, then `rforge ps` reports `state=stopped`
+- JSON row shows `runner_owner=daemon` and `runner_daemon_alive=false`
+
+Inspect and recover:
+```bash
+./build/rforge ps --json | jq '.[]? | {name,state,runs,runner_owner,runner_daemon_alive}'
+./build/rforge logs <loop-name-or-short-id>
+./build/rforge resume <loop-name-or-short-id> --spawn-owner daemon
+```
+
+Verify post-recovery:
+```bash
+./build/rforge status --json | jq '.alerts.items[]? | select(.message | test("runner health check failed"))'
+```
+
 ## Loop stuck / no progress
 
 Symptoms:

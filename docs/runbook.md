@@ -29,10 +29,62 @@ but not yet wired up. Planned steps are labeled.
   ./build/forge migrate version
   ```
 
+### `rforged` daemon mode health checks (Rust parity)
+
+For daemon-owned loops (`--spawn-owner daemon`) use these checks:
+
+1. Confirm daemon startup logs show both readiness lines:
+   - `rforged ready`
+   - `rforged gRPC serving`
+2. Confirm loop ownership and liveness:
+
+   ```bash
+   ./build/rforge ps --json | jq '.[]? | {name,state,runs,runner_owner,runner_daemon_alive,runner_instance_id}'
+   ```
+
+3. Confirm fleet alerts do not show runner health failures:
+
+   ```bash
+   ./build/rforge status --json | jq '.alerts.items[]? | select(.message | test("runner health check failed"))'
+   ```
+
+If daemon health is bad, follow recovery flow below.
+
 ### Planned
 
 - TUI dashboard for agent/workspace state.
 - Event stream with `--watch` and JSONL output.
+
+## `rforged` daemon operator flow
+
+### Launch daemon with explicit target
+
+```bash
+make build-rust-cli build-rust-daemon
+./build/rforged --config ~/.config/forge/config.yaml --port 50061
+export FORGE_DAEMON_TARGET=http://127.0.0.1:50061
+```
+
+### Start daemon-owned loops
+
+```bash
+./build/rforge up --name daemon-ops --profile <profile> --spawn-owner daemon
+```
+
+### Stop and recover daemon-owned loops
+
+Graceful stop path:
+
+```bash
+./build/rforge stop <loop-name-or-short-id>
+```
+
+Resume path after daemon restart or stale reconciliation:
+
+```bash
+./build/rforge resume <loop-name-or-short-id> --spawn-owner daemon
+./build/rforge ps --json | jq '.[]? | {name,state,runner_owner,runner_daemon_alive}'
+```
 
 ## Troubleshooting
 
