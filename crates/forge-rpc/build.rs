@@ -6,8 +6,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     std::env::set_var("PROTOC", protoc);
 
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
-    // crates/forge-rpc -> crates -> rust -> repo root -> proto
-    let proto_root = manifest_dir.join("../../old/go/proto");
+    let proto_root = manifest_dir.join("proto");
     let proto_file = proto_root.join("forged/v1/forged.proto");
 
     tonic_build::configure().compile_protos(&[proto_file], &[proto_root])?;
