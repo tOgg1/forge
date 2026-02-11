@@ -1102,7 +1102,7 @@ fn validate_prompt_mode(value: &str) -> Result<(), String> {
 fn default_prompt_mode(harness: &str) -> &'static str {
     match harness {
         "codex" => "env",
-        "claude" => "stdin",
+        "claude" => "env",
         _ => "path",
     }
 }
@@ -1110,7 +1110,9 @@ fn default_prompt_mode(harness: &str) -> &'static str {
 fn default_command_template(harness: &str) -> &'static str {
     match harness {
         "codex" => "codex exec",
-        "claude" => "claude --print",
+        "claude" => {
+            "claude --dangerously-skip-permissions --verbose --output-format stream-json --include-partial-messages -p \"$FORGE_PROMPT_CONTENT\""
+        }
         "opencode" => "opencode run",
         "droid" => "droid",
         _ => "pi -p \"{prompt}\"",
@@ -1435,6 +1437,21 @@ mod tests {
         assert_eq!(doctor.exit_code, 0);
         assert!(doctor.stderr.is_empty());
         assert!(doctor.stdout.contains("\"profile\": \"beta\""));
+    }
+
+    #[test]
+    fn profile_add_claude_defaults_to_stream_json_command() {
+        let mut backend = InMemoryProfileBackend::default();
+        let add = run_for_test(
+            &["profile", "add", "claude", "--name", "streamy", "--json"],
+            &mut backend,
+        );
+        assert_eq!(add.exit_code, 0);
+        assert!(add.stderr.is_empty());
+        assert!(add.stdout.contains("\"prompt_mode\": \"env\""));
+        assert!(add.stdout.contains("--output-format stream-json"));
+        assert!(add.stdout.contains("--include-partial-messages"));
+        assert!(add.stdout.contains("-p \\\"$FORGE_PROMPT_CONTENT\\\""));
     }
 
     #[test]

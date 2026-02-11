@@ -537,7 +537,7 @@ event_retention:
 #     harness: claude
 #     auth_home: ~/.claude
 #     prompt_mode: env
-#     command_template: claude -p "$FORGE_PROMPT_CONTENT" --dangerously-skip-permissions
+#     command_template: claude --dangerously-skip-permissions --verbose --output-format stream-json --include-partial-messages -p "$FORGE_PROMPT_CONTENT"
 #     max_concurrency: 1
 
 # =============================================================================
