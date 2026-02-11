@@ -374,6 +374,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut jsonl = false;
     let mut quiet = false;
     let mut spawn_owner = "auto".to_string();
+    let mut spawn_owner_explicit = false;
     let mut config_path = String::new();
     let mut loop_ref = String::new();
 
@@ -393,6 +394,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             }
             "--spawn-owner" => {
                 spawn_owner = take_value(args, index, "--spawn-owner")?;
+                spawn_owner_explicit = true;
                 index += 2;
             }
             "--config" => {
@@ -426,6 +428,10 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         return Err("loop name or ID required".to_string());
     }
     resolve_spawn_owner(&spawn_owner)?;
+    // Go parity: implicit auto (default, not explicitly provided) resolves to local.
+    if !spawn_owner_explicit && spawn_owner == "auto" {
+        spawn_owner = "local".to_string();
+    }
 
     Ok(ParsedArgs {
         loop_ref,
@@ -557,6 +563,32 @@ mod tests {
             Err(message) => message,
         };
         assert_eq!(err, "invalid --spawn-owner value: invalid");
+    }
+
+    #[test]
+    fn parse_default_spawn_owner_resolves_to_local() {
+        // Go parity: implicit auto (not explicitly provided) resolves to local.
+        let args = vec!["resume".to_string(), "abc".to_string()];
+        let parsed = match parse_args(&args) {
+            Ok(parsed) => parsed,
+            Err(err) => panic!("parse: {err}"),
+        };
+        assert_eq!(parsed.spawn_owner, "local");
+    }
+
+    #[test]
+    fn parse_explicit_auto_stays_auto() {
+        let args = vec![
+            "resume".to_string(),
+            "abc".to_string(),
+            "--spawn-owner".to_string(),
+            "auto".to_string(),
+        ];
+        let parsed = match parse_args(&args) {
+            Ok(parsed) => parsed,
+            Err(err) => panic!("parse: {err}"),
+        };
+        assert_eq!(parsed.spawn_owner, "auto");
     }
 
     #[test]

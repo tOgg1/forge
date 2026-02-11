@@ -533,6 +533,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut max_iterations = 0i32;
     let mut tags_raw = String::new();
     let mut spawn_owner = "auto".to_string();
+    let mut spawn_owner_explicit = false;
     let mut config_path = String::new();
 
     let mut quant_cmd = String::new();
@@ -622,6 +623,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             }
             "--spawn-owner" => {
                 spawn_owner = take_value(args, index, "--spawn-owner")?;
+                spawn_owner_explicit = true;
                 index += 2;
             }
             "--config" => {
@@ -721,6 +723,10 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         return Err(format!(
             "invalid --spawn-owner \"{spawn_owner}\" (valid: local|daemon|auto)"
         ));
+    }
+    // Go parity: implicit auto (default, not explicitly provided) resolves to local.
+    if !spawn_owner_explicit && spawn_owner == "auto" {
+        spawn_owner = "local".to_string();
     }
 
     let interval_seconds = parse_duration_seconds(&interval_raw, 0, "interval")?;
@@ -1451,9 +1457,18 @@ mod tests {
     }
 
     #[test]
-    fn up_default_spawn_owner_is_auto() {
+    fn up_default_spawn_owner_resolves_to_local() {
+        // Go parity: implicit auto (not explicitly provided) resolves to local.
         let mut backend = InMemoryUpBackend::default();
         let out = run_for_test(&["up", "--quiet"], &mut backend);
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(backend.starts[0].1, "local");
+    }
+
+    #[test]
+    fn up_explicit_auto_stays_auto() {
+        let mut backend = InMemoryUpBackend::default();
+        let out = run_for_test(&["up", "--quiet", "--spawn-owner", "auto"], &mut backend);
         assert_eq!(out.exit_code, 0);
         assert_eq!(backend.starts[0].1, "auto");
     }
@@ -1502,9 +1517,8 @@ mod tests {
         let metadata = created
             .metadata
             .unwrap_or_else(|| panic!("missing loop metadata"));
-        // auto mode tries daemon first; in test harness the daemon stub succeeds,
-        // so the effective runner owner is "daemon" (matching Go parity).
-        assert_eq!(metadata.get("runner_owner"), Some(&json!("daemon")));
+        // Go parity: implicit auto (not explicitly provided) resolves to local.
+        assert_eq!(metadata.get("runner_owner"), Some(&json!("local")));
         assert!(
             metadata
                 .get("runner_instance_id")
