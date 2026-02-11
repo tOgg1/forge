@@ -22,15 +22,18 @@ forge-core = { path = "../forge-core" }
 forge-rpc = { path = "../forge-rpc" }
 nix = { version = "0.29", features = ["signal", "resource", "process", "hostname"] }
 prost-types = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
 sha2 = "0.10"
 thiserror = "1"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "signal", "time"] }
 tokio-stream = "0.1"
 tonic = { version = "0.12", features = ["transport"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tonic = "0.12"
 
 [lints]
