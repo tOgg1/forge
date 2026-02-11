@@ -1,7 +1,13 @@
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
+use std::time::Duration;
 
+use forge_rpc::forged::v1 as proto;
+use forge_rpc::forged::v1::forged_service_client::ForgedServiceClient;
 use serde::Serialize;
+use serde_json::Value;
+use tonic::{transport::Endpoint, Code};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -54,27 +60,57 @@ pub struct LoopSelector {
 
 pub trait StopBackend {
     fn list_loops(&self) -> Result<Vec<LoopRecord>, String>;
+    fn runner_owner(&self, loop_id: &str) -> Result<String, String>;
+    fn stop_daemon_runner(&mut self, loop_id: &str) -> Result<(), String>;
     fn enqueue_stop(&mut self, loop_id: &str) -> Result<(), String>;
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryStopBackend {
     loops: Vec<LoopRecord>,
+    runner_owners: HashMap<String, String>,
+    pub daemon_stop_error: Option<String>,
+    pub daemon_stopped: Vec<String>,
     pub enqueued: Vec<String>,
 }
 
 impl InMemoryStopBackend {
     pub fn with_loops(loops: Vec<LoopRecord>) -> Self {
+        let mut runner_owners = HashMap::new();
+        for loop_entry in &loops {
+            runner_owners.insert(loop_entry.id.clone(), String::new());
+        }
         Self {
             loops,
+            runner_owners,
+            daemon_stop_error: None,
+            daemon_stopped: Vec::new(),
             enqueued: Vec::new(),
         }
+    }
+
+    pub fn with_runner_owner(mut self, loop_id: &str, owner: &str) -> Self {
+        self.runner_owners
+            .insert(loop_id.to_string(), owner.to_string());
+        self
     }
 }
 
 impl StopBackend for InMemoryStopBackend {
     fn list_loops(&self) -> Result<Vec<LoopRecord>, String> {
         Ok(self.loops.clone())
+    }
+
+    fn runner_owner(&self, loop_id: &str) -> Result<String, String> {
+        Ok(self.runner_owners.get(loop_id).cloned().unwrap_or_default())
+    }
+
+    fn stop_daemon_runner(&mut self, loop_id: &str) -> Result<(), String> {
+        self.daemon_stopped.push(loop_id.to_string());
+        if let Some(message) = self.daemon_stop_error.clone() {
+            return Err(message);
+        }
+        Ok(())
     }
 
     fn enqueue_stop(&mut self, loop_id: &str) -> Result<(), String> {
@@ -101,6 +137,11 @@ impl SqliteStopBackend {
     pub fn new(db_path: PathBuf) -> Self {
         Self { db_path }
     }
+
+    fn open_db(&self) -> Result<forge_db::Db, String> {
+        forge_db::Db::open(forge_db::Config::new(&self.db_path))
+            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))
+    }
 }
 
 impl StopBackend for SqliteStopBackend {
@@ -109,8 +150,7 @@ impl StopBackend for SqliteStopBackend {
             return Ok(Vec::new());
         }
 
-        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
-            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+        let db = self.open_db()?;
 
         let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
 
@@ -141,9 +181,22 @@ impl StopBackend for SqliteStopBackend {
         Ok(out)
     }
 
+    fn runner_owner(&self, loop_id: &str) -> Result<String, String> {
+        let db = self.open_db()?;
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let loop_entry = loop_repo.get(loop_id).map_err(|err| err.to_string())?;
+        Ok(metadata_string(
+            loop_entry.metadata.as_ref(),
+            "runner_owner",
+        ))
+    }
+
+    fn stop_daemon_runner(&mut self, loop_id: &str) -> Result<(), String> {
+        stop_daemon_loop_runner(loop_id)
+    }
+
     fn enqueue_stop(&mut self, loop_id: &str) -> Result<(), String> {
-        let db = forge_db::Db::open(forge_db::Config::new(&self.db_path))
-            .map_err(|err| format!("open database {}: {err}", self.db_path.display()))?;
+        let db = self.open_db()?;
 
         let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
 
@@ -248,6 +301,10 @@ fn execute(
     }
 
     for entry in &matched {
+        let runner_owner = backend.runner_owner(&entry.id)?;
+        if should_stop_daemon_runner(entry, &runner_owner) {
+            backend.stop_daemon_runner(&entry.id)?;
+        }
         backend.enqueue_stop(&entry.id)?;
     }
 
@@ -271,6 +328,13 @@ fn execute(
 
     writeln!(stdout, "Stopped {} loop(s)", matched.len()).map_err(|err| err.to_string())?;
     Ok(())
+}
+
+fn should_stop_daemon_runner(entry: &LoopRecord, runner_owner: &str) -> bool {
+    if !runner_owner.eq_ignore_ascii_case("daemon") {
+        return false;
+    }
+    matches!(entry.state, LoopState::Running | LoopState::Pending)
 }
 
 fn filter_loops(loops: Vec<LoopRecord>, selector: &LoopSelector) -> Vec<LoopRecord> {
@@ -360,6 +424,65 @@ fn short_id(entry: &LoopRecord) -> &str {
         return &entry.id;
     }
     &entry.short_id
+}
+
+fn metadata_string(
+    metadata: Option<&std::collections::HashMap<String, Value>>,
+    key: &str,
+) -> String {
+    metadata
+        .and_then(|map| map.get(key))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn stop_daemon_loop_runner(loop_id: &str) -> Result<(), String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|err| format!("initialize daemon RPC runtime: {err}"))?;
+    runtime.block_on(stop_daemon_loop_runner_async(loop_id))
+}
+
+async fn stop_daemon_loop_runner_async(loop_id: &str) -> Result<(), String> {
+    let target = resolved_daemon_target();
+    let endpoint = Endpoint::from_shared(target.clone())
+        .map_err(|err| format!("forged daemon unavailable: {err}"))?
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(2));
+
+    let channel = endpoint
+        .connect()
+        .await
+        .map_err(|err| format!("forged daemon unavailable: {err}"))?;
+
+    let mut client = ForgedServiceClient::new(channel);
+    let request = proto::StopLoopRunnerRequest {
+        loop_id: loop_id.to_string(),
+        force: false,
+    };
+    match client.stop_loop_runner(request).await {
+        Ok(_) => Ok(()),
+        Err(status) if status.code() == Code::NotFound => Ok(()),
+        Err(status) => Err(format!("failed to stop loop via daemon: {status}")),
+    }
+}
+
+fn resolved_daemon_target() -> String {
+    let env_target = std::env::var("FORGE_DAEMON_TARGET").unwrap_or_default();
+    if !env_target.trim().is_empty() {
+        return normalize_daemon_target(&env_target);
+    }
+    "http://127.0.0.1:50051".to_string()
+}
+
+fn normalize_daemon_target(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.contains("://") {
+        return trimmed.to_string();
+    }
+    format!("http://{trimmed}")
 }
 
 fn format_loop_match(entry: &LoopRecord) -> String {
@@ -533,6 +656,48 @@ mod tests {
         assert_eq!(out.exit_code, 0);
         assert!(out.stderr.is_empty());
         assert_eq!(backend.enqueued, vec!["loop-001"]);
+    }
+
+    #[test]
+    fn stop_daemon_owned_loop_stops_daemon_runner_before_enqueue() {
+        let loops = vec![LoopRecord {
+            id: "loop-001".to_string(),
+            short_id: "abc01".to_string(),
+            name: "daemon-loop".to_string(),
+            repo: "/repo".to_string(),
+            pool: "default".to_string(),
+            profile: "codex".to_string(),
+            state: LoopState::Running,
+            tags: vec![],
+        }];
+        let mut backend =
+            InMemoryStopBackend::with_loops(loops).with_runner_owner("loop-001", "daemon");
+        let out = run_for_test(&["stop", "daemon-loop", "--json"], &mut backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        assert_eq!(backend.daemon_stopped, vec!["loop-001"]);
+        assert_eq!(backend.enqueued, vec!["loop-001"]);
+    }
+
+    #[test]
+    fn stop_daemon_stop_failure_returns_error_without_enqueue() {
+        let loops = vec![LoopRecord {
+            id: "loop-001".to_string(),
+            short_id: "abc01".to_string(),
+            name: "daemon-loop".to_string(),
+            repo: "/repo".to_string(),
+            pool: "default".to_string(),
+            profile: "codex".to_string(),
+            state: LoopState::Running,
+            tags: vec![],
+        }];
+        let mut backend =
+            InMemoryStopBackend::with_loops(loops).with_runner_owner("loop-001", "daemon");
+        backend.daemon_stop_error = Some("failed to stop loop via daemon: unavailable".to_string());
+        let out = run_for_test(&["stop", "daemon-loop"], &mut backend);
+        assert_eq!(out.exit_code, 1);
+        assert_eq!(out.stderr, "failed to stop loop via daemon: unavailable\n");
+        assert_eq!(backend.daemon_stopped, vec!["loop-001"]);
+        assert!(backend.enqueued.is_empty());
     }
 
     #[test]
