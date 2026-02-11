@@ -579,4 +579,327 @@ mod tests {
         );
         assert!(result.is_ok());
     }
+
+    // ── Regression suite: spawn branch success/failure matrix ──
+
+    #[test]
+    fn local_success_returns_correct_spawn_result_fields() {
+        let mut spawner = MockSpawner::default();
+        let mut warning = Vec::new();
+
+        let result = start_loop_runner_with_spawner(
+            "loop-42",
+            "local",
+            &SpawnOptions::default(),
+            &mut warning,
+            &mut spawner,
+        )
+        .expect("local spawn should succeed");
+
+        assert_eq!(result.owner, "local");
+        assert_eq!(result.instance_id, "local-inst");
+        assert_eq!(result.pid, Some(123));
+        assert_eq!(spawner.local_calls, 1);
+        assert_eq!(spawner.daemon_calls, 0);
+        assert!(warning.is_empty(), "local path should not emit warnings");
+    }
+
+    #[test]
+    fn local_failure_returns_error_without_fallback() {
+        let mut spawner = MockSpawner {
+            local_result: Some(Err("process spawn failed".to_string())),
+            ..Default::default()
+        };
+        let mut warning = Vec::new();
+
+        let err = start_loop_runner_with_spawner(
+            "loop-1",
+            "local",
+            &SpawnOptions::default(),
+            &mut warning,
+            &mut spawner,
+        )
+        .expect_err("local spawn should fail");
+
+        assert_eq!(err, "process spawn failed");
+        assert_eq!(spawner.local_calls, 1);
+        assert_eq!(spawner.daemon_calls, 0, "local failure must not try daemon");
+        assert!(warning.is_empty());
+    }
+
+    #[test]
+    fn daemon_success_returns_correct_spawn_result_fields() {
+        let mut spawner = MockSpawner::default();
+        let mut warning = Vec::new();
+
+        let result = start_loop_runner_with_spawner(
+            "loop-42",
+            "daemon",
+            &SpawnOptions::default(),
+            &mut warning,
+            &mut spawner,
+        )
+        .expect("daemon spawn should succeed");
+
+        assert_eq!(result.owner, "daemon");
+        assert_eq!(result.instance_id, "daemon-inst");
+        assert_eq!(result.pid, None, "daemon-spawned loops have no local pid");
+        assert_eq!(spawner.daemon_calls, 1);
+        assert_eq!(spawner.local_calls, 0);
+        assert!(warning.is_empty());
+    }
+
+    #[test]
+    fn auto_daemon_success_returns_daemon_fields() {
+        let mut spawner = MockSpawner::default();
+        let mut warning = Vec::new();
+
+        let result = start_loop_runner_with_spawner(
+            "loop-42",
+            "auto",
+            &SpawnOptions::default(),
+            &mut warning,
+            &mut spawner,
+        )
+        .expect("auto should succeed via daemon");
+
+        assert_eq!(result.owner, "daemon");
+        assert_eq!(result.instance_id, "daemon-inst");
+        assert_eq!(result.pid, None);
+        assert_eq!(spawner.daemon_calls, 1);
+        assert_eq!(spawner.local_calls, 0, "daemon succeeded so local not called");
+        assert!(warning.is_empty(), "no warning when daemon succeeds");
+    }
+
+    #[test]
+    fn auto_fallback_returns_local_fields() {
+        let mut spawner = MockSpawner {
+            daemon_result: Some(Err("connection refused".to_string())),
+            ..Default::default()
+        };
+        let mut warning = Vec::new();
+
+        let result = start_loop_runner_with_spawner(
+            "loop-42",
+            "auto",
+            &SpawnOptions::default(),
+            &mut warning,
+            &mut spawner,
+        )
+        .expect("auto should succeed via local fallback");
+
+        assert_eq!(result.owner, "local");
+        assert_eq!(result.instance_id, "local-inst");
+        assert_eq!(result.pid, Some(123));
+        assert_eq!(spawner.daemon_calls, 1);
+        assert_eq!(spawner.local_calls, 1);
+    }
+
+    #[test]
+    fn auto_fallback_warning_includes_cause() {
+        let mut spawner = MockSpawner {
+            daemon_result: Some(Err("connection refused".to_string())),
+            ..Default::default()
+        };
+        let mut warning = Vec::new();
+
+        let _ = start_loop_runner_with_spawner(
+            "loop-1",
+            "auto",
+            &SpawnOptions::default(),
+            &mut warning,
+            &mut spawner,
+        )
+        .expect("auto fallback should succeed");
+
+        let text = String::from_utf8_lossy(&warning);
+        assert!(
+            text.contains("forged unavailable"),
+            "warning should mention daemon: {text}"
+        );
+        assert!(
+            text.contains("connection refused"),
+            "warning should include cause: {text}"
+        );
+        assert!(
+            text.contains("falling back to local spawn"),
+            "warning should mention fallback: {text}"
+        );
+    }
+
+    #[test]
+    fn auto_fallback_warning_suppressed_does_not_affect_result() {
+        let mut spawner = MockSpawner {
+            daemon_result: Some(Err("timeout".to_string())),
+            ..Default::default()
+        };
+        let mut warning = Vec::new();
+        let options = SpawnOptions {
+            suppress_warning: true,
+            ..Default::default()
+        };
+
+        let result = start_loop_runner_with_spawner(
+            "loop-1",
+            "auto",
+            &options,
+            &mut warning,
+            &mut spawner,
+        )
+        .expect("auto fallback should succeed even with suppressed warning");
+
+        assert_eq!(result.owner, "local");
+        assert!(warning.is_empty());
+        assert_eq!(spawner.daemon_calls, 1);
+        assert_eq!(spawner.local_calls, 1);
+    }
+
+    #[test]
+    fn auto_both_fail_error_includes_both_causes() {
+        let mut spawner = MockSpawner {
+            daemon_result: Some(Err("rpc timeout".to_string())),
+            local_result: Some(Err("binary not found".to_string())),
+            ..Default::default()
+        };
+        let mut warning = Vec::new();
+
+        let err = start_loop_runner_with_spawner(
+            "loop-1",
+            "auto",
+            &SpawnOptions::default(),
+            &mut warning,
+            &mut spawner,
+        )
+        .expect_err("both should fail");
+
+        assert!(
+            err.contains("rpc timeout"),
+            "error should include daemon cause: {err}"
+        );
+        assert!(
+            err.contains("binary not found"),
+            "error should include local cause: {err}"
+        );
+        assert_eq!(spawner.daemon_calls, 1);
+        assert_eq!(spawner.local_calls, 1);
+    }
+
+    #[test]
+    fn loop_id_is_forwarded_to_spawner() {
+        let mut spawner = MockSpawner::default();
+        let mut warning = Vec::new();
+
+        // local path
+        let _ = start_loop_runner_with_spawner(
+            "loop-abc",
+            "local",
+            &SpawnOptions::default(),
+            &mut warning,
+            &mut spawner,
+        );
+        assert_eq!(spawner.last_local.as_ref().unwrap().0, "loop-abc");
+
+        // daemon path
+        let _ = start_loop_runner_with_spawner(
+            "loop-xyz",
+            "daemon",
+            &SpawnOptions::default(),
+            &mut warning,
+            &mut spawner,
+        );
+        assert_eq!(spawner.last_daemon.as_ref().unwrap().0, "loop-xyz");
+    }
+
+    #[test]
+    fn empty_string_owner_is_rejected() {
+        let mut spawner = MockSpawner::default();
+        let mut warning = Vec::new();
+
+        let err = start_loop_runner_with_spawner(
+            "loop-1",
+            "",
+            &SpawnOptions::default(),
+            &mut warning,
+            &mut spawner,
+        )
+        .expect_err("empty owner should be rejected");
+
+        assert!(err.contains("invalid --spawn-owner"));
+        assert_eq!(spawner.local_calls, 0);
+        assert_eq!(spawner.daemon_calls, 0);
+    }
+
+    #[test]
+    fn case_sensitive_owner_rejects_uppercase() {
+        let mut spawner = MockSpawner::default();
+        let mut warning = Vec::new();
+
+        for variant in &["Local", "DAEMON", "Auto", "LOCAL"] {
+            let err = start_loop_runner_with_spawner(
+                "loop-1",
+                variant,
+                &SpawnOptions::default(),
+                &mut warning,
+                &mut spawner,
+            )
+            .expect_err("uppercase owner should be rejected");
+            assert!(err.contains("invalid --spawn-owner"));
+        }
+    }
+
+    // ── Regression: daemon target resolution ──
+
+    #[test]
+    fn daemon_target_with_scheme_preserved() {
+        let options = SpawnOptions {
+            daemon_target: "https://daemon.local:9999".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            options.resolved_daemon_target(),
+            "https://daemon.local:9999"
+        );
+    }
+
+    #[test]
+    fn daemon_target_default_when_empty() {
+        let options = SpawnOptions::default();
+        assert_eq!(options.resolved_daemon_target(), "http://127.0.0.1:50051");
+    }
+
+    #[test]
+    fn daemon_target_whitespace_only_uses_default() {
+        let options = SpawnOptions {
+            daemon_target: "   ".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(options.resolved_daemon_target(), "http://127.0.0.1:50051");
+    }
+
+    // ── Regression: request payload normalization ──
+
+    #[test]
+    fn build_request_trims_config_path() {
+        let options = SpawnOptions {
+            config_path: "  /etc/forge.yaml  ".to_string(),
+            command_path: "/bin/forge".to_string(),
+            ..Default::default()
+        };
+        let req = build_start_loop_runner_request("loop-1", &options)
+            .expect("build request should succeed");
+        assert_eq!(req.config_path, "/etc/forge.yaml");
+        assert_eq!(req.command_path, "/bin/forge");
+        assert_eq!(req.loop_id, "loop-1");
+    }
+
+    #[test]
+    fn build_request_allows_empty_config_path() {
+        let options = SpawnOptions {
+            command_path: "/bin/forge".to_string(),
+            ..Default::default()
+        };
+        let req = build_start_loop_runner_request("loop-1", &options)
+            .expect("build request should succeed");
+        assert_eq!(req.config_path, "");
+    }
 }

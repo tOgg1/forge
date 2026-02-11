@@ -1561,6 +1561,58 @@ mod tests {
         let _ = std::fs::remove_file(db_path);
     }
 
+    #[test]
+    fn scale_sqlite_up_local_owner_sets_pid_metadata() {
+        let db_path = temp_db_path("sqlite-local-owner");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let mut backend = SqliteScaleBackend::new(db_path.clone());
+        let out = run_for_test(
+            &[
+                "scale",
+                "--count",
+                "1",
+                "--name-prefix",
+                "local",
+                "--spawn-owner",
+                "local",
+                "--json",
+            ],
+            &mut backend,
+        );
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let loops = loop_repo
+            .list()
+            .unwrap_or_else(|err| panic!("list loops: {err}"));
+        assert_eq!(loops.len(), 1);
+
+        let metadata = loops[0]
+            .metadata
+            .clone()
+            .unwrap_or_else(|| panic!("expected metadata"));
+        assert_eq!(
+            metadata
+                .get("runner_owner")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+            "local"
+        );
+        assert!(
+            metadata
+                .get("runner_instance_id")
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| !v.trim().is_empty()),
+            "local owner should set runner_instance_id"
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
     fn temp_db_path(tag: &str) -> PathBuf {
         static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
         let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {

@@ -1638,6 +1638,93 @@ mod tests {
     }
 
     #[test]
+    fn up_sqlite_backend_daemon_owner_sets_metadata() {
+        let db_path = temp_db_path("sqlite-daemon-owner");
+        let _db = init_db(&db_path);
+
+        let mut backend = SqliteUpBackend::new(db_path.clone());
+        let out = run_for_test(
+            &[
+                "up",
+                "--name",
+                "daemon-loop",
+                "--spawn-owner",
+                "daemon",
+                "--quiet",
+            ],
+            &mut backend,
+        );
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+        let db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("reopen db: {err}"));
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let created = loop_repo
+            .get_by_name("daemon-loop")
+            .unwrap_or_else(|err| panic!("load loop: {err}"));
+        let metadata = created
+            .metadata
+            .unwrap_or_else(|| panic!("missing loop metadata"));
+
+        assert_eq!(metadata.get("runner_owner"), Some(&json!("daemon")));
+        assert!(
+            metadata
+                .get("runner_instance_id")
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| !v.trim().is_empty()),
+            "daemon owner should set runner_instance_id"
+        );
+        // daemon-spawned loops do not set a local pid
+        assert!(
+            metadata.get("pid").is_none(),
+            "daemon owner should not set pid metadata"
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn up_sqlite_backend_local_owner_sets_pid_metadata() {
+        let db_path = temp_db_path("sqlite-local-owner");
+        let _db = init_db(&db_path);
+
+        let mut backend = SqliteUpBackend::new(db_path.clone());
+        let out = run_for_test(
+            &[
+                "up",
+                "--name",
+                "local-loop",
+                "--spawn-owner",
+                "local",
+                "--quiet",
+            ],
+            &mut backend,
+        );
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+        let db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("reopen db: {err}"));
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let created = loop_repo
+            .get_by_name("local-loop")
+            .unwrap_or_else(|err| panic!("load loop: {err}"));
+        let metadata = created
+            .metadata
+            .unwrap_or_else(|| panic!("missing loop metadata"));
+
+        assert_eq!(metadata.get("runner_owner"), Some(&json!("local")));
+        assert!(
+            metadata
+                .get("runner_instance_id")
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| !v.trim().is_empty()),
+            "local owner should set runner_instance_id"
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
     fn up_sqlite_backend_persists_stop_config_metadata() {
         let db_path = temp_db_path("sqlite-stop-config");
         let _db = init_db(&db_path);

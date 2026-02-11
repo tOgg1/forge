@@ -657,6 +657,41 @@ mod tests {
         assert!(!instance_id.trim().is_empty());
     }
 
+    #[test]
+    fn sqlite_resume_local_owner_sets_metadata() {
+        let (db_path, _tmp, loop_id) = setup_sqlite_resume_fixture();
+        let mut backend = SqliteResumeBackend::new(db_path.clone());
+
+        let out = run_for_test(
+            &["resume", "demo", "--spawn-owner", "local", "--json"],
+            &mut backend,
+        );
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+        let db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+        let repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let entry = repo
+            .get(&loop_id)
+            .unwrap_or_else(|err| panic!("get loop {loop_id}: {err}"));
+
+        let metadata = entry.metadata.unwrap_or_default();
+        assert_eq!(metadata.get("runner_owner"), Some(&json!("local")));
+        assert!(
+            metadata
+                .get("runner_instance_id")
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| !v.trim().is_empty()),
+            "local owner should set runner_instance_id"
+        );
+        // runtime keys should be preserved
+        assert_eq!(
+            metadata.get("loop_started_at"),
+            Some(&json!("2026-02-10T00:00:00Z"))
+        );
+        assert_eq!(metadata.get("loop_iteration_count"), Some(&json!(42)));
+    }
+
     fn setup_sqlite_resume_fixture() -> (PathBuf, TempDir, String) {
         let tmp = TempDir::new("resume-sqlite");
         let db_path = tmp.path.join("forge.db");
