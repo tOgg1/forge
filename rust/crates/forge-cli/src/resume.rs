@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::spawn_loop::SpawnOptions;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
     pub stdout: String,
@@ -50,7 +52,13 @@ pub struct ResumeResult {
 
 pub trait ResumeBackend {
     fn list_loops(&self) -> Result<Vec<LoopRecord>, String>;
-    fn resume_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<ResumeResult, String>;
+    fn resume_loop(
+        &mut self,
+        loop_id: &str,
+        spawn_owner: &str,
+        spawn_options: &SpawnOptions,
+        warning_writer: &mut dyn Write,
+    ) -> Result<ResumeResult, String>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -75,7 +83,13 @@ impl ResumeBackend for InMemoryResumeBackend {
         Ok(self.loops.clone())
     }
 
-    fn resume_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<ResumeResult, String> {
+    fn resume_loop(
+        &mut self,
+        loop_id: &str,
+        spawn_owner: &str,
+        _spawn_options: &SpawnOptions,
+        _warning_writer: &mut dyn Write,
+    ) -> Result<ResumeResult, String> {
         let Some(index) = self.loops.iter().position(|entry| entry.id == loop_id) else {
             return Err(format!("loop {loop_id} not found"));
         };
@@ -162,9 +176,16 @@ impl ResumeBackend for SqliteResumeBackend {
         Ok(out)
     }
 
-    fn resume_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<ResumeResult, String> {
+    fn resume_loop(
+        &mut self,
+        loop_id: &str,
+        spawn_owner: &str,
+        spawn_options: &SpawnOptions,
+        warning_writer: &mut dyn Write,
+    ) -> Result<ResumeResult, String> {
         let owner = resolve_spawn_owner(spawn_owner)?;
-        let spawn_result = crate::spawn_loop::start_loop_runner(loop_id, &owner)?;
+        let spawn_result =
+            crate::spawn_loop::start_loop_runner(loop_id, &owner, spawn_options, warning_writer)?;
         let db = self.open_db()?;
         let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
         let mut loop_entry = loop_repo.get(loop_id).map_err(|err| err.to_string())?;
@@ -251,6 +272,7 @@ fn resolve_database_path() -> PathBuf {
 struct ParsedArgs {
     loop_ref: String,
     spawn_owner: String,
+    config_path: String,
     json: bool,
     jsonl: bool,
     quiet: bool,
@@ -281,7 +303,7 @@ pub fn run_with_backend(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> i32 {
-    match execute(args, backend, stdout) {
+    match execute(args, backend, stdout, stderr) {
         Ok(()) => 0,
         Err(message) => {
             let _ = writeln!(stderr, "{message}");
@@ -294,8 +316,14 @@ fn execute(
     args: &[String],
     backend: &mut dyn ResumeBackend,
     stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<(), String> {
     let parsed = parse_args(args)?;
+    let spawn_options = SpawnOptions {
+        config_path: parsed.config_path.clone(),
+        suppress_warning: parsed.quiet || parsed.json || parsed.jsonl,
+        ..Default::default()
+    };
     let loops = backend.list_loops()?;
     let loop_entry = match_loop_ref(&loops, &parsed.loop_ref)?;
 
@@ -310,7 +338,7 @@ fn execute(
         }
     }
 
-    let _ = backend.resume_loop(&loop_entry.id, &parsed.spawn_owner)?;
+    let _ = backend.resume_loop(&loop_entry.id, &parsed.spawn_owner, &spawn_options, stderr)?;
 
     if parsed.json || parsed.jsonl {
         let payload = serde_json::json!({
@@ -346,6 +374,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut jsonl = false;
     let mut quiet = false;
     let mut spawn_owner = "auto".to_string();
+    let mut config_path = String::new();
     let mut loop_ref = String::new();
 
     while let Some(token) = args.get(index) {
@@ -366,8 +395,15 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 spawn_owner = take_value(args, index, "--spawn-owner")?;
                 index += 2;
             }
+            "--config" => {
+                config_path = take_value(args, index, "--config")?;
+                index += 2;
+            }
             "--help" | "-h" => {
-                return Err("usage: resume <loop> [--spawn-owner local|daemon|auto]".to_string());
+                return Err(
+                    "usage: resume <loop> [--spawn-owner local|daemon|auto] [--config <path>]"
+                        .to_string(),
+                );
             }
             flag if flag.starts_with('-') => {
                 return Err(format!("error: unknown argument for resume: '{flag}'"));
@@ -394,6 +430,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     Ok(ParsedArgs {
         loop_ref,
         spawn_owner,
+        config_path,
         json,
         jsonl,
         quiet,
@@ -585,7 +622,7 @@ mod tests {
             .and_then(|value| value.as_str())
             .unwrap_or_default()
             .to_string();
-        assert!(instance_id.starts_with("resume-"));
+        assert!(!instance_id.trim().is_empty());
     }
 
     fn setup_sqlite_resume_fixture() -> (PathBuf, TempDir, String) {

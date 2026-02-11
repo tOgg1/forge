@@ -21,12 +21,15 @@ chrono = { version = "0.4", features = ["serde"] }
 fmail-core = { path = "../fmail-core" }
 forge-db = { path = "../forge-db" }
 forge-loop = { path = "../forge-loop" }
+forge-rpc = { path = "../forge-rpc" }
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 tabwriter = "1"
+tokio = { version = "1", features = ["rt", "time"] }
 toml = "0.8"
+tonic = "0.12"
 uuid = { version = "1", features = ["v4"] }
 
 [lints]

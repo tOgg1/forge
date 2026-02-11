@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde_json::json;
 
+use crate::spawn_loop::SpawnOptions;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
     pub stdout: String,
@@ -87,7 +89,13 @@ pub trait ScaleBackend {
     fn select_loops(&self, selector: &LoopSelector) -> Result<Vec<LoopRecord>, String>;
     fn enqueue_item(&mut self, loop_id: &str, item: QueueItem) -> Result<(), String>;
     fn create_loop(&mut self, spec: &LoopCreateSpec) -> Result<LoopRecord, String>;
-    fn start_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<(), String>;
+    fn start_loop(
+        &mut self,
+        loop_id: &str,
+        spawn_owner: &str,
+        spawn_options: &SpawnOptions,
+        warning_writer: &mut dyn Write,
+    ) -> Result<(), String>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -165,7 +173,13 @@ impl ScaleBackend for InMemoryScaleBackend {
         Ok(entry)
     }
 
-    fn start_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<(), String> {
+    fn start_loop(
+        &mut self,
+        loop_id: &str,
+        spawn_owner: &str,
+        _spawn_options: &SpawnOptions,
+        _warning_writer: &mut dyn Write,
+    ) -> Result<(), String> {
         if !self.loops.iter().any(|entry| entry.id == loop_id) {
             return Err(format!("loop {loop_id} not found"));
         }
@@ -366,8 +380,19 @@ impl ScaleBackend for SqliteScaleBackend {
         })
     }
 
-    fn start_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<(), String> {
-        let spawn_result = crate::spawn_loop::start_loop_runner(loop_id, spawn_owner)?;
+    fn start_loop(
+        &mut self,
+        loop_id: &str,
+        spawn_owner: &str,
+        spawn_options: &SpawnOptions,
+        warning_writer: &mut dyn Write,
+    ) -> Result<(), String> {
+        let spawn_result = crate::spawn_loop::start_loop_runner(
+            loop_id,
+            spawn_owner,
+            spawn_options,
+            warning_writer,
+        )?;
         let db = self.open_db()?;
         let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
         let mut loop_entry = match loop_repo.get(loop_id) {
@@ -413,6 +438,7 @@ struct ParsedArgs {
     name_prefix: String,
     kill: bool,
     spawn_owner: String,
+    config_path: String,
     stop_config: StopConfig,
 }
 
@@ -440,7 +466,7 @@ pub fn run_with_backend(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> i32 {
-    match execute(args, backend, stdout) {
+    match execute(args, backend, stdout, stderr) {
         Ok(()) => 0,
         Err(message) => {
             let _ = writeln!(stderr, "{message}");
@@ -453,8 +479,14 @@ fn execute(
     args: &[String],
     backend: &mut dyn ScaleBackend,
     stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<(), String> {
     let parsed = parse_args(args)?;
+    let spawn_options = SpawnOptions {
+        config_path: parsed.config_path.clone(),
+        suppress_warning: parsed.quiet || parsed.json || parsed.jsonl,
+        ..Default::default()
+    };
     let mut loops = backend.select_loops(&parsed.selector)?;
     loops.sort_by_key(|entry| entry.created_seq);
 
@@ -510,7 +542,7 @@ fn execute(
                     },
                 )?;
             }
-            backend.start_loop(&created.id, &parsed.spawn_owner)?;
+            backend.start_loop(&created.id, &parsed.spawn_owner, &spawn_options, stderr)?;
         }
     }
 
@@ -553,6 +585,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut name_prefix = String::new();
     let mut kill = false;
     let mut spawn_owner = "auto".to_string();
+    let mut config_path = String::new();
 
     let mut quant_cmd = String::new();
     let mut quant_every = 1i32;
@@ -645,6 +678,10 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             }
             "--spawn-owner" => {
                 spawn_owner = take_value(args, index, "--spawn-owner")?;
+                index += 2;
+            }
+            "--config" => {
+                config_path = take_value(args, index, "--config")?;
                 index += 2;
             }
             "--quantitative-stop-cmd" => {
@@ -850,6 +887,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         name_prefix,
         kill,
         spawn_owner,
+        config_path,
         stop_config,
     })
 }
@@ -1030,6 +1068,7 @@ Flags:
       --profile string       profile name or ID
       --prompt string        base prompt path or name
       --prompt-msg string    base prompt content
+      --config string        config file path passed to spawned loop runner
       --initial-wait string  wait before first iteration for new loops
       --kill                 kill extra loops instead of stopping
       --spawn-owner string   loop runner owner (local|daemon|auto)";

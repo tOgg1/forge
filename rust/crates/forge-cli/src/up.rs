@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde_json::json;
 
+use crate::spawn_loop::SpawnOptions;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
     pub stdout: String,
@@ -75,7 +77,13 @@ pub trait UpBackend {
     fn list_loop_names(&self) -> Result<Vec<String>, String>;
     fn create_loop(&mut self, spec: &LoopCreateSpec) -> Result<LoopRecord, String>;
     fn enqueue_item(&mut self, loop_id: &str, item: QueueItem) -> Result<(), String>;
-    fn start_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<(), String>;
+    fn start_loop(
+        &mut self,
+        loop_id: &str,
+        spawn_owner: &str,
+        spawn_options: &SpawnOptions,
+        warning_writer: &mut dyn Write,
+    ) -> Result<(), String>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -123,7 +131,13 @@ impl UpBackend for InMemoryUpBackend {
         Ok(())
     }
 
-    fn start_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<(), String> {
+    fn start_loop(
+        &mut self,
+        loop_id: &str,
+        spawn_owner: &str,
+        _spawn_options: &SpawnOptions,
+        _warning_writer: &mut dyn Write,
+    ) -> Result<(), String> {
         self.starts
             .push((loop_id.to_string(), spawn_owner.to_string()));
         Ok(())
@@ -257,8 +271,19 @@ impl UpBackend for SqliteUpBackend {
             .map_err(|err| format!("enqueue queue item: {err}"))
     }
 
-    fn start_loop(&mut self, loop_id: &str, spawn_owner: &str) -> Result<(), String> {
-        let spawn_result = crate::spawn_loop::start_loop_runner(loop_id, spawn_owner)?;
+    fn start_loop(
+        &mut self,
+        loop_id: &str,
+        spawn_owner: &str,
+        spawn_options: &SpawnOptions,
+        warning_writer: &mut dyn Write,
+    ) -> Result<(), String> {
+        let spawn_result = crate::spawn_loop::start_loop_runner(
+            loop_id,
+            spawn_owner,
+            spawn_options,
+            warning_writer,
+        )?;
         let db = self.open_db()?;
         let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
 
@@ -362,7 +387,7 @@ pub fn run_with_backend(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> i32 {
-    match execute(args, backend, stdout) {
+    match execute(args, backend, stdout, stderr) {
         Ok(()) => 0,
         Err(message) => {
             let _ = writeln!(stderr, "{message}");
@@ -389,6 +414,7 @@ struct ParsedArgs {
     max_iterations: i32,
     tags: Vec<String>,
     spawn_owner: String,
+    config_path: String,
     stop_config: StopConfig,
 }
 
@@ -402,8 +428,14 @@ fn execute(
     args: &[String],
     backend: &mut dyn UpBackend,
     stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<(), String> {
     let parsed = parse_args(args)?;
+    let spawn_options = SpawnOptions {
+        config_path: parsed.config_path.clone(),
+        suppress_warning: parsed.quiet || parsed.json || parsed.jsonl,
+        ..Default::default()
+    };
 
     let existing_names_list = backend.list_loop_names()?;
     let mut existing_names: BTreeSet<String> = existing_names_list.into_iter().collect();
@@ -448,7 +480,7 @@ fn execute(
                 },
             )?;
         }
-        backend.start_loop(&record.id, &parsed.spawn_owner)?;
+        backend.start_loop(&record.id, &parsed.spawn_owner, &spawn_options, stderr)?;
         created.push(record);
     }
 
@@ -501,6 +533,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut max_iterations = 0i32;
     let mut tags_raw = String::new();
     let mut spawn_owner = "auto".to_string();
+    let mut config_path = String::new();
 
     let mut quant_cmd = String::new();
     let mut quant_every = 1i32;
@@ -589,6 +622,10 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             }
             "--spawn-owner" => {
                 spawn_owner = take_value(args, index, "--spawn-owner")?;
+                index += 2;
+            }
+            "--config" => {
+                config_path = take_value(args, index, "--config")?;
                 index += 2;
             }
             "--quantitative-stop-cmd" => {
@@ -798,6 +835,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         max_iterations,
         tags: parse_tags(&tags_raw),
         spawn_owner,
+        config_path,
         stop_config,
     })
 }
@@ -923,6 +961,7 @@ Flags:
       --profile string                     profile name or ID
       --prompt string                      base prompt path or prompt name
       --prompt-msg string                  base prompt content for each iteration
+      --config string                      config file path passed to spawned loop runner
       --interval string                    sleep interval (e.g., 30s, 2m)
       --initial-wait string                wait before first iteration (e.g., 30s, 2m)
   -r, --max-runtime string                 max runtime before stopping (e.g., 30m, 2h)
@@ -1463,7 +1502,9 @@ mod tests {
         let metadata = created
             .metadata
             .unwrap_or_else(|| panic!("missing loop metadata"));
-        assert_eq!(metadata.get("runner_owner"), Some(&json!("auto")));
+        // auto mode tries daemon first; in test harness the daemon stub succeeds,
+        // so the effective runner owner is "daemon" (matching Go parity).
+        assert_eq!(metadata.get("runner_owner"), Some(&json!("daemon")));
         assert!(
             metadata
                 .get("runner_instance_id")

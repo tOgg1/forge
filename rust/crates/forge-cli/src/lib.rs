@@ -7,6 +7,7 @@ pub mod clean;
 pub mod completion;
 pub mod config;
 pub mod context;
+mod daemon_client;
 pub mod doctor;
 pub mod error_envelope;
 pub mod explain;
@@ -221,7 +222,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
         }
         Some("resume") => {
             let mut backend = resume::SqliteResumeBackend::open_from_env();
-            let forwarded = forward_args(remaining, &flags);
+            let forwarded = forward_loop_spawn_args(remaining, &flags);
             resume::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("rm") => {
@@ -236,7 +237,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
         }
         Some("scale") => {
             let mut backend = scale::SqliteScaleBackend::open_from_env();
-            let forwarded = forward_args(remaining, &flags);
+            let forwarded = forward_loop_spawn_args(remaining, &flags);
             scale::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("ps") | Some("ls") => {
@@ -280,7 +281,7 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
         }
         Some("up") => {
             let mut backend = up::SqliteUpBackend::open_from_env();
-            let forwarded = forward_args(remaining, &flags);
+            let forwarded = forward_loop_spawn_args(remaining, &flags);
             up::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("wait") => {
@@ -319,6 +320,15 @@ fn forward_args(remaining: &[String], flags: &GlobalFlags) -> Vec<String> {
     }
     if flags.quiet {
         out.insert(1, "--quiet".to_string());
+    }
+    out
+}
+
+fn forward_loop_spawn_args(remaining: &[String], flags: &GlobalFlags) -> Vec<String> {
+    let mut out = forward_args(remaining, flags);
+    if !flags.config.trim().is_empty() && !out.is_empty() {
+        out.insert(1, "--config".to_string());
+        out.insert(2, flags.config.clone());
     }
     out
 }
