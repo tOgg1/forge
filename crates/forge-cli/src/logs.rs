@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
+
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -25,6 +29,14 @@ struct ParsedArgs {
     follow: bool,
     lines: i32,
     since: String,
+    no_color: bool,
+    raw: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderOptions {
+    no_color: bool,
+    raw: bool,
 }
 
 pub trait LogsBackend {
@@ -32,7 +44,13 @@ pub trait LogsBackend {
     fn repo_path(&self) -> Result<String, String>;
     fn list_loops(&self) -> Result<Vec<LoopRecord>, String>;
     fn read_log(&self, path: &str, lines: i32, since: &str) -> Result<String, String>;
-    fn follow_log(&mut self, path: &str, lines: i32, stdout: &mut dyn Write) -> Result<(), String>;
+    fn follow_log(
+        &mut self,
+        path: &str,
+        lines: i32,
+        render: RenderOptions,
+        stdout: &mut dyn Write,
+    ) -> Result<(), String>;
 }
 
 #[derive(Debug, Clone)]
@@ -108,16 +126,22 @@ impl LogsBackend for InMemoryLogsBackend {
         Ok(filter_log_content(content, lines, since))
     }
 
-    fn follow_log(&mut self, path: &str, lines: i32, stdout: &mut dyn Write) -> Result<(), String> {
+    fn follow_log(
+        &mut self,
+        path: &str,
+        lines: i32,
+        render: RenderOptions,
+        stdout: &mut dyn Write,
+    ) -> Result<(), String> {
         self.followed_paths.push((path.to_string(), lines));
         if let Some(text) = self.follow_output.get(path) {
-            write!(stdout, "{text}").map_err(|err| err.to_string())?;
+            let rendered = render_log_content(text, render);
+            write_log_block(stdout, &rendered)?;
             return Ok(());
         }
         let tail = self.read_log(path, lines, "")?;
-        if !tail.is_empty() {
-            writeln!(stdout, "{tail}").map_err(|err| err.to_string())?;
-        }
+        let rendered = render_log_content(&tail, render);
+        write_log_block(stdout, &rendered)?;
         Ok(())
     }
 }
@@ -191,12 +215,57 @@ impl LogsBackend for SqliteLogsBackend {
         Ok(filter_log_content(&content, lines, since))
     }
 
-    fn follow_log(&mut self, path: &str, lines: i32, stdout: &mut dyn Write) -> Result<(), String> {
+    fn follow_log(
+        &mut self,
+        path: &str,
+        lines: i32,
+        render: RenderOptions,
+        stdout: &mut dyn Write,
+    ) -> Result<(), String> {
         let tail = self.read_log(path, lines, "")?;
-        if !tail.is_empty() {
-            writeln!(stdout, "{tail}").map_err(|err| err.to_string())?;
+        let rendered = render_log_content(&tail, render);
+        write_log_block(stdout, &rendered)?;
+        if std::env::var_os("FORGE_LOGS_FOLLOW_ONCE").is_some() {
+            return Ok(());
         }
-        Ok(())
+
+        let mut known_content =
+            std::fs::read_to_string(path).map_err(|err| format!("open {path}: {err}"))?;
+        let mut carry = String::new();
+
+        loop {
+            thread::sleep(Duration::from_millis(250));
+            let current =
+                std::fs::read_to_string(path).map_err(|err| format!("open {path}: {err}"))?;
+            if current == known_content {
+                continue;
+            }
+
+            let delta = if current.starts_with(&known_content) {
+                current[known_content.len()..].to_string()
+            } else {
+                // File truncated/rotated/replaced: treat full current content as new.
+                current.clone()
+            };
+            known_content = current;
+            if delta.is_empty() {
+                continue;
+            }
+
+            let chunk = if carry.is_empty() {
+                delta
+            } else {
+                format!("{carry}{delta}")
+            };
+            let (complete, rest) = split_complete_lines(&chunk);
+            carry = rest;
+
+            if complete.is_empty() {
+                continue;
+            }
+            let rendered = render_log_content(&complete, render);
+            write_log_block(stdout, &rendered)?;
+        }
     }
 }
 
@@ -287,6 +356,10 @@ fn execute(
     stdout: &mut dyn Write,
 ) -> Result<(), String> {
     let parsed = parse_args(args)?;
+    let render = RenderOptions {
+        no_color: parsed.no_color,
+        raw: parsed.raw,
+    };
     let mut loops = backend.list_loops()?;
 
     if parsed.all {
@@ -315,14 +388,13 @@ fn execute(
         writeln!(stdout, "==> {} <==", entry.name).map_err(|err| err.to_string())?;
 
         if parsed.follow {
-            backend.follow_log(&path, parsed.lines, stdout)?;
+            backend.follow_log(&path, parsed.lines, render, stdout)?;
             continue;
         }
 
         let content = backend.read_log(&path, parsed.lines, &parsed.since)?;
-        if !content.is_empty() {
-            writeln!(stdout, "{content}").map_err(|err| err.to_string())?;
-        }
+        let rendered = render_log_content(&content, render);
+        write_log_block(stdout, &rendered)?;
     }
     Ok(())
 }
@@ -340,6 +412,8 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut follow = false;
     let mut lines: i32 = 50;
     let mut since = String::new();
+    let mut no_color = false;
+    let mut raw = false;
     let mut positionals = Vec::new();
 
     while let Some(token) = args.get(index) {
@@ -362,6 +436,14 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             }
             "--all" => {
                 all = true;
+                index += 1;
+            }
+            "--no-color" => {
+                no_color = true;
+                index += 1;
+            }
+            "--raw" => {
+                raw = true;
                 index += 1;
             }
             flag if flag.starts_with('-') => {
@@ -389,7 +471,197 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         follow,
         lines,
         since,
+        no_color,
+        raw,
     })
+}
+
+fn write_log_block(stdout: &mut dyn Write, content: &str) -> Result<(), String> {
+    if content.is_empty() {
+        return Ok(());
+    }
+    write!(stdout, "{content}").map_err(|err| err.to_string())?;
+    if !content.ends_with('\n') {
+        writeln!(stdout).map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn split_complete_lines(input: &str) -> (String, String) {
+    if input.is_empty() {
+        return (String::new(), String::new());
+    }
+    if input.ends_with('\n') {
+        return (input.to_string(), String::new());
+    }
+    match input.rfind('\n') {
+        Some(index) => (input[..=index].to_string(), input[index + 1..].to_string()),
+        None => (String::new(), input.to_string()),
+    }
+}
+
+fn render_log_content(content: &str, options: RenderOptions) -> String {
+    if options.raw || content.is_empty() {
+        return content.to_string();
+    }
+
+    let use_color = colors_enabled(options.no_color);
+    let mut out = Vec::new();
+
+    for line in content.lines() {
+        match maybe_render_claude_stream_line(line, use_color) {
+            Some(rendered) if !rendered.is_empty() => out.push(rendered),
+            Some(_) => {}
+            None => out.push(line.to_string()),
+        }
+    }
+
+    out.join("\n")
+}
+
+const COLOR_RESET: &str = "\x1b[0m";
+const COLOR_DIM: &str = "\x1b[2m";
+const COLOR_CYAN: &str = "\x1b[36m";
+const COLOR_GREEN: &str = "\x1b[32m";
+const COLOR_YELLOW: &str = "\x1b[33m";
+const COLOR_RED: &str = "\x1b[31m";
+
+fn colors_enabled(no_color: bool) -> bool {
+    if no_color {
+        return false;
+    }
+    std::env::var_os("NO_COLOR").is_none()
+}
+
+fn colorize(input: &str, color: &str, enabled: bool) -> String {
+    if !enabled || input.is_empty() {
+        return input.to_string();
+    }
+    format!("{color}{input}{COLOR_RESET}")
+}
+
+fn maybe_render_claude_stream_line(line: &str, use_color: bool) -> Option<String> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('{') {
+        return None;
+    }
+
+    let value: Value = serde_json::from_str(trimmed).ok()?;
+    let event_type = value.get("type").and_then(Value::as_str)?;
+
+    match event_type {
+        "system" => render_claude_system_line(&value, use_color),
+        "stream_event" => render_claude_stream_event_line(&value, use_color),
+        "result" => render_claude_result_line(&value, use_color),
+        "error" => {
+            let message = value
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error");
+            Some(format!(
+                "{} {}",
+                colorize("[claude:error]", COLOR_RED, use_color),
+                message
+            ))
+        }
+        // Avoid duplicate full-response payloads in stream-json mode.
+        "assistant" | "user" => Some(String::new()),
+        _ => None,
+    }
+}
+
+fn render_claude_system_line(value: &Value, use_color: bool) -> Option<String> {
+    if value.get("subtype").and_then(Value::as_str) != Some("init") {
+        return None;
+    }
+    let model = value
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let tools = value
+        .get("tools")
+        .and_then(Value::as_array)
+        .map_or(0, std::vec::Vec::len);
+    let mcp = value
+        .get("mcp_servers")
+        .and_then(Value::as_array)
+        .map_or(0, std::vec::Vec::len);
+    let session = value
+        .get("session_id")
+        .and_then(Value::as_str)
+        .unwrap_or("-");
+    Some(format!(
+        "{} model={model} tools={tools} mcp={mcp} session={session}",
+        colorize("[claude:init]", COLOR_CYAN, use_color)
+    ))
+}
+
+fn render_claude_stream_event_line(value: &Value, use_color: bool) -> Option<String> {
+    let event = value.get("event")?;
+    let event_type = event.get("type").and_then(Value::as_str).unwrap_or("-");
+    match event_type {
+        "content_block_delta" => {
+            let delta = event.get("delta")?;
+            if delta.get("type").and_then(Value::as_str) != Some("text_delta") {
+                return Some(String::new());
+            }
+            let text = delta
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if text.is_empty() {
+                return Some(String::new());
+            }
+            Some(colorize(text, COLOR_GREEN, use_color))
+        }
+        "message_delta" => {
+            let stop_reason = event
+                .get("delta")
+                .and_then(|delta| delta.get("stop_reason"))
+                .and_then(Value::as_str);
+            if let Some(reason) = stop_reason {
+                return Some(format!(
+                    "{} stop_reason={reason}",
+                    colorize("[claude:event]", COLOR_DIM, use_color)
+                ));
+            }
+            Some(String::new())
+        }
+        "message_start" | "message_stop" | "content_block_start" | "content_block_stop" => {
+            Some(String::new())
+        }
+        other => Some(format!(
+            "{} {}",
+            colorize("[claude:event]", COLOR_DIM, use_color),
+            other
+        )),
+    }
+}
+
+fn render_claude_result_line(value: &Value, use_color: bool) -> Option<String> {
+    let turns = value.get("num_turns").and_then(Value::as_i64).unwrap_or(0);
+    let duration_ms = value
+        .get("duration_ms")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let usage = value.get("usage");
+    let input_tokens = usage
+        .and_then(|usage| usage.get("input_tokens"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let output_tokens = usage
+        .and_then(|usage| usage.get("output_tokens"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let cost = value
+        .get("total_cost_usd")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let duration_seconds = duration_ms as f64 / 1000.0;
+    Some(format!(
+        "{} turns={turns} duration={duration_seconds:.1}s input={input_tokens} output={output_tokens} cost=${cost:.6}",
+        colorize("[claude:result]", COLOR_YELLOW, use_color)
+    ))
 }
 
 fn take_value(args: &[String], index: usize, flag: &str) -> Result<String, String> {
@@ -564,11 +836,15 @@ Flags:
   -n, --lines N     number of lines to show (default 50)
       --since VAL   show logs since duration or timestamp
       --all         show logs for all loops in repo
+      --raw         disable Claude stream-json rendering
+      --no-color    disable colored log rendering
 ";
 
 #[cfg(test)]
 mod tests {
-    use super::{default_log_path, run_for_test, InMemoryLogsBackend, LoopRecord};
+    use super::{
+        default_log_path, run_for_test, split_complete_lines, InMemoryLogsBackend, LoopRecord,
+    };
 
     #[test]
     fn logs_requires_loop_or_all() {
@@ -776,6 +1052,57 @@ mod tests {
     }
 
     #[test]
+    fn logs_formats_claude_stream_json_lines() {
+        let path = "/tmp/forge/logs/loops/claude.log";
+        let mut backend = InMemoryLogsBackend::with_loops(vec![LoopRecord {
+            id: "loop-claude".to_string(),
+            short_id: "cc123456".to_string(),
+            name: "claude-loop".to_string(),
+            repo: "/repo".to_string(),
+            log_path: path.to_string(),
+        }])
+        .with_log(
+            path,
+            "{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"claude-opus-4-6\",\"tools\":[\"Bash\"],\"mcp_servers\":[],\"session_id\":\"sess-1\"}\n\
+             {\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}}\n\
+             {\"type\":\"result\",\"num_turns\":1,\"duration_ms\":2100,\"total_cost_usd\":0.120001,\"usage\":{\"input_tokens\":10,\"output_tokens\":20}}\n",
+        );
+
+        let out = run_for_test(&["logs", "claude-loop", "--no-color"], &mut backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stderr.is_empty());
+        assert!(out.stdout.contains("[claude:init] model=claude-opus-4-6"));
+        assert!(out.stdout.contains("hello"));
+        assert!(out
+            .stdout
+            .contains("[claude:result] turns=1 duration=2.1s input=10 output=20"));
+        assert!(!out.stdout.contains("{\"type\":\"system\""));
+    }
+
+    #[test]
+    fn logs_raw_preserves_original_claude_stream_json() {
+        let path = "/tmp/forge/logs/loops/claude-raw.log";
+        let mut backend = InMemoryLogsBackend::with_loops(vec![LoopRecord {
+            id: "loop-claude-raw".to_string(),
+            short_id: "cc654321".to_string(),
+            name: "claude-raw-loop".to_string(),
+            repo: "/repo".to_string(),
+            log_path: path.to_string(),
+        }])
+        .with_log(
+            path,
+            "{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"claude-opus-4-6\"}\n",
+        );
+
+        let out = run_for_test(&["logs", "claude-raw-loop", "--raw"], &mut backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stderr.is_empty());
+        assert!(out
+            .stdout
+            .contains("{\"type\":\"system\",\"subtype\":\"init\""));
+    }
+
+    #[test]
     fn default_log_path_matches_go_shape() {
         assert_eq!(
             default_log_path("/tmp/forge", "My Loop_Name", "loop-1"),
@@ -785,5 +1112,26 @@ mod tests {
             default_log_path("/tmp/forge", " ", "loop-1"),
             "/tmp/forge/logs/loops/loop-1.log"
         );
+    }
+
+    #[test]
+    fn split_complete_lines_handles_trailing_partial() {
+        let (complete, rest) = split_complete_lines("one\ntwo\nthr");
+        assert_eq!(complete, "one\ntwo\n");
+        assert_eq!(rest, "thr");
+    }
+
+    #[test]
+    fn split_complete_lines_handles_full_block() {
+        let (complete, rest) = split_complete_lines("one\ntwo\n");
+        assert_eq!(complete, "one\ntwo\n");
+        assert_eq!(rest, "");
+    }
+
+    #[test]
+    fn split_complete_lines_handles_no_newline() {
+        let (complete, rest) = split_complete_lines("partial");
+        assert_eq!(complete, "");
+        assert_eq!(rest, "partial");
     }
 }

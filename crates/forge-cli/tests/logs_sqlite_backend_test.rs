@@ -71,7 +71,9 @@ fn logs_dispatch_supports_since_and_follow_flags_on_sqlite_backend() {
         "==> oracle-loop <==\n[2026-01-01T00:00:01Z] keep\n[2026-01-01T00:00:02Z] newest\n"
     );
 
+    std::env::set_var("FORGE_LOGS_FOLLOW_ONCE", "1");
     let (code, stdout, stderr) = run(&["logs", "oracle-loop", "--follow", "--lines", "1"]);
+    std::env::remove_var("FORGE_LOGS_FOLLOW_ONCE");
     assert_eq!(code, 0, "stderr: {stderr}");
     assert!(stderr.is_empty());
     assert_eq!(
