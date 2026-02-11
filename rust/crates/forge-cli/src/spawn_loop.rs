@@ -608,7 +608,7 @@ mod tests {
             &mut warning,
             &mut spawner,
         )
-        .expect("local spawn should succeed");
+        .unwrap_or_else(|err| panic!("local spawn should succeed: {err}"));
 
         assert_eq!(result.owner, "local");
         assert_eq!(result.instance_id, "local-inst");
@@ -633,7 +633,8 @@ mod tests {
             &mut warning,
             &mut spawner,
         )
-        .expect_err("local spawn should fail");
+        .err()
+        .unwrap_or_else(|| panic!("local spawn should fail"));
 
         assert_eq!(err, "process spawn failed");
         assert_eq!(spawner.local_calls, 1);
@@ -653,7 +654,7 @@ mod tests {
             &mut warning,
             &mut spawner,
         )
-        .expect("daemon spawn should succeed");
+        .unwrap_or_else(|err| panic!("daemon spawn should succeed: {err}"));
 
         assert_eq!(result.owner, "daemon");
         assert_eq!(result.instance_id, "daemon-inst");
@@ -675,7 +676,7 @@ mod tests {
             &mut warning,
             &mut spawner,
         )
-        .expect("auto should succeed via daemon");
+        .unwrap_or_else(|err| panic!("auto should succeed via daemon: {err}"));
 
         assert_eq!(result.owner, "daemon");
         assert_eq!(result.instance_id, "daemon-inst");
@@ -703,7 +704,7 @@ mod tests {
             &mut warning,
             &mut spawner,
         )
-        .expect("auto should succeed via local fallback");
+        .unwrap_or_else(|err| panic!("auto should succeed via local fallback: {err}"));
 
         assert_eq!(result.owner, "local");
         assert_eq!(result.instance_id, "local-inst");
@@ -727,7 +728,7 @@ mod tests {
             &mut warning,
             &mut spawner,
         )
-        .expect("auto fallback should succeed");
+        .unwrap_or_else(|err| panic!("auto fallback should succeed: {err}"));
 
         let text = String::from_utf8_lossy(&warning);
         assert!(
@@ -758,7 +759,9 @@ mod tests {
 
         let result =
             start_loop_runner_with_spawner("loop-1", "auto", &options, &mut warning, &mut spawner)
-                .expect("auto fallback should succeed even with suppressed warning");
+                .unwrap_or_else(|err| {
+                    panic!("auto fallback should succeed even with suppressed warning: {err}")
+                });
 
         assert_eq!(result.owner, "local");
         assert!(warning.is_empty());
@@ -782,7 +785,8 @@ mod tests {
             &mut warning,
             &mut spawner,
         )
-        .expect_err("both should fail");
+        .err()
+        .unwrap_or_else(|| panic!("both should fail"));
 
         assert!(
             err.contains("rpc timeout"),
@@ -809,7 +813,11 @@ mod tests {
             &mut warning,
             &mut spawner,
         );
-        assert_eq!(spawner.last_local.as_ref().unwrap().0, "loop-abc");
+        let local = match spawner.last_local.as_ref() {
+            Some(local) => local,
+            None => panic!("expected local call"),
+        };
+        assert_eq!(local.0, "loop-abc");
 
         // daemon path
         let _ = start_loop_runner_with_spawner(
@@ -819,7 +827,11 @@ mod tests {
             &mut warning,
             &mut spawner,
         );
-        assert_eq!(spawner.last_daemon.as_ref().unwrap().0, "loop-xyz");
+        let daemon = match spawner.last_daemon.as_ref() {
+            Some(daemon) => daemon,
+            None => panic!("expected daemon call"),
+        };
+        assert_eq!(daemon.0, "loop-xyz");
     }
 
     #[test]
@@ -834,7 +846,8 @@ mod tests {
             &mut warning,
             &mut spawner,
         )
-        .expect_err("empty owner should be rejected");
+        .err()
+        .unwrap_or_else(|| panic!("empty owner should be rejected"));
 
         assert!(err.contains("invalid --spawn-owner"));
         assert_eq!(spawner.local_calls, 0);
@@ -854,7 +867,8 @@ mod tests {
                 &mut warning,
                 &mut spawner,
             )
-            .expect_err("uppercase owner should be rejected");
+            .err()
+            .unwrap_or_else(|| panic!("uppercase owner should be rejected"));
             assert!(err.contains("invalid --spawn-owner"));
         }
     }
@@ -898,7 +912,7 @@ mod tests {
             ..Default::default()
         };
         let req = build_start_loop_runner_request("loop-1", &options)
-            .expect("build request should succeed");
+            .unwrap_or_else(|err| panic!("build request should succeed: {err}"));
         assert_eq!(req.config_path, "/etc/forge.yaml");
         assert_eq!(req.command_path, "/bin/forge");
         assert_eq!(req.loop_id, "loop-1");
@@ -911,7 +925,7 @@ mod tests {
             ..Default::default()
         };
         let req = build_start_loop_runner_request("loop-1", &options)
-            .expect("build request should succeed");
+            .unwrap_or_else(|err| panic!("build request should succeed: {err}"));
         assert_eq!(req.config_path, "");
     }
 }

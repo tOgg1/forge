@@ -1676,7 +1676,7 @@ mod tests {
         );
         // daemon-spawned loops do not set a local pid
         assert!(
-            metadata.get("pid").is_none(),
+            !metadata.contains_key("pid"),
             "daemon owner should not set pid metadata"
         );
 

@@ -802,7 +802,7 @@ fn profile_available(
     run_repo: &forge_db::loop_run_repository::LoopRunRepository<'_>,
     profile: &forge_db::profile_repository::Profile,
     now: DateTime<Utc>,
-) -> Result<(bool, Option<DateTime<Utc>>, Option<String>), String> {
+) -> Result<ProfileAvailability, String> {
     if let Some(cooldown) = profile
         .cooldown_until
         .as_deref()
@@ -824,6 +824,8 @@ fn profile_available(
 
     Ok((true, None, None))
 }
+
+type ProfileAvailability = (bool, Option<DateTime<Utc>>, Option<String>);
 
 fn pool_last_index(pool: &forge_db::pool_repository::Pool) -> i32 {
     let Some(metadata) = &pool.metadata else {
@@ -890,21 +892,21 @@ fn execute_profile(
     let mut profile_env = profile.env.clone();
     profile_env.insert("FORGE_LOOP_ID".to_string(), loop_entry.id.clone());
     profile_env.insert("FORGE_LOOP_NAME".to_string(), loop_entry.name.clone());
-    if profile_env.get("FMAIL_AGENT").is_none()
+    if !profile_env.contains_key("FMAIL_AGENT")
         || profile_env
             .get("FMAIL_AGENT")
             .is_some_and(|value| value.trim().is_empty())
     {
         profile_env.insert("FMAIL_AGENT".to_string(), loop_entry.name.clone());
     }
-    if profile_env.get("SV_REPO").is_none()
+    if !profile_env.contains_key("SV_REPO")
         || profile_env
             .get("SV_REPO")
             .is_some_and(|value| value.trim().is_empty())
     {
         profile_env.insert("SV_REPO".to_string(), loop_entry.repo_path.clone());
     }
-    if profile_env.get("SV_ACTOR").is_none()
+    if !profile_env.contains_key("SV_ACTOR")
         || profile_env
             .get("SV_ACTOR")
             .is_some_and(|value| value.trim().is_empty())
