@@ -60,6 +60,11 @@ impl ForgedAgentService {
         &self.agents
     }
 
+    /// Access the loop runner manager (used by daemon shutdown flow).
+    pub fn loop_runner_manager(&self) -> LoopRunnerManager {
+        self.loop_runners.clone()
+    }
+
     // -- RPC handlers --
 
     /// SpawnAgent creates a new agent in a tmux pane.
