@@ -2,6 +2,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -350,6 +351,199 @@ fn run_dispatch_qualitative_stop_after_run_stops_loop() {
         repo_path.join("ran.txt").exists(),
         "main profile command should have executed"
     );
+}
+
+#[test]
+fn run_dispatch_streams_process_output_to_log_before_exit() {
+    let _guard = match env_lock().lock() {
+        Ok(guard) => guard,
+        Err(poison) => poison.into_inner(),
+    };
+
+    let (db_path, dir) = setup_db("run_dispatch_streams_process_output_to_log_before_exit");
+    let data_dir = dir.path.join("data");
+    std::env::set_var("FORGE_DATABASE_PATH", &db_path);
+    std::env::set_var("FORGE_DATA_DIR", &data_dir);
+
+    let loop_id = {
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db {}: {err}", db_path.display()));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+        let repo_path = dir.path.join("repo");
+        std::fs::create_dir_all(&repo_path)
+            .unwrap_or_else(|err| panic!("mkdir {}: {err}", repo_path.display()));
+
+        let mut profile = forge_db::profile_repository::Profile {
+            name: "stream-profile".to_string(),
+            harness: "codex".to_string(),
+            prompt_mode: "env".to_string(),
+            command_template: "printf 'first\\n'; sleep 2; printf 'second\\n'".to_string(),
+            ..Default::default()
+        };
+        profile_repo
+            .create(&mut profile)
+            .unwrap_or_else(|err| panic!("create profile: {err}"));
+
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "stream-loop".to_string(),
+            repo_path: repo_path.to_string_lossy().into_owned(),
+            profile_id: profile.id.clone(),
+            base_prompt_msg: "hello".to_string(),
+            max_iterations: 1,
+            state: forge_db::loop_repository::LoopState::Stopped,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+        loop_entry.id
+    };
+
+    let log_path = forge_cli::logs::default_log_path(
+        data_dir.to_string_lossy().as_ref(),
+        "stream-loop",
+        &loop_id,
+    );
+
+    let run_handle = std::thread::spawn(|| run(&["run", "stream-loop"]));
+    let deadline = Instant::now() + Duration::from_millis(1200);
+    let mut saw_first_chunk = false;
+    while Instant::now() < deadline {
+        let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+        if log.contains("first") {
+            saw_first_chunk = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    assert!(
+        saw_first_chunk,
+        "expected first output chunk in log before process exit; log: {}",
+        std::fs::read_to_string(&log_path).unwrap_or_default()
+    );
+    assert!(
+        !run_handle.is_finished(),
+        "run completed before stream assertion; output was not observed in-flight"
+    );
+
+    let (code, stdout, stderr) = run_handle
+        .join()
+        .unwrap_or_else(|_| panic!("join run thread failed"));
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+
+    let full_log = std::fs::read_to_string(&log_path)
+        .unwrap_or_else(|err| panic!("read log {}: {err}", log_path));
+    assert!(full_log.contains("first"), "full log: {full_log}");
+    assert!(full_log.contains("second"), "full log: {full_log}");
+}
+
+#[test]
+fn run_dispatch_streams_output_for_all_harness_kinds() {
+    let _guard = match env_lock().lock() {
+        Ok(guard) => guard,
+        Err(poison) => poison.into_inner(),
+    };
+
+    let harnesses = ["codex", "claude", "opencode", "pi", "droid"];
+
+    for harness in harnesses {
+        let test_tag = format!(
+            "run_dispatch_streams_all_harnesses_{}",
+            sanitize_tag(harness)
+        );
+        let (db_path, dir) = setup_db(&test_tag);
+        let data_dir = dir.path.join("data");
+        std::env::set_var("FORGE_DATABASE_PATH", &db_path);
+        std::env::set_var("FORGE_DATA_DIR", &data_dir);
+
+        let loop_name = format!("stream-{harness}");
+        let loop_id = {
+            let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+                .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+            db.migrate_up()
+                .unwrap_or_else(|err| panic!("migrate db {}: {err}", db_path.display()));
+
+            let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+            let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+            let repo_path = dir.path.join("repo");
+            std::fs::create_dir_all(&repo_path)
+                .unwrap_or_else(|err| panic!("mkdir {}: {err}", repo_path.display()));
+
+            let mut profile = forge_db::profile_repository::Profile {
+                name: format!("{harness}-stream-profile"),
+                harness: harness.to_string(),
+                prompt_mode: "env".to_string(),
+                command_template: "printf 'first\\n'; sleep 1; printf 'second\\n'".to_string(),
+                ..Default::default()
+            };
+            profile_repo
+                .create(&mut profile)
+                .unwrap_or_else(|err| panic!("create profile ({harness}): {err}"));
+
+            let mut loop_entry = forge_db::loop_repository::Loop {
+                name: loop_name.clone(),
+                repo_path: repo_path.to_string_lossy().into_owned(),
+                profile_id: profile.id.clone(),
+                base_prompt_msg: "hello".to_string(),
+                max_iterations: 1,
+                state: forge_db::loop_repository::LoopState::Stopped,
+                ..Default::default()
+            };
+            loop_repo
+                .create(&mut loop_entry)
+                .unwrap_or_else(|err| panic!("create loop ({harness}): {err}"));
+            loop_entry.id
+        };
+
+        let log_path = forge_cli::logs::default_log_path(
+            data_dir.to_string_lossy().as_ref(),
+            &loop_name,
+            &loop_id,
+        );
+        let loop_name_clone = loop_name.clone();
+        let run_handle = std::thread::spawn(move || run(&["run", &loop_name_clone]));
+        let deadline = Instant::now() + Duration::from_millis(700);
+        let mut saw_first_chunk = false;
+        while Instant::now() < deadline {
+            let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+            if log.contains("first") {
+                saw_first_chunk = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(40));
+        }
+
+        assert!(
+            saw_first_chunk,
+            "harness={harness} log={}",
+            std::fs::read_to_string(&log_path).unwrap_or_default()
+        );
+        assert!(
+            !run_handle.is_finished(),
+            "harness={harness} run ended before in-flight log check"
+        );
+
+        let (code, stdout, stderr) = run_handle
+            .join()
+            .unwrap_or_else(|_| panic!("join run thread failed ({harness})"));
+        assert_eq!(code, 0, "harness={harness} stderr: {stderr}");
+        assert!(stdout.is_empty(), "harness={harness} stdout: {stdout}");
+        assert!(stderr.is_empty(), "harness={harness} stderr: {stderr}");
+    }
+}
+
+fn sanitize_tag(input: &str) -> String {
+    input
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect()
 }
 
 fn run(args: &[&str]) -> (i32, String, String) {

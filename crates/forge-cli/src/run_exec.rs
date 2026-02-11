@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -975,34 +976,102 @@ fn execute_profile(
         }
     }
 
-    let output = match child.wait_with_output() {
-        Ok(output) => output,
-        Err(err) => {
+    let mut combined = String::new();
+    let mut stream_errors = Vec::new();
+
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
             return ExecutionResult {
                 exit_code: -1,
                 output_tail: String::new(),
-                err_text: err.to_string(),
+                err_text: "child stdout pipe unavailable".to_string(),
+            };
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            return ExecutionResult {
+                exit_code: -1,
+                output_tail: String::new(),
+                err_text: "child stderr pipe unavailable".to_string(),
             };
         }
     };
 
-    let mut combined = String::new();
-    combined.push_str(&String::from_utf8_lossy(&output.stdout));
-    combined.push_str(&String::from_utf8_lossy(&output.stderr));
-    if !combined.is_empty() {
-        let _ = logger.write_all(combined.as_bytes());
-        let _ = logger.flush();
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    let stdout_reader = std::thread::spawn({
+        let tx = tx.clone();
+        move || read_stream_chunks(stdout, tx)
+    });
+    let stderr_reader = std::thread::spawn({
+        let tx = tx.clone();
+        move || read_stream_chunks(stderr, tx)
+    });
+    drop(tx);
+
+    while let Ok(chunk) = rx.recv() {
+        if chunk.is_empty() {
+            continue;
+        }
+        let _ = logger.write_all(&chunk);
+        combined.push_str(&String::from_utf8_lossy(&chunk));
+    }
+    let _ = logger.flush();
+
+    if let Ok(Some(err)) = stdout_reader.join() {
+        stream_errors.push(format!("stdout read error: {err}"));
+    }
+    if let Ok(Some(err)) = stderr_reader.join() {
+        stream_errors.push(format!("stderr read error: {err}"));
     }
 
-    let exit_code = output.status.code().unwrap_or(-1);
+    let status = match child.wait() {
+        Ok(status) => status,
+        Err(err) => {
+            return ExecutionResult {
+                exit_code: -1,
+                output_tail: tail_lines(&combined, DEFAULT_OUTPUT_TAIL_LINES),
+                err_text: format!("wait failed: {err}"),
+            };
+        }
+    };
+
+    let exit_code = status.code().unwrap_or(-1);
+    let mut err_text = if status.success() {
+        String::new()
+    } else {
+        format!("exit status {exit_code}")
+    };
+    if !stream_errors.is_empty() {
+        let stream_msg = stream_errors.join("; ");
+        if err_text.is_empty() {
+            err_text = stream_msg;
+        } else {
+            err_text.push_str("; ");
+            err_text.push_str(&stream_msg);
+        }
+    }
     ExecutionResult {
         exit_code,
         output_tail: tail_lines(&combined, DEFAULT_OUTPUT_TAIL_LINES),
-        err_text: if output.status.success() {
-            String::new()
-        } else {
-            format!("exit status {exit_code}")
-        },
+        err_text,
+    }
+}
+
+fn read_stream_chunks<R: Read>(mut reader: R, tx: Sender<Vec<u8>>) -> Option<String> {
+    let mut buf = [0u8; 8192];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => return None,
+            Ok(n) => {
+                if tx.send(buf[..n].to_vec()).is_err() {
+                    return None;
+                }
+            }
+            Err(err) => return Some(err.to_string()),
+        }
     }
 }
 
