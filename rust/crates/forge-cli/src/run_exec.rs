@@ -17,6 +17,9 @@ use forge_loop::prompt_composition::{
     append_operator_messages, resolve_base_prompt, resolve_override_prompt, LoopPromptConfig,
     OperatorMessage, PromptOverridePayload,
 };
+use forge_loop::queue_interactions::{should_inject_qualitative_stop, QueueInteractionPlan};
+use forge_loop::stop_rules;
+use serde::Deserialize;
 use serde_json::Value;
 
 const DEFAULT_WAIT_SECONDS: i64 = 5;
@@ -25,6 +28,52 @@ const DEFAULT_WAIT_SECONDS: i64 = 5;
 enum IterationControl {
     Stop,
     Sleep(Duration),
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct StoredStopConfig {
+    #[serde(default)]
+    quant: Option<StoredQuantStopConfig>,
+    #[serde(default)]
+    qual: Option<StoredQualStopConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct StoredQuantStopConfig {
+    #[serde(default)]
+    cmd: String,
+    #[serde(default)]
+    every_n: i32,
+    #[serde(default)]
+    when: String,
+    #[serde(default)]
+    decision: String,
+    #[serde(default)]
+    exit_codes: Vec<i32>,
+    #[serde(default)]
+    exit_invert: bool,
+    #[serde(default)]
+    stdout_mode: String,
+    #[serde(default)]
+    stderr_mode: String,
+    #[serde(default)]
+    stdout_regex: String,
+    #[serde(default)]
+    stderr_regex: String,
+    #[serde(default)]
+    timeout_seconds: i64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct StoredQualStopConfig {
+    #[serde(default)]
+    every_n: i32,
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    is_prompt_path: bool,
+    #[serde(default)]
+    on_invalid: String,
 }
 
 pub fn run_single_iteration(db_path: &Path, loop_id: &str) -> Result<(), String> {
@@ -78,6 +127,10 @@ fn run_iteration(
     if metadata_i64(&metadata, "iteration_count").is_none() {
         metadata.insert("iteration_count".to_string(), Value::from(0));
     }
+    let stop_config = parse_stop_config(&metadata)?;
+    let iteration_index = metadata_i64(&metadata, "iteration_count")
+        .unwrap_or(0)
+        .saturating_add(1) as i32;
 
     if let Some(reason) = limit_reason(&loop_entry, &metadata, now) {
         let _ = logger.write_line(&reason);
@@ -132,6 +185,27 @@ fn run_iteration(
             }
             mark_queue_completed(&queue_repo, &plan.pause_ids)?;
         }
+    }
+
+    if let Some(stop_reason) = stop_config
+        .as_ref()
+        .and_then(|cfg| cfg.quant.as_ref())
+        .and_then(|cfg| {
+            evaluate_quantitative_stop(
+                &loop_entry.repo_path,
+                cfg,
+                iteration_index,
+                false,
+                &mut logger,
+            )
+        })
+    {
+        loop_entry.state = forge_db::loop_repository::LoopState::Stopped;
+        loop_entry.last_error = stop_reason;
+        loop_repo
+            .update(&mut loop_entry)
+            .map_err(|err| format!("persist quantitative stop {}: {err}", loop_entry.id))?;
+        return Ok(IterationControl::Stop);
     }
 
     let (profile, wait_until) = match select_profile(db, &loop_entry, now) {
@@ -249,11 +323,44 @@ fn run_iteration(
     let next_iteration = metadata_i64(&metadata, "iteration_count").unwrap_or(0) + 1;
     metadata.insert("iteration_count".to_string(), Value::from(next_iteration));
 
+    let mut post_run_stop_reason = stop_config
+        .as_ref()
+        .and_then(|cfg| cfg.quant.as_ref())
+        .and_then(|cfg| {
+            evaluate_quantitative_stop(
+                &loop_entry.repo_path,
+                cfg,
+                next_iteration as i32,
+                true,
+                &mut logger,
+            )
+        });
+    if post_run_stop_reason.is_none() {
+        post_run_stop_reason = stop_config
+            .as_ref()
+            .and_then(|cfg| cfg.qual.as_ref())
+            .and_then(|cfg| {
+                evaluate_qualitative_stop(
+                    &loop_entry.repo_path,
+                    cfg,
+                    next_iteration as i32,
+                    single_run,
+                    &plan,
+                    &mut logger,
+                )
+            });
+    }
+
     loop_entry.metadata = Some(metadata);
     loop_entry.last_run_at = run_record.finished_at.clone();
     loop_entry.last_exit_code = Some(i64::from(exec_result.exit_code));
-    loop_entry.last_error = exec_result.err_text.clone();
-    loop_entry.state = forge_db::loop_repository::LoopState::Sleeping;
+    if let Some(reason) = post_run_stop_reason.as_ref() {
+        loop_entry.last_error = reason.clone();
+        loop_entry.state = forge_db::loop_repository::LoopState::Stopped;
+    } else {
+        loop_entry.last_error = exec_result.err_text.clone();
+        loop_entry.state = forge_db::loop_repository::LoopState::Sleeping;
+    }
     loop_repo
         .update(&mut loop_entry)
         .map_err(|err| format!("persist run result {}: {err}", loop_entry.id))?;
@@ -294,12 +401,20 @@ fn run_iteration(
 
     if let Some(duration) = plan.pause_duration {
         if !plan.pause_before_run {
-            let _ = logger.write_line(&format!("pause for {:?}", duration));
-            if duration > Duration::ZERO {
-                std::thread::sleep(duration);
+            if post_run_stop_reason.is_some() {
+                let _ = logger.write_line("skip pause because loop is stopping");
+            } else {
+                let _ = logger.write_line(&format!("pause for {:?}", duration));
+                if duration > Duration::ZERO {
+                    std::thread::sleep(duration);
+                }
             }
             mark_queue_completed(&queue_repo, &plan.pause_ids)?;
         }
+    }
+
+    if post_run_stop_reason.is_some() {
+        return Ok(IterationControl::Stop);
     }
 
     if single_run {
@@ -331,6 +446,121 @@ fn run_iteration(
         Duration::from_secs(loop_entry.interval_seconds as u64)
     };
     Ok(IterationControl::Sleep(interval))
+}
+
+fn parse_stop_config(
+    metadata: &HashMap<String, Value>,
+) -> Result<Option<StoredStopConfig>, String> {
+    let Some(value) = metadata.get("stop_config") else {
+        return Ok(None);
+    };
+    let parsed: StoredStopConfig = serde_json::from_value(value.clone())
+        .map_err(|err| format!("decode stop_config: {err}"))?;
+    Ok(Some(parsed))
+}
+
+fn evaluate_quantitative_stop(
+    repo_path: &str,
+    cfg: &StoredQuantStopConfig,
+    iteration_index: i32,
+    after_run: bool,
+    logger: &mut LoopLogger,
+) -> Option<String> {
+    if !stop_rules::quant_should_evaluate(&cfg.when, cfg.every_n, iteration_index, after_run) {
+        return None;
+    }
+
+    let timeout = if cfg.timeout_seconds <= 0 {
+        Duration::ZERO
+    } else {
+        Duration::from_secs(cfg.timeout_seconds as u64)
+    };
+    let command_result = stop_rules::run_quant_command(Path::new(repo_path), &cfg.cmd, timeout);
+    let runtime_cfg = stop_rules::QuantStopConfig {
+        cmd: cfg.cmd.clone(),
+        every_n: cfg.every_n,
+        when: cfg.when.clone(),
+        decision: cfg.decision.clone(),
+        exit_codes: cfg.exit_codes.clone(),
+        exit_invert: cfg.exit_invert,
+        stdout_mode: cfg.stdout_mode.clone(),
+        stderr_mode: cfg.stderr_mode.clone(),
+        stdout_regex: cfg.stdout_regex.clone(),
+        stderr_regex: cfg.stderr_regex.clone(),
+        timeout_seconds: cfg.timeout_seconds,
+    };
+    let match_result = stop_rules::quant_rule_matches(&runtime_cfg, &command_result);
+    if !match_result.matched {
+        let _ = logger.write_line(&format!("quant stop not matched: {}", match_result.reason));
+        return None;
+    }
+
+    let decision = stop_rules::normalize_decision(&cfg.decision);
+    if decision == stop_rules::STOP_DECISION_CONTINUE {
+        let _ = logger.write_line("quant stop matched but decision=continue");
+        return None;
+    }
+
+    let phase = if after_run { "after-run" } else { "before-run" };
+    Some(format!(
+        "quantitative stop matched ({phase}): {}",
+        match_result.reason
+    ))
+}
+
+fn evaluate_qualitative_stop(
+    repo_path: &str,
+    cfg: &StoredQualStopConfig,
+    iteration_index: i32,
+    single_run: bool,
+    plan: &QueuePlan,
+    logger: &mut LoopLogger,
+) -> Option<String> {
+    if cfg.every_n <= 0 {
+        return None;
+    }
+    let qual_due = iteration_index > 0 && iteration_index % cfg.every_n == 0;
+    let interaction_plan = QueueInteractionPlan {
+        has_messages: !plan.messages.is_empty(),
+        has_prompt_override: plan.override_prompt.is_some(),
+        pause_requested: plan.pause_duration.is_some(),
+        pause_before_run: plan.pause_before_run,
+        stop_requested: !plan.stop_ids.is_empty(),
+        kill_requested: !plan.kill_ids.is_empty(),
+    };
+    if !should_inject_qualitative_stop(qual_due, single_run, &interaction_plan) {
+        return None;
+    }
+
+    let judge_output = match resolve_qualitative_output(repo_path, cfg) {
+        Ok(output) => output,
+        Err(err) => {
+            let _ = logger.write_line(&format!("qual stop judge error: {err}"));
+            err
+        }
+    };
+    if !stop_rules::qual_should_stop(&judge_output, &cfg.on_invalid) {
+        let _ = logger.write_line("qual stop not matched");
+        return None;
+    }
+    Some("qualitative stop matched".to_string())
+}
+
+fn resolve_qualitative_output(
+    repo_path: &str,
+    cfg: &StoredQualStopConfig,
+) -> Result<String, String> {
+    if cfg.is_prompt_path {
+        let prompt = resolve_override_prompt(
+            repo_path,
+            &PromptOverridePayload {
+                prompt: cfg.prompt.clone(),
+                is_path: true,
+            },
+        )?;
+        return Ok(prompt.content);
+    }
+    Ok(cfg.prompt.clone())
 }
 
 #[derive(Debug, Clone)]

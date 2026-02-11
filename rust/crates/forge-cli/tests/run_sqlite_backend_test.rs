@@ -1,3 +1,5 @@
+use serde_json::json;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
@@ -146,6 +148,207 @@ fn run_dispatch_profile_selection_error_sets_loop_error_state() {
         loop_entry.last_error.contains("pool unavailable"),
         "last_error: {}",
         loop_entry.last_error
+    );
+}
+
+#[test]
+fn run_dispatch_quantitative_stop_before_run_short_circuits_iteration() {
+    let _guard = match env_lock().lock() {
+        Ok(guard) => guard,
+        Err(poison) => poison.into_inner(),
+    };
+
+    let (db_path, dir) = setup_db("run_dispatch_quantitative_stop_before_run");
+    std::env::set_var("FORGE_DATABASE_PATH", &db_path);
+    std::env::set_var("FORGE_DATA_DIR", dir.path.join("data"));
+
+    let repo_path = dir.path.join("repo");
+    std::fs::create_dir_all(&repo_path)
+        .unwrap_or_else(|err| panic!("mkdir {}: {err}", repo_path.display()));
+
+    let loop_id = {
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db {}: {err}", db_path.display()));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let mut profile = forge_db::profile_repository::Profile {
+            name: "quant-profile".to_string(),
+            harness: "codex".to_string(),
+            prompt_mode: "env".to_string(),
+            command_template: "printf 'should-not-run\\n' >> ran.txt".to_string(),
+            ..Default::default()
+        };
+        profile_repo
+            .create(&mut profile)
+            .unwrap_or_else(|err| panic!("create profile: {err}"));
+
+        let stop_config = json!({
+            "quant": {
+                "cmd": "printf 'PASS\\n'",
+                "every_n": 1,
+                "when": "before",
+                "decision": "stop",
+                "exit_codes": [0],
+                "exit_invert": false,
+                "stdout_mode": "nonempty",
+                "stderr_mode": "any",
+                "stdout_regex": "PASS",
+                "stderr_regex": "",
+                "timeout_seconds": 2
+            }
+        });
+        let mut metadata = HashMap::new();
+        metadata.insert("stop_config".to_string(), stop_config);
+
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "quant-before-loop".to_string(),
+            repo_path: repo_path.to_string_lossy().into_owned(),
+            profile_id: profile.id.clone(),
+            base_prompt_msg: "hello".to_string(),
+            max_iterations: 5,
+            metadata: Some(metadata),
+            state: forge_db::loop_repository::LoopState::Stopped,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+        loop_entry.id
+    };
+
+    let (code, stdout, stderr) = run(&["run", "quant-before-loop"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+
+    let db = forge_db::Db::open(forge_db::Config::new(&db_path))
+        .unwrap_or_else(|err| panic!("reopen db {}: {err}", db_path.display()));
+    let run_repo = forge_db::loop_run_repository::LoopRunRepository::new(&db);
+    let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+    let runs = run_repo
+        .list_by_loop(&loop_id)
+        .unwrap_or_else(|err| panic!("list runs: {err}"));
+    assert_eq!(runs.len(), 0, "before-run quant stop should skip main run");
+
+    let loop_entry = loop_repo
+        .get(&loop_id)
+        .unwrap_or_else(|err| panic!("get loop: {err}"));
+    assert_eq!(
+        loop_entry.state,
+        forge_db::loop_repository::LoopState::Stopped
+    );
+    assert!(
+        loop_entry
+            .last_error
+            .contains("quantitative stop matched (before-run)"),
+        "last_error: {}",
+        loop_entry.last_error
+    );
+    assert!(
+        !repo_path.join("ran.txt").exists(),
+        "main profile command should not have executed"
+    );
+}
+
+#[test]
+fn run_dispatch_qualitative_stop_after_run_stops_loop() {
+    let _guard = match env_lock().lock() {
+        Ok(guard) => guard,
+        Err(poison) => poison.into_inner(),
+    };
+
+    let (db_path, dir) = setup_db("run_dispatch_qualitative_stop_after_run");
+    std::env::set_var("FORGE_DATABASE_PATH", &db_path);
+    std::env::set_var("FORGE_DATA_DIR", dir.path.join("data"));
+
+    let repo_path = dir.path.join("repo");
+    std::fs::create_dir_all(&repo_path)
+        .unwrap_or_else(|err| panic!("mkdir {}: {err}", repo_path.display()));
+
+    let loop_id = {
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db {}: {err}", db_path.display()));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let profile_repo = forge_db::profile_repository::ProfileRepository::new(&db);
+
+        let mut profile = forge_db::profile_repository::Profile {
+            name: "qual-profile".to_string(),
+            harness: "codex".to_string(),
+            prompt_mode: "env".to_string(),
+            command_template: "printf 'ran\\n' >> ran.txt".to_string(),
+            ..Default::default()
+        };
+        profile_repo
+            .create(&mut profile)
+            .unwrap_or_else(|err| panic!("create profile: {err}"));
+
+        let stop_config = json!({
+            "qual": {
+                "every_n": 1,
+                "prompt": "0 stop",
+                "is_prompt_path": false,
+                "on_invalid": "continue"
+            }
+        });
+        let mut metadata = HashMap::new();
+        metadata.insert("stop_config".to_string(), stop_config);
+
+        let mut loop_entry = forge_db::loop_repository::Loop {
+            name: "qual-after-loop".to_string(),
+            repo_path: repo_path.to_string_lossy().into_owned(),
+            profile_id: profile.id.clone(),
+            base_prompt_msg: "hello".to_string(),
+            max_iterations: 5,
+            metadata: Some(metadata),
+            state: forge_db::loop_repository::LoopState::Stopped,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut loop_entry)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+        loop_entry.id
+    };
+
+    let (code, stdout, stderr) = run(&["loop", "run", "qual-after-loop"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+
+    let db = forge_db::Db::open(forge_db::Config::new(&db_path))
+        .unwrap_or_else(|err| panic!("reopen db {}: {err}", db_path.display()));
+    let run_repo = forge_db::loop_run_repository::LoopRunRepository::new(&db);
+    let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+    let runs = run_repo
+        .list_by_loop(&loop_id)
+        .unwrap_or_else(|err| panic!("list runs: {err}"));
+    assert_eq!(
+        runs.len(),
+        1,
+        "main run should execute once before qual stop"
+    );
+
+    let loop_entry = loop_repo
+        .get(&loop_id)
+        .unwrap_or_else(|err| panic!("get loop: {err}"));
+    assert_eq!(
+        loop_entry.state,
+        forge_db::loop_repository::LoopState::Stopped
+    );
+    assert!(
+        loop_entry.last_error.contains("qualitative stop matched"),
+        "last_error: {}",
+        loop_entry.last_error
+    );
+    assert!(
+        repo_path.join("ran.txt").exists(),
+        "main profile command should have executed"
     );
 }
 
