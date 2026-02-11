@@ -3,9 +3,12 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use chrono::{DateTime, SecondsFormat, Utc};
+use forge_loop::stale_runner::{self, DaemonRunner};
 use serde::Serialize;
 use serde_json::Value;
 use tabwriter::TabWriter;
+
+use crate::ps::list_daemon_runners;
 
 const STATUS_ALERT_LIMIT: usize = 5;
 
@@ -168,20 +171,32 @@ pub trait StatusBackend {
     fn get_status(&self) -> Result<StatusSummary, String>;
 }
 
+type DaemonLister = fn() -> (HashMap<String, DaemonRunner>, bool);
+
 #[derive(Debug, Clone)]
 pub struct SqliteStatusBackend {
     db_path: PathBuf,
+    daemon_lister: DaemonLister,
 }
 
 impl SqliteStatusBackend {
     pub fn open_from_env() -> Self {
         Self {
             db_path: resolve_database_path(),
+            daemon_lister: list_daemon_runners,
         }
     }
 
     pub fn new(db_path: PathBuf) -> Self {
-        Self { db_path }
+        Self {
+            db_path,
+            daemon_lister: list_daemon_runners,
+        }
+    }
+
+    pub fn with_daemon_lister(mut self, daemon_lister: DaemonLister) -> Self {
+        self.daemon_lister = daemon_lister;
+        self
     }
 }
 
@@ -237,6 +252,7 @@ impl StatusBackend for SqliteStatusBackend {
             Err(err) => return Err(err.to_string()),
         };
 
+        let (daemon_runners, daemon_reachable) = (self.daemon_lister)();
         let profile_cooldowns = load_profile_cooldowns(&profile_repo)?;
         let mut queue_table_missing = false;
 
@@ -258,7 +274,19 @@ impl StatusBackend for SqliteStatusBackend {
                 .map(|until| is_cooldown_active(until, &now))
                 .unwrap_or(false);
 
-            let health = runner_health(loop_entry.metadata.as_ref());
+            let effective_state = effective_loop_state_live(
+                &loop_entry.state,
+                loop_entry.metadata.as_ref(),
+                &loop_entry.id,
+                &daemon_runners,
+                daemon_reachable,
+            );
+            let health = runner_health_live(
+                loop_entry.metadata.as_ref(),
+                &loop_entry.id,
+                &daemon_runners,
+                daemon_reachable,
+            );
             match health {
                 RunnerHealth::Online => {
                     nodes.total += 1;
@@ -274,7 +302,7 @@ impl StatusBackend for SqliteStatusBackend {
                 }
             }
 
-            let state = classify_agent_state(&loop_entry.state, pending_queue, cooldown_active);
+            let state = classify_agent_state(&effective_state, pending_queue, cooldown_active);
             increment_state_count(&mut state_counts, state);
 
             let loop_ref = loop_short_id(loop_entry);
@@ -681,10 +709,35 @@ enum RunnerHealth {
     Unknown,
 }
 
-fn runner_health(metadata: Option<&HashMap<String, Value>>) -> RunnerHealth {
+/// Compute runner health by merging stored metadata with live daemon runner
+/// state from the ListLoopRunners RPC. When the daemon is reachable and the
+/// loop's runner_owner is "daemon", the live daemon runner state takes
+/// precedence over any previously stored daemon_runner_alive flag.
+fn runner_health_live(
+    metadata: Option<&HashMap<String, Value>>,
+    loop_id: &str,
+    daemon_runners: &HashMap<String, DaemonRunner>,
+    daemon_reachable: bool,
+) -> RunnerHealth {
     let pid_alive = metadata_nested_bool(metadata, "runner_liveness", "pid_alive");
-    let daemon_alive = metadata_nested_bool(metadata, "runner_liveness", "daemon_runner_alive")
-        .or_else(|| metadata_nested_bool(metadata, "runner_liveness", "daemon_alive"));
+    let owner = metadata
+        .and_then(|meta| meta.get("runner_owner"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let instance_id = metadata
+        .and_then(|meta| meta.get("runner_instance_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    let daemon_alive = if daemon_reachable && owner == "daemon" {
+        Some(stale_runner::daemon_runner_alive(
+            daemon_runners.get(loop_id),
+            instance_id,
+        ))
+    } else {
+        metadata_nested_bool(metadata, "runner_liveness", "daemon_runner_alive")
+            .or_else(|| metadata_nested_bool(metadata, "runner_liveness", "daemon_alive"))
+    };
 
     if matches!(pid_alive, Some(false)) || matches!(daemon_alive, Some(false)) {
         return RunnerHealth::Offline;
@@ -693,6 +746,42 @@ fn runner_health(metadata: Option<&HashMap<String, Value>>) -> RunnerHealth {
         return RunnerHealth::Online;
     }
     RunnerHealth::Unknown
+}
+
+fn effective_loop_state_live(
+    loop_state: &forge_db::loop_repository::LoopState,
+    metadata: Option<&HashMap<String, Value>>,
+    loop_id: &str,
+    daemon_runners: &HashMap<String, DaemonRunner>,
+    daemon_reachable: bool,
+) -> forge_db::loop_repository::LoopState {
+    if !daemon_reachable {
+        return loop_state.clone();
+    }
+    if matches!(
+        loop_state,
+        forge_db::loop_repository::LoopState::Stopped | forge_db::loop_repository::LoopState::Error
+    ) {
+        return loop_state.clone();
+    }
+
+    let owner = metadata
+        .and_then(|meta| meta.get("runner_owner"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !owner.eq_ignore_ascii_case(stale_runner::LOOP_SPAWN_OWNER_DAEMON) {
+        return loop_state.clone();
+    }
+
+    let instance_id = metadata
+        .and_then(|meta| meta.get("runner_instance_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if stale_runner::daemon_runner_alive(daemon_runners.get(loop_id), instance_id) {
+        return loop_state.clone();
+    }
+
+    forge_db::loop_repository::LoopState::Stopped
 }
 
 fn metadata_nested_bool(
@@ -1450,7 +1539,10 @@ mod tests {
             .enqueue(&waiting_loop.id, &mut waiting_queue_items)
             .unwrap_or_else(|err| panic!("enqueue waiting queue item: {err}"));
 
-        let backend = SqliteStatusBackend::new(db_path.clone());
+        fn no_daemon() -> (HashMap<String, DaemonRunner>, bool) {
+            (HashMap::new(), false)
+        }
+        let backend = SqliteStatusBackend::new(db_path.clone()).with_daemon_lister(no_daemon);
         let summary = backend
             .get_status()
             .unwrap_or_else(|err| panic!("get status summary: {err}"));
@@ -1492,7 +1584,10 @@ mod tests {
         let db_path = temp_db_path("sqlite-missing");
         let _ = std::fs::remove_file(&db_path);
 
-        let backend = SqliteStatusBackend::new(db_path);
+        fn no_daemon() -> (HashMap<String, DaemonRunner>, bool) {
+            (HashMap::new(), false)
+        }
+        let backend = SqliteStatusBackend::new(db_path).with_daemon_lister(no_daemon);
         let summary = backend
             .get_status()
             .unwrap_or_else(|err| panic!("summary from missing db: {err}"));
@@ -1503,5 +1598,254 @@ mod tests {
         assert_eq!(summary.agents.total, 0);
         assert_eq!(summary.alerts.total, 0);
         assert!(summary.alerts.items.is_empty());
+    }
+
+    // --- runner_health_live tests ---
+
+    #[test]
+    fn runner_health_live_daemon_owned_online_when_daemon_running() {
+        use forge_loop::stale_runner::DaemonRunnerState;
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("daemon"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-1"));
+
+        let mut daemon_runners = HashMap::new();
+        daemon_runners.insert(
+            "loop-1".to_string(),
+            DaemonRunner {
+                instance_id: "inst-1".to_string(),
+                state: DaemonRunnerState::Running,
+            },
+        );
+
+        let health = runner_health_live(Some(&metadata), "loop-1", &daemon_runners, true);
+        assert_eq!(health, RunnerHealth::Online);
+    }
+
+    #[test]
+    fn runner_health_live_daemon_owned_offline_when_daemon_stopped() {
+        use forge_loop::stale_runner::DaemonRunnerState;
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("daemon"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-1"));
+
+        let mut daemon_runners = HashMap::new();
+        daemon_runners.insert(
+            "loop-1".to_string(),
+            DaemonRunner {
+                instance_id: "inst-1".to_string(),
+                state: DaemonRunnerState::Stopped,
+            },
+        );
+
+        let health = runner_health_live(Some(&metadata), "loop-1", &daemon_runners, true);
+        assert_eq!(health, RunnerHealth::Offline);
+    }
+
+    #[test]
+    fn runner_health_live_daemon_owned_offline_when_not_in_daemon_runners() {
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("daemon"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-1"));
+
+        let daemon_runners = HashMap::new();
+        let health = runner_health_live(Some(&metadata), "loop-1", &daemon_runners, true);
+        assert_eq!(health, RunnerHealth::Offline);
+    }
+
+    #[test]
+    fn runner_health_live_daemon_unreachable_falls_back_to_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("daemon"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-1"));
+        metadata.insert(
+            "runner_liveness".to_string(),
+            json!({"daemon_runner_alive": true}),
+        );
+
+        let health = runner_health_live(Some(&metadata), "loop-1", &HashMap::new(), false);
+        assert_eq!(health, RunnerHealth::Online);
+    }
+
+    #[test]
+    fn runner_health_live_local_owner_ignores_daemon_runners() {
+        use forge_loop::stale_runner::DaemonRunnerState;
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("local"));
+        metadata.insert("runner_liveness".to_string(), json!({"pid_alive": true}));
+
+        let mut daemon_runners = HashMap::new();
+        daemon_runners.insert(
+            "loop-1".to_string(),
+            DaemonRunner {
+                instance_id: "inst-1".to_string(),
+                state: DaemonRunnerState::Stopped,
+            },
+        );
+
+        // Local owner: pid_alive=true → Online; daemon_runners should not
+        // override because owner != "daemon"
+        let health = runner_health_live(Some(&metadata), "loop-1", &daemon_runners, true);
+        assert_eq!(health, RunnerHealth::Online);
+    }
+
+    #[test]
+    fn runner_health_live_no_metadata_unknown() {
+        let health = runner_health_live(None, "loop-1", &HashMap::new(), false);
+        assert_eq!(health, RunnerHealth::Unknown);
+    }
+
+    #[test]
+    fn runner_health_live_daemon_instance_mismatch_offline() {
+        use forge_loop::stale_runner::DaemonRunnerState;
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("daemon"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-1"));
+
+        let mut daemon_runners = HashMap::new();
+        daemon_runners.insert(
+            "loop-1".to_string(),
+            DaemonRunner {
+                instance_id: "inst-DIFFERENT".to_string(),
+                state: DaemonRunnerState::Running,
+            },
+        );
+
+        let health = runner_health_live(Some(&metadata), "loop-1", &daemon_runners, true);
+        assert_eq!(health, RunnerHealth::Offline);
+    }
+
+    #[test]
+    fn effective_loop_state_live_keeps_running_when_daemon_runner_is_running() {
+        use forge_loop::stale_runner::DaemonRunnerState;
+
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("daemon"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-1"));
+
+        let mut daemon_runners = HashMap::new();
+        daemon_runners.insert(
+            "loop-1".to_string(),
+            DaemonRunner {
+                instance_id: "inst-1".to_string(),
+                state: DaemonRunnerState::Running,
+            },
+        );
+
+        let state = effective_loop_state_live(
+            &forge_db::loop_repository::LoopState::Running,
+            Some(&metadata),
+            "loop-1",
+            &daemon_runners,
+            true,
+        );
+        assert_eq!(state, forge_db::loop_repository::LoopState::Running);
+    }
+
+    #[test]
+    fn effective_loop_state_live_marks_running_and_sleeping_stopped_when_daemon_runner_missing() {
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("daemon"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-1"));
+        let daemon_runners = HashMap::new();
+
+        let running = effective_loop_state_live(
+            &forge_db::loop_repository::LoopState::Running,
+            Some(&metadata),
+            "loop-1",
+            &daemon_runners,
+            true,
+        );
+        let sleeping = effective_loop_state_live(
+            &forge_db::loop_repository::LoopState::Sleeping,
+            Some(&metadata),
+            "loop-1",
+            &daemon_runners,
+            true,
+        );
+        assert_eq!(running, forge_db::loop_repository::LoopState::Stopped);
+        assert_eq!(sleeping, forge_db::loop_repository::LoopState::Stopped);
+    }
+
+    #[test]
+    fn status_sqlite_daemon_owned_loop_uses_live_daemon_state() {
+        let db_path = temp_db_path("sqlite-daemon-live");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+
+        // Create a daemon-owned running loop with stale metadata that says
+        // daemon_runner_alive=true, but actual daemon state is stopped.
+        let mut metadata = HashMap::new();
+        metadata.insert("runner_owner".to_string(), json!("daemon"));
+        metadata.insert("runner_instance_id".to_string(), json!("inst-abc"));
+        metadata.insert(
+            "runner_liveness".to_string(),
+            json!({"daemon_runner_alive": true}),
+        );
+
+        let mut daemon_loop = forge_db::loop_repository::Loop {
+            name: "daemon-loop".to_string(),
+            repo_path: "/repo/daemon".to_string(),
+            state: forge_db::loop_repository::LoopState::Running,
+            metadata: Some(metadata),
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut daemon_loop)
+            .unwrap_or_else(|err| panic!("create loop: {err}"));
+
+        let mut sleeping_metadata = HashMap::new();
+        sleeping_metadata.insert("runner_owner".to_string(), json!("daemon"));
+        sleeping_metadata.insert("runner_instance_id".to_string(), json!("inst-def"));
+        let mut sleeping_loop = forge_db::loop_repository::Loop {
+            name: "daemon-sleeping".to_string(),
+            repo_path: "/repo/daemon".to_string(),
+            state: forge_db::loop_repository::LoopState::Sleeping,
+            metadata: Some(sleeping_metadata),
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut sleeping_loop)
+            .unwrap_or_else(|err| panic!("create sleeping loop: {err}"));
+
+        // Daemon lister returns the runner as stopped
+        fn daemon_with_stopped_runner() -> (HashMap<String, DaemonRunner>, bool) {
+            (HashMap::new(), true)
+        }
+
+        let backend = SqliteStatusBackend::new(db_path.clone())
+            .with_daemon_lister(daemon_with_stopped_runner);
+        let summary = backend
+            .get_status()
+            .unwrap_or_else(|err| panic!("get status: {err}"));
+
+        // Even though metadata says daemon_runner_alive=true, the live daemon
+        // state should report offline (loop not in daemon's runner list).
+        assert_eq!(summary.nodes.total, 2);
+        assert_eq!(
+            summary.nodes.offline, 2,
+            "daemon-owned loop should be offline when daemon doesn't list it"
+        );
+        assert_eq!(summary.nodes.online, 0);
+        assert_eq!(
+            find_state_count(&summary, AgentState::Stopped),
+            2,
+            "daemon-owned running loop should render as stopped when daemon runner is absent"
+        );
+        assert_eq!(find_state_count(&summary, AgentState::Idle), 0);
+        assert_eq!(find_state_count(&summary, AgentState::Paused), 0);
+
+        // Should generate a health check failed alert for running+offline loop.
+        assert!(summary
+            .alerts
+            .items
+            .iter()
+            .any(|a| a.message.contains("runner health check failed")));
+
+        let _ = std::fs::remove_file(db_path);
     }
 }
