@@ -62,6 +62,7 @@ Key subcommands:
 - `forge agent wait <agent-id> --until <state>`
 - `forge agent ps`
 - `forge agent show <agent-id>`
+- `forge agent summary <agent-id>`
 - `forge agent interrupt <agent-id>`
 - `forge agent kill <agent-id> [--force]`
 

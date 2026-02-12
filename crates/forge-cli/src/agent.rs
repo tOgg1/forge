@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,6 +14,10 @@ use forge_agent::types::{
     AgentRequestMode, AgentSnapshot, AgentState, KillAgentParams, ListAgentsFilter,
     SendMessageParams, SpawnAgentParams, WaitStateParams,
 };
+use forge_db::persistent_agent_event_repository::{
+    PersistentAgentEvent, PersistentAgentEventRepository,
+};
+use forge_db::transcript_repository::{Transcript, TranscriptRepository};
 use serde::Serialize;
 
 // ── JSON output types ────────────────────────────────────────────────────────
@@ -68,6 +73,43 @@ struct RunResultJson {
     tags: Vec<String>,
     labels: HashMap<String, String>,
     quick_tail: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentSummarySnapshot {
+    agent_id: String,
+    concise_status: String,
+    latest_task_outcome: String,
+    unresolved_blockers: Vec<String>,
+    transcript_excerpt: Vec<String>,
+    transcript_captured_at: Option<String>,
+    recent_events_considered: usize,
+    generated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentSummaryJson {
+    #[serde(flatten)]
+    snapshot: AgentSummarySnapshot,
+    snapshot_event_id: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentGcEvictionJson {
+    agent_id: String,
+    reason: String,
+    age_seconds: i64,
+    idle_seconds: i64,
+    ttl_seconds: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentGcResultJson {
+    scanned: usize,
+    evicted: usize,
+    kept: usize,
+    dry_run: bool,
+    evictions: Vec<AgentGcEvictionJson>,
 }
 
 // ── Backend trait ─────────────────────────────────────────────────────────────
@@ -238,6 +280,8 @@ enum Subcommand {
     Wait(WaitArgs),
     Ps(PsArgs),
     Show(ShowArgs),
+    Summary(SummaryArgs),
+    Gc(GcArgs),
     Interrupt(InterruptArgs),
     Kill(KillArgs),
     Revive(ReviveArgs),
@@ -279,6 +323,20 @@ struct PsArgs {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ShowArgs {
     agent_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SummaryArgs {
+    agent_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GcArgs {
+    workspace_id: String,
+    idle_timeout_seconds: Option<i64>,
+    max_age_seconds: Option<i64>,
+    dry_run: bool,
+    limit: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -363,6 +421,7 @@ fn execute(
         Subcommand::Wait(wait_args) => exec_wait(backend, wait_args, &parsed, stdout),
         Subcommand::Ps(ps_args) => exec_ps(backend, ps_args, &parsed, stdout),
         Subcommand::Show(show_args) => exec_show(backend, show_args, &parsed, stdout),
+        Subcommand::Summary(summary_args) => exec_summary(summary_args, &parsed, stdout),
         Subcommand::Interrupt(int_args) => exec_interrupt(backend, int_args, &parsed, stdout),
         Subcommand::Kill(kill_args) => exec_kill(backend, kill_args, &parsed, stdout),
         Subcommand::Revive(revive_args) => exec_revive(backend, revive_args, &parsed, stdout),
@@ -374,6 +433,309 @@ fn execute(
 }
 
 // ── Subcommand implementations ───────────────────────────────────────────────
+
+const SUMMARY_EVENT_SCAN_LIMIT: i64 = 48;
+const SUMMARY_TRANSCRIPT_SCAN_LIMIT: usize = 160;
+const SUMMARY_EXCERPT_LIMIT: usize = 8;
+const SUMMARY_BLOCKER_LIMIT: usize = 6;
+const SUMMARY_TEXT_LIMIT: usize = 220;
+
+fn exec_summary(
+    args: &SummaryArgs,
+    parsed: &ParsedArgs,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    let db_path = resolve_database_path();
+    exec_summary_with_db_path(args, parsed, stdout, &db_path)
+}
+
+fn exec_summary_with_db_path(
+    args: &SummaryArgs,
+    parsed: &ParsedArgs,
+    stdout: &mut dyn Write,
+    db_path: &Path,
+) -> Result<(), String> {
+    if args.agent_id.trim().is_empty() {
+        return Err("error: agent ID is required for agent summary".to_string());
+    }
+
+    let mut db = forge_db::Db::open(forge_db::Config::new(db_path))
+        .map_err(|err| format!("open db {}: {err}", db_path.display()))?;
+    db.migrate_up()
+        .map_err(|err| format!("migrate db {}: {err}", db_path.display()))?;
+
+    let transcript_repo = TranscriptRepository::new(&db);
+    let event_repo = PersistentAgentEventRepository::new(&db);
+
+    let transcript = match transcript_repo.latest_by_agent(&args.agent_id) {
+        Ok(value) => Some(value),
+        Err(forge_db::DbError::TranscriptNotFound) => None,
+        Err(err) => return Err(format!("load transcript for {}: {err}", args.agent_id)),
+    };
+
+    let events = event_repo
+        .list_by_agent(&args.agent_id, SUMMARY_EVENT_SCAN_LIMIT)
+        .map_err(|err| format!("load events for {}: {err}", args.agent_id))?;
+
+    let snapshot = summarize_agent_snapshot(&args.agent_id, transcript.as_ref(), &events);
+    let snapshot_event_id = persist_summary_snapshot(&event_repo, &snapshot)?;
+    let output = AgentSummaryJson {
+        snapshot,
+        snapshot_event_id,
+    };
+
+    if parsed.json {
+        serde_json::to_writer_pretty(&mut *stdout, &output).map_err(|e| e.to_string())?;
+        writeln!(stdout).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    if parsed.jsonl {
+        serde_json::to_writer(&mut *stdout, &output).map_err(|e| e.to_string())?;
+        writeln!(stdout).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    if parsed.quiet {
+        return Ok(());
+    }
+
+    writeln!(stdout, "agent: {}", output.snapshot.agent_id).map_err(|e| e.to_string())?;
+    writeln!(stdout, "status: {}", output.snapshot.concise_status).map_err(|e| e.to_string())?;
+    writeln!(
+        stdout,
+        "latest_task_outcome: {}",
+        output.snapshot.latest_task_outcome
+    )
+    .map_err(|e| e.to_string())?;
+    if output.snapshot.unresolved_blockers.is_empty() {
+        writeln!(stdout, "unresolved_blockers: none").map_err(|e| e.to_string())?;
+    } else {
+        writeln!(stdout, "unresolved_blockers:").map_err(|e| e.to_string())?;
+        for blocker in &output.snapshot.unresolved_blockers {
+            writeln!(stdout, "- {blocker}").map_err(|e| e.to_string())?;
+        }
+    }
+    if !output.snapshot.transcript_excerpt.is_empty() {
+        writeln!(stdout, "transcript_excerpt:").map_err(|e| e.to_string())?;
+        for line in &output.snapshot.transcript_excerpt {
+            writeln!(stdout, "- {line}").map_err(|e| e.to_string())?;
+        }
+    }
+    writeln!(stdout, "snapshot_event_id: {}", output.snapshot_event_id)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn summarize_agent_snapshot(
+    agent_id: &str,
+    transcript: Option<&Transcript>,
+    events: &[PersistentAgentEvent],
+) -> AgentSummarySnapshot {
+    let transcript_lines = transcript
+        .map(|t| collect_recent_lines(&t.content, SUMMARY_TRANSCRIPT_SCAN_LIMIT))
+        .unwrap_or_default();
+    let blockers = extract_unresolved_blockers(&transcript_lines, events);
+    let latest_task_outcome = latest_task_outcome(&transcript_lines, events);
+    let concise_status = concise_status(events, &blockers, &latest_task_outcome);
+
+    AgentSummarySnapshot {
+        agent_id: agent_id.to_string(),
+        concise_status,
+        latest_task_outcome,
+        unresolved_blockers: blockers,
+        transcript_excerpt: transcript_lines
+            .iter()
+            .rev()
+            .take(SUMMARY_EXCERPT_LIMIT)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect(),
+        transcript_captured_at: transcript.map(|t| t.captured_at.clone()),
+        recent_events_considered: events.len(),
+        generated_at: chrono::Utc::now().to_rfc3339(),
+    }
+}
+
+fn persist_summary_snapshot(
+    repo: &PersistentAgentEventRepository<'_>,
+    snapshot: &AgentSummarySnapshot,
+) -> Result<i64, String> {
+    let detail = serde_json::to_string(snapshot).map_err(|err| err.to_string())?;
+    let mut event = PersistentAgentEvent {
+        id: 0,
+        agent_id: Some(snapshot.agent_id.clone()),
+        kind: "summary_snapshot".to_string(),
+        outcome: snapshot.concise_status.clone(),
+        detail: Some(detail),
+        timestamp: String::new(),
+    };
+    repo.append(&mut event).map_err(|err| err.to_string())?;
+    Ok(event.id)
+}
+
+fn concise_status(
+    events: &[PersistentAgentEvent],
+    unresolved_blockers: &[String],
+    latest_task_outcome: &str,
+) -> String {
+    if !unresolved_blockers.is_empty() || contains_blocker_keyword(latest_task_outcome) {
+        return "blocked".to_string();
+    }
+
+    if let Some(event) = events.iter().find(|event| event.kind != "summary_snapshot") {
+        let outcome = event.outcome.to_ascii_lowercase();
+        if outcome.contains("error") || outcome.contains("fail") {
+            return "needs_attention".to_string();
+        }
+        if event.kind == "wait_state" && outcome.contains("success") {
+            return "idle".to_string();
+        }
+        if event.kind == "spawn" && outcome.contains("success") {
+            return "running".to_string();
+        }
+        return "active".to_string();
+    }
+
+    if latest_task_outcome == "unknown" {
+        "unknown".to_string()
+    } else {
+        "active".to_string()
+    }
+}
+
+fn latest_task_outcome(transcript_lines: &[String], events: &[PersistentAgentEvent]) -> String {
+    if let Some(event) = events.iter().find(|event| event.kind != "summary_snapshot") {
+        let mut value = format!("{}: {}", event.kind, event.outcome);
+        if let Some(detail) = event.detail.as_ref().filter(|d| !d.trim().is_empty()) {
+            value.push_str(" :: ");
+            value.push_str(detail.trim());
+        }
+        return truncate_summary_text(&value);
+    }
+
+    for line in transcript_lines.iter().rev() {
+        if line.is_empty() {
+            continue;
+        }
+        if contains_outcome_keyword(line) {
+            return truncate_summary_text(line);
+        }
+    }
+
+    transcript_lines
+        .iter()
+        .rev()
+        .find(|line| !line.is_empty())
+        .map(|line| truncate_summary_text(line))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn extract_unresolved_blockers(
+    transcript_lines: &[String],
+    events: &[PersistentAgentEvent],
+) -> Vec<String> {
+    let mut blockers = Vec::new();
+    let mut seen = HashSet::new();
+
+    for line in transcript_lines.iter().rev() {
+        if !contains_blocker_keyword(line) {
+            continue;
+        }
+        let normalized = line.trim().to_ascii_lowercase();
+        if seen.insert(normalized) {
+            blockers.push(truncate_summary_text(line));
+        }
+        if blockers.len() >= SUMMARY_BLOCKER_LIMIT {
+            return blockers;
+        }
+    }
+
+    for event in events
+        .iter()
+        .filter(|event| event.kind != "summary_snapshot")
+    {
+        let mut candidate = None;
+        if contains_blocker_keyword(&event.outcome) {
+            candidate = Some(event.outcome.trim().to_string());
+        } else if let Some(detail) = event.detail.as_ref() {
+            if contains_blocker_keyword(detail) {
+                candidate = Some(detail.trim().to_string());
+            }
+        }
+
+        if let Some(text) = candidate {
+            let normalized = text.to_ascii_lowercase();
+            if seen.insert(normalized) {
+                blockers.push(truncate_summary_text(&text));
+            }
+        }
+        if blockers.len() >= SUMMARY_BLOCKER_LIMIT {
+            break;
+        }
+    }
+
+    blockers
+}
+
+fn contains_blocker_keyword(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    [
+        "blocked",
+        "blocker",
+        "waiting on",
+        "waiting for",
+        "cannot",
+        "can't",
+        "failed",
+        "error",
+    ]
+    .iter()
+    .any(|token| lower.contains(token))
+}
+
+fn contains_outcome_keyword(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    [
+        "done",
+        "complete",
+        "completed",
+        "shipped",
+        "fixed",
+        "passed",
+        "failed",
+        "error",
+    ]
+    .iter()
+    .any(|token| lower.contains(token))
+}
+
+fn collect_recent_lines(content: &str, limit: usize) -> Vec<String> {
+    let mut lines = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(truncate_summary_text)
+        .collect::<Vec<_>>();
+    if lines.len() > limit {
+        let split = lines.len() - limit;
+        lines.drain(0..split);
+    }
+    lines
+}
+
+fn truncate_summary_text(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.chars().count() <= SUMMARY_TEXT_LIMIT {
+        return trimmed.to_string();
+    }
+    let mut truncated = trimmed
+        .chars()
+        .take(SUMMARY_TEXT_LIMIT.saturating_sub(3))
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
+}
 
 fn exec_run(
     backend: &dyn AgentBackend,
@@ -846,6 +1208,24 @@ fn write_agent_list_output(
     Ok(())
 }
 
+fn resolve_database_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut path = PathBuf::from(home);
+        path.push(".local");
+        path.push("share");
+        path.push("forge");
+        path.push("forge.db");
+        return path;
+    }
+    PathBuf::from("forge.db")
+}
+
 fn write_bool_output(ok: bool, parsed: &ParsedArgs, stdout: &mut dyn Write) -> Result<(), String> {
     if parsed.json {
         serde_json::to_writer_pretty(&mut *stdout, &BoolResultJson { ok })
@@ -973,6 +1353,16 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 jsonl,
                 quiet,
                 subcommand: Subcommand::Show(show_args),
+            })
+        }
+        Some("summary") => {
+            index += 1;
+            let summary_args = parse_summary_args(args, index)?;
+            Ok(ParsedArgs {
+                json,
+                jsonl,
+                quiet,
+                subcommand: Subcommand::Summary(summary_args),
             })
         }
         Some("interrupt") => {
@@ -1307,6 +1697,31 @@ fn parse_show_args(args: &[String], mut index: usize) -> Result<ShowArgs, String
     Ok(result)
 }
 
+fn parse_summary_args(args: &[String], mut index: usize) -> Result<SummaryArgs, String> {
+    let mut result = SummaryArgs {
+        agent_id: String::new(),
+    };
+
+    if let Some(token) = args.get(index) {
+        if token == "-h" || token == "--help" {
+            return Err(SUMMARY_HELP.to_string());
+        }
+        if !token.starts_with('-') {
+            result.agent_id = token.clone();
+            index += 1;
+        }
+    }
+
+    if let Some(token) = args.get(index) {
+        if token.starts_with('-') {
+            return Err(format!("error: unknown flag for agent summary: '{token}'"));
+        }
+        return Err(format!("error: unexpected positional argument: '{token}'"));
+    }
+
+    Ok(result)
+}
+
 fn parse_interrupt_args(args: &[String], mut index: usize) -> Result<InterruptArgs, String> {
     let mut result = InterruptArgs {
         agent_id: String::new(),
@@ -1418,6 +1833,7 @@ Subcommands:
   wait        Wait for an agent to reach a target state
   ps          List agents
   show        Show agent details
+  summary     Generate concise parent rehydration summary
   interrupt   Interrupt an agent (Ctrl+C)
   kill        Kill an agent
   revive      Revive a stopped/failed agent
@@ -1503,6 +1919,12 @@ Usage:
 Aliases:
   show, get";
 
+const SUMMARY_HELP: &str = "\
+Generate concise summary for parent rehydration
+
+Usage:
+  forge agent summary <agent-id>";
+
 const INTERRUPT_HELP: &str = "\
 Interrupt an agent (send Ctrl+C)
 
@@ -1532,6 +1954,9 @@ mod tests {
     use super::*;
     use forge_agent::mock::test_snapshot;
     use forge_agent::types::AgentState;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn parse_ok(args: &[String]) -> ParsedArgs {
         match parse_args(args) {
@@ -1552,6 +1977,29 @@ mod tests {
             Ok(value) => value,
             Err(err) => panic!("expected valid json: {err}\ninput: {text}"),
         }
+    }
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        let nonce = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "forge-agent-{prefix}-{}-{now}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir)
+            .unwrap_or_else(|err| panic!("create temp dir {}: {err}", dir.display()));
+        dir
+    }
+
+    fn setup_migrated_db(db_path: &Path) {
+        let mut db = forge_db::Db::open(forge_db::Config::new(db_path))
+            .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db {}: {err}", db_path.display()));
     }
 
     // ── Parse tests ──────────────────────────────────────────────────────
@@ -1733,6 +2181,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_summary_positional() {
+        let args = vec![
+            "agent".to_string(),
+            "summary".to_string(),
+            "agent-42".to_string(),
+        ];
+        let parsed = parse_ok(&args);
+        match &parsed.subcommand {
+            Subcommand::Summary(a) => {
+                assert_eq!(a.agent_id, "agent-42");
+            }
+            other => panic!("expected Summary, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_kill_with_force() {
         let args = vec![
             "agent".to_string(),
@@ -1798,6 +2262,107 @@ mod tests {
         assert!(err.contains("bogus"));
     }
 
+    #[test]
+    fn summary_snapshot_marks_blocked_when_blockers_present() {
+        let transcript = Transcript {
+            id: 1,
+            agent_id: "ag-1".to_string(),
+            content: "Investigated root cause
+Blocked waiting on forge-fbs
+Will resume after unblock"
+                .to_string(),
+            content_hash: "hash".to_string(),
+            captured_at: "2026-02-12T00:00:00Z".to_string(),
+        };
+        let events = vec![PersistentAgentEvent {
+            id: 7,
+            agent_id: Some("ag-1".to_string()),
+            kind: "wait_state".to_string(),
+            outcome: "error: blocked by forge-fbs".to_string(),
+            detail: Some("waiting for dependency".to_string()),
+            timestamp: "2026-02-12T00:00:05Z".to_string(),
+        }];
+
+        let snapshot = summarize_agent_snapshot("ag-1", Some(&transcript), &events);
+        assert_eq!(snapshot.concise_status, "blocked");
+        assert!(snapshot.latest_task_outcome.contains("wait_state"));
+        assert!(!snapshot.unresolved_blockers.is_empty());
+        assert!(snapshot
+            .unresolved_blockers
+            .iter()
+            .any(|line| line.to_ascii_lowercase().contains("blocked")));
+        assert!(snapshot.transcript_excerpt.len() <= SUMMARY_EXCERPT_LIMIT);
+    }
+
+    #[test]
+    fn summary_snapshot_without_inputs_is_unknown() {
+        let snapshot = summarize_agent_snapshot("ag-empty", None, &[]);
+        assert_eq!(snapshot.concise_status, "unknown");
+        assert_eq!(snapshot.latest_task_outcome, "unknown");
+        assert!(snapshot.unresolved_blockers.is_empty());
+        assert!(snapshot.transcript_excerpt.is_empty());
+    }
+
+    #[test]
+    fn agent_summary_json_persists_summary_snapshot_event() {
+        let temp = temp_dir("summary-json");
+        let db_path = temp.join("forge.db");
+        setup_migrated_db(&db_path);
+
+        let db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+        let event_repo = PersistentAgentEventRepository::new(&db);
+        let mut seed = PersistentAgentEvent {
+            id: 0,
+            agent_id: Some("ag-summary".to_string()),
+            kind: "wait_state".to_string(),
+            outcome: "error: blocked by forge-fbs".to_string(),
+            detail: Some("blocked by forge-fbs".to_string()),
+            timestamp: String::new(),
+        };
+        event_repo
+            .append(&mut seed)
+            .unwrap_or_else(|err| panic!("append seed event: {err}"));
+
+        let args = vec![
+            "agent".to_string(),
+            "--json".to_string(),
+            "summary".to_string(),
+            "ag-summary".to_string(),
+        ];
+        let parsed = parse_ok(&args);
+        let summary_args = match &parsed.subcommand {
+            Subcommand::Summary(value) => value.clone(),
+            other => panic!("expected Summary, got {other:?}"),
+        };
+
+        let mut stdout = Vec::new();
+        exec_summary_with_db_path(&summary_args, &parsed, &mut stdout, &db_path)
+            .unwrap_or_else(|err| panic!("exec summary: {err}"));
+
+        let output = String::from_utf8(stdout).unwrap_or_else(|err| panic!("utf8 output: {err}"));
+        let json = parse_json(&output);
+        assert_eq!(json["agent_id"], "ag-summary");
+        assert_eq!(json["concise_status"], "blocked");
+        assert!(json["snapshot_event_id"].as_i64().unwrap_or(0) > seed.id);
+        assert!(json["recent_events_considered"].as_u64().unwrap_or(0) >= 1);
+
+        let verify_db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open verify db {}: {err}", db_path.display()));
+        let verify_repo = PersistentAgentEventRepository::new(&verify_db);
+        let events = verify_repo
+            .list_by_agent("ag-summary", 20)
+            .unwrap_or_else(|err| panic!("list events: {err}"));
+        let latest = &events[0];
+        assert_eq!(latest.kind, "summary_snapshot");
+        assert_eq!(latest.outcome, "blocked");
+        let detail = latest.detail.as_ref().expect("summary detail");
+        assert!(detail.contains("\"agent_id\":\"ag-summary\""));
+
+        std::fs::remove_dir_all(&temp)
+            .unwrap_or_else(|err| panic!("remove temp dir {}: {err}", temp.display()));
+    }
+
     // ── Execution tests with InMemory backend ────────────────────────────
 
     #[test]
@@ -1812,6 +2377,7 @@ mod tests {
         assert!(out.stdout.contains("wait"));
         assert!(out.stdout.contains("ps"));
         assert!(out.stdout.contains("show"));
+        assert!(out.stdout.contains("summary"));
         assert!(out.stdout.contains("kill"));
     }
 
@@ -2165,6 +2731,12 @@ mod tests {
         let show_out = run_for_test(&["agent", "show", "--help"], &backend);
         assert_eq!(show_out.exit_code, 1);
         assert!(show_out.stderr.contains("Show agent details"));
+
+        let summary_out = run_for_test(&["agent", "summary", "--help"], &backend);
+        assert_eq!(summary_out.exit_code, 1);
+        assert!(summary_out
+            .stderr
+            .contains("Generate concise summary for parent rehydration"));
 
         let kill_out = run_for_test(&["agent", "kill", "--help"], &backend);
         assert_eq!(kill_out.exit_code, 1);
