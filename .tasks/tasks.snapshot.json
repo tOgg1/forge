@@ -1,14 +1,32 @@
 {
   "schema_version": "sv.tasks.v1",
-  "generated_at": "2026-02-12T12:36:24.401839Z",
+  "generated_at": "2026-02-12T12:39:56.955883Z",
   "tasks": [
+    {
+      "id": "forge-26e",
+      "title": "M10.10: Approval/policy inheritance and redaction",
+      "status": "in_progress",
+      "priority": "P2",
+      "created_at": "2026-02-09T06:23:41.964881Z",
+      "updated_at": "2026-02-12T12:39:56.944817Z",
+      "created_by": "codex",
+      "updated_by": "rewrite-persistent-codex-115919",
+      "body": "Scope:\n- Propagate approval policy + account/profile context from parent to child spawn defaults.\n- Add policy checks for risky send/interrupt commands.\n- Add redaction rules for sensitive payloads in agent events.\n\nAcceptance:\n- Child runs with expected approval posture.\n- Sensitive text not leaked in audit fields.\n\nTests:\n- Unit tests for policy inheritance + redaction.",
+      "epic": "forge-ktk",
+      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
+      "workspace": "forge",
+      "branch": "main",
+      "started_at": "2026-02-12T12:39:56.944817Z",
+      "started_by": "rewrite-persistent-codex-115919",
+      "comments_count": 0
+    },
     {
       "id": "forge-mp7",
       "title": "M10.12: End-to-end and regression test matrix",
-      "status": "in_progress",
+      "status": "closed",
       "priority": "P1",
       "created_at": "2026-02-09T06:23:42.019932Z",
-      "updated_at": "2026-02-12T12:36:24.390559Z",
+      "updated_at": "2026-02-12T12:39:44.580174Z",
       "created_by": "codex",
       "updated_by": "rewrite-persistent-codex-115919",
       "body": "Scope:\n- Build comprehensive test matrix:\n  - spawn/send/wait/interrupt/kill/revive\n  - capability mismatch paths\n  - daemon unavailable fallback errors\n  - multi-agent concurrency\n- Add regression tests for known pitfalls:\n  - one-shot harness used as continuous agent\n  - stale pane ID after restart\n  - legacy `forge subagent` command path follows chosen policy (explicit failure or compatibility alias)\n\nAcceptance:\n- CI includes agent flow tests with stable fixtures.\n- Failures isolate root cause quickly.",
@@ -18,6 +36,8 @@
       "branch": "main",
       "started_at": "2026-02-12T12:36:24.390559Z",
       "started_by": "rewrite-persistent-codex-115919",
+      "closed_at": "2026-02-12T12:39:44.580174Z",
+      "closed_by": "rewrite-persistent-codex-115919",
       "comments_count": 0
     },
     {
@@ -1454,19 +1474,6 @@
       "started_by": "tui-next-codex-live2-085111",
       "closed_at": "2026-02-12T07:57:54.464527Z",
       "closed_by": "tui-next-codex-live2-085111",
-      "comments_count": 0
-    },
-    {
-      "id": "forge-26e",
-      "title": "M10.10: Approval/policy inheritance and redaction",
-      "status": "open",
-      "priority": "P2",
-      "created_at": "2026-02-09T06:23:41.964881Z",
-      "updated_at": "2026-02-11T18:35:54.956107Z",
-      "created_by": "codex",
-      "updated_by": "rforged-runtime-parity-specialist",
-      "body": "Scope:\n- Propagate approval policy + account/profile context from parent to child spawn defaults.\n- Add policy checks for risky send/interrupt commands.\n- Add redaction rules for sensitive payloads in agent events.\n\nAcceptance:\n- Child runs with expected approval posture.\n- Sensitive text not leaked in audit fields.\n\nTests:\n- Unit tests for policy inheritance + redaction.",
-      "epic": "forge-ktk",
       "comments_count": 0
     },
     {

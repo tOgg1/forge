@@ -392,3 +392,80 @@ hi. strong loop momentum; shipped core reliability slices.
 - Requested unblock: align `RunArgs` revive wiring in `crates/forge-cli/src/agent.rs`, then rerun workspace gates and close `forge-d1j`.
 ```
 
+## 2026-02-12T12:38:14Z
+
+- run_id: 8b331c8b-90b3-4c60-9795-bb523dce5938
+- loop_name: rewrite-tui-codex-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T12:30:40Z
+- finished_at: 2026-02-12T12:38:14Z
+- exit_code: 0
+
+```
++- Exposes:
++  - reconstructed `TimelineHeatmap`
++  - ranked hotspot list (`ReplayHotspot`)
++  - replay-visible events and annotations at cursor time
++
++## Implementation
++
++- New module: `crates/forge-tui/src/incident_replay.rs`
++- Exported from crate root: `crates/forge-tui/src/lib.rs`
++
++## Regression tests
++
++- replay range derivation from event stream
++- seek/step/advance time-control semantics
++- dedupe + visibility filtering in replay snapshot
++- timeline reconstruction + hotspot detection behavior
++- empty-input replay snapshot fallback behavior
++
++## Validation
++
++- `cargo fmt --check`
++- `cargo clippy --workspace --all-targets -- -D warnings`
++- `EDITOR=true VISUAL=true GIT_EDITOR=true cargo test --workspace`
+diff --git a/docs/tui-next-roadmap-2026-02-10.md b/docs/tui-next-roadmap-2026-02-10.md
+index ee86edc828b61188c16a0eef7eeba89fd6b1d938..47ecb816d632bfc26645eca4d293b7539c3deca3
+--- a/docs/tui-next-roadmap-2026-02-10.md
++++ b/docs/tui-next-roadmap-2026-02-10.md
+@@ -71,6 +71,7 @@
+ - `forge-mdc` delivered in `docs/tui-405-next-best-task-recommendation-engine.md` with operator-context-aware next-task ranking using priority/readiness/dependency/ownership/context scoring and explainable recommendation reasons in `crates/forge-tui/src/task_recommendation.rs`.
+ - `forge-2er` delivered in `docs/tui-702-data-polling-pipeline-backpressure-jitter.md` with bounded polling queues, deterministic jittered poll intervals, backlog-driven backpressure penalties, and interactive-loop integration in `crates/forge-tui/src/polling_pipeline.rs` and `crates/forge-tui/src/bin/forge-tui.rs`.
+ - `forge-nwk` delivered in `docs/tui-703-crash-safe-state-persistence-recovery.md` with crash-safe minimal session snapshot persistence (`temp+rename`), backup snapshot fallback recovery, digest-based corruption detection, and recovery warnings in `crates/forge-tui/src/crash_safe_state.rs`.
++- `forge-h18` delivered in `docs/tui-704-incident-replay-mode-timeline-reconstruction.md` with incident replay controls (`seek/step/playback`), deterministic timeline reconstruction, replay hotspot ranking, annotation visibility at cursor time, and duplicate-event dedupe accounting in `crates/forge-tui/src/incident_replay.rs`.
+ - `forge-d1j` delivered in `docs/tui-706-resilience-test-matrix-degraded-environments.md` with deterministic resilience matrix evaluation for missing profiles, DB lock contention, partial-data handling, and network interruptions (including severity ordering and operator guidance) in `crates/forge-tui/src/resilience_matrix.rs`.
+ - `forge-r1d` delivered in `docs/tui-105-global-search-index.md` with incremental cross-entity indexing, repo/profile/tag filters, partial-match semantics, and relevance+recency ranking in `crates/forge-tui/src/global_search_index.rs`.
+ - `forge-chf` delivered in `docs/tui-106-session-restore-delta-digest.md` with privacy-safe session snapshots, opt-out restore/persist controls, availability-aware restore fallbacks, and deterministic context delta digests in `crates/forge-tui/src/session_restore.rs`.
+
+tokens used
+144,247
+Hi. One more shipped; queue now idle.
+
+- Closed `forge-h18` (`TUI-704`).
+- Added incident replay model: `crates/forge-tui/src/incident_replay.rs`.
+- Added replay regression tests: `crates/forge-tui/src/incident_replay_tests.rs`.
+- Wired export: `crates/forge-tui/src/lib.rs:31`.
+- Added task doc: `docs/tui-704-incident-replay-mode-timeline-reconstruction.md`.
+- Updated roadmap: `docs/tui-next-roadmap-2026-02-10.md`.
+
+Validation (full pass):
+- `cargo fmt --check`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `EDITOR=true VISUAL=true GIT_EDITOR=true cargo test --workspace`
+
+Protocol updates sent:
+- `fmail` claim/progress/close (+ follow-up note).
+- `fmail` done ping to `@forge-orchestrator`.
+- `sv task close forge-h18`.
+
+Next-task scan:
+- `sv task ready --json` had no `TUI-*` for 3 consecutive snapshots.
+- Loop stopped idle per policy.
+```
+
