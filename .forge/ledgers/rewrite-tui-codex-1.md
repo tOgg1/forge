@@ -315,3 +315,80 @@ Comms/state:
 - orchestrator notified `done` for closed tasks, `blocked` for `forge-98e`.
 ```
 
+## 2026-02-12T12:30:10Z
+
+- run_id: ae902f2b-c9e9-484c-8539-6c7058273453
+- loop_name: rewrite-tui-codex-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T12:18:49Z
+- finished_at: 2026-02-12T12:30:10Z
+- exit_code: 0
+
+```
++
++- Added coverage for:
++  - missing profile blocking behavior
++  - DB lock contention degraded behavior
++  - partial-data severity thresholds
++  - network interruption degraded-vs-blocked staleness gate
++  - combined scenario counts + deterministic ordering
++
++## Validation
++
++- `cargo fmt --check`
++- `cargo clippy --workspace --all-targets -- -D warnings`
++- `EDITOR=true VISUAL=true GIT_EDITOR=true cargo test --workspace`
+diff --git a/docs/tui-next-roadmap-2026-02-10.md b/docs/tui-next-roadmap-2026-02-10.md
+index ce5dbcb4807a88583783681826e078607e199851..ee86edc828b61188c16a0eef7eeba89fd6b1d938
+--- a/docs/tui-next-roadmap-2026-02-10.md
++++ b/docs/tui-next-roadmap-2026-02-10.md
+@@ -70,6 +70,8 @@
+ - `forge-1fx` delivered in `docs/tui-404-readiness-board-priority-risk-overlays.md` with project/epic filterable readiness-board rows, priority overlays, stale-risk and owner-gap signals, and deterministic risk-first ordering in `crates/forge-tui/src/readiness_board.rs`.
+ - `forge-mdc` delivered in `docs/tui-405-next-best-task-recommendation-engine.md` with operator-context-aware next-task ranking using priority/readiness/dependency/ownership/context scoring and explainable recommendation reasons in `crates/forge-tui/src/task_recommendation.rs`.
+ - `forge-2er` delivered in `docs/tui-702-data-polling-pipeline-backpressure-jitter.md` with bounded polling queues, deterministic jittered poll intervals, backlog-driven backpressure penalties, and interactive-loop integration in `crates/forge-tui/src/polling_pipeline.rs` and `crates/forge-tui/src/bin/forge-tui.rs`.
++- `forge-nwk` delivered in `docs/tui-703-crash-safe-state-persistence-recovery.md` with crash-safe minimal session snapshot persistence (`temp+rename`), backup snapshot fallback recovery, digest-based corruption detection, and recovery warnings in `crates/forge-tui/src/crash_safe_state.rs`.
++- `forge-d1j` delivered in `docs/tui-706-resilience-test-matrix-degraded-environments.md` with deterministic resilience matrix evaluation for missing profiles, DB lock contention, partial-data handling, and network interruptions (including severity ordering and operator guidance) in `crates/forge-tui/src/resilience_matrix.rs`.
+ - `forge-r1d` delivered in `docs/tui-105-global-search-index.md` with incremental cross-entity indexing, repo/profile/tag filters, partial-match semantics, and relevance+recency ranking in `crates/forge-tui/src/global_search_index.rs`.
+ - `forge-chf` delivered in `docs/tui-106-session-restore-delta-digest.md` with privacy-safe session snapshots, opt-out restore/persist controls, availability-aware restore fallbacks, and deterministic context delta digests in `crates/forge-tui/src/session_restore.rs`.
+ - `forge-bx4` delivered in `docs/tui-104-layout-preset-system.md` with schema-versioned layout preset persistence/restoration, v1 migration path, corruption-resilient fallback/normalization, and effective layout application via `fit_pane_layout` in `crates/forge-tui/src/layout_presets.rs`.
+
+tokens used
+300,474
+hi. strong loop momentum; shipped core reliability slices.
+
+1. Closed `forge-98e` (`TUI-705`).
+- Delivered/validated performance SLO gate work already in tree (`crates/forge-tui/src/performance_gates.rs`, `docs/tui-705-performance-benchmark-suite-slo-gates.md`).
+- Full gates passed: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`.
+- Reported + closed via `sv`/`fmail`.
+
+2. Closed `forge-nwk` (`TUI-703`).
+- Added crash-safe persistence/recovery module: `crates/forge-tui/src/crash_safe_state.rs`.
+- Exported in `crates/forge-tui/src/lib.rs`.
+- Added docs: `docs/tui-703-crash-safe-state-persistence-recovery.md`.
+- Roadmap updated: `docs/tui-next-roadmap-2026-02-10.md`.
+- Full workspace gates passed.
+- Reported + closed via `sv`/`fmail`.
+
+3. Claimed `forge-d1j` (`TUI-706`) and implemented.
+- Added resilience matrix module: `crates/forge-tui/src/resilience_matrix.rs`.
+- Exported in `crates/forge-tui/src/lib.rs`.
+- Added docs: `docs/tui-706-resilience-test-matrix-degraded-environments.md`.
+- Roadmap updated: `docs/tui-next-roadmap-2026-02-10.md`.
+- Targeted validation passed:
+  - `cargo clippy -p forge-tui --all-targets -- -D warnings`
+  - `cargo test -p forge-tui resilience_matrix::tests::`
+
+4. Current blocker (task kept `in_progress`, per protocol).
+- Full workspace gate fails outside TUI-706 scope:
+  - `crates/forge-cli/src/agent.rs:1239`
+  - `crates/forge-cli/src/agent.rs:1275`
+  - Error: missing `RunArgs.revive` field (`E0609`).
+- Blocker posted to `fmail` task channel + `@forge-orchestrator` with command/path/line/unblock request.
+- Requested unblock: align `RunArgs` revive wiring in `crates/forge-cli/src/agent.rs`, then rerun workspace gates and close `forge-d1j`.
+```
+
