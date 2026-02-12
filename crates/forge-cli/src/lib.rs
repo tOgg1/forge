@@ -84,6 +84,10 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
         return 0;
     }
 
+    if let Err(err) = apply_chdir_if_requested(&flags) {
+        return handle_cli_error(&err, &flags, stdout, stderr);
+    }
+
     let remaining = &args[index..];
     let command = remaining.first().map(|arg| arg.as_str());
     match command {
@@ -308,6 +312,16 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             code
         }
     }
+}
+
+fn apply_chdir_if_requested(flags: &GlobalFlags) -> Result<(), String> {
+    let target = flags.chdir.trim();
+    if target.is_empty() {
+        return Ok(());
+    }
+
+    std::env::set_current_dir(target)
+        .map_err(|err| format!("failed to change directory to {target}: {err}"))
 }
 
 fn forward_args(remaining: &[String], flags: &GlobalFlags) -> Vec<String> {
@@ -789,5 +803,17 @@ mod tests {
         let out = run_for_test(&["--verbose", "--quiet", "--help"]);
         assert_eq!(out.exit_code, 0);
         assert!(out.stdout.contains("Commands:"));
+    }
+
+    #[test]
+    fn invalid_chdir_global_flag_returns_error() {
+        let out = run_for_test(&["-C", "/definitely/not/a/forge-dir", "up", "--name", "demo"]);
+        assert_eq!(out.exit_code, 2);
+        assert!(out.stdout.is_empty());
+        assert!(out.stderr.contains("failed to change directory"));
+        assert!(
+            out.stderr.contains("/definitely/not/a/forge-dir"),
+            "stderr should include the failing path"
+        );
     }
 }
