@@ -422,6 +422,7 @@ fn execute(
         Subcommand::Ps(ps_args) => exec_ps(backend, ps_args, &parsed, stdout),
         Subcommand::Show(show_args) => exec_show(backend, show_args, &parsed, stdout),
         Subcommand::Summary(summary_args) => exec_summary(summary_args, &parsed, stdout),
+        Subcommand::Gc(gc_args) => exec_gc(gc_args, &parsed, stdout),
         Subcommand::Interrupt(int_args) => exec_interrupt(backend, int_args, &parsed, stdout),
         Subcommand::Kill(kill_args) => exec_kill(backend, kill_args, &parsed, stdout),
         Subcommand::Revive(revive_args) => exec_revive(backend, revive_args, &parsed, stdout),
@@ -735,6 +736,243 @@ fn truncate_summary_text(value: &str) -> String {
         .collect::<String>();
     truncated.push_str("...");
     truncated
+}
+
+const PARKED_AGENT_STATES: &[&str] = &["idle", "stopped", "failed"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EvictionReason {
+    Ttl,
+    IdleTimeout,
+    MaxAge,
+}
+
+impl EvictionReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ttl => "ttl",
+            Self::IdleTimeout => "idle_timeout",
+            Self::MaxAge => "max_age",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EvictionCandidate {
+    reason: EvictionReason,
+    age_seconds: i64,
+    idle_seconds: i64,
+    ttl_seconds: Option<i64>,
+}
+
+fn exec_gc(args: &GcArgs, parsed: &ParsedArgs, stdout: &mut dyn Write) -> Result<(), String> {
+    let db_path = resolve_database_path();
+    exec_gc_with_db_path(args, parsed, stdout, &db_path)
+}
+
+fn exec_gc_with_db_path(
+    args: &GcArgs,
+    parsed: &ParsedArgs,
+    stdout: &mut dyn Write,
+    db_path: &Path,
+) -> Result<(), String> {
+    let mut db = forge_db::Db::open(forge_db::Config::new(db_path))
+        .map_err(|err| format!("open db {}: {err}", db_path.display()))?;
+    db.migrate_up()
+        .map_err(|err| format!("migrate db {}: {err}", db_path.display()))?;
+
+    let repo = forge_db::persistent_agent_repository::PersistentAgentRepository::new(&db);
+    let event_repo = PersistentAgentEventRepository::new(&db);
+
+    let agents = repo
+        .list(
+            forge_db::persistent_agent_repository::PersistentAgentFilter {
+                workspace_id: if args.workspace_id.trim().is_empty() {
+                    None
+                } else {
+                    Some(args.workspace_id.clone())
+                },
+                states: PARKED_AGENT_STATES
+                    .iter()
+                    .map(|s| (*s).to_string())
+                    .collect(),
+                limit: args.limit,
+                ..Default::default()
+            },
+        )
+        .map_err(|err| format!("list persistent agents: {err}"))?;
+
+    let now = chrono::Utc::now();
+    let mut evictions = Vec::new();
+
+    for agent in &agents {
+        let Some(candidate) = evaluate_eviction_candidate(agent, args, &now) else {
+            continue;
+        };
+
+        let detail = serde_json::json!({
+            "reason": candidate.reason.as_str(),
+            "age_seconds": candidate.age_seconds,
+            "idle_seconds": candidate.idle_seconds,
+            "ttl_seconds": candidate.ttl_seconds,
+            "workspace_id": agent.workspace_id,
+        })
+        .to_string();
+
+        if !args.dry_run {
+            let mut start_event = PersistentAgentEvent {
+                id: 0,
+                agent_id: Some(agent.id.clone()),
+                kind: "gc_evict_start".to_string(),
+                outcome: "candidate".to_string(),
+                detail: Some(detail.clone()),
+                timestamp: String::new(),
+            };
+            event_repo
+                .append(&mut start_event)
+                .map_err(|err| format!("append gc start event for {}: {err}", agent.id))?;
+
+            if let Err(err) = repo.delete(&agent.id) {
+                let mut failed_event = PersistentAgentEvent {
+                    id: 0,
+                    agent_id: Some(agent.id.clone()),
+                    kind: "gc_evict_done".to_string(),
+                    outcome: format!("error: {err}"),
+                    detail: Some(detail),
+                    timestamp: String::new(),
+                };
+                let _ = event_repo.append(&mut failed_event);
+                return Err(format!("evict persistent agent {}: {err}", agent.id));
+            }
+
+            let mut done_event = PersistentAgentEvent {
+                id: 0,
+                agent_id: Some(agent.id.clone()),
+                kind: "gc_evict_done".to_string(),
+                outcome: "success".to_string(),
+                detail: Some(detail),
+                timestamp: String::new(),
+            };
+            event_repo
+                .append(&mut done_event)
+                .map_err(|err| format!("append gc done event for {}: {err}", agent.id))?;
+        }
+
+        evictions.push(AgentGcEvictionJson {
+            agent_id: agent.id.clone(),
+            reason: candidate.reason.as_str().to_string(),
+            age_seconds: candidate.age_seconds,
+            idle_seconds: candidate.idle_seconds,
+            ttl_seconds: candidate.ttl_seconds,
+        });
+    }
+
+    let result = AgentGcResultJson {
+        scanned: agents.len(),
+        evicted: evictions.len(),
+        kept: agents.len().saturating_sub(evictions.len()),
+        dry_run: args.dry_run,
+        evictions,
+    };
+
+    if parsed.json {
+        serde_json::to_writer_pretty(&mut *stdout, &result).map_err(|e| e.to_string())?;
+        writeln!(stdout).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    if parsed.jsonl {
+        serde_json::to_writer(&mut *stdout, &result).map_err(|e| e.to_string())?;
+        writeln!(stdout).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    if parsed.quiet {
+        return Ok(());
+    }
+
+    if result.dry_run {
+        writeln!(
+            stdout,
+            "dry-run: {} eviction candidates (scanned {}, kept {})",
+            result.evicted, result.scanned, result.kept
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        writeln!(
+            stdout,
+            "evicted {} stale agents (scanned {}, kept {})",
+            result.evicted, result.scanned, result.kept
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    for item in &result.evictions {
+        writeln!(
+            stdout,
+            "{}	{}	age={}s	idle={}s",
+            item.agent_id, item.reason, item.age_seconds, item.idle_seconds
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn evaluate_eviction_candidate(
+    agent: &forge_db::persistent_agent_repository::PersistentAgent,
+    args: &GcArgs,
+    now: &chrono::DateTime<chrono::Utc>,
+) -> Option<EvictionCandidate> {
+    if !PARKED_AGENT_STATES.contains(&agent.state.as_str()) {
+        return None;
+    }
+
+    let created_at = parse_agent_timestamp(&agent.created_at)?;
+    let last_activity_at = parse_agent_timestamp(&agent.last_activity_at)?;
+    let age_seconds = now.signed_duration_since(created_at).num_seconds().max(0);
+    let idle_seconds = now
+        .signed_duration_since(last_activity_at)
+        .num_seconds()
+        .max(0);
+
+    if let Some(ttl) = agent.ttl_seconds.filter(|v| *v > 0) {
+        if age_seconds >= ttl {
+            return Some(EvictionCandidate {
+                reason: EvictionReason::Ttl,
+                age_seconds,
+                idle_seconds,
+                ttl_seconds: Some(ttl),
+            });
+        }
+    }
+
+    if let Some(idle_timeout) = args.idle_timeout_seconds {
+        if idle_seconds >= idle_timeout {
+            return Some(EvictionCandidate {
+                reason: EvictionReason::IdleTimeout,
+                age_seconds,
+                idle_seconds,
+                ttl_seconds: agent.ttl_seconds,
+            });
+        }
+    }
+
+    if let Some(max_age) = args.max_age_seconds {
+        if age_seconds >= max_age {
+            return Some(EvictionCandidate {
+                reason: EvictionReason::MaxAge,
+                age_seconds,
+                idle_seconds,
+                ttl_seconds: agent.ttl_seconds,
+            });
+        }
+    }
+
+    None
+}
+
+fn parse_agent_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|parsed| parsed.with_timezone(&chrono::Utc))
 }
 
 fn exec_run(
@@ -1365,6 +1603,16 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 subcommand: Subcommand::Summary(summary_args),
             })
         }
+        Some("gc") => {
+            index += 1;
+            let gc_args = parse_gc_args(args, index)?;
+            Ok(ParsedArgs {
+                json,
+                jsonl,
+                quiet,
+                subcommand: Subcommand::Gc(gc_args),
+            })
+        }
         Some("interrupt") => {
             index += 1;
             let int_args = parse_interrupt_args(args, index)?;
@@ -1722,6 +1970,70 @@ fn parse_summary_args(args: &[String], mut index: usize) -> Result<SummaryArgs, 
     Ok(result)
 }
 
+fn parse_gc_args(args: &[String], mut index: usize) -> Result<GcArgs, String> {
+    let mut result = GcArgs {
+        workspace_id: String::new(),
+        idle_timeout_seconds: None,
+        max_age_seconds: None,
+        dry_run: false,
+        limit: 500,
+    };
+
+    while let Some(token) = args.get(index) {
+        match token.as_str() {
+            "-h" | "--help" => return Err(GC_HELP.to_string()),
+            "--workspace" | "-w" => {
+                result.workspace_id = take_value(args, index, "--workspace")?;
+                index += 2;
+            }
+            "--idle-timeout" => {
+                let raw = take_value(args, index, "--idle-timeout")?;
+                result.idle_timeout_seconds = Some(parse_gc_seconds(&raw, "--idle-timeout")?);
+                index += 2;
+            }
+            "--max-age" => {
+                let raw = take_value(args, index, "--max-age")?;
+                result.max_age_seconds = Some(parse_gc_seconds(&raw, "--max-age")?);
+                index += 2;
+            }
+            "--limit" => {
+                let raw = take_value(args, index, "--limit")?;
+                result.limit = raw
+                    .parse::<i64>()
+                    .map_err(|_| format!("invalid limit value: '{raw}'"))?;
+                if result.limit <= 0 {
+                    return Err("error: --limit must be > 0".to_string());
+                }
+                index += 2;
+            }
+            "--dry-run" => {
+                result.dry_run = true;
+                index += 1;
+            }
+            flag if flag.starts_with('-') => {
+                return Err(format!("error: unknown flag for agent gc: '{flag}'"));
+            }
+            other => {
+                return Err(format!(
+                    "error: agent gc takes no positional arguments, got '{other}'"
+                ));
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+fn parse_gc_seconds(raw: &str, flag: &str) -> Result<i64, String> {
+    let value = raw
+        .parse::<i64>()
+        .map_err(|_| format!("invalid {flag} value: '{raw}'"))?;
+    if value <= 0 {
+        return Err(format!("error: {flag} must be > 0"));
+    }
+    Ok(value)
+}
+
 fn parse_interrupt_args(args: &[String], mut index: usize) -> Result<InterruptArgs, String> {
     let mut result = InterruptArgs {
         agent_id: String::new(),
@@ -1834,6 +2146,7 @@ Subcommands:
   ps          List agents
   show        Show agent details
   summary     Generate concise parent rehydration summary
+  gc          Evict stale parked persistent agents
   interrupt   Interrupt an agent (Ctrl+C)
   kill        Kill an agent
   revive      Revive a stopped/failed agent
@@ -1924,6 +2237,19 @@ Generate concise summary for parent rehydration
 
 Usage:
   forge agent summary <agent-id>";
+
+const GC_HELP: &str = "\
+Evict stale parked persistent agents
+
+Usage:
+  forge agent gc [flags]
+
+Flags:
+  -w, --workspace string   filter by workspace
+      --idle-timeout int   evict idle agents at/after this age in seconds
+      --max-age int        evict agents at/after this total age in seconds
+      --limit int          max parked agents scanned (default: 500)
+      --dry-run            report candidates without deleting";
 
 const INTERRUPT_HELP: &str = "\
 Interrupt an agent (send Ctrl+C)
@@ -2197,6 +2523,34 @@ mod tests {
     }
 
     #[test]
+    fn parse_gc_with_flags() {
+        let args = vec![
+            "agent".to_string(),
+            "gc".to_string(),
+            "--workspace".to_string(),
+            "ws-1".to_string(),
+            "--idle-timeout".to_string(),
+            "60".to_string(),
+            "--max-age".to_string(),
+            "600".to_string(),
+            "--limit".to_string(),
+            "25".to_string(),
+            "--dry-run".to_string(),
+        ];
+        let parsed = parse_ok(&args);
+        match &parsed.subcommand {
+            Subcommand::Gc(a) => {
+                assert_eq!(a.workspace_id, "ws-1");
+                assert_eq!(a.idle_timeout_seconds, Some(60));
+                assert_eq!(a.max_age_seconds, Some(600));
+                assert_eq!(a.limit, 25);
+                assert!(a.dry_run);
+            }
+            other => panic!("expected Gc, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_kill_with_force() {
         let args = vec![
             "agent".to_string(),
@@ -2363,6 +2717,148 @@ Will resume after unblock"
             .unwrap_or_else(|err| panic!("remove temp dir {}: {err}", temp.display()));
     }
 
+    #[test]
+    fn eviction_candidate_prefers_ttl_over_other_thresholds() {
+        let now = chrono::Utc::now();
+        let agent = forge_db::persistent_agent_repository::PersistentAgent {
+            id: "ag-ttl".to_string(),
+            workspace_id: "ws-1".to_string(),
+            harness: "codex".to_string(),
+            mode: "continuous".to_string(),
+            state: "idle".to_string(),
+            ttl_seconds: Some(30),
+            created_at: (now - chrono::Duration::seconds(120)).to_rfc3339(),
+            last_activity_at: (now - chrono::Duration::seconds(120)).to_rfc3339(),
+            updated_at: now.to_rfc3339(),
+            ..Default::default()
+        };
+        let args = GcArgs {
+            workspace_id: String::new(),
+            idle_timeout_seconds: Some(10),
+            max_age_seconds: Some(60),
+            dry_run: false,
+            limit: 100,
+        };
+
+        let candidate = evaluate_eviction_candidate(&agent, &args, &now).expect("candidate");
+        assert_eq!(candidate.reason, EvictionReason::Ttl);
+        assert_eq!(candidate.ttl_seconds, Some(30));
+    }
+
+    #[test]
+    fn eviction_candidate_ignores_non_parked_states() {
+        let now = chrono::Utc::now();
+        let agent = forge_db::persistent_agent_repository::PersistentAgent {
+            id: "ag-running".to_string(),
+            workspace_id: "ws-1".to_string(),
+            harness: "codex".to_string(),
+            mode: "continuous".to_string(),
+            state: "running".to_string(),
+            ttl_seconds: Some(1),
+            created_at: (now - chrono::Duration::seconds(600)).to_rfc3339(),
+            last_activity_at: (now - chrono::Duration::seconds(600)).to_rfc3339(),
+            updated_at: now.to_rfc3339(),
+            ..Default::default()
+        };
+        let args = GcArgs {
+            workspace_id: String::new(),
+            idle_timeout_seconds: Some(10),
+            max_age_seconds: Some(60),
+            dry_run: false,
+            limit: 100,
+        };
+
+        let candidate = evaluate_eviction_candidate(&agent, &args, &now);
+        assert!(candidate.is_none());
+    }
+
+    #[test]
+    fn agent_gc_evicts_expired_parked_agents_and_emits_events() {
+        let temp = temp_dir("agent-gc");
+        let db_path = temp.join("forge.db");
+        setup_migrated_db(&db_path);
+
+        let now = chrono::Utc::now();
+        let old = (now - chrono::Duration::seconds(600)).to_rfc3339();
+        let recent = (now - chrono::Duration::seconds(5)).to_rfc3339();
+
+        let db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+        let repo = forge_db::persistent_agent_repository::PersistentAgentRepository::new(&db);
+
+        let mut stale_idle = forge_db::persistent_agent_repository::PersistentAgent {
+            id: "ag-stale-idle".to_string(),
+            workspace_id: "ws-1".to_string(),
+            harness: "codex".to_string(),
+            mode: "continuous".to_string(),
+            state: "idle".to_string(),
+            ttl_seconds: Some(30),
+            created_at: old.clone(),
+            last_activity_at: old.clone(),
+            updated_at: old.clone(),
+            ..Default::default()
+        };
+        repo.create(&mut stale_idle)
+            .unwrap_or_else(|err| panic!("create stale idle: {err}"));
+
+        let mut active_running = forge_db::persistent_agent_repository::PersistentAgent {
+            id: "ag-active-running".to_string(),
+            workspace_id: "ws-1".to_string(),
+            harness: "codex".to_string(),
+            mode: "continuous".to_string(),
+            state: "running".to_string(),
+            ttl_seconds: Some(30),
+            created_at: old.clone(),
+            last_activity_at: recent,
+            updated_at: old,
+            ..Default::default()
+        };
+        repo.create(&mut active_running)
+            .unwrap_or_else(|err| panic!("create active running: {err}"));
+
+        let gc_args = GcArgs {
+            workspace_id: "ws-1".to_string(),
+            idle_timeout_seconds: Some(60),
+            max_age_seconds: None,
+            dry_run: false,
+            limit: 100,
+        };
+        let parsed = ParsedArgs {
+            json: true,
+            jsonl: false,
+            quiet: false,
+            subcommand: Subcommand::Help,
+        };
+
+        let mut stdout = Vec::new();
+        exec_gc_with_db_path(&gc_args, &parsed, &mut stdout, &db_path)
+            .unwrap_or_else(|err| panic!("exec gc: {err}"));
+
+        let output = String::from_utf8(stdout).unwrap_or_else(|err| panic!("utf8 output: {err}"));
+        let json = parse_json(&output);
+        assert_eq!(json["evicted"], 1);
+        assert_eq!(json["scanned"], 1);
+        assert_eq!(json["evictions"][0]["agent_id"], "ag-stale-idle");
+
+        let verify_db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open verify db {}: {err}", db_path.display()));
+        let verify_repo =
+            forge_db::persistent_agent_repository::PersistentAgentRepository::new(&verify_db);
+        assert!(verify_repo.get("ag-stale-idle").is_err());
+        assert!(verify_repo.get("ag-active-running").is_ok());
+
+        let event_repo = PersistentAgentEventRepository::new(&verify_db);
+        let events = event_repo
+            .list_by_agent("ag-stale-idle", 10)
+            .unwrap_or_else(|err| panic!("list gc events: {err}"));
+        assert_eq!(events[0].kind, "gc_evict_done");
+        assert_eq!(events[0].outcome, "success");
+        assert_eq!(events[1].kind, "gc_evict_start");
+
+        std::fs::remove_dir_all(&temp)
+            .unwrap_or_else(|err| panic!("remove temp dir {}: {err}", temp.display()));
+    }
+
     // ── Execution tests with InMemory backend ────────────────────────────
 
     #[test]
@@ -2378,6 +2874,7 @@ Will resume after unblock"
         assert!(out.stdout.contains("ps"));
         assert!(out.stdout.contains("show"));
         assert!(out.stdout.contains("summary"));
+        assert!(out.stdout.contains("gc"));
         assert!(out.stdout.contains("kill"));
     }
 
@@ -2737,6 +3234,12 @@ Will resume after unblock"
         assert!(summary_out
             .stderr
             .contains("Generate concise summary for parent rehydration"));
+
+        let gc_out = run_for_test(&["agent", "gc", "--help"], &backend);
+        assert_eq!(gc_out.exit_code, 1);
+        assert!(gc_out
+            .stderr
+            .contains("Evict stale parked persistent agents"));
 
         let kill_out = run_for_test(&["agent", "kill", "--help"], &backend);
         assert_eq!(kill_out.exit_code, 1);

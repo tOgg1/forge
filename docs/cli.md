@@ -63,6 +63,7 @@ Key subcommands:
 - `forge agent ps`
 - `forge agent show <agent-id>`
 - `forge agent summary <agent-id>`
+- `forge agent gc [--idle-timeout <sec>] [--max-age <sec>] [--dry-run]`
 - `forge agent interrupt <agent-id>`
 - `forge agent kill <agent-id> [--force]`
 
