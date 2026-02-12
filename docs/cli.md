@@ -56,15 +56,15 @@ Parent-oriented delegated workflow for non-loop tasks. Reuse one child across mu
 
 Key subcommands:
 
-- `forge agent run [task-text] [--agent <id>] [--type <harness>] [--wait idle] [--revive|--revive-policy auto]`
+- `forge agent run [task-text] [--agent <id>] [--type <harness>] [--wait idle] [--revive|--revive-policy auto] [--approval-policy <mode>] [--account-id <id>] [--profile <name>]`
 - `forge agent spawn [agent-id] --command <cmd>`
-- `forge agent send <agent-id> <text>`
+- `forge agent send <agent-id> <text> [--approval-policy <mode>] [--allow-risky]`
 - `forge agent wait <agent-id> --until <state>`
 - `forge agent ps`
 - `forge agent show <agent-id>`
 - `forge agent summary <agent-id>`
 - `forge agent gc [--idle-timeout <sec>] [--max-age <sec>] [--dry-run]`
-- `forge agent interrupt <agent-id>`
+- `forge agent interrupt <agent-id> [--approval-policy <mode>] [--allow-risky]`
 - `forge agent kill <agent-id> [--force]`
 
 Real recipes:
@@ -88,6 +88,12 @@ forge agent run "Continue previous migration audit" \
   --label epic=M10 \
   --wait idle
 ```
+
+Policy notes:
+
+- `agent run` propagates approval/account/profile context into spawned child environment (`FORGE_APPROVAL_POLICY`, `FORGE_ACCOUNT_ID`, `FORGE_PROFILE`).
+- `agent send` and `agent interrupt` block risky actions under strict/default/plan policy unless `--allow-risky` is set.
+- Persistent agent audit events redact common secret/token payloads.
 
 Harness mode guidance:
 

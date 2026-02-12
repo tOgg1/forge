@@ -17,7 +17,9 @@ use forge_agent::types::{
 use forge_db::persistent_agent_event_repository::{
     PersistentAgentEvent, PersistentAgentEventRepository,
 };
-use forge_db::persistent_agent_repository::{PersistentAgentFilter, PersistentAgentRepository};
+use forge_db::persistent_agent_repository::{
+    PersistentAgent, PersistentAgentFilter, PersistentAgentRepository,
+};
 use forge_db::transcript_repository::{Transcript, TranscriptRepository};
 use serde::Serialize;
 
@@ -306,6 +308,8 @@ struct SendArgs {
     text: String,
     send_enter: bool,
     keys: Vec<String>,
+    approval_policy: String,
+    allow_risky: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -343,6 +347,8 @@ struct GcArgs {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct InterruptArgs {
     agent_id: String,
+    approval_policy: String,
+    allow_risky: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -380,6 +386,9 @@ struct RunArgs {
     workspace_id: String,
     agent_type: String,
     command: String,
+    approval_policy: String,
+    account_id: String,
+    profile: String,
     wait_for: String,
     wait_timeout: u64,
     revive_policy: RevivePolicy,
@@ -459,6 +468,313 @@ const SUMMARY_EXCERPT_LIMIT: usize = 8;
 const SUMMARY_BLOCKER_LIMIT: usize = 6;
 const SUMMARY_TEXT_LIMIT: usize = 220;
 const OBSERVABILITY_AGENT_SCAN_LIMIT: i64 = 20_000;
+const DEFAULT_APPROVAL_POLICY: &str = "strict";
+const APPROVAL_POLICY_ENV_KEY: &str = "FORGE_APPROVAL_POLICY";
+const ACCOUNT_ID_ENV_KEY: &str = "FORGE_ACCOUNT_ID";
+const PROFILE_ENV_KEY: &str = "FORGE_PROFILE";
+const APPROVAL_POLICY_LABEL_KEY: &str = "approval_policy";
+const ACCOUNT_ID_LABEL_KEY: &str = "account_id";
+const PROFILE_LABEL_KEY: &str = "profile";
+const REDACTED_VALUE: &str = "[REDACTED]";
+const SENSITIVE_KEY_TOKENS: &[&str] = &[
+    "token",
+    "secret",
+    "password",
+    "api_key",
+    "apikey",
+    "authorization",
+    "cookie",
+    "session",
+    "private_key",
+];
+const SENSITIVE_VALUE_MARKERS: &[&str] = &[
+    "bearer ",
+    "token=",
+    "token:",
+    "secret=",
+    "secret:",
+    "password=",
+    "password:",
+    "api_key=",
+    "api_key:",
+    "apikey=",
+    "apikey:",
+    "authorization:",
+    "authorization=",
+    "xoxb-",
+    "xoxp-",
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "sk-",
+    "-----begin",
+];
+#[allow(dead_code)]
+const RISKY_SEND_TOKENS: &[&str] = &[
+    "rm -rf",
+    "rm -fr",
+    "git push --force",
+    "git reset --hard",
+    "git clean -fd",
+    "drop table",
+    "truncate table",
+    "mkfs",
+    "dd if=",
+    "curl ",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ApprovalContext {
+    approval_policy: String,
+    account_id: Option<String>,
+    profile: Option<String>,
+}
+
+impl ApprovalContext {
+    fn to_spawn_env(&self) -> HashMap<String, String> {
+        let mut env = HashMap::new();
+        env.insert(
+            APPROVAL_POLICY_ENV_KEY.to_string(),
+            self.approval_policy.clone(),
+        );
+        if let Some(account_id) = self
+            .account_id
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            env.insert(ACCOUNT_ID_ENV_KEY.to_string(), account_id.to_string());
+        }
+        if let Some(profile) = self
+            .profile
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            env.insert(PROFILE_ENV_KEY.to_string(), profile.to_string());
+        }
+        env
+    }
+
+    fn to_labels(&self) -> HashMap<String, String> {
+        let mut labels = HashMap::new();
+        labels.insert(
+            APPROVAL_POLICY_LABEL_KEY.to_string(),
+            self.approval_policy.clone(),
+        );
+        if let Some(account_id) = self
+            .account_id
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            labels.insert(ACCOUNT_ID_LABEL_KEY.to_string(), account_id.to_string());
+        }
+        if let Some(profile) = self
+            .profile
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            labels.insert(PROFILE_LABEL_KEY.to_string(), profile.to_string());
+        }
+        labels
+    }
+}
+
+fn env_non_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn record_label_non_empty(record: Option<&PersistentAgent>, key: &str) -> Option<String> {
+    record
+        .and_then(|entry| entry.labels.get(key))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn pick_context_value(
+    explicit: &str,
+    record: Option<&PersistentAgent>,
+    label_key: &str,
+    env_key: &str,
+) -> Option<String> {
+    if !explicit.trim().is_empty() {
+        return Some(explicit.trim().to_string());
+    }
+    if let Some(value) = record_label_non_empty(record, label_key) {
+        return Some(value);
+    }
+    env_non_empty(env_key)
+}
+
+fn resolve_run_approval_context(
+    args: &RunArgs,
+    record: Option<&PersistentAgent>,
+) -> ApprovalContext {
+    let approval_policy = pick_context_value(
+        &args.approval_policy,
+        record,
+        APPROVAL_POLICY_LABEL_KEY,
+        APPROVAL_POLICY_ENV_KEY,
+    )
+    .unwrap_or_else(|| DEFAULT_APPROVAL_POLICY.to_string());
+    let account_id = pick_context_value(
+        &args.account_id,
+        record,
+        ACCOUNT_ID_LABEL_KEY,
+        ACCOUNT_ID_ENV_KEY,
+    );
+    let profile = pick_context_value(&args.profile, record, PROFILE_LABEL_KEY, PROFILE_ENV_KEY);
+    ApprovalContext {
+        approval_policy,
+        account_id,
+        profile,
+    }
+}
+
+fn resolve_control_policy(explicit: &str, record: Option<&PersistentAgent>) -> String {
+    pick_context_value(
+        explicit,
+        record,
+        APPROVAL_POLICY_LABEL_KEY,
+        APPROVAL_POLICY_ENV_KEY,
+    )
+    .unwrap_or_else(|| DEFAULT_APPROVAL_POLICY.to_string())
+}
+
+#[allow(dead_code)]
+fn is_protective_policy(policy: &str) -> bool {
+    matches!(
+        policy.trim().to_ascii_lowercase().as_str(),
+        "" | "strict" | "default" | "plan"
+    )
+}
+
+#[allow(dead_code)]
+fn detect_risky_send_reason(text: &str, keys: &[String]) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    if let Some(token) = RISKY_SEND_TOKENS.iter().find(|token| {
+        if **token == "curl " {
+            lower.contains("curl ") && (lower.contains("| sh") || lower.contains("| bash"))
+        } else {
+            lower.contains(**token)
+        }
+    }) {
+        return Some(format!("payload contains risky token '{token}'"));
+    }
+
+    if let Some(key) = keys
+        .iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .find(|key| matches!(key.as_str(), "c-c" | "c-z" | "c-d"))
+    {
+        return Some(format!("key sequence '{key}' may interrupt live work"));
+    }
+
+    None
+}
+
+#[allow(dead_code)]
+fn detect_risky_interrupt_reason(state: AgentState) -> Option<String> {
+    match state {
+        AgentState::WaitingApproval => {
+            Some("agent is waiting_approval; interrupt may discard pending approval".to_string())
+        }
+        AgentState::Paused => {
+            Some("agent is paused; interrupt may lose paused context".to_string())
+        }
+        _ => None,
+    }
+}
+
+#[allow(dead_code)]
+fn enforce_risky_action_policy(
+    policy: &str,
+    allow_risky: bool,
+    action: &str,
+    agent_id: &str,
+    reason: Option<String>,
+) -> Result<(), String> {
+    let Some(reason) = reason else {
+        return Ok(());
+    };
+    if allow_risky || !is_protective_policy(policy) {
+        return Ok(());
+    }
+    Err(format!(
+        "policy '{policy}' blocked risky {action} for agent '{agent_id}': {reason}. Retry with --allow-risky or set --approval-policy to a less restrictive mode"
+    ))
+}
+
+fn key_is_sensitive(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    SENSITIVE_KEY_TOKENS
+        .iter()
+        .any(|token| lower.contains(token))
+}
+
+fn text_contains_sensitive_marker(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    SENSITIVE_VALUE_MARKERS
+        .iter()
+        .any(|token| lower.contains(token))
+}
+
+fn redact_sensitive_text(value: &str) -> String {
+    if text_contains_sensitive_marker(value) {
+        REDACTED_VALUE.to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn redact_sensitive_json(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut redacted = serde_json::Map::with_capacity(map.len());
+            for (key, value) in map {
+                if key_is_sensitive(key) {
+                    redacted.insert(
+                        key.clone(),
+                        serde_json::Value::String(REDACTED_VALUE.to_string()),
+                    );
+                } else {
+                    redacted.insert(key.clone(), redact_sensitive_json(value));
+                }
+            }
+            serde_json::Value::Object(redacted)
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(redact_sensitive_json).collect())
+        }
+        serde_json::Value::String(text) => serde_json::Value::String(redact_sensitive_text(text)),
+        _ => value.clone(),
+    }
+}
+
+fn redact_detail_payload(raw: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(value) => serde_json::to_string(&redact_sensitive_json(&value))
+            .unwrap_or_else(|_| REDACTED_VALUE.to_string()),
+        Err(_) => redact_sensitive_text(raw),
+    }
+}
+
+fn append_sanitized_event(
+    repo: &PersistentAgentEventRepository<'_>,
+    event: &mut PersistentAgentEvent,
+) -> Result<(), forge_db::DbError> {
+    event.outcome = redact_sensitive_text(&event.outcome);
+    event.detail = event
+        .detail
+        .as_ref()
+        .map(|value| redact_detail_payload(value));
+    repo.append(event)
+}
 
 fn exec_summary(
     args: &SummaryArgs,
@@ -581,7 +897,9 @@ fn persist_summary_snapshot(
     repo: &PersistentAgentEventRepository<'_>,
     snapshot: &AgentSummarySnapshot,
 ) -> Result<i64, String> {
-    let detail = serde_json::to_string(snapshot).map_err(|err| err.to_string())?;
+    let detail_value = serde_json::to_value(snapshot).map_err(|err| err.to_string())?;
+    let detail = serde_json::to_string(&redact_sensitive_json(&detail_value))
+        .map_err(|err| err.to_string())?;
     let mut event = PersistentAgentEvent {
         id: 0,
         agent_id: Some(snapshot.agent_id.clone()),
@@ -590,7 +908,7 @@ fn persist_summary_snapshot(
         detail: Some(detail),
         timestamp: String::new(),
     };
-    repo.append(&mut event).map_err(|err| err.to_string())?;
+    append_sanitized_event(repo, &mut event).map_err(|err| err.to_string())?;
     Ok(event.id)
 }
 
@@ -687,10 +1005,10 @@ fn append_metric_event(
         agent_id: agent_id.map(ToOwned::to_owned),
         kind: format!("metric_{name}"),
         outcome: outcome.to_string(),
-        detail: serde_json::to_string(&detail).ok(),
+        detail: serde_json::to_string(&redact_sensitive_json(&detail)).ok(),
         timestamp: String::new(),
     };
-    let _ = repo.append(&mut event);
+    let _ = append_sanitized_event(repo, &mut event);
 }
 
 fn with_observability_repos(
@@ -1045,8 +1363,7 @@ fn exec_gc_with_db_path(
                 detail: Some(detail.clone()),
                 timestamp: String::new(),
             };
-            event_repo
-                .append(&mut start_event)
+            append_sanitized_event(&event_repo, &mut start_event)
                 .map_err(|err| format!("append gc start event for {}: {err}", agent.id))?;
 
             if let Err(err) = repo.delete(&agent.id) {
@@ -1058,7 +1375,7 @@ fn exec_gc_with_db_path(
                     detail: Some(detail),
                     timestamp: String::new(),
                 };
-                let _ = event_repo.append(&mut failed_event);
+                let _ = append_sanitized_event(&event_repo, &mut failed_event);
                 return Err(format!("evict persistent agent {}: {err}", agent.id));
             }
 
@@ -1070,8 +1387,7 @@ fn exec_gc_with_db_path(
                 detail: Some(detail),
                 timestamp: String::new(),
             };
-            event_repo
-                .append(&mut done_event)
+            append_sanitized_event(&event_repo, &mut done_event)
                 .map_err(|err| format!("append gc done event for {}: {err}", agent.id))?;
         }
 
@@ -1202,7 +1518,7 @@ fn append_revive_audit_event(agent_id: &str, kind: &str, outcome: &str, detail: 
             detail: serde_json::to_string(&detail).ok(),
             timestamp: String::new(),
         };
-        let _ = event_repo.append(&mut event);
+        let _ = append_sanitized_event(event_repo, &mut event);
     });
 }
 
@@ -1211,6 +1527,7 @@ fn ensure_persistent_agent_record(
     workspace_id: &str,
     harness: &str,
     parent_agent_id: Option<&str>,
+    approval_context: Option<&ApprovalContext>,
 ) {
     with_observability_repos(|_event_repo, agent_repo| {
         if let Ok(current) = agent_repo.get(agent_id) {
@@ -1221,13 +1538,16 @@ fn ensure_persistent_agent_record(
             return;
         }
 
-        let mut persistent = forge_db::persistent_agent_repository::PersistentAgent {
+        let mut persistent = PersistentAgent {
             id: agent_id.to_string(),
             parent_agent_id: parent_agent_id.map(ToOwned::to_owned),
             workspace_id: workspace_id.to_string(),
             harness: harness.to_string(),
             mode: "continuous".to_string(),
             state: "starting".to_string(),
+            labels: approval_context
+                .map(ApprovalContext::to_labels)
+                .unwrap_or_default(),
             ..Default::default()
         };
         let _ = agent_repo.create(&mut persistent);
@@ -1291,6 +1611,7 @@ struct ReviveContext<'a> {
     parent_agent_id: Option<&'a str>,
     reason: &'a str,
     policy: RevivePolicy,
+    approval_context: ApprovalContext,
     kill_before_spawn: bool,
 }
 
@@ -1302,6 +1623,9 @@ fn revive_agent_with_context(
     let start_detail = serde_json::json!({
         "reason": ctx.reason,
         "policy": ctx.policy.as_str(),
+        "approval_policy": ctx.approval_context.approval_policy.as_str(),
+        "account_id": ctx.approval_context.account_id.as_deref(),
+        "profile": ctx.approval_context.profile.as_deref(),
         "workspace_id": ctx.workspace_id,
         "command": ctx.command,
         "adapter": ctx.adapter,
@@ -1355,6 +1679,7 @@ fn revive_agent_with_context(
         ctx.adapter,
         ctx.harness,
         Some(ctx.adapter),
+        &ctx.approval_context,
     ) {
         Ok(snapshot) => snapshot,
         Err(err) => {
@@ -1400,7 +1725,13 @@ fn revive_agent_with_context(
         return Err(err);
     }
 
-    ensure_persistent_agent_record(agent_id, ctx.workspace_id, ctx.harness, ctx.parent_agent_id);
+    ensure_persistent_agent_record(
+        agent_id,
+        ctx.workspace_id,
+        ctx.harness,
+        ctx.parent_agent_id,
+        Some(&ctx.approval_context),
+    );
     append_revive_audit_event(agent_id, "revive_done", "success", start_detail);
     observe_counter_metric("agents_revived", "success", Some(agent_id), None);
 
@@ -1444,6 +1775,7 @@ fn exec_run(
     let mut revived = false;
 
     let persistent_record = load_persistent_agent_record(&agent_id);
+    let approval_context = resolve_run_approval_context(args, persistent_record.as_ref());
 
     let existing = match backend.get_agent(&agent_id) {
         Ok(snapshot) => Some(snapshot),
@@ -1494,6 +1826,7 @@ fn exec_run(
                     parent_agent_id,
                     reason: &format!("terminal_state:{}", snapshot.state),
                     policy: args.revive_policy,
+                    approval_context: approval_context.clone(),
                     kill_before_spawn: true,
                 },
             )?
@@ -1546,6 +1879,7 @@ fn exec_run(
                 parent_agent_id: record.parent_agent_id.as_deref(),
                 reason: "missing_process",
                 policy: args.revive_policy,
+                approval_context: approval_context.clone(),
                 kill_before_spawn: false,
             },
         )?
@@ -1558,9 +1892,25 @@ fn exec_run(
             default_adapter,
             &args.agent_type,
             None,
+            &approval_context,
         )?
     };
 
+    let persisted_parent = persistent_record
+        .as_ref()
+        .and_then(|record| record.parent_agent_id.as_deref());
+    let persisted_harness = if !start_snapshot.adapter.trim().is_empty() {
+        start_snapshot.adapter.clone()
+    } else {
+        args.agent_type.clone()
+    };
+    ensure_persistent_agent_record(
+        &agent_id,
+        &workspace_id,
+        &persisted_harness,
+        persisted_parent,
+        Some(&approval_context),
+    );
     let run_text = build_run_message(args);
     let send_started_at = Instant::now();
     let send_params = SendMessageParams {
@@ -1704,6 +2054,29 @@ fn exec_send(
     if args.agent_id.is_empty() {
         return Err("error: agent ID is required for agent send".to_string());
     }
+
+    let persistent_record = load_persistent_agent_record(&args.agent_id);
+    let approval_policy = resolve_control_policy(&args.approval_policy, persistent_record.as_ref());
+    if let Err(err) = enforce_risky_action_policy(
+        &approval_policy,
+        args.allow_risky,
+        "send",
+        &args.agent_id,
+        detect_risky_send_reason(&args.text, &args.keys),
+    ) {
+        observe_counter_metric(
+            "sends",
+            "error",
+            Some(&args.agent_id),
+            Some(serde_json::json!({
+                "error": err,
+                "policy": approval_policy,
+                "reason": "policy_denied"
+            })),
+        );
+        return Err(err);
+    }
+
     let params = SendMessageParams {
         agent_id: args.agent_id.clone(),
         text: args.text.clone(),
@@ -1813,6 +2186,42 @@ fn exec_interrupt(
     if args.agent_id.is_empty() {
         return Err("error: agent ID is required for agent interrupt".to_string());
     }
+
+    let persistent_record = load_persistent_agent_record(&args.agent_id);
+    let approval_policy = resolve_control_policy(&args.approval_policy, persistent_record.as_ref());
+    let current = match backend.get_agent(&args.agent_id) {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            observe_counter_metric(
+                "interrupts",
+                "error",
+                Some(&args.agent_id),
+                Some(serde_json::json!({ "error": err })),
+            );
+            return Err(err);
+        }
+    };
+
+    if let Err(err) = enforce_risky_action_policy(
+        &approval_policy,
+        args.allow_risky,
+        "interrupt",
+        &args.agent_id,
+        detect_risky_interrupt_reason(current.state),
+    ) {
+        observe_counter_metric(
+            "interrupts",
+            "error",
+            Some(&args.agent_id),
+            Some(serde_json::json!({
+                "error": err,
+                "policy": approval_policy,
+                "reason": "policy_denied"
+            })),
+        );
+        return Err(err);
+    }
+
     let ok = match backend.interrupt_agent(&args.agent_id) {
         Ok(value) => value,
         Err(err) => {
@@ -1873,6 +2282,21 @@ fn exec_revive(
     }
 
     let persistent_record = load_persistent_agent_record(&args.agent_id);
+    let approval_context = ApprovalContext {
+        approval_policy: resolve_control_policy("", persistent_record.as_ref()),
+        account_id: pick_context_value(
+            "",
+            persistent_record.as_ref(),
+            ACCOUNT_ID_LABEL_KEY,
+            ACCOUNT_ID_ENV_KEY,
+        ),
+        profile: pick_context_value(
+            "",
+            persistent_record.as_ref(),
+            PROFILE_LABEL_KEY,
+            PROFILE_ENV_KEY,
+        ),
+    };
     let existing = match backend.get_agent(&args.agent_id) {
         Ok(snapshot) => Some(snapshot),
         Err(err) if is_not_found_error(&err) => None,
@@ -1907,6 +2331,7 @@ fn exec_revive(
                 parent_agent_id,
                 reason: &format!("terminal_state:{}", snapshot.state),
                 policy: RevivePolicy::Auto,
+                approval_context: approval_context.clone(),
                 kill_before_spawn: true,
             },
         )?
@@ -1923,6 +2348,7 @@ fn exec_revive(
                 parent_agent_id: record.parent_agent_id.as_deref(),
                 reason: "missing_process",
                 policy: RevivePolicy::Auto,
+                approval_context: approval_context.clone(),
                 kill_before_spawn: false,
             },
         )?
@@ -1945,6 +2371,7 @@ fn spawn_for_run(
     default_adapter: &str,
     agent_type: &str,
     adapter_override: Option<&str>,
+    approval_context: &ApprovalContext,
 ) -> Result<AgentSnapshot, String> {
     let working_dir = std::env::current_dir()
         .ok()
@@ -1963,7 +2390,7 @@ fn spawn_for_run(
         workspace_id: workspace_id.to_string(),
         command: command.to_string(),
         args: Vec::new(),
-        env: HashMap::new(),
+        env: approval_context.to_spawn_env(),
         working_dir,
         session_name: agent_id.to_string(),
         adapter,
@@ -1980,6 +2407,7 @@ fn spawn_for_run_with_metrics(
     default_adapter: &str,
     agent_type: &str,
     adapter_override: Option<&str>,
+    approval_context: &ApprovalContext,
 ) -> Result<AgentSnapshot, String> {
     let spawned = spawn_for_run(
         backend,
@@ -1989,6 +2417,7 @@ fn spawn_for_run_with_metrics(
         default_adapter,
         agent_type,
         adapter_override,
+        approval_context,
     );
     match spawned {
         Ok(snapshot) => {
@@ -2368,6 +2797,9 @@ fn parse_run_args(args: &[String], mut index: usize) -> Result<RunArgs, String> 
         workspace_id: String::new(),
         agent_type: "codex".to_string(),
         command: String::new(),
+        approval_policy: String::new(),
+        account_id: String::new(),
+        profile: String::new(),
         wait_for: String::new(),
         wait_timeout: 300,
         revive_policy: RevivePolicy::Never,
@@ -2429,6 +2861,18 @@ fn parse_run_args(args: &[String], mut index: usize) -> Result<RunArgs, String> 
             }
             "--text" | "-t" => {
                 result.text = take_value(args, index, "--text")?;
+                index += 2;
+            }
+            "--approval-policy" => {
+                result.approval_policy = take_value(args, index, "--approval-policy")?;
+                index += 2;
+            }
+            "--account-id" => {
+                result.account_id = take_value(args, index, "--account-id")?;
+                index += 2;
+            }
+            "--profile" => {
+                result.profile = take_value(args, index, "--profile")?;
                 index += 2;
             }
             flag if flag.starts_with('-') => {
@@ -2520,6 +2964,8 @@ fn parse_send_args(args: &[String], mut index: usize) -> Result<SendArgs, String
         text: String::new(),
         send_enter: true,
         keys: Vec::new(),
+        approval_policy: String::new(),
+        allow_risky: false,
     };
 
     // Positional: agent_id.
@@ -2544,6 +2990,14 @@ fn parse_send_args(args: &[String], mut index: usize) -> Result<SendArgs, String
             "--key" => {
                 result.keys.push(take_value(args, index, "--key")?);
                 index += 2;
+            }
+            "--approval-policy" => {
+                result.approval_policy = take_value(args, index, "--approval-policy")?;
+                index += 2;
+            }
+            "--allow-risky" => {
+                result.allow_risky = true;
+                index += 1;
             }
             flag if flag.starts_with('-') => {
                 return Err(format!("error: unknown flag for agent send: '{flag}'"));
@@ -2754,6 +3208,8 @@ fn parse_gc_seconds(raw: &str, flag: &str) -> Result<i64, String> {
 fn parse_interrupt_args(args: &[String], mut index: usize) -> Result<InterruptArgs, String> {
     let mut result = InterruptArgs {
         agent_id: String::new(),
+        approval_policy: String::new(),
+        allow_risky: false,
     };
 
     if let Some(token) = args.get(index) {
@@ -2766,13 +3222,26 @@ fn parse_interrupt_args(args: &[String], mut index: usize) -> Result<InterruptAr
         }
     }
 
-    if let Some(token) = args.get(index) {
-        if token.starts_with('-') {
-            return Err(format!(
-                "error: unknown flag for agent interrupt: '{token}'"
-            ));
+    while let Some(token) = args.get(index) {
+        match token.as_str() {
+            "-h" | "--help" => return Err(INTERRUPT_HELP.to_string()),
+            "--approval-policy" => {
+                result.approval_policy = take_value(args, index, "--approval-policy")?;
+                index += 2;
+            }
+            "--allow-risky" => {
+                result.allow_risky = true;
+                index += 1;
+            }
+            flag if flag.starts_with('-') => {
+                return Err(format!("error: unknown flag for agent interrupt: '{flag}'"));
+            }
+            positional => {
+                return Err(format!(
+                    "error: unexpected positional argument: '{positional}'"
+                ));
+            }
         }
-        return Err(format!("error: unexpected positional argument: '{token}'"));
     }
 
     Ok(result)
@@ -2902,6 +3371,9 @@ Flags:
       --timeout int        wait timeout in seconds (default: 300)
       --revive             shorthand for --revive-policy auto
       --revive-policy str  revive behavior: never|ask|auto (default: never)
+      --approval-policy str parent approval policy hint (default: strict)
+      --account-id string   parent account context for child spawn
+      --profile string      parent profile context for child spawn
       --task-id string     correlation id for parent task
       --tag string         correlation tag (repeatable)
       --label string       correlation label KEY=VALUE (repeatable)
@@ -2914,9 +3386,11 @@ Usage:
   forge agent send <agent-id> [text] [flags]
 
 Flags:
-  -t, --text string   message text
-      --no-enter       do not send Enter after text
-      --key string     send a key (repeatable)";
+  -t, --text string       message text
+      --no-enter           do not send Enter after text
+      --key string         send a key (repeatable)
+      --approval-policy str approval policy for risk checks
+      --allow-risky        allow risky send payloads under strict policy";
 
 const WAIT_HELP: &str = "\
 Wait for an agent to reach a target state
@@ -2973,7 +3447,11 @@ const INTERRUPT_HELP: &str = "\
 Interrupt an agent (send Ctrl+C)
 
 Usage:
-  forge agent interrupt <agent-id>";
+  forge agent interrupt <agent-id> [flags]
+
+Flags:
+      --approval-policy str approval policy for risk checks
+      --allow-risky        allow risky interrupts under strict policy";
 
 const KILL_HELP: &str = "\
 Kill an agent
@@ -3000,7 +3478,7 @@ Notes:
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use forge_agent::mock::test_snapshot;
+    use forge_agent::mock::{test_snapshot, MockCall};
     use forge_agent::types::AgentState;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -3078,6 +3556,30 @@ mod tests {
 
         std::fs::remove_dir_all(&temp)
             .unwrap_or_else(|err| panic!("remove temp dir {}: {err}", temp.display()));
+    }
+
+    fn with_temp_env(vars: &[(&str, &str)], callback: impl FnOnce()) {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|err| panic!("lock env guard: {err}"));
+
+        let saved: Vec<(String, Option<std::ffi::OsString>)> = vars
+            .iter()
+            .map(|(key, _)| ((*key).to_string(), std::env::var_os(key)))
+            .collect();
+
+        for (key, value) in vars {
+            std::env::set_var(key, value);
+        }
+
+        callback();
+
+        for (key, prior) in saved {
+            match prior {
+                Some(value) => std::env::set_var(&key, value),
+                None => std::env::remove_var(&key),
+            }
+        }
     }
 
     fn seed_persistent_agent(
@@ -3201,6 +3703,72 @@ mod tests {
                 assert_eq!(a.labels, vec!["epic=persistent"]);
             }
             other => panic!("expected Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_run_includes_approval_context_flags() {
+        let args = vec![
+            "agent".to_string(),
+            "run".to_string(),
+            "delegate".to_string(),
+            "--approval-policy".to_string(),
+            "plan".to_string(),
+            "--account-id".to_string(),
+            "acct-9".to_string(),
+            "--profile".to_string(),
+            "ops".to_string(),
+        ];
+        let parsed = parse_ok(&args);
+        match &parsed.subcommand {
+            Subcommand::Run(a) => {
+                assert_eq!(a.approval_policy, "plan");
+                assert_eq!(a.account_id, "acct-9");
+                assert_eq!(a.profile, "ops");
+            }
+            other => panic!("expected Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_send_allow_risky_and_policy_flags() {
+        let args = vec![
+            "agent".to_string(),
+            "send".to_string(),
+            "ag-1".to_string(),
+            "--approval-policy".to_string(),
+            "strict".to_string(),
+            "--allow-risky".to_string(),
+            "--text".to_string(),
+            "rm -rf /tmp/demo".to_string(),
+        ];
+        let parsed = parse_ok(&args);
+        match &parsed.subcommand {
+            Subcommand::Send(a) => {
+                assert_eq!(a.approval_policy, "strict");
+                assert!(a.allow_risky);
+            }
+            other => panic!("expected Send, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_interrupt_allow_risky_and_policy_flags() {
+        let args = vec![
+            "agent".to_string(),
+            "interrupt".to_string(),
+            "ag-1".to_string(),
+            "--approval-policy".to_string(),
+            "plan".to_string(),
+            "--allow-risky".to_string(),
+        ];
+        let parsed = parse_ok(&args);
+        match &parsed.subcommand {
+            Subcommand::Interrupt(a) => {
+                assert_eq!(a.approval_policy, "plan");
+                assert!(a.allow_risky);
+            }
+            other => panic!("expected Interrupt, got {other:?}"),
         }
     }
 
@@ -3450,6 +4018,63 @@ mod tests {
             assert_eq!(detail["type"], "counter");
             assert_eq!(detail["name"], "sends");
             assert_eq!(detail["value"], 1);
+        });
+    }
+
+    #[test]
+    fn metric_event_redacts_sensitive_payload_fields() {
+        with_observability_db_path("metric-redact", |db_path| {
+            observe_counter_metric(
+                "sends",
+                "error",
+                Some("ag-redact"),
+                Some(serde_json::json!({
+                    "token": "super-secret-token",
+                    "note": "Authorization: Bearer sk-demo",
+                    "safe": "ok"
+                })),
+            );
+
+            let db = forge_db::Db::open(forge_db::Config::new(db_path))
+                .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+            let repo = PersistentAgentEventRepository::new(&db);
+            let events = repo
+                .list_by_agent("ag-redact", 4)
+                .unwrap_or_else(|err| panic!("list redaction events: {err}"));
+            let detail = events[0].detail.as_ref().expect("detail");
+            assert!(!detail.contains("super-secret-token"));
+            assert!(!detail.contains("sk-demo"));
+
+            let parsed = parse_metric_detail(&events[0]);
+            assert_eq!(parsed["detail"]["token"], REDACTED_VALUE);
+            assert_eq!(parsed["detail"]["note"], REDACTED_VALUE);
+            assert_eq!(parsed["detail"]["safe"], "ok");
+        });
+    }
+
+    #[test]
+    fn revive_audit_event_redacts_sensitive_detail_text() {
+        with_observability_db_path("revive-redact", |db_path| {
+            append_revive_audit_event(
+                "ag-redact",
+                "revive_start",
+                "started",
+                serde_json::json!({
+                    "api_key": "sk-live-value",
+                    "message": "token=abc123"
+                }),
+            );
+
+            let db = forge_db::Db::open(forge_db::Config::new(db_path))
+                .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+            let repo = PersistentAgentEventRepository::new(&db);
+            let events = repo
+                .list_by_agent("ag-redact", 4)
+                .unwrap_or_else(|err| panic!("list revive events: {err}"));
+            let detail = events[0].detail.as_ref().expect("detail");
+            assert!(!detail.contains("sk-live-value"));
+            assert!(!detail.contains("abc123"));
+            assert!(detail.contains(REDACTED_VALUE));
         });
     }
 
@@ -3972,6 +4597,44 @@ Will resume after unblock"
     }
 
     #[test]
+    fn agent_run_inherits_parent_context_into_spawn_env() {
+        let backend = InMemoryAgentBackend::new();
+
+        with_temp_env(
+            &[
+                (APPROVAL_POLICY_ENV_KEY, "plan"),
+                (ACCOUNT_ID_ENV_KEY, "acct-42"),
+                (PROFILE_ENV_KEY, "ops"),
+            ],
+            || {
+                let out = run_for_test(
+                    &["agent", "run", "delegate audit", "--agent", "ag-context"],
+                    &backend,
+                );
+                assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+            },
+        );
+
+        let calls = backend.mock.calls();
+        let spawn = calls
+            .iter()
+            .find_map(|call| match call {
+                MockCall::Spawn(params) => Some(params.clone()),
+                _ => None,
+            })
+            .expect("spawn call");
+        assert_eq!(
+            spawn.env.get(APPROVAL_POLICY_ENV_KEY),
+            Some(&"plan".to_string())
+        );
+        assert_eq!(
+            spawn.env.get(ACCOUNT_ID_ENV_KEY),
+            Some(&"acct-42".to_string())
+        );
+        assert_eq!(spawn.env.get(PROFILE_ENV_KEY), Some(&"ops".to_string()));
+    }
+
+    #[test]
     fn agent_run_create_path_json() {
         let backend = InMemoryAgentBackend::new();
         let out = run_for_test(
@@ -4044,6 +4707,32 @@ Will resume after unblock"
     }
 
     #[test]
+    fn agent_send_risky_payload_denied_under_strict_policy() {
+        let backend =
+            InMemoryAgentBackend::new().with_agent(test_snapshot("ag-risk", AgentState::Idle));
+        let out = run_for_test(&["agent", "send", "ag-risk", "rm -rf /tmp/demo"], &backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("blocked risky send"));
+    }
+
+    #[test]
+    fn agent_send_risky_payload_allowed_with_override() {
+        let backend =
+            InMemoryAgentBackend::new().with_agent(test_snapshot("ag-risk", AgentState::Idle));
+        let out = run_for_test(
+            &[
+                "agent",
+                "send",
+                "ag-risk",
+                "rm -rf /tmp/demo",
+                "--allow-risky",
+            ],
+            &backend,
+        );
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+    }
+
+    #[test]
     fn agent_send_json() {
         let backend =
             InMemoryAgentBackend::new().with_agent(test_snapshot("ag-001", AgentState::Idle));
@@ -4087,6 +4776,26 @@ Will resume after unblock"
         assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
         let parsed = parse_json(&out.stdout);
         assert_eq!(parsed["ok"], true);
+    }
+
+    #[test]
+    fn agent_interrupt_waiting_approval_denied_under_strict_policy() {
+        let backend = InMemoryAgentBackend::new()
+            .with_agent(test_snapshot("ag-approval", AgentState::WaitingApproval));
+        let out = run_for_test(&["agent", "interrupt", "ag-approval"], &backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("blocked risky interrupt"));
+    }
+
+    #[test]
+    fn agent_interrupt_waiting_approval_allowed_with_override() {
+        let backend = InMemoryAgentBackend::new()
+            .with_agent(test_snapshot("ag-approval", AgentState::WaitingApproval));
+        let out = run_for_test(
+            &["agent", "interrupt", "ag-approval", "--allow-risky"],
+            &backend,
+        );
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
     }
 
     #[test]
