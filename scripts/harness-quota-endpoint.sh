@@ -55,7 +55,7 @@ extract_reset_paren() {
 
 extract_reset_loose() {
   local line="$1"
-  printf '%s\n' "$line" | sed -n -E 's/.*Rese[a-zA-Z]*//p' | head -n 1
+  printf '%s\n' "$line" | sed -n -E 's/.*Rese(ts|s)//p' | head -n 1
 }
 
 clean_capture() {

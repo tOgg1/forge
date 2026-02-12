@@ -38,3 +38,5 @@ scripts/harness-usage-capture.sh stop
 ## Limitation
 
 Provider “remaining quota” panels shown by interactive slash UIs (`/status`, `/usage`) are not currently exposed as a stable machine-readable CLI surface. This script captures best-effort local metrics available without driving TUI rendering.
+
+See also: `docs/integrations/harness-quota-endpoint.md` for direct 5h/week remaining quota retrieval from slash views.
