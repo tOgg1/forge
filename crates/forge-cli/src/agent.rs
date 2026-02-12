@@ -709,6 +709,84 @@ fn with_observability_repos(
     callback(&event_repo, &agent_repo);
 }
 
+fn is_not_found_error(message: &str) -> bool {
+    message.to_ascii_lowercase().contains("not found")
+}
+
+fn load_persistent_agent_record(
+    agent_id: &str,
+) -> Option<forge_db::persistent_agent_repository::PersistentAgent> {
+    let db_path = resolve_database_path();
+    let mut db = forge_db::Db::open(forge_db::Config::new(&db_path)).ok()?;
+    db.migrate_up().ok()?;
+    let repo = PersistentAgentRepository::new(&db);
+    repo.get(agent_id).ok()
+}
+
+fn revive_policy_error_message(agent_id: &str, reason: &str, policy: RevivePolicy) -> String {
+    match policy {
+        RevivePolicy::Never => format!(
+            "agent '{agent_id}' requires revive ({reason}); revive policy is never. Retry with --revive-policy auto or --revive"
+        ),
+        RevivePolicy::Ask => format!(
+            "agent '{agent_id}' requires revive ({reason}); rerun with --revive-policy auto (or --revive) to continue"
+        ),
+        RevivePolicy::Auto => format!(
+            "agent '{agent_id}' requires revive ({reason}); retry with --revive-policy auto"
+        ),
+    }
+}
+
+fn revive_pending_objective(summary: &AgentSummarySnapshot) -> String {
+    if let Some(blocker) = summary.unresolved_blockers.first() {
+        return format!("resolve blocker: {blocker}");
+    }
+    if let Some(line) = summary
+        .transcript_excerpt
+        .iter()
+        .rev()
+        .find(|line| !line.is_empty())
+    {
+        return line.clone();
+    }
+    "continue previous delegated objective and report concise status".to_string()
+}
+
+fn build_revive_preamble(agent_id: &str, parent_agent_id: Option<&str>) -> String {
+    let db_path = resolve_database_path();
+    let mut transcript = None;
+    let mut events = Vec::new();
+    if let Ok(mut db) = forge_db::Db::open(forge_db::Config::new(&db_path)) {
+        if db.migrate_up().is_ok() {
+            let transcript_repo = TranscriptRepository::new(&db);
+            if let Ok(value) = transcript_repo.latest_by_agent(agent_id) {
+                transcript = Some(value);
+            }
+            let event_repo = PersistentAgentEventRepository::new(&db);
+            if let Ok(value) = event_repo.list_by_agent(agent_id, SUMMARY_EVENT_SCAN_LIMIT) {
+                events = value;
+            }
+        }
+    }
+
+    let summary = summarize_agent_snapshot(agent_id, transcript.as_ref(), &events);
+    let pending_objective = revive_pending_objective(&summary);
+
+    let mut lines = vec![
+        "Context rehydration after revive.".to_string(),
+        format!("Agent-ID: {agent_id}"),
+    ];
+    if let Some(parent) = parent_agent_id.filter(|value| !value.trim().is_empty()) {
+        lines.push(format!("Parent-Agent-ID: {parent}"));
+    }
+    lines.push(format!("Last-task: {}", summary.latest_task_outcome));
+    lines.push(format!("Summary-status: {}", summary.concise_status));
+    lines.push(format!("Pending-objective: {pending_objective}"));
+    lines.push("Resume work from this context and return concise status + next step.".to_string());
+
+    lines.join("\n")
+}
+
 fn is_wait_timeout_error(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("wait timeout") || lower.contains("timed out")
@@ -1114,6 +1192,221 @@ fn parse_agent_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         .map(|parsed| parsed.with_timezone(&chrono::Utc))
 }
 
+fn append_revive_audit_event(agent_id: &str, kind: &str, outcome: &str, detail: serde_json::Value) {
+    with_observability_repos(|event_repo, _agent_repo| {
+        let mut event = PersistentAgentEvent {
+            id: 0,
+            agent_id: Some(agent_id.to_string()),
+            kind: kind.to_string(),
+            outcome: outcome.to_string(),
+            detail: serde_json::to_string(&detail).ok(),
+            timestamp: String::new(),
+        };
+        let _ = event_repo.append(&mut event);
+    });
+}
+
+fn ensure_persistent_agent_record(
+    agent_id: &str,
+    workspace_id: &str,
+    harness: &str,
+    parent_agent_id: Option<&str>,
+) {
+    with_observability_repos(|_event_repo, agent_repo| {
+        if let Ok(current) = agent_repo.get(agent_id) {
+            if current.parent_agent_id.is_none() {
+                let _ = agent_repo.touch_activity(agent_id);
+            }
+            let _ = agent_repo.update_state(agent_id, "starting");
+            return;
+        }
+
+        let mut persistent = forge_db::persistent_agent_repository::PersistentAgent {
+            id: agent_id.to_string(),
+            parent_agent_id: parent_agent_id.map(ToOwned::to_owned),
+            workspace_id: workspace_id.to_string(),
+            harness: harness.to_string(),
+            mode: "continuous".to_string(),
+            state: "starting".to_string(),
+            ..Default::default()
+        };
+        let _ = agent_repo.create(&mut persistent);
+    });
+}
+
+fn send_revive_context(
+    backend: &dyn AgentBackend,
+    agent_id: &str,
+    parent_agent_id: Option<&str>,
+) -> Result<(), String> {
+    let preamble = build_revive_preamble(agent_id, parent_agent_id);
+    let params = SendMessageParams {
+        agent_id: agent_id.to_string(),
+        text: preamble,
+        send_enter: true,
+        keys: Vec::new(),
+    };
+
+    match backend.send_message(params) {
+        Ok(true) => {
+            observe_counter_metric(
+                "sends",
+                "success",
+                Some(agent_id),
+                Some(serde_json::json!({ "phase": "revive_preamble" })),
+            );
+            Ok(())
+        }
+        Ok(false) => {
+            let message = format!(
+                "revive context injection returned false for agent '{agent_id}'; retry with `forge agent send {agent_id} <context>`"
+            );
+            observe_counter_metric(
+                "sends",
+                "error",
+                Some(agent_id),
+                Some(serde_json::json!({ "phase": "revive_preamble", "error": message })),
+            );
+            Err(message)
+        }
+        Err(err) => {
+            observe_counter_metric(
+                "sends",
+                "error",
+                Some(agent_id),
+                Some(serde_json::json!({ "phase": "revive_preamble", "error": err })),
+            );
+            Err(format!(
+                "failed to inject revive context for agent '{agent_id}': {err}. Remediation: run `forge agent send {agent_id} <context>`"
+            ))
+        }
+    }
+}
+
+struct ReviveContext<'a> {
+    workspace_id: &'a str,
+    command: &'a str,
+    adapter: &'a str,
+    harness: &'a str,
+    parent_agent_id: Option<&'a str>,
+    reason: &'a str,
+    policy: RevivePolicy,
+    kill_before_spawn: bool,
+}
+
+fn revive_agent_with_context(
+    backend: &dyn AgentBackend,
+    agent_id: &str,
+    ctx: ReviveContext<'_>,
+) -> Result<AgentSnapshot, String> {
+    let start_detail = serde_json::json!({
+        "reason": ctx.reason,
+        "policy": ctx.policy.as_str(),
+        "workspace_id": ctx.workspace_id,
+        "command": ctx.command,
+        "adapter": ctx.adapter,
+        "harness": ctx.harness,
+        "parent_agent_id": ctx.parent_agent_id,
+    });
+    append_revive_audit_event(agent_id, "revive_start", "started", start_detail.clone());
+
+    if ctx.kill_before_spawn {
+        match backend.kill_agent(KillAgentParams {
+            agent_id: agent_id.to_string(),
+            force: true,
+            grace_period: None,
+        }) {
+            Ok(_) => observe_counter_metric("kill", "success", Some(agent_id), None),
+            Err(err) => {
+                observe_counter_metric(
+                    "kill",
+                    "error",
+                    Some(agent_id),
+                    Some(serde_json::json!({ "error": err })),
+                );
+                append_revive_audit_event(
+                    agent_id,
+                    "revive_done",
+                    "error",
+                    serde_json::json!({
+                        "reason": ctx.reason,
+                        "phase": "kill",
+                        "error": err,
+                    }),
+                );
+                observe_counter_metric(
+                    "agents_revived",
+                    "error",
+                    Some(agent_id),
+                    Some(serde_json::json!({ "error": err })),
+                );
+                return Err(format!(
+                    "failed to stop terminal agent '{agent_id}' before revive: {err}"
+                ));
+            }
+        }
+    }
+
+    let spawned = match spawn_for_run_with_metrics(
+        backend,
+        agent_id,
+        ctx.workspace_id,
+        ctx.command,
+        ctx.adapter,
+        ctx.harness,
+        Some(ctx.adapter),
+    ) {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            append_revive_audit_event(
+                agent_id,
+                "revive_done",
+                "error",
+                serde_json::json!({
+                    "reason": ctx.reason,
+                    "phase": "spawn",
+                    "error": err,
+                }),
+            );
+            observe_counter_metric(
+                "agents_revived",
+                "error",
+                Some(agent_id),
+                Some(serde_json::json!({ "error": err })),
+            );
+            return Err(format!(
+                "failed to respawn agent '{agent_id}' during revive: {err}"
+            ));
+        }
+    };
+
+    if let Err(err) = send_revive_context(backend, agent_id, ctx.parent_agent_id) {
+        append_revive_audit_event(
+            agent_id,
+            "revive_done",
+            "error",
+            serde_json::json!({
+                "reason": ctx.reason,
+                "phase": "preamble",
+                "error": err,
+            }),
+        );
+        observe_counter_metric(
+            "agents_revived",
+            "error",
+            Some(agent_id),
+            Some(serde_json::json!({ "error": err })),
+        );
+        return Err(err);
+    }
+
+    ensure_persistent_agent_record(agent_id, ctx.workspace_id, ctx.harness, ctx.parent_agent_id);
+    append_revive_audit_event(agent_id, "revive_done", "success", start_detail);
+    observe_counter_metric("agents_revived", "success", Some(agent_id), None);
+
+    Ok(spawned)
+}
+
 fn exec_run(
     backend: &dyn AgentBackend,
     args: &RunArgs,
@@ -1129,7 +1422,7 @@ fn exec_run(
     } else {
         args.agent_id.clone()
     };
-    let workspace_id = if args.workspace_id.is_empty() {
+    let mut workspace_id = if args.workspace_id.is_empty() {
         "default".to_string()
     } else {
         args.workspace_id.clone()
@@ -1150,53 +1443,113 @@ fn exec_run(
     let mut reused = false;
     let mut revived = false;
 
+    let persistent_record = load_persistent_agent_record(&agent_id);
+
     let existing = match backend.get_agent(&agent_id) {
         Ok(snapshot) => Some(snapshot),
-        Err(err) if err.contains("not found") => None,
+        Err(err) if is_not_found_error(&err) => None,
         Err(err) => return Err(err),
     };
 
     let start_snapshot = if let Some(snapshot) = existing {
         if snapshot.state.is_terminal() {
-            if !args.revive {
-                return Err(format!(
-                    "agent '{}' is in terminal state '{}'; use --revive to restart it",
-                    snapshot.id, snapshot.state
+            if args.revive_policy != RevivePolicy::Auto {
+                return Err(revive_policy_error_message(
+                    &snapshot.id,
+                    &format!("terminal state '{}'", snapshot.state),
+                    args.revive_policy,
                 ));
             }
-            match backend.kill_agent(KillAgentParams {
-                agent_id: snapshot.id.clone(),
-                force: true,
-                grace_period: None,
-            }) {
-                Ok(_) => observe_counter_metric("kill", "success", Some(&snapshot.id), None),
-                Err(err) => {
-                    observe_counter_metric(
-                        "kill",
-                        "error",
-                        Some(&snapshot.id),
-                        Some(serde_json::json!({ "error": err })),
-                    );
-                    return Err(err);
-                }
-            }
             revived = true;
-            spawn_for_run_with_metrics(
+            if args.workspace_id.is_empty() {
+                workspace_id = snapshot.workspace_id.clone();
+            }
+            let revive_command = if args.command.is_empty() {
+                snapshot.command.clone()
+            } else {
+                args.command.clone()
+            };
+            let revive_adapter = if args.command.is_empty() {
+                snapshot.adapter.clone()
+            } else {
+                default_adapter.to_string()
+            };
+            let harness = if !snapshot.adapter.trim().is_empty() {
+                snapshot.adapter.clone()
+            } else {
+                args.agent_type.clone()
+            };
+            let parent_agent_id = persistent_record
+                .as_ref()
+                .and_then(|record| record.parent_agent_id.as_deref());
+
+            revive_agent_with_context(
                 backend,
                 &agent_id,
-                &workspace_id,
-                &command,
-                default_adapter,
-                &args.agent_type,
+                ReviveContext {
+                    workspace_id: &workspace_id,
+                    command: &revive_command,
+                    adapter: &revive_adapter,
+                    harness: &harness,
+                    parent_agent_id,
+                    reason: &format!("terminal_state:{}", snapshot.state),
+                    policy: args.revive_policy,
+                    kill_before_spawn: true,
+                },
             )?
         } else {
             reused = true;
+            if args.workspace_id.is_empty() {
+                workspace_id = snapshot.workspace_id.clone();
+            }
             snapshot
         }
-    } else {
-        if args.revive && !args.agent_id.is_empty() {
-            revived = true;
+    } else if let Some(record) = persistent_record.as_ref() {
+        if args.revive_policy != RevivePolicy::Auto {
+            return Err(revive_policy_error_message(
+                &agent_id,
+                "process/pane missing",
+                args.revive_policy,
+            ));
         }
+
+        revived = true;
+        if args.workspace_id.is_empty() {
+            workspace_id = record.workspace_id.clone();
+        }
+
+        let harness = if args.agent_type == "codex" {
+            record.harness.clone()
+        } else {
+            args.agent_type.clone()
+        };
+        let (revive_default_command, revive_default_adapter) = defaults_for_agent_type(&harness);
+        let revive_command = if args.command.is_empty() {
+            revive_default_command.to_string()
+        } else {
+            args.command.clone()
+        };
+        let revive_adapter = if args.command.is_empty() {
+            revive_default_adapter.to_string()
+        } else {
+            default_adapter.to_string()
+        };
+
+        revive_agent_with_context(
+            backend,
+            &agent_id,
+            ReviveContext {
+                workspace_id: &workspace_id,
+                command: &revive_command,
+                adapter: &revive_adapter,
+                harness: &harness,
+                parent_agent_id: record.parent_agent_id.as_deref(),
+                reason: "missing_process",
+                policy: args.revive_policy,
+                kill_before_spawn: false,
+            },
+        )?
+    } else {
         spawn_for_run_with_metrics(
             backend,
             &agent_id,
@@ -1204,6 +1557,7 @@ fn exec_run(
             &command,
             default_adapter,
             &args.agent_type,
+            None,
         )?
     };
 
@@ -1260,9 +1614,6 @@ fn exec_run(
         backend.get_agent(&agent_id).unwrap_or(start_snapshot)
     };
 
-    if revived {
-        observe_counter_metric("agents_revived", "success", Some(&observed.id), None);
-    }
     observe_gauge_metrics(Some(&workspace_id));
 
     let quick_tail = quick_tail_from_text(&run_text);
@@ -1298,7 +1649,7 @@ fn exec_run(
         };
         writeln!(
             stdout,
-            "{}\t{}\t{}\t{}",
+            "{}	{}	{}	{}",
             result.agent_id, result.observed_state, mode, quick_tail
         )
         .map_err(|e| e.to_string())?;
@@ -1512,22 +1863,78 @@ fn exec_kill(
 }
 
 fn exec_revive(
-    _backend: &dyn AgentBackend,
+    backend: &dyn AgentBackend,
     args: &ReviveArgs,
-    _parsed: &ParsedArgs,
-    _stdout: &mut dyn Write,
+    parsed: &ParsedArgs,
+    stdout: &mut dyn Write,
 ) -> Result<(), String> {
     if args.agent_id.is_empty() {
         return Err("error: agent ID is required for agent revive".to_string());
     }
-    // Revive is a composite operation: spawn with the same parameters.
-    // This requires the agent to be in a terminal state. For now, this
-    // returns an error because the underlying service does not yet support
-    // revive directly. M10.5 will add full revive semantics.
-    Err(format!(
-        "agent revive is not yet implemented (agent '{}'). Use `agent spawn` with the same parameters to restart.",
-        args.agent_id
-    ))
+
+    let persistent_record = load_persistent_agent_record(&args.agent_id);
+    let existing = match backend.get_agent(&args.agent_id) {
+        Ok(snapshot) => Some(snapshot),
+        Err(err) if is_not_found_error(&err) => None,
+        Err(err) => return Err(err),
+    };
+
+    let revived = if let Some(snapshot) = existing {
+        if !snapshot.state.is_terminal() {
+            return Err(format!(
+                "agent '{}' is in state '{}'; revive only allowed from stopped/failed. Use `forge agent send` or `forge agent run`",
+                snapshot.id, snapshot.state
+            ));
+        }
+
+        let harness = if !snapshot.adapter.trim().is_empty() {
+            snapshot.adapter.clone()
+        } else {
+            snapshot.command.clone()
+        };
+        let parent_agent_id = persistent_record
+            .as_ref()
+            .and_then(|record| record.parent_agent_id.as_deref());
+
+        revive_agent_with_context(
+            backend,
+            &snapshot.id,
+            ReviveContext {
+                workspace_id: &snapshot.workspace_id,
+                command: &snapshot.command,
+                adapter: &snapshot.adapter,
+                harness: &harness,
+                parent_agent_id,
+                reason: &format!("terminal_state:{}", snapshot.state),
+                policy: RevivePolicy::Auto,
+                kill_before_spawn: true,
+            },
+        )?
+    } else if let Some(record) = persistent_record.as_ref() {
+        let (command, adapter) = defaults_for_agent_type(&record.harness);
+        revive_agent_with_context(
+            backend,
+            &args.agent_id,
+            ReviveContext {
+                workspace_id: &record.workspace_id,
+                command,
+                adapter,
+                harness: &record.harness,
+                parent_agent_id: record.parent_agent_id.as_deref(),
+                reason: "missing_process",
+                policy: RevivePolicy::Auto,
+                kill_before_spawn: false,
+            },
+        )?
+    } else {
+        return Err(format!(
+            "agent '{}' not found and no persistent record exists; use `forge agent spawn {}` to create a new agent",
+            args.agent_id, args.agent_id
+        ));
+    };
+
+    observe_gauge_metrics(Some(&revived.workspace_id));
+    write_agent_output(&revived, parsed, stdout)
 }
 
 fn spawn_for_run(
@@ -1537,13 +1944,16 @@ fn spawn_for_run(
     command: &str,
     default_adapter: &str,
     agent_type: &str,
+    adapter_override: Option<&str>,
 ) -> Result<AgentSnapshot, String> {
     let working_dir = std::env::current_dir()
         .ok()
         .and_then(|path| path.to_str().map(ToOwned::to_owned))
         .unwrap_or_else(|| ".".to_string());
     let (_, mapped_adapter) = defaults_for_agent_type(agent_type);
-    let adapter = if mapped_adapter.is_empty() {
+    let adapter = if let Some(value) = adapter_override.filter(|value| !value.trim().is_empty()) {
+        value.to_string()
+    } else if mapped_adapter.is_empty() {
         default_adapter.to_string()
     } else {
         mapped_adapter.to_string()
@@ -1569,6 +1979,7 @@ fn spawn_for_run_with_metrics(
     command: &str,
     default_adapter: &str,
     agent_type: &str,
+    adapter_override: Option<&str>,
 ) -> Result<AgentSnapshot, String> {
     let spawned = spawn_for_run(
         backend,
@@ -1577,6 +1988,7 @@ fn spawn_for_run_with_metrics(
         command,
         default_adapter,
         agent_type,
+        adapter_override,
     );
     match spawned {
         Ok(snapshot) => {
@@ -1938,6 +2350,17 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     }
 }
 
+fn parse_revive_policy(raw: &str) -> Result<RevivePolicy, String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "never" => Ok(RevivePolicy::Never),
+        "ask" => Ok(RevivePolicy::Ask),
+        "auto" => Ok(RevivePolicy::Auto),
+        _ => Err(format!(
+            "invalid revive policy: '{raw}'. Valid values: never, ask, auto"
+        )),
+    }
+}
+
 fn parse_run_args(args: &[String], mut index: usize) -> Result<RunArgs, String> {
     let mut result = RunArgs {
         text: String::new(),
@@ -1947,7 +2370,7 @@ fn parse_run_args(args: &[String], mut index: usize) -> Result<RunArgs, String> 
         command: String::new(),
         wait_for: String::new(),
         wait_timeout: 300,
-        revive: false,
+        revive_policy: RevivePolicy::Never,
         task_id: String::new(),
         tags: Vec::new(),
         labels: Vec::new(),
@@ -1984,8 +2407,13 @@ fn parse_run_args(args: &[String], mut index: usize) -> Result<RunArgs, String> 
                 index += 2;
             }
             "--revive" => {
-                result.revive = true;
+                result.revive_policy = RevivePolicy::Auto;
                 index += 1;
+            }
+            "--revive-policy" => {
+                let value = take_value(args, index, "--revive-policy")?;
+                result.revive_policy = parse_revive_policy(&value)?;
+                index += 2;
             }
             "--task-id" => {
                 result.task_id = take_value(args, index, "--task-id")?;
@@ -2472,7 +2900,8 @@ Flags:
   -c, --command string     command override
       --wait string        wait for state (e.g. idle)
       --timeout int        wait timeout in seconds (default: 300)
-      --revive             restart terminal/missing agent id before send
+      --revive             shorthand for --revive-policy auto
+      --revive-policy str  revive behavior: never|ask|auto (default: never)
       --task-id string     correlation id for parent task
       --tag string         correlation tag (repeatable)
       --label string       correlation label KEY=VALUE (repeatable)
@@ -2559,7 +2988,11 @@ const REVIVE_HELP: &str = "\
 Revive a stopped or failed agent
 
 Usage:
-  forge agent revive <agent-id>";
+  forge agent revive <agent-id>
+
+Notes:
+  - Revive restores an existing terminal/missing agent id.
+  - Context preamble is injected before returning control.";
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -2645,6 +3078,30 @@ mod tests {
 
         std::fs::remove_dir_all(&temp)
             .unwrap_or_else(|err| panic!("remove temp dir {}: {err}", temp.display()));
+    }
+
+    fn seed_persistent_agent(
+        db_path: &Path,
+        id: &str,
+        workspace_id: &str,
+        harness: &str,
+        parent_agent_id: Option<&str>,
+        state: &str,
+    ) {
+        let db = forge_db::Db::open(forge_db::Config::new(db_path))
+            .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+        let repo = PersistentAgentRepository::new(&db);
+        let mut agent = forge_db::persistent_agent_repository::PersistentAgent {
+            id: id.to_string(),
+            parent_agent_id: parent_agent_id.map(ToOwned::to_owned),
+            workspace_id: workspace_id.to_string(),
+            harness: harness.to_string(),
+            mode: "continuous".to_string(),
+            state: state.to_string(),
+            ..Default::default()
+        };
+        repo.create(&mut agent)
+            .unwrap_or_else(|err| panic!("create persistent agent {id}: {err}"));
     }
 
     fn parse_metric_detail(event: &PersistentAgentEvent) -> serde_json::Value {
@@ -2752,6 +3209,36 @@ mod tests {
         let args = vec!["agent".to_string(), "run".to_string()];
         let err = parse_err(&args);
         assert!(err.contains("task text is required"));
+    }
+
+    #[test]
+    fn parse_run_revive_policy_auto() {
+        let args = vec![
+            "agent".to_string(),
+            "run".to_string(),
+            "continue".to_string(),
+            "--revive-policy".to_string(),
+            "auto".to_string(),
+        ];
+        let parsed = parse_ok(&args);
+        match &parsed.subcommand {
+            Subcommand::Run(a) => assert_eq!(a.revive_policy, RevivePolicy::Auto),
+            other => panic!("expected Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_run_revive_policy_invalid() {
+        let args = vec![
+            "agent".to_string(),
+            "run".to_string(),
+            "continue".to_string(),
+            "--revive-policy".to_string(),
+            "later".to_string(),
+        ];
+        let err = parse_err(&args);
+        assert!(err.contains("invalid revive policy"));
+        assert!(err.contains("never, ask, auto"));
     }
 
     #[test]
@@ -3607,12 +4094,100 @@ Will resume after unblock"
     }
 
     #[test]
-    fn agent_revive_not_implemented() {
+    fn agent_run_terminal_without_auto_revive_policy_errors() {
         let backend =
-            InMemoryAgentBackend::new().with_agent(test_snapshot("ag-001", AgentState::Stopped));
-        let out = run_for_test(&["agent", "revive", "ag-001"], &backend);
+            InMemoryAgentBackend::new().with_agent(test_snapshot("ag-dead", AgentState::Stopped));
+        let out = run_for_test(
+            &["agent", "run", "continue", "--agent", "ag-dead"],
+            &backend,
+        );
         assert_eq!(out.exit_code, 1);
-        assert!(out.stderr.contains("not yet implemented"));
+        assert!(out.stderr.contains("revive policy is never"));
+    }
+
+    #[test]
+    fn agent_run_missing_process_auto_policy_revives_with_audit_events() {
+        with_observability_db_path("run-revive-missing", |db_path| {
+            seed_persistent_agent(
+                db_path,
+                "ag-missing",
+                "ws-revive",
+                "claude_code",
+                Some("parent-7"),
+                "failed",
+            );
+
+            let backend = InMemoryAgentBackend::new().with_get_error(AgentServiceError::NotFound {
+                agent_id: "ag-missing".to_string(),
+            });
+            let out = run_for_test(
+                &[
+                    "agent",
+                    "--json",
+                    "run",
+                    "continue delegated task",
+                    "--agent",
+                    "ag-missing",
+                    "--revive-policy",
+                    "auto",
+                ],
+                &backend,
+            );
+            assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+            let parsed = parse_json(&out.stdout);
+            assert_eq!(parsed["agent_id"], "ag-missing");
+            assert_eq!(parsed["revived"], true);
+
+            let db = forge_db::Db::open(forge_db::Config::new(db_path))
+                .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+            let events = PersistentAgentEventRepository::new(&db)
+                .list_by_agent("ag-missing", 16)
+                .unwrap_or_else(|err| panic!("list revive events: {err}"));
+            assert!(events.iter().any(|event| event.kind == "revive_start"));
+            assert!(events
+                .iter()
+                .any(|event| event.kind == "revive_done" && event.outcome == "success"));
+        });
+    }
+
+    #[test]
+    fn agent_revive_terminal_success_json() {
+        with_observability_db_path("revive-terminal", |db_path| {
+            seed_persistent_agent(
+                db_path,
+                "ag-revive",
+                "ws-revive",
+                "claude_code",
+                Some("parent-11"),
+                "stopped",
+            );
+
+            let backend = InMemoryAgentBackend::new()
+                .with_agent(test_snapshot("ag-revive", AgentState::Stopped));
+            let out = run_for_test(&["agent", "--json", "revive", "ag-revive"], &backend);
+            assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+            let parsed = parse_json(&out.stdout);
+            assert_eq!(parsed["id"], "ag-revive");
+            assert_eq!(parsed["state"], "starting");
+
+            let db = forge_db::Db::open(forge_db::Config::new(db_path))
+                .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+            let events = PersistentAgentEventRepository::new(&db)
+                .list_by_agent("ag-revive", 16)
+                .unwrap_or_else(|err| panic!("list revive events: {err}"));
+            assert!(events
+                .iter()
+                .any(|event| event.kind == "revive_done" && event.outcome == "success"));
+        });
+    }
+
+    #[test]
+    fn agent_revive_unknown_agent_returns_actionable_error() {
+        let backend = InMemoryAgentBackend::new();
+        let out = run_for_test(&["agent", "revive", "ag-missing"], &backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("no persistent record exists"));
+        assert!(out.stderr.contains("forge agent spawn ag-missing"));
     }
 
     #[test]

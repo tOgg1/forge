@@ -56,7 +56,7 @@ Parent-oriented delegated workflow for non-loop tasks. Reuse one child across mu
 
 Key subcommands:
 
-- `forge agent run [task-text] [--agent <id>] [--type <harness>] [--wait idle] [--revive]`
+- `forge agent run [task-text] [--agent <id>] [--type <harness>] [--wait idle] [--revive|--revive-policy auto]`
 - `forge agent spawn [agent-id] --command <cmd>`
 - `forge agent send <agent-id> <text>`
 - `forge agent wait <agent-id> --until <state>`
@@ -82,7 +82,7 @@ forge agent send triage-2 "Now propose minimal patch set"
 # Recipe 3: terminal-state recovery + correlation metadata
 forge agent run "Continue previous migration audit" \
   --agent migration-auditor \
-  --revive \
+  --revive-policy auto \
   --task-id forge-ftz \
   --tag persistent \
   --label epic=M10 \
