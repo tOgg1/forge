@@ -579,17 +579,11 @@ fn write_bool_output(ok: bool, parsed: &ParsedArgs, stdout: &mut dyn Write) -> R
 }
 
 fn parse_agent_state(s: &str) -> Result<AgentState, String> {
-    match s {
-        "starting" => Ok(AgentState::Starting),
-        "running" => Ok(AgentState::Running),
-        "idle" => Ok(AgentState::Idle),
-        "waiting_approval" => Ok(AgentState::WaitingApproval),
-        "paused" => Ok(AgentState::Paused),
-        "stopping" => Ok(AgentState::Stopping),
-        "stopped" => Ok(AgentState::Stopped),
-        "failed" => Ok(AgentState::Failed),
-        other => Err(format!(
-            "invalid agent state: '{other}'. Valid states: starting, running, idle, waiting_approval, paused, stopping, stopped, failed"
+    match AgentState::from_str(s) {
+        Some(state) if state != AgentState::Unspecified => Ok(state),
+        _ => Err(format!(
+            "invalid agent state: '{s}'. Valid states: {}",
+            AgentState::command_filter_values().join(", ")
         )),
     }
 }

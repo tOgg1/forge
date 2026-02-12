@@ -11,6 +11,7 @@ use chrono::Utc;
 
 use crate::capability::validate_spawn_guardrails;
 use crate::error::AgentServiceError;
+use crate::lifecycle::{validate_operation_state, AgentOperation};
 use crate::service::AgentService;
 use crate::types::{
     AgentSnapshot, AgentState, KillAgentParams, ListAgentsFilter, SendMessageParams,
@@ -235,6 +236,11 @@ impl AgentService for MockAgentService {
                 agent_id: params.agent_id,
             });
         }
+        let state = agents
+            .get(&params.agent_id)
+            .map(|agent| agent.state)
+            .unwrap_or(AgentState::Unspecified);
+        validate_operation_state(&params.agent_id, AgentOperation::SendMessage, state)?;
 
         Ok(true)
     }
@@ -284,6 +290,11 @@ impl AgentService for MockAgentService {
                 agent_id: agent_id.to_string(),
             });
         }
+        let state = agents
+            .get(agent_id)
+            .map(|agent| agent.state)
+            .unwrap_or(AgentState::Unspecified);
+        validate_operation_state(agent_id, AgentOperation::Interrupt, state)?;
 
         Ok(true)
     }
@@ -299,6 +310,14 @@ impl AgentService for MockAgentService {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
+
+        let state = agents
+            .get(&params.agent_id)
+            .map(|agent| agent.state)
+            .ok_or_else(|| AgentServiceError::NotFound {
+                agent_id: params.agent_id.clone(),
+            })?;
+        validate_operation_state(&params.agent_id, AgentOperation::Kill, state)?;
 
         if agents.remove(&params.agent_id).is_none() {
             return Err(AgentServiceError::NotFound {

@@ -23,6 +23,33 @@ pub enum AgentState {
 }
 
 impl AgentState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unspecified => "unspecified",
+            Self::Starting => "starting",
+            Self::Running => "running",
+            Self::Idle => "idle",
+            Self::WaitingApproval => "waiting_approval",
+            Self::Paused => "paused",
+            Self::Stopping => "stopping",
+            Self::Stopped => "stopped",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn command_filter_values() -> &'static [&'static str] {
+        &[
+            "starting",
+            "running",
+            "idle",
+            "waiting_approval",
+            "paused",
+            "stopping",
+            "stopped",
+            "failed",
+        ]
+    }
+
     pub fn from_proto_i32(v: i32) -> Self {
         match v {
             1 => Self::Starting,
@@ -81,18 +108,7 @@ impl AgentState {
 
 impl std::fmt::Display for AgentState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Self::Unspecified => "unspecified",
-            Self::Starting => "starting",
-            Self::Running => "running",
-            Self::Idle => "idle",
-            Self::WaitingApproval => "waiting_approval",
-            Self::Paused => "paused",
-            Self::Stopping => "stopping",
-            Self::Stopped => "stopped",
-            Self::Failed => "failed",
-        };
-        f.write_str(s)
+        f.write_str(self.as_str())
     }
 }
 
@@ -110,6 +126,44 @@ pub struct AgentSnapshot {
     pub last_activity_at: DateTime<Utc>,
 }
 
+/// Canonical persisted/inspectable agent model used by lifecycle tooling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRecord {
+    pub id: String,
+    pub parent_agent_id: Option<String>,
+    pub workspace_id: String,
+    pub repo: Option<String>,
+    pub node: Option<String>,
+    pub harness: String,
+    pub mode: AgentMode,
+    pub state: AgentState,
+    pub created_at: DateTime<Utc>,
+    pub last_activity_at: DateTime<Utc>,
+    pub ttl: Option<Duration>,
+    pub labels: HashMap<String, String>,
+    pub tags: Vec<String>,
+}
+
+/// Agent runtime mode contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AgentMode {
+    Continuous,
+    OneShot,
+}
+
+impl AgentMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Continuous => "continuous",
+            Self::OneShot => "one-shot",
+        }
+    }
+
+    pub fn supports_reengagement(self) -> bool {
+        matches!(self, Self::Continuous)
+    }
+}
+
 /// Requested agent mode from caller intent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentRequestMode {
@@ -122,6 +176,15 @@ impl AgentRequestMode {
         match self {
             Self::Continuous => "continuous",
             Self::OneShot => "one-shot",
+        }
+    }
+}
+
+impl From<AgentRequestMode> for AgentMode {
+    fn from(value: AgentRequestMode) -> Self {
+        match value {
+            AgentRequestMode::Continuous => Self::Continuous,
+            AgentRequestMode::OneShot => Self::OneShot,
         }
     }
 }

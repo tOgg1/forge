@@ -13,6 +13,7 @@ use forge_rpc::forged::v1::forged_service_client::ForgedServiceClient;
 use crate::capability::validate_spawn_guardrails;
 use crate::error::AgentServiceError;
 use crate::event::{AgentEvent, AgentEventKind, AgentEventOutcome, AgentEventSink};
+use crate::lifecycle::{validate_operation_state, AgentOperation};
 use crate::service::AgentService;
 use crate::types::{
     AgentSnapshot, AgentState, KillAgentParams, ListAgentsFilter, SendMessageParams,
@@ -145,6 +146,8 @@ impl AgentService for ForgedTransport {
                 message: "agent_id is required".into(),
             });
         }
+        let current = self.get_agent(&params.agent_id).await?;
+        validate_operation_state(&params.agent_id, AgentOperation::SendMessage, current.state)?;
 
         let mut client = self.connect().await?;
 
@@ -252,6 +255,8 @@ impl AgentService for ForgedTransport {
                 message: "agent_id is required".into(),
             });
         }
+        let current = self.get_agent(agent_id).await?;
+        validate_operation_state(agent_id, AgentOperation::Interrupt, current.state)?;
 
         let mut client = self.connect().await?;
 
@@ -285,6 +290,8 @@ impl AgentService for ForgedTransport {
                 message: "agent_id is required".into(),
             });
         }
+        let current = self.get_agent(&params.agent_id).await?;
+        validate_operation_state(&params.agent_id, AgentOperation::Kill, current.state)?;
 
         let mut client = self.connect().await?;
 

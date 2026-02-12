@@ -76,8 +76,7 @@ async fn spawn_error_is_returned_when_configured() {
 
 #[tokio::test]
 async fn send_message_succeeds_for_existing_agent() {
-    let svc = MockAgentService::new();
-    svc.spawn_agent(test_spawn_params("a1")).await.unwrap();
+    let svc = MockAgentService::new().with_agent(test_snapshot("a1", AgentState::Running));
 
     let ok = svc
         .send_message(SendMessageParams {
@@ -90,6 +89,33 @@ async fn send_message_succeeds_for_existing_agent() {
         .unwrap();
 
     assert!(ok);
+}
+
+#[tokio::test]
+async fn send_message_rejects_non_interactive_state() {
+    let svc = MockAgentService::new().with_agent(test_snapshot("a1", AgentState::Starting));
+
+    let err = svc
+        .send_message(SendMessageParams {
+            agent_id: "a1".into(),
+            text: "do something".into(),
+            send_enter: true,
+            keys: vec![],
+        })
+        .await
+        .unwrap_err();
+
+    match err {
+        AgentServiceError::InvalidState {
+            current_state,
+            operation,
+            ..
+        } => {
+            assert_eq!(current_state, "starting");
+            assert_eq!(operation, "send_message");
+        }
+        other => panic!("expected InvalidState, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -233,8 +259,7 @@ async fn interrupt_agent_returns_not_found_for_missing_agent() {
 
 #[tokio::test]
 async fn kill_agent_removes_from_registry() {
-    let svc = MockAgentService::new();
-    svc.spawn_agent(test_spawn_params("a1")).await.unwrap();
+    let svc = MockAgentService::new().with_agent(test_snapshot("a1", AgentState::Running));
 
     let ok = svc
         .kill_agent(KillAgentParams {
@@ -255,6 +280,32 @@ async fn kill_agent_removes_from_registry() {
             agent_id: "a1".into()
         }
     );
+}
+
+#[tokio::test]
+async fn kill_agent_rejects_terminal_state() {
+    let svc = MockAgentService::new().with_agent(test_snapshot("a1", AgentState::Stopped));
+
+    let err = svc
+        .kill_agent(KillAgentParams {
+            agent_id: "a1".into(),
+            force: false,
+            grace_period: None,
+        })
+        .await
+        .unwrap_err();
+
+    match err {
+        AgentServiceError::InvalidState {
+            current_state,
+            operation,
+            ..
+        } => {
+            assert_eq!(current_state, "stopped");
+            assert_eq!(operation, "kill_agent");
+        }
+        other => panic!("expected InvalidState, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -417,6 +468,7 @@ async fn get_agent_error_is_returned_when_configured() {
 async fn calls_are_recorded() {
     let svc = MockAgentService::new();
     svc.spawn_agent(test_spawn_params("a1")).await.unwrap();
+    svc.set_agent_state("a1", AgentState::Running);
     svc.get_agent("a1").await.unwrap();
     svc.send_message(SendMessageParams {
         agent_id: "a1".into(),

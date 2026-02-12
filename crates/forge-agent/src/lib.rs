@@ -10,6 +10,7 @@ pub mod capability;
 pub mod error;
 pub mod event;
 pub mod forged;
+pub mod lifecycle;
 pub mod mock;
 pub mod service;
 pub mod types;
