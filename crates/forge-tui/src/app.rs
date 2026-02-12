@@ -10,6 +10,10 @@ use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent};
 use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 use forge_ftui_adapter::style::ThemeSpec;
 
+use crate::command_palette::{
+    CommandPalette, PaletteActionId, PaletteContext, DEFAULT_SEARCH_BUDGET,
+};
+use crate::keymap::{KeyChord, KeyCommand, KeyScope, Keymap, ModeScope};
 use crate::layouts::{
     fit_pane_layout, layout_index_for, normalize_layout_index, PaneLayout, PANE_LAYOUTS,
 };
@@ -35,21 +39,23 @@ pub const FILTER_STATUS_OPTIONS: &[&str] =
 // MainTab
 // ---------------------------------------------------------------------------
 
-/// The four main tabs, matching Go's `mainTab` constants.
+/// Main tabs for the Forge operator shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MainTab {
     Overview,
     Logs,
     Runs,
     MultiLogs,
+    Inbox,
 }
 
 impl MainTab {
-    pub const ORDER: [MainTab; 4] = [
+    pub const ORDER: [MainTab; 5] = [
         MainTab::Overview,
         MainTab::Logs,
         MainTab::Runs,
         MainTab::MultiLogs,
+        MainTab::Inbox,
     ];
 
     #[must_use]
@@ -59,6 +65,7 @@ impl MainTab {
             Self::Logs => "Logs",
             Self::Runs => "Runs",
             Self::MultiLogs => "Multi Logs",
+            Self::Inbox => "Inbox",
         }
     }
 
@@ -69,6 +76,7 @@ impl MainTab {
             Self::Logs => "logs",
             Self::Runs => "runs",
             Self::MultiLogs => "multi",
+            Self::Inbox => "inbox",
         }
     }
 }
@@ -82,6 +90,7 @@ impl MainTab {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiMode {
     Main,
+    Palette,
     Filter,
     ExpandedLogs,
     Confirm,
@@ -108,6 +117,44 @@ pub enum StatusKind {
 pub enum FilterFocus {
     Text,
     Status,
+}
+
+// ---------------------------------------------------------------------------
+// DensityMode / FocusMode
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DensityMode {
+    Comfortable,
+    Compact,
+}
+
+impl DensityMode {
+    pub const ORDER: [DensityMode; 2] = [DensityMode::Comfortable, DensityMode::Compact];
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Comfortable => "comfortable",
+            Self::Compact => "compact",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusMode {
+    Standard,
+    DeepDebug,
+}
+
+impl FocusMode {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::DeepDebug => "deep",
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +276,93 @@ pub struct RunView {
 pub struct LogTailView {
     pub lines: Vec<String>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InboxFilter {
+    All,
+    Unread,
+    AckRequired,
+}
+
+impl InboxFilter {
+    const ORDER: [InboxFilter; 3] = [
+        InboxFilter::All,
+        InboxFilter::Unread,
+        InboxFilter::AckRequired,
+    ];
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Unread => "unread",
+            Self::AckRequired => "ack-required",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct InboxMessageView {
+    pub id: i64,
+    pub thread_id: Option<String>,
+    pub from: String,
+    pub subject: String,
+    pub body: String,
+    pub created_at: String,
+    pub ack_required: bool,
+    pub read_at: Option<String>,
+    pub acked_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct InboxThreadView {
+    thread_key: String,
+    message_indices: Vec<usize>,
+    subject: String,
+    latest_created_at: String,
+    latest_message_id: i64,
+    unread_count: usize,
+    pending_ack_count: usize,
+    participant_count: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ClaimEventView {
+    pub task_id: String,
+    pub claimed_by: String,
+    pub claimed_at: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ClaimConflictView {
+    task_id: String,
+    latest_by: String,
+    previous_by: String,
+    latest_at: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct HandoffSnapshotView {
+    thread_key: String,
+    task_id: String,
+    loop_id: String,
+    status: String,
+    context: String,
+    links: String,
+    pending_risks: String,
+}
+
+impl HandoffSnapshotView {
+    fn lines(&self) -> [String; 5] {
+        [
+            format!("task={} loop={}", self.task_id, self.loop_id),
+            format!("status: {}", self.status),
+            format!("context: {}", self.context),
+            format!("links: {}", self.links),
+            format!("pending-risks: {}", self.pending_risks),
+        ]
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -530,6 +664,12 @@ pub struct App {
     multi_page: usize,
     multi_logs: HashMap<String, LogTailView>,
     pinned: HashSet<String>,
+    inbox_messages: Vec<InboxMessageView>,
+    inbox_filter: InboxFilter,
+    inbox_selected_thread: usize,
+    claim_events: Vec<ClaimEventView>,
+    selected_claim_conflict: usize,
+    handoff_snapshot: Option<HandoffSnapshotView>,
 
     // -- filter --
     filter_text: String,
@@ -554,6 +694,8 @@ pub struct App {
     width: usize,
     height: usize,
     palette: Palette,
+    keymap: Keymap,
+    command_palette: CommandPalette,
     quitting: bool,
 
     // -- view registry (for tab content) --
@@ -595,6 +737,12 @@ impl App {
             multi_page: 0,
             multi_logs: HashMap::new(),
             pinned: HashSet::new(),
+            inbox_messages: Vec::new(),
+            inbox_filter: InboxFilter::All,
+            inbox_selected_thread: 0,
+            claim_events: Vec::new(),
+            selected_claim_conflict: 0,
+            handoff_snapshot: None,
 
             filter_text: String::new(),
             filter_state: "all".to_owned(),
@@ -614,6 +762,8 @@ impl App {
             width: 120,
             height: 40,
             palette,
+            keymap: Keymap::default_forge_tui(),
+            command_palette: CommandPalette::new_default(),
             quitting: false,
 
             views: HashMap::new(),
@@ -759,6 +909,45 @@ impl App {
     }
 
     #[must_use]
+    pub fn palette_query(&self) -> &str {
+        self.command_palette.query()
+    }
+
+    #[must_use]
+    pub fn palette_match_count(&self) -> usize {
+        self.command_palette.matches().len()
+    }
+
+    fn palette_context(&self) -> PaletteContext {
+        PaletteContext {
+            tab: self.tab,
+            has_selection: self.selected_view().is_some(),
+        }
+    }
+
+    fn key_scope_chain(&self) -> [KeyScope; 3] {
+        let mode_scope = match self.mode {
+            UiMode::Main => ModeScope::Main,
+            UiMode::Filter => ModeScope::Filter,
+            UiMode::ExpandedLogs => ModeScope::ExpandedLogs,
+            UiMode::Confirm => ModeScope::Confirm,
+            UiMode::Wizard => ModeScope::Wizard,
+            UiMode::Help => ModeScope::Help,
+            UiMode::Palette => ModeScope::Palette,
+        };
+        [
+            KeyScope::View(self.tab),
+            KeyScope::Mode(mode_scope),
+            KeyScope::Global,
+        ]
+    }
+
+    fn resolve_key_command(&self, key: KeyEvent) -> Option<KeyCommand> {
+        self.keymap
+            .resolve(&self.key_scope_chain(), KeyChord::from_event(key))
+    }
+
+    #[must_use]
     pub fn multi_logs(&self) -> &HashMap<String, LogTailView> {
         &self.multi_logs
     }
@@ -768,8 +957,441 @@ impl App {
         self.multi_page
     }
 
+    #[must_use]
+    pub fn inbox_filter(&self) -> InboxFilter {
+        self.inbox_filter
+    }
+
+    #[must_use]
+    pub fn inbox_messages(&self) -> &[InboxMessageView] {
+        &self.inbox_messages
+    }
+
+    pub fn set_inbox_messages(&mut self, messages: Vec<InboxMessageView>) {
+        self.inbox_messages = messages;
+        self.handoff_snapshot = None;
+        self.clamp_inbox_selection();
+    }
+
+    #[must_use]
+    pub fn claim_events(&self) -> &[ClaimEventView] {
+        &self.claim_events
+    }
+
+    pub fn set_claim_events(&mut self, events: Vec<ClaimEventView>) {
+        self.claim_events = events;
+        self.claim_events.sort_by(|a, b| {
+            b.claimed_at
+                .cmp(&a.claimed_at)
+                .then(a.task_id.cmp(&b.task_id))
+        });
+        let conflicts = self.claim_conflicts();
+        if conflicts.is_empty() {
+            self.selected_claim_conflict = 0;
+        } else {
+            self.selected_claim_conflict = self
+                .selected_claim_conflict
+                .min(conflicts.len().saturating_sub(1));
+        }
+    }
+
     pub fn set_layout_idx(&mut self, idx: usize) {
         self.layout_idx = idx;
+    }
+
+    fn inbox_threads(&self) -> Vec<InboxThreadView> {
+        let mut grouped: HashMap<String, InboxThreadView> = HashMap::new();
+        for (idx, message) in self.inbox_messages.iter().enumerate() {
+            let thread_key = inbox_thread_key(message);
+            let entry = grouped
+                .entry(thread_key.clone())
+                .or_insert_with(|| InboxThreadView {
+                    thread_key: thread_key.clone(),
+                    ..InboxThreadView::default()
+                });
+
+            entry.message_indices.push(idx);
+            if entry.subject.is_empty() {
+                entry.subject = if message.subject.trim().is_empty() {
+                    "(no subject)".to_owned()
+                } else {
+                    message.subject.trim().to_owned()
+                };
+            }
+            if message.created_at >= entry.latest_created_at {
+                entry.latest_created_at = message.created_at.clone();
+                entry.latest_message_id = message.id;
+            }
+            if message.read_at.is_none() {
+                entry.unread_count += 1;
+            }
+            if message.ack_required && message.acked_at.is_none() {
+                entry.pending_ack_count += 1;
+            }
+        }
+
+        let mut threads: Vec<InboxThreadView> = grouped
+            .into_values()
+            .map(|mut thread| {
+                thread.message_indices.sort_by(|a, b| {
+                    self.inbox_messages[*a]
+                        .created_at
+                        .cmp(&self.inbox_messages[*b].created_at)
+                });
+                let mut participants = HashSet::new();
+                for index in &thread.message_indices {
+                    participants.insert(self.inbox_messages[*index].from.trim().to_owned());
+                }
+                thread.participant_count = participants.len();
+                thread
+            })
+            .collect();
+
+        threads.retain(|thread| match self.inbox_filter {
+            InboxFilter::All => true,
+            InboxFilter::Unread => thread.unread_count > 0,
+            InboxFilter::AckRequired => thread.pending_ack_count > 0,
+        });
+        threads.sort_by(|a, b| {
+            b.latest_created_at
+                .cmp(&a.latest_created_at)
+                .then(b.latest_message_id.cmp(&a.latest_message_id))
+        });
+        threads
+    }
+
+    fn clamp_inbox_selection(&mut self) {
+        let total = self.inbox_threads().len();
+        if total == 0 {
+            self.inbox_selected_thread = 0;
+            return;
+        }
+        self.inbox_selected_thread = self.inbox_selected_thread.min(total.saturating_sub(1));
+    }
+
+    fn move_inbox_selection(&mut self, delta: i32) {
+        let total = self.inbox_threads().len();
+        if total == 0 {
+            self.inbox_selected_thread = 0;
+            return;
+        }
+        let mut idx = self.inbox_selected_thread as i32 + delta;
+        if idx < 0 {
+            idx = 0;
+        }
+        if idx >= total as i32 {
+            idx = total as i32 - 1;
+        }
+        self.inbox_selected_thread = idx as usize;
+    }
+
+    fn cycle_inbox_filter(&mut self, delta: i32) {
+        let mut idx = 0i32;
+        for (i, option) in InboxFilter::ORDER.iter().enumerate() {
+            if *option == self.inbox_filter {
+                idx = i as i32;
+                break;
+            }
+        }
+        idx += delta;
+        while idx < 0 {
+            idx += InboxFilter::ORDER.len() as i32;
+        }
+        self.inbox_filter = InboxFilter::ORDER[(idx as usize) % InboxFilter::ORDER.len()];
+        self.clamp_inbox_selection();
+        self.set_status(
+            StatusKind::Info,
+            &format!("Inbox filter: {}", self.inbox_filter.label()),
+        );
+    }
+
+    fn mark_selected_inbox_thread_read(&mut self) {
+        let threads = self.inbox_threads();
+        let Some(thread) = threads.get(self.inbox_selected_thread) else {
+            self.set_status(StatusKind::Info, "Inbox is empty");
+            return;
+        };
+
+        let mut marked = 0usize;
+        for index in &thread.message_indices {
+            if let Some(message) = self.inbox_messages.get_mut(*index) {
+                if message.read_at.is_none() {
+                    message.read_at = Some("now".to_owned());
+                    marked += 1;
+                }
+            }
+        }
+        if marked == 0 {
+            self.set_status(StatusKind::Info, "Thread already read");
+        } else {
+            self.set_status(StatusKind::Ok, &format!("Marked {marked} message(s) read"));
+        }
+        self.clamp_inbox_selection();
+    }
+
+    fn acknowledge_selected_inbox_message(&mut self) {
+        let threads = self.inbox_threads();
+        let Some(thread) = threads.get(self.inbox_selected_thread) else {
+            self.set_status(StatusKind::Info, "Inbox is empty");
+            return;
+        };
+
+        let mut acked_id = None;
+        for index in thread.message_indices.iter().rev() {
+            if let Some(message) = self.inbox_messages.get_mut(*index) {
+                if message.ack_required && message.acked_at.is_none() {
+                    message.acked_at = Some("now".to_owned());
+                    acked_id = Some(message.id);
+                    break;
+                }
+            }
+        }
+
+        if let Some(id) = acked_id {
+            self.set_status(
+                StatusKind::Ok,
+                &format!("Acknowledged {}", format_mail_id(id)),
+            );
+        } else {
+            self.set_status(StatusKind::Info, "No pending ack in selected thread");
+        }
+        self.clamp_inbox_selection();
+    }
+
+    fn quick_reply_selected_inbox_thread(&mut self) {
+        let threads = self.inbox_threads();
+        let Some(thread) = threads.get(self.inbox_selected_thread) else {
+            self.set_status(StatusKind::Info, "Inbox is empty");
+            return;
+        };
+        let Some(latest_index) = thread.message_indices.last().copied() else {
+            self.set_status(StatusKind::Info, "Inbox is empty");
+            return;
+        };
+        let message = &self.inbox_messages[latest_index];
+        let target = message.from.trim();
+        let target = if target.is_empty() { "unknown" } else { target };
+        self.set_status(
+            StatusKind::Info,
+            &format!(
+                "Reply shortcut: to {target}, thread {}, reply-to {}",
+                thread.thread_key,
+                format_mail_id(message.id)
+            ),
+        );
+    }
+
+    fn claim_conflicts(&self) -> Vec<ClaimConflictView> {
+        let mut by_task: HashMap<String, Vec<&ClaimEventView>> = HashMap::new();
+        for event in &self.claim_events {
+            if event.task_id.trim().is_empty() {
+                continue;
+            }
+            by_task
+                .entry(event.task_id.clone())
+                .or_default()
+                .push(event);
+        }
+
+        let mut conflicts = Vec::new();
+        for (task_id, events) in by_task {
+            if events.len() < 2 {
+                continue;
+            }
+            let latest = events[0];
+            let previous = events.iter().skip(1).find(|event| {
+                !event.claimed_by.trim().is_empty() && event.claimed_by != latest.claimed_by
+            });
+            let Some(previous) = previous else {
+                continue;
+            };
+            conflicts.push(ClaimConflictView {
+                task_id,
+                latest_by: latest.claimed_by.clone(),
+                previous_by: previous.claimed_by.clone(),
+                latest_at: latest.claimed_at.clone(),
+            });
+        }
+
+        conflicts.sort_by(|a, b| {
+            b.latest_at
+                .cmp(&a.latest_at)
+                .then(a.task_id.cmp(&b.task_id))
+        });
+        conflicts
+    }
+
+    fn cycle_claim_conflict(&mut self, delta: i32) {
+        let conflicts = self.claim_conflicts();
+        if conflicts.is_empty() {
+            self.selected_claim_conflict = 0;
+            self.set_status(StatusKind::Info, "No claim ownership conflicts");
+            return;
+        }
+        let len = conflicts.len() as i32;
+        let mut idx = self.selected_claim_conflict as i32 + delta;
+        while idx < 0 {
+            idx += len;
+        }
+        self.selected_claim_conflict = (idx as usize) % conflicts.len();
+        let conflict = &conflicts[self.selected_claim_conflict];
+        self.set_status(
+            StatusKind::Err,
+            &format!(
+                "Claim conflict {}: {} vs {}",
+                conflict.task_id, conflict.latest_by, conflict.previous_by
+            ),
+        );
+    }
+
+    fn show_claim_resolution_hint(&mut self) {
+        let conflicts = self.claim_conflicts();
+        let Some(conflict) = conflicts.get(self.selected_claim_conflict) else {
+            self.set_status(StatusKind::Info, "No claim conflicts to resolve");
+            return;
+        };
+        self.set_status(
+            StatusKind::Info,
+            &format!(
+                "Resolve {}: confirm owner, then post `fmail send task \"takeover claim: {} by <agent>\"`",
+                conflict.task_id, conflict.task_id
+            ),
+        );
+    }
+
+    fn extract_task_id_from_thread(&self, thread: &InboxThreadView) -> Option<String> {
+        for index in thread.message_indices.iter().rev() {
+            let Some(message) = self.inbox_messages.get(*index) else {
+                continue;
+            };
+            if let Some(task_id) = extract_prefixed_token(&message.subject, "forge-")
+                .or_else(|| extract_prefixed_token(&message.body, "forge-"))
+            {
+                return Some(task_id);
+            }
+        }
+        None
+    }
+
+    fn extract_loop_id_from_thread(&self, thread: &InboxThreadView) -> Option<String> {
+        for index in thread.message_indices.iter().rev() {
+            let Some(message) = self.inbox_messages.get(*index) else {
+                continue;
+            };
+            if let Some(loop_id) = extract_prefixed_token(&message.subject, "loop-")
+                .or_else(|| extract_prefixed_token(&message.body, "loop-"))
+            {
+                return Some(loop_id);
+            }
+        }
+        None
+    }
+
+    fn loop_state_for_handoff(&self, loop_id: &str) -> Option<String> {
+        if loop_id.trim().is_empty() {
+            return None;
+        }
+        self.loops
+            .iter()
+            .find(|view| view.id == loop_id)
+            .map(|view| view.state.trim().to_owned())
+            .filter(|state| !state.is_empty())
+    }
+
+    fn generate_handoff_snapshot(&mut self) {
+        let threads = self.inbox_threads();
+        let Some(thread) = threads.get(self.inbox_selected_thread) else {
+            self.set_status(StatusKind::Info, "Inbox is empty");
+            return;
+        };
+        let Some(latest_index) = thread.message_indices.last().copied() else {
+            self.set_status(StatusKind::Info, "Inbox is empty");
+            return;
+        };
+        let Some(latest_message) = self.inbox_messages.get(latest_index) else {
+            self.set_status(StatusKind::Info, "Inbox is empty");
+            return;
+        };
+
+        let claim_conflicts = self.claim_conflicts();
+        let task_id = self
+            .extract_task_id_from_thread(thread)
+            .or_else(|| {
+                claim_conflicts
+                    .get(self.selected_claim_conflict)
+                    .map(|conflict| conflict.task_id.clone())
+            })
+            .or_else(|| self.claim_events.first().map(|event| event.task_id.clone()))
+            .unwrap_or_else(|| "unknown-task".to_owned());
+
+        let loop_id = self
+            .extract_loop_id_from_thread(thread)
+            .or_else(|| self.selected_view().map(|view| view.id.clone()))
+            .unwrap_or_else(|| "unknown-loop".to_owned());
+
+        let loop_state = self
+            .loop_state_for_handoff(&loop_id)
+            .unwrap_or_else(|| "unknown".to_owned());
+        let from = latest_message.from.trim();
+        let from = if from.is_empty() { "unknown" } else { from };
+        let status = format!(
+            "loop={loop_state} unread={} pending-ack={}",
+            thread.unread_count, thread.pending_ack_count
+        );
+        let context = format!(
+            "thread={} latest={} from={} messages={} participants={}",
+            thread.thread_key,
+            format_mail_id(latest_message.id),
+            from,
+            thread.message_indices.len(),
+            thread.participant_count
+        );
+        let links = format!(
+            "task:sv task show {} | loop:forge logs {} | mail:fmail log task -n 200 | rg {}",
+            task_id, loop_id, thread.thread_key
+        );
+
+        let mut risks = Vec::new();
+        if thread.unread_count > 0 {
+            risks.push(format!("unread messages={}", thread.unread_count));
+        }
+        if thread.pending_ack_count > 0 {
+            risks.push(format!("ack pending={}", thread.pending_ack_count));
+        }
+        if loop_id == "unknown-loop" {
+            risks.push("loop mapping missing".to_owned());
+        }
+        if loop_state.eq_ignore_ascii_case("error") {
+            risks.push("loop state=error".to_owned());
+        }
+        if let Some(conflict) = claim_conflicts
+            .iter()
+            .find(|conflict| conflict.task_id == task_id)
+        {
+            risks.push(format!(
+                "ownership conflict: {} vs {}",
+                conflict.latest_by, conflict.previous_by
+            ));
+        }
+        let pending_risks = if risks.is_empty() {
+            "none".to_owned()
+        } else {
+            risks.join("; ")
+        };
+
+        self.handoff_snapshot = Some(HandoffSnapshotView {
+            thread_key: thread.thread_key.clone(),
+            task_id: task_id.clone(),
+            loop_id: loop_id.clone(),
+            status,
+            context,
+            links,
+            pending_risks,
+        });
+        self.set_status(
+            StatusKind::Ok,
+            &format!("Handoff snapshot ready: task {task_id}, loop {loop_id}"),
+        );
     }
 
     // -- data setters (called from refresh/tick) -----------------------------
@@ -818,6 +1440,8 @@ impl App {
         if tab == MainTab::MultiLogs {
             self.focus_right = true;
             self.clamp_multi_page();
+        } else if tab == MainTab::Inbox {
+            self.clamp_inbox_selection();
         } else if self.focus_right {
             self.focus_right = false;
         }
@@ -1159,7 +1783,11 @@ impl App {
         let height = self.height as i32;
         let overhead: i32 =
             4 + match self.mode {
-                UiMode::Filter | UiMode::Confirm | UiMode::Wizard | UiMode::Help => 3,
+                UiMode::Palette
+                | UiMode::Filter
+                | UiMode::Confirm
+                | UiMode::Wizard
+                | UiMode::Help => 3,
                 _ => 0,
             } + if self.status_text.is_empty() { 0 } else { 1 };
         let pane_height = (height - overhead).max(10);
@@ -1294,13 +1922,13 @@ impl App {
         }
 
         if let InputEvent::Key(key_event) = event {
-            // Ctrl+C is always quit.
-            if key_event.key == Key::Char('c') && key_event.modifiers.ctrl {
+            if matches!(self.resolve_key_command(key_event), Some(KeyCommand::Quit)) {
                 self.quitting = true;
                 return Command::Quit;
             }
 
             match self.mode {
+                UiMode::Palette => self.update_palette_mode(key_event),
                 UiMode::Filter => self.update_filter_mode(key_event),
                 UiMode::ExpandedLogs => self.update_expanded_logs_mode(key_event),
                 UiMode::Confirm => self.update_confirm_mode(key_event),
@@ -1314,6 +1942,13 @@ impl App {
     }
 
     fn update_main_mode(&mut self, key: KeyEvent) -> Command {
+        if matches!(self.resolve_key_command(key), Some(KeyCommand::OpenPalette)) {
+            self.command_palette
+                .open(self.palette_context(), DEFAULT_SEARCH_BUDGET);
+            self.mode = UiMode::Palette;
+            return Command::None;
+        }
+
         match key.key {
             Key::Char('q') => {
                 self.quitting = true;
@@ -1338,6 +1973,10 @@ impl App {
             }
             Key::Char('4') => {
                 self.set_tab(MainTab::MultiLogs);
+                Command::Fetch
+            }
+            Key::Char('5') => {
+                self.set_tab(MainTab::Inbox);
                 Command::Fetch
             }
             Key::Char(']') => {
@@ -1374,12 +2013,76 @@ impl App {
                 Command::None
             }
             Key::Char('j') | Key::Down => {
-                self.move_selection(1);
+                if self.tab == MainTab::Inbox {
+                    self.move_inbox_selection(1);
+                } else {
+                    self.move_selection(1);
+                }
                 Command::Fetch
             }
             Key::Char('k') | Key::Up => {
-                self.move_selection(-1);
+                if self.tab == MainTab::Inbox {
+                    self.move_inbox_selection(-1);
+                } else {
+                    self.move_selection(-1);
+                }
                 Command::Fetch
+            }
+            Key::Enter => {
+                if self.tab == MainTab::Inbox {
+                    self.mark_selected_inbox_thread_read();
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('f') => {
+                if self.tab == MainTab::Inbox {
+                    self.cycle_inbox_filter(1);
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('a') => {
+                if self.tab == MainTab::Inbox {
+                    self.acknowledge_selected_inbox_message();
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('h') => {
+                if self.tab == MainTab::Inbox {
+                    self.generate_handoff_snapshot();
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('R') => {
+                if self.tab == MainTab::Inbox {
+                    self.quick_reply_selected_inbox_thread();
+                    Command::None
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('o') => {
+                if self.tab == MainTab::Inbox {
+                    self.cycle_claim_conflict(1);
+                    Command::None
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('O') => {
+                if self.tab == MainTab::Inbox {
+                    self.show_claim_resolution_hint();
+                    Command::None
+                } else {
+                    Command::None
+                }
             }
             Key::Char('u') if key.modifiers.ctrl => {
                 if self.tab == MainTab::Logs || self.tab == MainTab::Runs {
@@ -1509,6 +2212,10 @@ impl App {
                 Command::None
             }
             Key::Char('r') => {
+                if self.tab == MainTab::Inbox {
+                    self.quick_reply_selected_inbox_thread();
+                    return Command::None;
+                }
                 let loop_id = match self.selected_view() {
                     Some(v) => v.id.clone(),
                     None => {
@@ -1522,6 +2229,126 @@ impl App {
             Key::Char('K') => self.enter_confirm(ActionType::Kill),
             Key::Char('D') => self.enter_confirm(ActionType::Delete),
             _ => Command::None,
+        }
+    }
+
+    fn update_palette_mode(&mut self, key: KeyEvent) -> Command {
+        match self.resolve_key_command(key) {
+            Some(KeyCommand::PaletteClose) => {
+                self.mode = UiMode::Main;
+                Command::None
+            }
+            Some(KeyCommand::ToggleHelp) => {
+                self.help_return = UiMode::Palette;
+                self.mode = UiMode::Help;
+                Command::None
+            }
+            Some(KeyCommand::PaletteMoveNext) => {
+                self.command_palette.move_selection(1);
+                Command::None
+            }
+            Some(KeyCommand::PaletteMovePrev) => {
+                self.command_palette.move_selection(-1);
+                Command::None
+            }
+            Some(KeyCommand::PaletteQueryBackspace) => {
+                self.command_palette
+                    .pop_char(self.palette_context(), DEFAULT_SEARCH_BUDGET);
+                Command::None
+            }
+            Some(KeyCommand::PaletteExecute) => {
+                let context = self.palette_context();
+                let Some(action) = self.command_palette.accept(context, DEFAULT_SEARCH_BUDGET)
+                else {
+                    return Command::None;
+                };
+                self.execute_palette_action(action)
+            }
+            _ => match key.key {
+                Key::Char(ch) if !key.modifiers.ctrl && !key.modifiers.alt => {
+                    self.command_palette.push_char(
+                        ch,
+                        self.palette_context(),
+                        DEFAULT_SEARCH_BUDGET,
+                    );
+                    Command::None
+                }
+                _ => Command::None,
+            },
+        }
+    }
+
+    fn execute_palette_action(&mut self, action: PaletteActionId) -> Command {
+        self.mode = UiMode::Main;
+        match action {
+            PaletteActionId::SwitchOverview => {
+                self.set_tab(MainTab::Overview);
+                Command::Fetch
+            }
+            PaletteActionId::SwitchLogs => {
+                self.set_tab(MainTab::Logs);
+                Command::Fetch
+            }
+            PaletteActionId::SwitchRuns => {
+                self.set_tab(MainTab::Runs);
+                Command::Fetch
+            }
+            PaletteActionId::SwitchMultiLogs => {
+                self.set_tab(MainTab::MultiLogs);
+                Command::Fetch
+            }
+            PaletteActionId::SwitchInbox => {
+                self.set_tab(MainTab::Inbox);
+                Command::Fetch
+            }
+            PaletteActionId::OpenFilter => {
+                self.mode = UiMode::Filter;
+                self.filter_focus = FilterFocus::Text;
+                Command::None
+            }
+            PaletteActionId::NewLoopWizard => {
+                self.mode = UiMode::Wizard;
+                self.wizard = WizardState::with_defaults(
+                    &self.default_interval,
+                    &self.default_prompt,
+                    &self.default_prompt_msg,
+                );
+                Command::None
+            }
+            PaletteActionId::ResumeSelectedLoop => {
+                let loop_id = match self.selected_view() {
+                    Some(v) => v.id.clone(),
+                    None => {
+                        self.set_status(StatusKind::Info, "No loop selected");
+                        return Command::None;
+                    }
+                };
+                self.run_action(ActionType::Resume, &loop_id)
+            }
+            PaletteActionId::StopSelectedLoop => self.enter_confirm(ActionType::Stop),
+            PaletteActionId::KillSelectedLoop => self.enter_confirm(ActionType::Kill),
+            PaletteActionId::DeleteSelectedLoop => self.enter_confirm(ActionType::Delete),
+            PaletteActionId::CycleTheme => {
+                self.cycle_theme();
+                Command::None
+            }
+            PaletteActionId::ToggleZenMode => {
+                self.focus_right = !self.focus_right;
+                if self.tab == MainTab::MultiLogs {
+                    self.clamp_multi_page();
+                }
+                if self.focus_right {
+                    self.set_status(StatusKind::Info, "Zen mode: right pane focus");
+                } else {
+                    self.set_status(StatusKind::Info, "Zen mode: split view");
+                }
+                if self.tab == MainTab::MultiLogs {
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            PaletteActionId::Custom(_) => Command::None,
         }
     }
 
@@ -1937,6 +2764,24 @@ impl App {
             UiMode::Help => {
                 self.render_help_content(&mut frame, width, content_height, content_start);
             }
+            UiMode::Palette => {
+                let lines = self.command_palette.render_lines(width, content_height);
+                for (idx, line) in lines.iter().enumerate() {
+                    if idx >= content_height {
+                        break;
+                    }
+                    let role = if idx == 0 {
+                        TextRole::Accent
+                    } else if idx == 1 {
+                        TextRole::Muted
+                    } else if line.starts_with(">") {
+                        TextRole::Primary
+                    } else {
+                        TextRole::Muted
+                    };
+                    frame.draw_text(0, content_start + idx, line, role);
+                }
+            }
             UiMode::Confirm => {
                 if let Some(ref confirm) = self.confirm {
                     let prompt = &confirm.prompt;
@@ -2004,6 +2849,9 @@ impl App {
                 } else if self.mode == UiMode::Main && self.tab == MainTab::MultiLogs {
                     let multi_frame = self.render_multi_logs_pane(width, content_height);
                     blit_frame(&mut frame, &multi_frame, 0, content_start);
+                } else if self.mode == UiMode::Main && self.tab == MainTab::Inbox {
+                    let inbox_frame = self.render_inbox_pane(width, content_height);
+                    blit_frame(&mut frame, &inbox_frame, 0, content_start);
                 } else {
                     // Placeholder: show tab label + selection info.
                     let info = format!(
@@ -2040,7 +2888,7 @@ impl App {
 
         // Footer hint line.
         let footer_y = height.saturating_sub(1);
-        let hint = "? help  q quit  / filter  1-4 tabs  j/k sel  S stop  K kill  D del  n new";
+        let hint = "? help  q quit  ctrl+p palette  / filter  1-5 tabs  j/k sel  S stop  K kill";
         let truncated = if hint.len() > width {
             &hint[..width]
         } else {
@@ -2052,9 +2900,19 @@ impl App {
     }
 
     fn render_header_text(&self, width: usize) -> String {
-        let count_label = format!("{}/{} loops", self.filtered.len(), self.loops.len());
+        let count_label = if self.tab == MainTab::Inbox {
+            let threads = self.inbox_threads();
+            let unread = threads
+                .iter()
+                .map(|thread| thread.unread_count)
+                .sum::<usize>();
+            format!("{} threads, {} unread", threads.len(), unread)
+        } else {
+            format!("{}/{} loops", self.filtered.len(), self.loops.len())
+        };
         let mode_label = match self.mode {
             UiMode::Wizard => "  mode:New Loop Wizard",
+            UiMode::Palette => "  mode:Command Palette",
             UiMode::Filter => "  mode:Filter",
             UiMode::Help => "  mode:Help",
             UiMode::Confirm => "  mode:Confirm",
@@ -2194,6 +3052,245 @@ impl App {
         }
     }
 
+    fn render_inbox_pane(&self, width: usize, height: usize) -> RenderFrame {
+        let theme = crate::default_theme();
+        let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
+        if width == 0 || height == 0 {
+            return frame;
+        }
+
+        let threads = self.inbox_threads();
+        let claim_conflicts = self.claim_conflicts();
+        let unread_total = threads
+            .iter()
+            .map(|thread| thread.unread_count)
+            .sum::<usize>();
+        let pending_ack_total = threads
+            .iter()
+            .map(|thread| thread.pending_ack_count)
+            .sum::<usize>();
+        let header = format!(
+            "Inbox filter:{}  threads:{}  unread:{}  pending-ack:{}  claims:{}  conflicts:{}",
+            self.inbox_filter.label(),
+            threads.len(),
+            unread_total,
+            pending_ack_total,
+            self.claim_events.len(),
+            claim_conflicts.len()
+        );
+        frame.draw_text(0, 0, &trim_to_width(&header, width), TextRole::Accent);
+
+        if height <= 1 {
+            return frame;
+        }
+
+        let timeline_reserved = if self.claim_events.is_empty() {
+            0usize
+        } else {
+            4usize.min(height.saturating_sub(1))
+        };
+        let timeline_start = height.saturating_sub(timeline_reserved);
+
+        if threads.is_empty() {
+            frame.draw_text(0, 1, "No messages for selected filter", TextRole::Muted);
+            frame.draw_text(
+                0,
+                2.min(timeline_start.saturating_sub(1)),
+                "keys: f filter  j/k select  enter read  a ack  h handoff  r reply",
+                TextRole::Muted,
+            );
+            if timeline_reserved == 0 {
+                return frame;
+            }
+        } else {
+            let min_detail_width = 30usize;
+            let list_width = if width > min_detail_width + 22 {
+                (width * 2 / 5).clamp(22, width - min_detail_width - 1)
+            } else {
+                width
+            };
+            let detail_x = if list_width + 2 < width {
+                list_width + 2
+            } else {
+                width
+            };
+
+            if detail_x < width {
+                for y in 1..timeline_start {
+                    frame.draw_text(list_width, y, "|", TextRole::Muted);
+                }
+            }
+
+            let list_height = timeline_start.saturating_sub(2);
+            for row in 0..list_height {
+                let Some(thread) = threads.get(row) else {
+                    break;
+                };
+                let selected = row == self.inbox_selected_thread;
+                let prefix = if selected { ">" } else { " " };
+                let line = format!(
+                    "{prefix} {} u:{} a:{} {}",
+                    format_mail_id(thread.latest_message_id),
+                    thread.unread_count,
+                    thread.pending_ack_count,
+                    thread.subject
+                );
+                let role = if selected {
+                    TextRole::Primary
+                } else {
+                    TextRole::Muted
+                };
+                frame.draw_text(0, row + 1, &trim_to_width(&line, list_width), role);
+            }
+
+            if let Some(selected_thread) = threads.get(self.inbox_selected_thread) {
+                if detail_x < width {
+                    let detail_width = width.saturating_sub(detail_x);
+                    let detail_header = format!(
+                        "thread:{}  msgs:{}  participants:{}",
+                        selected_thread.thread_key,
+                        selected_thread.message_indices.len(),
+                        selected_thread.participant_count
+                    );
+                    frame.draw_text(
+                        detail_x,
+                        1,
+                        &trim_to_width(&detail_header, detail_width),
+                        TextRole::Primary,
+                    );
+
+                    let detail_hint =
+                        "enter=read  a=ack  h=handoff  r=reply  o=next-conflict  O=resolution";
+                    if timeline_start > 2 {
+                        frame.draw_text(
+                            detail_x,
+                            2,
+                            &trim_to_width(detail_hint, detail_width),
+                            TextRole::Muted,
+                        );
+                    }
+
+                    let mut row = 3usize;
+                    if let Some(snapshot) = self
+                        .handoff_snapshot
+                        .as_ref()
+                        .filter(|snapshot| snapshot.thread_key == selected_thread.thread_key)
+                    {
+                        if row < timeline_start {
+                            frame.draw_text(
+                                detail_x,
+                                row,
+                                &trim_to_width("handoff snapshot (h regenerate)", detail_width),
+                                TextRole::Accent,
+                            );
+                            row += 1;
+                        }
+                        for line in snapshot.lines() {
+                            if row >= timeline_start {
+                                break;
+                            }
+                            frame.draw_text(
+                                detail_x,
+                                row,
+                                &trim_to_width(&line, detail_width),
+                                TextRole::Primary,
+                            );
+                            row += 1;
+                        }
+                        if row < timeline_start {
+                            frame.draw_text(
+                                detail_x,
+                                row,
+                                "recent thread messages",
+                                TextRole::Muted,
+                            );
+                            row += 1;
+                        }
+                    }
+                    for idx in selected_thread.message_indices.iter().rev() {
+                        if row >= timeline_start {
+                            break;
+                        }
+                        let Some(message) = self.inbox_messages.get(*idx) else {
+                            continue;
+                        };
+                        let unread_mark = if message.read_at.is_none() { "*" } else { " " };
+                        let ack_mark = if message.ack_required && message.acked_at.is_none() {
+                            "!"
+                        } else if message.acked_at.is_some() {
+                            "a"
+                        } else {
+                            "-"
+                        };
+                        let preview = if !message.subject.trim().is_empty() {
+                            message.subject.trim()
+                        } else if !message.body.trim().is_empty() {
+                            message.body.trim()
+                        } else {
+                            "(empty)"
+                        };
+                        let line = format!(
+                            "{unread_mark}{ack_mark} {} {} {}",
+                            format_mail_id(message.id),
+                            message.from.trim(),
+                            preview
+                        );
+                        frame.draw_text(
+                            detail_x,
+                            row,
+                            &trim_to_width(&line, detail_width),
+                            if message.read_at.is_none() {
+                                TextRole::Primary
+                            } else {
+                                TextRole::Muted
+                            },
+                        );
+                        row += 1;
+                    }
+                }
+            }
+        }
+        if timeline_reserved > 0 {
+            frame.draw_text(
+                0,
+                timeline_start,
+                "claim timeline (latest)",
+                TextRole::Accent,
+            );
+            let conflict_task_ids: HashSet<&str> = claim_conflicts
+                .iter()
+                .map(|conflict| conflict.task_id.as_str())
+                .collect();
+            let highlight_task = claim_conflicts
+                .get(self.selected_claim_conflict)
+                .map(|conflict| conflict.task_id.as_str());
+            for row in 1..timeline_reserved {
+                let Some(event) = self.claim_events.get(row - 1) else {
+                    break;
+                };
+                let flag = if conflict_task_ids.contains(event.task_id.as_str()) {
+                    "!"
+                } else {
+                    " "
+                };
+                let line = format!(
+                    "{flag} {} {} <- {}",
+                    event.claimed_at, event.task_id, event.claimed_by
+                );
+                let role = if Some(event.task_id.as_str()) == highlight_task {
+                    TextRole::Danger
+                } else if flag == "!" {
+                    TextRole::Primary
+                } else {
+                    TextRole::Muted
+                };
+                frame.draw_text(0, timeline_start + row, &trim_to_width(&line, width), role);
+            }
+        }
+
+        frame
+    }
+
     fn status_display_text(&self) -> String {
         if self.status_kind == StatusKind::Err {
             let trimmed = self.status_text.trim();
@@ -2212,42 +3309,62 @@ impl App {
         height: usize,
         y_offset: usize,
     ) {
-        let lines = [
-            "=== Forge Loop TUI Help ===",
-            "",
-            "Navigation:",
-            "  1/2/3/4   switch tabs (Overview/Logs/Runs/MultiLogs)",
-            "  ]/[       cycle tabs",
-            "  j/k       move loop selection",
-            "  ,/.       move run selection / multi page",
-            "",
-            "Actions:",
-            "  S         stop selected loop",
-            "  K         kill selected loop",
-            "  D         delete selected loop",
-            "  r         resume selected loop",
-            "  n         new loop wizard",
-            "",
-            "Logs:",
-            "  v         cycle log source",
-            "  x         cycle log layer",
-            "  u/d       scroll logs",
-            "  l         expand logs fullscreen",
-            "",
-            "Multi Logs:",
-            "  m         cycle layout",
-            "  space     toggle pin",
-            "  c         clear pinned",
-            "  ,/.       page left/right",
-            "  g/G       first/last page",
-            "",
-            "Global:",
-            "  ?         toggle help",
-            "  q         quit",
-            "  t         cycle theme",
-            "  z         zen mode (focus right pane)",
-            "  /         filter mode",
+        let mut lines: Vec<String> = vec![
+            "=== Forge Loop TUI Help ===".to_owned(),
+            "".to_owned(),
+            "Navigation:".to_owned(),
+            "  1/2/3/4/5 switch tabs (Overview/Logs/Runs/MultiLogs/Inbox)".to_owned(),
+            "  ]/[       cycle tabs".to_owned(),
+            "  j/k       move loop selection".to_owned(),
+            "  ,/.       move run selection / multi page".to_owned(),
+            "".to_owned(),
+            "Actions:".to_owned(),
+            "  S         stop selected loop".to_owned(),
+            "  K         kill selected loop".to_owned(),
+            "  D         delete selected loop".to_owned(),
+            "  r         resume selected loop".to_owned(),
+            "  n         new loop wizard".to_owned(),
+            "".to_owned(),
+            "Command Palette:".to_owned(),
+            "  Ctrl+P    open command palette".to_owned(),
+            "  type      fuzzy search action registry".to_owned(),
+            "  tab/j/k   move result selection".to_owned(),
+            "  enter     run selected action".to_owned(),
+            "".to_owned(),
+            "Logs:".to_owned(),
+            "  v         cycle log source".to_owned(),
+            "  x         cycle log layer".to_owned(),
+            "  u/d       scroll logs".to_owned(),
+            "  l         expand logs fullscreen".to_owned(),
+            "".to_owned(),
+            "Multi Logs:".to_owned(),
+            "  m         cycle layout".to_owned(),
+            "  space     toggle pin".to_owned(),
+            "  c         clear pinned".to_owned(),
+            "  ,/.       page left/right".to_owned(),
+            "  g/G       first/last page".to_owned(),
+            "".to_owned(),
+            "Inbox:".to_owned(),
+            "  f         cycle inbox filter (all/unread/ack-required)".to_owned(),
+            "  enter     mark selected thread read".to_owned(),
+            "  a         ack latest pending message in thread".to_owned(),
+            "  h         generate handoff snapshot package".to_owned(),
+            "  r         quick reply shortcut (thread + reply-to id)".to_owned(),
+            "  o         next claim conflict".to_owned(),
+            "  O         show conflict resolution hint".to_owned(),
+            "".to_owned(),
+            "Global:".to_owned(),
+            "  ?         toggle help".to_owned(),
+            "  q         quit".to_owned(),
+            "  t         cycle theme".to_owned(),
+            "  z         zen mode (focus right pane)".to_owned(),
+            "  /         filter mode".to_owned(),
+            "".to_owned(),
         ];
+        lines.extend(
+            self.keymap
+                .conflict_diagnostics_lines(width, height.saturating_sub(lines.len())),
+        );
         for (i, line) in lines.iter().enumerate() {
             if i >= height {
                 break;
@@ -2272,6 +3389,46 @@ fn blit_frame(dest: &mut RenderFrame, src: &RenderFrame, x_offset: usize, y_offs
             }
         }
     }
+}
+
+fn inbox_thread_key(message: &InboxMessageView) -> String {
+    if let Some(thread_id) = &message.thread_id {
+        let trimmed = thread_id.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_owned();
+        }
+    }
+    format_mail_id(message.id)
+}
+
+fn extract_prefixed_token(text: &str, prefix: &str) -> Option<String> {
+    let normalized_prefix = prefix.to_ascii_lowercase();
+    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+        .find_map(|token| {
+            if token.is_empty() {
+                return None;
+            }
+            let normalized = token.to_ascii_lowercase();
+            if normalized.starts_with(&normalized_prefix) {
+                Some(normalized)
+            } else {
+                None
+            }
+        })
+}
+
+fn format_mail_id(id: i64) -> String {
+    format!("m-{id}")
+}
+
+fn trim_to_width(value: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if value.len() <= width {
+        return value.to_owned();
+    }
+    value.chars().take(width).collect()
 }
 
 /// Multi-page pagination bounds, matching Go's `multiPageBounds`.
@@ -2387,18 +3544,90 @@ mod tests {
         app
     }
 
+    fn sample_inbox_messages() -> Vec<InboxMessageView> {
+        vec![
+            InboxMessageView {
+                id: 1,
+                thread_id: Some("thread-a".to_owned()),
+                from: "agent-a".to_owned(),
+                subject: "handoff ready".to_owned(),
+                body: "please review".to_owned(),
+                created_at: "2026-02-12T08:10:00Z".to_owned(),
+                ack_required: true,
+                read_at: None,
+                acked_at: None,
+            },
+            InboxMessageView {
+                id: 2,
+                thread_id: Some("thread-a".to_owned()),
+                from: "agent-b".to_owned(),
+                subject: "re: handoff ready".to_owned(),
+                body: "reviewing now".to_owned(),
+                created_at: "2026-02-12T08:11:00Z".to_owned(),
+                ack_required: false,
+                read_at: None,
+                acked_at: None,
+            },
+            InboxMessageView {
+                id: 3,
+                thread_id: Some("thread-b".to_owned()),
+                from: "agent-c".to_owned(),
+                subject: "incident escalated".to_owned(),
+                body: "needs ack".to_owned(),
+                created_at: "2026-02-12T08:12:00Z".to_owned(),
+                ack_required: true,
+                read_at: Some("2026-02-12T08:12:30Z".to_owned()),
+                acked_at: None,
+            },
+        ]
+    }
+
+    fn sample_handoff_messages() -> Vec<InboxMessageView> {
+        vec![InboxMessageView {
+            id: 11,
+            thread_id: Some("thread-handoff".to_owned()),
+            from: "agent-h".to_owned(),
+            subject: "handoff forge-jws loop-2".to_owned(),
+            body: "status update and pending risk summary".to_owned(),
+            created_at: "2026-02-12T08:13:00Z".to_owned(),
+            ack_required: true,
+            read_at: None,
+            acked_at: None,
+        }]
+    }
+
+    fn sample_claim_events() -> Vec<ClaimEventView> {
+        vec![
+            ClaimEventView {
+                task_id: "forge-jws".to_owned(),
+                claimed_by: "agent-a".to_owned(),
+                claimed_at: "2026-02-12T08:10:00Z".to_owned(),
+            },
+            ClaimEventView {
+                task_id: "forge-jws".to_owned(),
+                claimed_by: "agent-b".to_owned(),
+                claimed_at: "2026-02-12T08:12:00Z".to_owned(),
+            },
+            ClaimEventView {
+                task_id: "forge-73b".to_owned(),
+                claimed_by: "agent-c".to_owned(),
+                claimed_at: "2026-02-12T08:11:00Z".to_owned(),
+            },
+        ]
+    }
+
     // -- MainTab labels --
 
     #[test]
     fn tab_label_snapshot() {
         let labels: Vec<&str> = MainTab::ORDER.iter().map(|t| t.label()).collect();
-        assert_eq!(labels.join("|"), "Overview|Logs|Runs|Multi Logs");
+        assert_eq!(labels.join("|"), "Overview|Logs|Runs|Multi Logs|Inbox");
     }
 
     #[test]
     fn tab_short_label_snapshot() {
         let labels: Vec<&str> = MainTab::ORDER.iter().map(|t| t.short_label()).collect();
-        assert_eq!(labels.join("|"), "ov|logs|runs|multi");
+        assert_eq!(labels.join("|"), "ov|logs|runs|multi|inbox");
     }
 
     // -- LogSource / LogLayer labels --
@@ -2441,6 +3670,8 @@ mod tests {
         assert_eq!(app.tab(), MainTab::Runs);
         app.update(key(Key::Char('4')));
         assert_eq!(app.tab(), MainTab::MultiLogs);
+        app.update(key(Key::Char('5')));
+        assert_eq!(app.tab(), MainTab::Inbox);
         app.update(key(Key::Char('1')));
         assert_eq!(app.tab(), MainTab::Overview);
     }
@@ -2464,6 +3695,108 @@ mod tests {
         assert!(app.focus_right());
         app.update(key(Key::Char('1')));
         assert!(!app.focus_right());
+    }
+
+    #[test]
+    fn inbox_filter_cycles_and_clamps_selection() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.update(key(Key::Char('5')));
+        assert_eq!(app.tab(), MainTab::Inbox);
+        assert_eq!(app.inbox_filter(), InboxFilter::All);
+
+        app.update(key(Key::Char('f')));
+        assert_eq!(app.inbox_filter(), InboxFilter::Unread);
+        app.update(key(Key::Char('f')));
+        assert_eq!(app.inbox_filter(), InboxFilter::AckRequired);
+        app.update(key(Key::Char('f')));
+        assert_eq!(app.inbox_filter(), InboxFilter::All);
+    }
+
+    #[test]
+    fn inbox_enter_marks_selected_thread_read() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('j')));
+        app.update(key(Key::Enter));
+        let unread = app
+            .inbox_messages()
+            .iter()
+            .filter(|message| message.read_at.is_none())
+            .count();
+        assert_eq!(unread, 0);
+    }
+
+    #[test]
+    fn inbox_acknowledges_latest_pending_message() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('a')));
+        let acked = app
+            .inbox_messages()
+            .iter()
+            .find(|message| message.id == 3)
+            .and_then(|message| message.acked_at.clone());
+        assert_eq!(acked.as_deref(), Some("now"));
+    }
+
+    #[test]
+    fn inbox_render_uses_cli_mail_ids_and_threads() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.set_claim_events(sample_claim_events());
+        app.update(key(Key::Char('5')));
+        let frame = app.render();
+        let snapshot = frame.snapshot();
+        assert!(snapshot.contains("Inbox filter:all"));
+        assert!(snapshot.contains("m-3"));
+        assert!(snapshot.contains("thread:thread-b"));
+        assert!(snapshot.contains("claim timeline (latest)"));
+        assert!(snapshot.contains("! 2026-02-12T08:12:00Z forge-jws <- agent-b"));
+    }
+
+    #[test]
+    fn inbox_claim_conflict_shortcuts_show_status() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.set_claim_events(sample_claim_events());
+        app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('o')));
+        assert!(app.status_text().contains("Claim conflict forge-jws"));
+        app.update(key(Key::Char('O')));
+        assert!(app
+            .status_text()
+            .contains("takeover claim: forge-jws by <agent>"));
+    }
+
+    #[test]
+    fn inbox_handoff_snapshot_generates_compact_package() {
+        let mut app = app_with_loops(3);
+        app.set_inbox_messages(sample_handoff_messages());
+        app.set_claim_events(sample_claim_events());
+        app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('h')));
+        assert!(app.status_text().contains("Handoff snapshot ready"));
+        let snapshot = app.render().snapshot();
+        assert!(snapshot.contains("handoff snapshot"));
+        assert!(snapshot.contains("task=forge-jws loop=loop-2"));
+        assert!(snapshot.contains("status: loop=running"));
+        assert!(snapshot.contains("context: thread=thread-handoff"));
+        assert!(snapshot.contains("links: task:sv task show forge-jws"));
+        assert!(snapshot.contains("pending-risks:"));
+    }
+
+    #[test]
+    fn inbox_handoff_snapshot_uses_claim_fallback_when_task_not_in_thread() {
+        let mut app = app_with_loops(2);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.set_claim_events(sample_claim_events());
+        app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('h')));
+        let snapshot = app.render().snapshot();
+        assert!(snapshot.contains("task=forge-jws"));
     }
 
     // -- quit --
@@ -2511,6 +3844,78 @@ mod tests {
         assert_eq!(app.mode(), UiMode::Help);
         app.update(key(Key::Escape));
         assert_eq!(app.mode(), UiMode::Filter);
+    }
+
+    #[test]
+    fn help_includes_keymap_diagnostics_panel() {
+        let mut app = App::new("default", 12);
+        app.height = 80;
+        app.update(key(Key::Char('?')));
+        let frame = app.render();
+        let all_text = (0..app.height())
+            .map(|row| frame.row_text(row))
+            .collect::<Vec<String>>()
+            .join("\n");
+        assert!(all_text.contains("Keymap diagnostics"));
+        assert!(all_text.contains("no conflicts detected"));
+    }
+
+    #[test]
+    fn ctrl_p_enters_palette_mode() {
+        let mut app = App::new("default", 12);
+        let cmd = app.update(ctrl_key('p'));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(app.mode(), UiMode::Palette);
+        assert!(app.palette_match_count() > 0);
+        assert!(app.palette_query().is_empty());
+    }
+
+    #[test]
+    fn palette_typing_and_backspace_updates_query() {
+        let mut app = App::new("default", 12);
+        app.update(ctrl_key('p'));
+        app.update(key(Key::Char('l')));
+        app.update(key(Key::Char('o')));
+        assert_eq!(app.palette_query(), "lo");
+        app.update(key(Key::Backspace));
+        assert_eq!(app.palette_query(), "l");
+    }
+
+    #[test]
+    fn palette_enter_executes_navigation_action() {
+        let mut app = App::new("default", 12);
+        app.update(ctrl_key('p'));
+        for ch in ['l', 'o', 'g', 's'] {
+            app.update(key(Key::Char(ch)));
+        }
+        let cmd = app.update(key(Key::Enter));
+        assert_eq!(cmd, Command::Fetch);
+        assert_eq!(app.mode(), UiMode::Main);
+        assert_eq!(app.tab(), MainTab::Logs);
+    }
+
+    #[test]
+    fn palette_enter_executes_selected_loop_action() {
+        let mut app = app_with_loops(2);
+        app.update(ctrl_key('p'));
+        for ch in ['s', 't', 'o', 'p'] {
+            app.update(key(Key::Char(ch)));
+        }
+        let cmd = app.update(key(Key::Enter));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(app.mode(), UiMode::Confirm);
+        assert!(app.confirm().is_some());
+    }
+
+    #[test]
+    fn palette_help_round_trips_back_to_palette() {
+        let mut app = App::new("default", 12);
+        app.update(ctrl_key('p'));
+        assert_eq!(app.mode(), UiMode::Palette);
+        app.update(key(Key::Char('?')));
+        assert_eq!(app.mode(), UiMode::Help);
+        app.update(key(Key::Escape));
+        assert_eq!(app.mode(), UiMode::Palette);
     }
 
     // -- selection --

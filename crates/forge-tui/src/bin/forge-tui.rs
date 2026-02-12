@@ -18,59 +18,141 @@ struct LiveLoopSnapshot {
     errored: usize,
 }
 
-fn main() {
-    let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-    if interactive {
-        loop {
-            print!("\x1b[2J\x1b[H");
-            let _ = std::io::stdout().flush();
-            render_snapshot();
-            println!();
-            println!("refresh: 2s   exit: Ctrl+C");
-            thread::sleep(Duration::from_secs(2));
-        }
-    } else {
-        render_snapshot();
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenderDiffPlan {
+    changed_rows: Vec<usize>,
+    clear_start_row: Option<usize>,
+    clear_end_row: usize,
+}
+
+impl RenderDiffPlan {
+    fn is_noop(&self) -> bool {
+        self.changed_rows.is_empty() && self.clear_start_row.is_none()
     }
 }
 
-fn render_snapshot() {
+#[derive(Debug, Default)]
+struct IncrementalRenderEngine {
+    previous_lines: Vec<String>,
+}
+
+impl IncrementalRenderEngine {
+    fn repaint<W: Write>(&mut self, mut out: W, next_lines: &[String]) -> std::io::Result<()> {
+        let plan = plan_render_diff(&self.previous_lines, next_lines);
+        if plan.is_noop() {
+            return Ok(());
+        }
+
+        for row in plan.changed_rows {
+            let line = next_lines.get(row - 1).map_or("", String::as_str);
+            write!(out, "\x1b[{row};1H\x1b[2K{line}")?;
+        }
+
+        if let Some(start_row) = plan.clear_start_row {
+            for row in start_row..=plan.clear_end_row {
+                write!(out, "\x1b[{row};1H\x1b[2K")?;
+            }
+        }
+
+        write!(out, "\x1b[{};1H", next_lines.len().saturating_add(1))?;
+        out.flush()?;
+        self.previous_lines = next_lines.to_vec();
+        Ok(())
+    }
+}
+
+fn main() {
+    let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    if interactive {
+        run_interactive();
+    } else {
+        print!("{}", render_snapshot_text());
+    }
+}
+
+fn run_interactive() {
+    let mut renderer = IncrementalRenderEngine::default();
+    print!("\x1b[2J");
+    let _ = std::io::stdout().flush();
+    loop {
+        let mut lines = render_snapshot_lines();
+        lines.push(String::new());
+        lines.push("refresh: 2s   exit: Ctrl+C".to_string());
+        let _ = renderer.repaint(std::io::stdout(), &lines);
+        thread::sleep(Duration::from_secs(2));
+    }
+}
+
+fn plan_render_diff(previous: &[String], next: &[String]) -> RenderDiffPlan {
+    let shared = previous.len().min(next.len());
+    let mut changed_rows = Vec::new();
+
+    for idx in 0..shared {
+        if previous[idx] != next[idx] {
+            changed_rows.push(idx + 1);
+        }
+    }
+    if next.len() > shared {
+        changed_rows.extend((shared + 1)..=next.len());
+    }
+
+    let clear_start_row = (next.len() < previous.len()).then_some(next.len() + 1);
+
+    RenderDiffPlan {
+        changed_rows,
+        clear_start_row,
+        clear_end_row: previous.len(),
+    }
+}
+
+fn render_snapshot_text() -> String {
+    let lines = render_snapshot_lines();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let mut output = lines.join("\n");
+    output.push('\n');
+    output
+}
+
+fn render_snapshot_lines() -> Vec<String> {
+    let mut lines = Vec::new();
     let db_path = resolve_database_path();
     let snapshot = match load_live_loop_snapshot(&db_path) {
         Ok(snapshot) => snapshot,
         Err(err) => {
-            println!("error: load live loop snapshot: {err}");
-            return;
+            lines.push(format!("error: load live loop snapshot: {err}"));
+            return lines;
         }
     };
 
     let mut app = App::new("default", 200);
     app.set_loops(snapshot.loops.clone());
-    println!("{}", app.render().snapshot());
-    println!();
-    println!("forge loop snapshot (rust)");
-    println!("db: {}", db_path.display());
-    println!(
+    lines.extend(app.render().snapshot().lines().map(str::to_owned));
+    lines.push(String::new());
+    lines.push("forge loop snapshot (rust)".to_string());
+    lines.push(format!("db: {}", db_path.display()));
+    lines.push(format!(
         "loops: {}  queue(pending): {}  profiles: {}",
         snapshot.loops.len(),
         snapshot.total_queue_depth,
         snapshot.profile_count
-    );
-    println!(
+    ));
+    lines.push(format!(
         "states: running={} sleeping={} waiting={} stopped={} error={}",
         snapshot.running, snapshot.sleeping, snapshot.waiting, snapshot.stopped, snapshot.errored
-    );
-    println!();
+    ));
+    lines.push(String::new());
 
     if snapshot.loops.is_empty() {
-        println!("No loops found");
-        return;
+        lines.push("No loops found".to_string());
+        return lines;
     }
 
-    println!(
+    lines.push(format!(
         "{:<10} {:<9} {:>5} {:>6} {:<18} NAME",
         "ID", "STATE", "RUNS", "QUEUE", "PROFILE"
-    );
+    ));
     for loop_view in snapshot.loops.iter().take(40) {
         let display_id = if loop_view.short_id.trim().is_empty() {
             trim(&loop_view.id, 10)
@@ -82,7 +164,7 @@ fn render_snapshot() {
         } else {
             trim(&loop_view.profile_name, 18)
         };
-        println!(
+        lines.push(format!(
             "{:<10} {:<9} {:>5} {:>6} {:<18} {}",
             display_id,
             trim(&loop_view.state, 9),
@@ -90,8 +172,9 @@ fn render_snapshot() {
             loop_view.queue_depth,
             profile,
             trim(&loop_view.name, 60)
-        );
+        ));
     }
+    lines
 }
 
 fn load_live_loop_snapshot(db_path: &Path) -> Result<LiveLoopSnapshot, String> {
@@ -256,7 +339,7 @@ mod tests {
     use forge_db::pool_repository::{Pool, PoolRepository};
     use forge_db::profile_repository::{Profile, ProfileRepository};
 
-    use super::load_live_loop_snapshot;
+    use super::{load_live_loop_snapshot, plan_render_diff, IncrementalRenderEngine};
 
     #[test]
     fn live_snapshot_includes_loop_queue_and_profile_fields() {
@@ -361,6 +444,67 @@ mod tests {
         assert_eq!(after.loops[0].queue_depth, 1);
 
         cleanup_temp_dir(&path);
+    }
+
+    #[test]
+    fn render_diff_plan_marks_changed_and_appended_rows() {
+        let plan = plan_render_diff(
+            &lines(["header", "stable", "tail-old"]),
+            &lines(["header", "changed", "tail-old", "new-row"]),
+        );
+        assert_eq!(plan.changed_rows, vec![2, 4]);
+        assert_eq!(plan.clear_start_row, None);
+        assert_eq!(plan.clear_end_row, 3);
+    }
+
+    #[test]
+    fn render_diff_plan_marks_clear_range_when_next_is_shorter() {
+        let plan = plan_render_diff(
+            &lines(["alpha", "beta", "gamma"]),
+            &lines(["alpha", "beta"]),
+        );
+        assert!(plan.changed_rows.is_empty());
+        assert_eq!(plan.clear_start_row, Some(3));
+        assert_eq!(plan.clear_end_row, 3);
+    }
+
+    #[test]
+    fn incremental_repaint_noop_for_identical_frames() {
+        let mut engine = IncrementalRenderEngine::default();
+        let frame = lines(["row-1", "row-2"]);
+
+        let mut first = Vec::new();
+        engine.repaint(&mut first, &frame).expect("first repaint");
+        assert!(!first.is_empty());
+
+        let mut second = Vec::new();
+        engine.repaint(&mut second, &frame).expect("second repaint");
+        assert!(second.is_empty());
+    }
+
+    #[test]
+    fn incremental_repaint_updates_changed_rows_and_clears_removed_tail() {
+        let mut engine = IncrementalRenderEngine::default();
+
+        let mut seed = Vec::new();
+        engine
+            .repaint(&mut seed, &lines(["alpha", "beta", "gamma"]))
+            .expect("seed repaint");
+
+        let mut out = Vec::new();
+        engine
+            .repaint(&mut out, &lines(["alpha", "BETA"]))
+            .expect("incremental repaint");
+
+        let ansi = String::from_utf8(out).expect("valid utf8");
+        assert!(!ansi.contains("\x1b[1;1H\x1b[2Kalpha"));
+        assert!(ansi.contains("\x1b[2;1H\x1b[2KBETA"));
+        assert!(ansi.contains("\x1b[3;1H\x1b[2K"));
+        assert!(ansi.ends_with("\x1b[3;1H"));
+    }
+
+    fn lines<const N: usize>(rows: [&str; N]) -> Vec<String> {
+        rows.into_iter().map(str::to_owned).collect()
     }
 
     fn temp_db_path(tag: &str) -> PathBuf {

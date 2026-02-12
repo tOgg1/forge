@@ -6,14 +6,35 @@ use forge_ftui_adapter::style::{ThemeKind, ThemeSpec};
 use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 
 pub mod actions;
+pub mod analytics_dashboard;
+pub mod analytics_fact_model;
 pub mod app;
+pub mod blocker_graph;
+pub mod command_palette;
+pub mod extension_actions;
+pub mod extension_api;
+pub mod extension_event_bus;
+pub mod extension_package_manager;
+pub mod extension_reference;
+pub mod extension_sandbox;
 pub mod filter;
+pub mod global_search_index;
 pub mod help_overlay;
+pub mod keymap;
+pub mod lane_model;
+pub mod layout_presets;
 pub mod layouts;
 pub mod logs_tab;
 pub mod multi_logs;
+pub mod navigation_graph;
 pub mod overview_tab;
 pub mod runs_tab;
+pub mod session_restore;
+pub mod swarm_dogpile;
+pub mod swarm_governor;
+pub mod swarm_stop_monitor;
+pub mod swarm_templates;
+pub mod swarm_wind_down;
 pub mod theme;
 
 /// Stable crate label used by bootstrap smoke tests.
