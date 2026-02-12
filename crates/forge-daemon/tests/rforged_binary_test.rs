@@ -451,6 +451,51 @@ fn rforged_binary_serves_ping_and_get_status_then_exits_on_sigterm() {
     assert_clean_exit(exit_status, "rforged");
 }
 
+fn wait_for_log_marker_count(
+    rforge_bin: &Path,
+    repo_path: &Path,
+    db_path: &Path,
+    data_dir: &Path,
+    daemon_target: &str,
+    loop_prefix: &str,
+    marker: &str,
+    min_count: usize,
+    timeout: Duration,
+) -> String {
+    let deadline = Instant::now() + timeout;
+    let mut last_logs: Option<String> = None;
+
+    loop {
+        let logs = run_rforge(
+            rforge_bin,
+            repo_path,
+            db_path,
+            data_dir,
+            daemon_target,
+            &["logs", loop_prefix],
+        );
+        assert_command_ok(&logs, "rforge logs <short-prefix>");
+        last_logs = Some(logs.stdout);
+
+        if count_occurrences(
+            last_logs
+                .as_ref()
+                .expect("last logs should be set before marker check"),
+            marker,
+        ) >= min_count
+        {
+            return last_logs.expect("last logs should be set before return");
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "timed out waiting for logs marker count >= {min_count}\n{}",
+                last_logs.unwrap_or_default()
+            );
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+}
+
 #[test]
 fn rforged_and_rforge_up_spawn_owner_daemon_e2e_tmp_repo() {
     let temp = TempDir::new("rforged-rforge-daemon-e2e");
@@ -550,19 +595,20 @@ fn rforged_and_rforge_up_spawn_owner_daemon_e2e_tmp_repo() {
     let short_prefix: String = short_id.chars().take(4).collect();
     assert_eq!(short_prefix.len(), 4, "short_id prefix should have 4 chars");
 
-    let logs = run_rforge(
+    let logs = wait_for_log_marker_count(
         &rforge_bin,
         &repo_path,
         &db_path,
         &data_dir,
         &daemon_target,
-        &["logs", short_prefix.as_str()],
+        short_prefix.as_str(),
+        RUN_MARKER,
+        2,
+        Duration::from_secs(10),
     );
-    assert_command_ok(&logs, "rforge logs <short-prefix>");
     assert!(
-        count_occurrences(&logs.stdout, RUN_MARKER) >= 2,
-        "logs should contain >=2 run markers\n{}",
-        logs.stdout
+        count_occurrences(&logs, RUN_MARKER) >= 2,
+        "logs should contain >=2 run markers\n{logs}"
     );
 
     let stop = run_rforge(
