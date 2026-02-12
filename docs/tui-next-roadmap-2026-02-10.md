@@ -59,6 +59,7 @@ Implementation notes:
 - `forge-daf` delivered in `docs/tui-604-shared-notes-breadcrumbs.md` with per-task shared notes, timestamped/attributed breadcrumbs, merged timeline rows, and notes-pane rendering helpers in `crates/forge-tui/src/task_notes.rs`.
 - `forge-vz1` delivered in `docs/tui-605-activity-stream-agent-repo-task.md` with bounded real-time activity stream modeling, filters by `agent/repo/task/kind/text`, and jump-link metadata for task/log pivots in `crates/forge-tui/src/activity_stream.rs`.
 - `forge-z33` delivered in `docs/tui-606-communication-quality-stale-thread-alerts.md` with unanswered-ask checks, stale-thread alerts, closure-note hygiene detection, and actionable communication remediation hints in `crates/forge-tui/src/communication_quality.rs`.
+- `forge-67x` delivered in `docs/tui-607-alert-rail-failures-stuck-loops.md` with sticky alert-rail planning for failures/stuck loops/queue growth, bounded sticky recovery windows, and deterministic quick-jump loop targeting in `crates/forge-tui/src/alert_rail.rs`.
 - `forge-rky` delivered in `docs/tui-502-controlled-ramp-wizard.md` with staged ramp-up and health-gate progression logic in `crates/forge-tui/src/swarm_templates.rs`.
 - `forge-k1s` delivered in `docs/tui-503-concurrency-governor.md` with concurrency governor + starvation-throttle recommendations in `crates/forge-tui/src/swarm_governor.rs`.
 - `forge-0q3` delivered in `docs/tui-504-dogpile-detector-redistribution.md` with duplicate-claim detection + redistribution action planning in `crates/forge-tui/src/swarm_dogpile.rs`.

@@ -7,6 +7,7 @@ use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 
 pub mod actions;
 pub mod activity_stream;
+pub mod alert_rail;
 pub mod analytics_dashboard;
 pub mod analytics_fact_model;
 pub mod app;
