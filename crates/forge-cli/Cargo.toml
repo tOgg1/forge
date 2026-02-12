@@ -17,8 +17,10 @@ name = "rforge"
 path = "src/bin/rforge.rs"
 
 [dependencies]
+async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 fmail-core = { path = "../fmail-core" }
+forge-agent = { path = "../forge-agent" }
 forge-db = { path = "../forge-db" }
 forge-loop = { path = "../forge-loop" }
 forge-rpc = { path = "../forge-rpc" }

@@ -3,6 +3,7 @@ members = [
     "crates/fmail-cli",
     "crates/fmail-core",
     "crates/fmail-tui",
+    "crates/forge-agent",
     "crates/forge-cli",
     "crates/forge-core",
     "crates/forge-db",
