@@ -209,12 +209,12 @@ fn score_context(
     let mut score = 0;
     if let (Some(task_project), Some(focus_project)) = (project_id, project_focus) {
         if task_project == focus_project {
-            score += 10;
+            score += 15;
         }
     }
     if let (Some(task_epic), Some(focus_epic)) = (epic_id, epic_focus) {
         if task_epic == focus_epic {
-            score += 10;
+            score += 15;
         }
     }
     score
