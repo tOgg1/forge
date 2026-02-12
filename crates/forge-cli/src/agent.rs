@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use forge_agent::error::AgentServiceError;
 use forge_agent::event::NullEventSink;
@@ -17,6 +17,7 @@ use forge_agent::types::{
 use forge_db::persistent_agent_event_repository::{
     PersistentAgentEvent, PersistentAgentEventRepository,
 };
+use forge_db::persistent_agent_repository::{PersistentAgentFilter, PersistentAgentRepository};
 use forge_db::transcript_repository::{Transcript, TranscriptRepository};
 use serde::Serialize;
 
@@ -355,6 +356,23 @@ struct ReviveArgs {
     agent_id: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RevivePolicy {
+    Never,
+    Ask,
+    Auto,
+}
+
+impl RevivePolicy {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::Ask => "ask",
+            Self::Auto => "auto",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RunArgs {
     text: String,
@@ -364,7 +382,7 @@ struct RunArgs {
     command: String,
     wait_for: String,
     wait_timeout: u64,
-    revive: bool,
+    revive_policy: RevivePolicy,
     task_id: String,
     tags: Vec<String>,
     labels: Vec<String>,
@@ -440,6 +458,7 @@ const SUMMARY_TRANSCRIPT_SCAN_LIMIT: usize = 160;
 const SUMMARY_EXCERPT_LIMIT: usize = 8;
 const SUMMARY_BLOCKER_LIMIT: usize = 6;
 const SUMMARY_TEXT_LIMIT: usize = 220;
+const OBSERVABILITY_AGENT_SCAN_LIMIT: i64 = 20_000;
 
 fn exec_summary(
     args: &SummaryArgs,
@@ -573,6 +592,126 @@ fn persist_summary_snapshot(
     };
     repo.append(&mut event).map_err(|err| err.to_string())?;
     Ok(event.id)
+}
+
+fn observe_counter_metric(
+    name: &str,
+    outcome: &str,
+    agent_id: Option<&str>,
+    detail: Option<serde_json::Value>,
+) {
+    with_observability_repos(|event_repo, _agent_repo| {
+        let mut payload = serde_json::json!({
+            "type": "counter",
+            "name": name,
+            "value": 1
+        });
+        if let Some(extra) = &detail {
+            payload["detail"] = extra.clone();
+        }
+        append_metric_event(event_repo, name, outcome, agent_id, payload);
+    });
+}
+
+fn observe_latency_metric(name: &str, outcome: &str, agent_id: Option<&str>, value_ms: u128) {
+    with_observability_repos(|event_repo, _agent_repo| {
+        let payload = serde_json::json!({
+            "type": "latency_ms",
+            "name": name,
+            "value_ms": value_ms
+        });
+        append_metric_event(event_repo, name, outcome, agent_id, payload);
+    });
+}
+
+fn observe_gauge_metrics(workspace_id: Option<&str>) {
+    with_observability_repos(|event_repo, agent_repo| {
+        let filter = PersistentAgentFilter {
+            workspace_id: workspace_id
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned),
+            limit: OBSERVABILITY_AGENT_SCAN_LIMIT,
+            ..Default::default()
+        };
+        let agents = match agent_repo.list(filter) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        let active = agents
+            .iter()
+            .filter(|agent| !matches!(agent.state.as_str(), "failed" | "stopped"))
+            .count() as i64;
+        let idle = agents.iter().filter(|agent| agent.state == "idle").count() as i64;
+
+        let scope = workspace_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("all");
+        append_metric_event(
+            event_repo,
+            "active_agents",
+            "snapshot",
+            None,
+            serde_json::json!({
+                "type": "gauge",
+                "name": "active_agents",
+                "value": active,
+                "scope": scope
+            }),
+        );
+        append_metric_event(
+            event_repo,
+            "idle_agents",
+            "snapshot",
+            None,
+            serde_json::json!({
+                "type": "gauge",
+                "name": "idle_agents",
+                "value": idle,
+                "scope": scope
+            }),
+        );
+    });
+}
+
+fn append_metric_event(
+    repo: &PersistentAgentEventRepository<'_>,
+    name: &str,
+    outcome: &str,
+    agent_id: Option<&str>,
+    detail: serde_json::Value,
+) {
+    let mut event = PersistentAgentEvent {
+        id: 0,
+        agent_id: agent_id.map(ToOwned::to_owned),
+        kind: format!("metric_{name}"),
+        outcome: outcome.to_string(),
+        detail: serde_json::to_string(&detail).ok(),
+        timestamp: String::new(),
+    };
+    let _ = repo.append(&mut event);
+}
+
+fn with_observability_repos(
+    mut callback: impl FnMut(&PersistentAgentEventRepository<'_>, &PersistentAgentRepository<'_>),
+) {
+    let db_path = resolve_database_path();
+    let mut db = match forge_db::Db::open(forge_db::Config::new(&db_path)) {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+    if db.migrate_up().is_err() {
+        return;
+    }
+    let event_repo = PersistentAgentEventRepository::new(&db);
+    let agent_repo = PersistentAgentRepository::new(&db);
+    callback(&event_repo, &agent_repo);
+}
+
+fn is_wait_timeout_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("wait timeout") || lower.contains("timed out")
 }
 
 fn concise_status(
@@ -1025,13 +1164,24 @@ fn exec_run(
                     snapshot.id, snapshot.state
                 ));
             }
-            backend.kill_agent(KillAgentParams {
+            match backend.kill_agent(KillAgentParams {
                 agent_id: snapshot.id.clone(),
                 force: true,
                 grace_period: None,
-            })?;
+            }) {
+                Ok(_) => observe_counter_metric("kill", "success", Some(&snapshot.id), None),
+                Err(err) => {
+                    observe_counter_metric(
+                        "kill",
+                        "error",
+                        Some(&snapshot.id),
+                        Some(serde_json::json!({ "error": err })),
+                    );
+                    return Err(err);
+                }
+            }
             revived = true;
-            spawn_for_run(
+            spawn_for_run_with_metrics(
                 backend,
                 &agent_id,
                 &workspace_id,
@@ -1047,7 +1197,7 @@ fn exec_run(
         if args.revive && !args.agent_id.is_empty() {
             revived = true;
         }
-        spawn_for_run(
+        spawn_for_run_with_metrics(
             backend,
             &agent_id,
             &workspace_id,
@@ -1058,23 +1208,62 @@ fn exec_run(
     };
 
     let run_text = build_run_message(args);
-    backend.send_message(SendMessageParams {
+    let send_started_at = Instant::now();
+    let send_params = SendMessageParams {
         agent_id: agent_id.clone(),
         text: run_text.clone(),
         send_enter: true,
         keys: Vec::new(),
-    })?;
+    };
+    if let Err(err) = backend.send_message(send_params) {
+        observe_counter_metric(
+            "sends",
+            "error",
+            Some(&agent_id),
+            Some(serde_json::json!({ "error": err })),
+        );
+        return Err(err);
+    }
+    observe_counter_metric("sends", "success", Some(&agent_id), None);
 
     let observed = if let Some(target) = wait_target {
-        backend.wait_state(WaitStateParams {
+        match backend.wait_state(WaitStateParams {
             agent_id: agent_id.clone(),
             target_states: vec![target],
             timeout: Duration::from_secs(args.wait_timeout),
             poll_interval: Duration::from_millis(500),
-        })?
+        }) {
+            Ok(snapshot) => {
+                if target == AgentState::Idle {
+                    observe_latency_metric(
+                        "send_to_idle_duration",
+                        "success",
+                        Some(&agent_id),
+                        send_started_at.elapsed().as_millis(),
+                    );
+                }
+                snapshot
+            }
+            Err(err) => {
+                if is_wait_timeout_error(&err) {
+                    observe_counter_metric(
+                        "wait_timeout",
+                        "error",
+                        Some(&agent_id),
+                        Some(serde_json::json!({ "error": err })),
+                    );
+                }
+                return Err(err);
+            }
+        }
     } else {
         backend.get_agent(&agent_id).unwrap_or(start_snapshot)
     };
+
+    if revived {
+        observe_counter_metric("agents_revived", "success", Some(&observed.id), None);
+    }
+    observe_gauge_metrics(Some(&workspace_id));
 
     let quick_tail = quick_tail_from_text(&run_text);
     let result = RunResultJson {
@@ -1138,7 +1327,20 @@ fn exec_spawn(
         requested_mode: AgentRequestMode::Continuous,
         allow_oneshot_fallback: false,
     };
-    let snapshot = backend.spawn_agent(params)?;
+    let snapshot = match backend.spawn_agent(params) {
+        Ok(value) => value,
+        Err(err) => {
+            observe_counter_metric(
+                "agents_spawned",
+                "error",
+                empty_to_none(&args.agent_id).as_deref(),
+                Some(serde_json::json!({ "error": err })),
+            );
+            return Err(err);
+        }
+    };
+    observe_counter_metric("agents_spawned", "success", Some(&snapshot.id), None);
+    observe_gauge_metrics(Some(&snapshot.workspace_id));
     write_agent_output(&snapshot, parsed, stdout)
 }
 
@@ -1157,7 +1359,20 @@ fn exec_send(
         send_enter: args.send_enter,
         keys: args.keys.clone(),
     };
-    let ok = backend.send_message(params)?;
+    let ok = match backend.send_message(params) {
+        Ok(value) => value,
+        Err(err) => {
+            observe_counter_metric(
+                "sends",
+                "error",
+                Some(&args.agent_id),
+                Some(serde_json::json!({ "error": err })),
+            );
+            return Err(err);
+        }
+    };
+    let outcome = if ok { "success" } else { "error" };
+    observe_counter_metric("sends", outcome, Some(&args.agent_id), None);
     write_bool_output(ok, parsed, stdout)
 }
 
@@ -1184,7 +1399,21 @@ fn exec_wait(
         timeout: Duration::from_secs(args.timeout),
         poll_interval: Duration::from_millis(500),
     };
-    let snapshot = backend.wait_state(params)?;
+    let snapshot = match backend.wait_state(params) {
+        Ok(value) => value,
+        Err(err) => {
+            if is_wait_timeout_error(&err) {
+                observe_counter_metric(
+                    "wait_timeout",
+                    "error",
+                    Some(&args.agent_id),
+                    Some(serde_json::json!({ "error": err })),
+                );
+            }
+            return Err(err);
+        }
+    };
+    observe_gauge_metrics(Some(&snapshot.workspace_id));
     write_agent_output(&snapshot, parsed, stdout)
 }
 
@@ -1233,7 +1462,20 @@ fn exec_interrupt(
     if args.agent_id.is_empty() {
         return Err("error: agent ID is required for agent interrupt".to_string());
     }
-    let ok = backend.interrupt_agent(&args.agent_id)?;
+    let ok = match backend.interrupt_agent(&args.agent_id) {
+        Ok(value) => value,
+        Err(err) => {
+            observe_counter_metric(
+                "interrupts",
+                "error",
+                Some(&args.agent_id),
+                Some(serde_json::json!({ "error": err })),
+            );
+            return Err(err);
+        }
+    };
+    let outcome = if ok { "success" } else { "error" };
+    observe_counter_metric("interrupts", outcome, Some(&args.agent_id), None);
     write_bool_output(ok, parsed, stdout)
 }
 
@@ -1251,7 +1493,21 @@ fn exec_kill(
         force: args.force,
         grace_period: None,
     };
-    let ok = backend.kill_agent(params)?;
+    let ok = match backend.kill_agent(params) {
+        Ok(value) => value,
+        Err(err) => {
+            observe_counter_metric(
+                "kill",
+                "error",
+                Some(&args.agent_id),
+                Some(serde_json::json!({ "error": err })),
+            );
+            return Err(err);
+        }
+    };
+    let outcome = if ok { "success" } else { "error" };
+    observe_counter_metric("kill", outcome, Some(&args.agent_id), None);
+    observe_gauge_metrics(None);
     write_bool_output(ok, parsed, stdout)
 }
 
@@ -1304,6 +1560,39 @@ fn spawn_for_run(
         requested_mode: AgentRequestMode::Continuous,
         allow_oneshot_fallback: false,
     })
+}
+
+fn spawn_for_run_with_metrics(
+    backend: &dyn AgentBackend,
+    agent_id: &str,
+    workspace_id: &str,
+    command: &str,
+    default_adapter: &str,
+    agent_type: &str,
+) -> Result<AgentSnapshot, String> {
+    let spawned = spawn_for_run(
+        backend,
+        agent_id,
+        workspace_id,
+        command,
+        default_adapter,
+        agent_type,
+    );
+    match spawned {
+        Ok(snapshot) => {
+            observe_counter_metric("agents_spawned", "success", Some(&snapshot.id), None);
+            Ok(snapshot)
+        }
+        Err(err) => {
+            observe_counter_metric(
+                "agents_spawned",
+                "error",
+                Some(agent_id),
+                Some(serde_json::json!({ "error": err })),
+            );
+            Err(err)
+        }
+    }
 }
 
 fn defaults_for_agent_type(agent_type: &str) -> (&str, &str) {
@@ -2328,6 +2617,41 @@ mod tests {
             .unwrap_or_else(|err| panic!("migrate db {}: {err}", db_path.display()));
     }
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn with_observability_db_path(prefix: &str, callback: impl FnOnce(&Path)) {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|err| panic!("lock env guard: {err}"));
+        let temp = temp_dir(prefix);
+        let db_path = temp.join("forge.db");
+        setup_migrated_db(&db_path);
+
+        let old_db_path = std::env::var_os("FORGE_DATABASE_PATH");
+        let old_forge_db_path = std::env::var_os("FORGE_DB_PATH");
+        std::env::set_var("FORGE_DATABASE_PATH", &db_path);
+        std::env::set_var("FORGE_DB_PATH", &db_path);
+
+        callback(&db_path);
+
+        match old_db_path {
+            Some(value) => std::env::set_var("FORGE_DATABASE_PATH", value),
+            None => std::env::remove_var("FORGE_DATABASE_PATH"),
+        }
+        match old_forge_db_path {
+            Some(value) => std::env::set_var("FORGE_DB_PATH", value),
+            None => std::env::remove_var("FORGE_DB_PATH"),
+        }
+
+        std::fs::remove_dir_all(&temp)
+            .unwrap_or_else(|err| panic!("remove temp dir {}: {err}", temp.display()));
+    }
+
+    fn parse_metric_detail(event: &PersistentAgentEvent) -> serde_json::Value {
+        let detail = event.detail.as_ref().expect("metric detail");
+        parse_json(detail)
+    }
+
     // ── Parse tests ──────────────────────────────────────────────────────
 
     #[test]
@@ -2614,6 +2938,119 @@ mod tests {
         let err = parse_agent_state("bogus").unwrap_err();
         assert!(err.contains("invalid agent state"));
         assert!(err.contains("bogus"));
+    }
+
+    #[test]
+    fn metric_counter_hook_persists_event() {
+        with_observability_db_path("metric-counter", |db_path| {
+            observe_counter_metric(
+                "sends",
+                "success",
+                Some("ag-metric"),
+                Some(serde_json::json!({ "source": "test" })),
+            );
+
+            let db = forge_db::Db::open(forge_db::Config::new(db_path))
+                .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+            let repo = PersistentAgentEventRepository::new(&db);
+            let events = repo
+                .list_by_agent("ag-metric", 8)
+                .unwrap_or_else(|err| panic!("list metric events: {err}"));
+            assert!(!events.is_empty());
+            assert_eq!(events[0].kind, "metric_sends");
+            assert_eq!(events[0].outcome, "success");
+            let detail = parse_metric_detail(&events[0]);
+            assert_eq!(detail["type"], "counter");
+            assert_eq!(detail["name"], "sends");
+            assert_eq!(detail["value"], 1);
+        });
+    }
+
+    #[test]
+    fn metric_gauge_hook_emits_active_and_idle() {
+        with_observability_db_path("metric-gauge", |db_path| {
+            let db = forge_db::Db::open(forge_db::Config::new(db_path))
+                .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+            let agent_repo = PersistentAgentRepository::new(&db);
+
+            let mut idle = forge_db::persistent_agent_repository::PersistentAgent {
+                id: "ag-idle".to_string(),
+                workspace_id: "ws-metric".to_string(),
+                harness: "codex".to_string(),
+                mode: "continuous".to_string(),
+                state: "idle".to_string(),
+                ..Default::default()
+            };
+            agent_repo
+                .create(&mut idle)
+                .unwrap_or_else(|err| panic!("create idle: {err}"));
+
+            let mut running = forge_db::persistent_agent_repository::PersistentAgent {
+                id: "ag-running".to_string(),
+                workspace_id: "ws-metric".to_string(),
+                harness: "codex".to_string(),
+                mode: "continuous".to_string(),
+                state: "running".to_string(),
+                ..Default::default()
+            };
+            agent_repo
+                .create(&mut running)
+                .unwrap_or_else(|err| panic!("create running: {err}"));
+
+            observe_gauge_metrics(Some("ws-metric"));
+
+            let event_repo = PersistentAgentEventRepository::new(&db);
+            let active = event_repo
+                .query(
+                    forge_db::persistent_agent_event_repository::PersistentAgentEventQuery {
+                        kind: Some("metric_active_agents".to_string()),
+                        limit: 1,
+                        ..Default::default()
+                    },
+                )
+                .unwrap_or_else(|err| panic!("query active metric: {err}"));
+            let idle_events = event_repo
+                .query(
+                    forge_db::persistent_agent_event_repository::PersistentAgentEventQuery {
+                        kind: Some("metric_idle_agents".to_string()),
+                        limit: 1,
+                        ..Default::default()
+                    },
+                )
+                .unwrap_or_else(|err| panic!("query idle metric: {err}"));
+
+            let active_detail = parse_metric_detail(&active[0]);
+            let idle_detail = parse_metric_detail(&idle_events[0]);
+            assert_eq!(active_detail["type"], "gauge");
+            assert_eq!(active_detail["value"], 2);
+            assert_eq!(idle_detail["type"], "gauge");
+            assert_eq!(idle_detail["value"], 1);
+        });
+    }
+
+    #[test]
+    fn metric_latency_hook_persists_value_ms() {
+        with_observability_db_path("metric-latency", |db_path| {
+            observe_latency_metric("send_to_idle_duration", "success", Some("ag-lat"), 321);
+
+            let db = forge_db::Db::open(forge_db::Config::new(db_path))
+                .unwrap_or_else(|err| panic!("open db {}: {err}", db_path.display()));
+            let repo = PersistentAgentEventRepository::new(&db);
+            let events = repo
+                .list_by_agent("ag-lat", 4)
+                .unwrap_or_else(|err| panic!("list latency metrics: {err}"));
+            assert_eq!(events[0].kind, "metric_send_to_idle_duration");
+            let detail = parse_metric_detail(&events[0]);
+            assert_eq!(detail["type"], "latency_ms");
+            assert_eq!(detail["value_ms"], 321);
+        });
+    }
+
+    #[test]
+    fn wait_timeout_detector_matches_expected_shapes() {
+        assert!(is_wait_timeout_error("wait timeout: idle"));
+        assert!(is_wait_timeout_error("timed out waiting for idle"));
+        assert!(!is_wait_timeout_error("agent entered terminal state"));
     }
 
     #[test]

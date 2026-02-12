@@ -8,6 +8,9 @@ use serde::Serialize;
 
 use crate::context::{ContextBackend, FilesystemContextBackend};
 
+const EXPLAIN_EVENT_LIMIT: i64 = 48;
+const PERSISTENT_STALE_IDLE_SECONDS: i64 = 3600;
+
 // ---------------------------------------------------------------------------
 // Domain types
 // ---------------------------------------------------------------------------
@@ -154,6 +157,9 @@ pub struct AgentRecord {
     pub last_activity: Option<String>,
     pub paused_until: Option<String>,
     pub account_id: String,
+    pub created_at: Option<String>,
+    pub ttl_seconds: Option<i64>,
+    pub persistent: bool,
 }
 
 /// Account record for cooldown information.
@@ -175,6 +181,14 @@ pub struct QueueItemRecord {
     pub created_at: String,
     pub content: Option<String>,
     pub condition: Option<ConditionalPayload>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentEventRecord {
+    pub kind: String,
+    pub outcome: String,
+    pub detail: Option<String>,
+    pub timestamp: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +214,13 @@ pub trait ExplainBackend {
 
     /// Get account info for an agent (if it has an account).
     fn get_account(&self, account_id: &str) -> Result<Option<AccountRecord>, String>;
+
+    /// List recent persistent-agent events for observability context.
+    fn list_agent_events(
+        &self,
+        agent_id: &str,
+        limit: i64,
+    ) -> Result<Vec<AgentEventRecord>, String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +233,7 @@ pub struct InMemoryExplainBackend {
     pub agents: Vec<AgentRecord>,
     pub queue_items: Vec<QueueItemRecord>,
     pub accounts: Vec<(String, AccountRecord)>,
+    pub agent_events: Vec<(String, AgentEventRecord)>,
     pub context_agent_id: Option<String>,
     pub workspace_first_agent_id: Option<String>,
 }
@@ -267,6 +289,21 @@ impl ExplainBackend for InMemoryExplainBackend {
             .find(|(id, _)| id == account_id)
             .map(|(_, acct)| acct.clone()))
     }
+
+    fn list_agent_events(
+        &self,
+        agent_id: &str,
+        limit: i64,
+    ) -> Result<Vec<AgentEventRecord>, String> {
+        let max = if limit <= 0 { 100 } else { limit as usize };
+        Ok(self
+            .agent_events
+            .iter()
+            .filter(|(id, _)| id == agent_id)
+            .map(|(_, event)| event.clone())
+            .take(max)
+            .collect())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -314,69 +351,15 @@ impl ExplainBackend for SqliteExplainBackend {
 
         let db = self.open_db()?;
         let conn = db.conn();
-        let exact = conn
-            .query_row(
-                "SELECT
-                    id,
-                    type,
-                    state,
-                    COALESCE(state_reason, ''),
-                    COALESCE(state_confidence, ''),
-                    NULLIF(last_activity_at, ''),
-                    NULLIF(paused_until, ''),
-                    COALESCE(account_id, '')
-                FROM agents
-                WHERE id = ?1",
-                rusqlite::params![trimmed],
-                scan_agent_row,
-            )
-            .optional();
-        let exact = match exact {
-            Ok(value) => value,
-            Err(err) if err.to_string().contains("no such table: agents") => {
-                return Err(format!("agent '{trimmed}' not found"));
-            }
-            Err(err) => return Err(err.to_string()),
-        };
-        if let Some(agent) = exact {
+
+        if let Some(agent) = resolve_agent_from_agents_table(conn, trimmed)? {
+            return Ok(agent);
+        }
+        if let Some(agent) = resolve_agent_from_persistent_table(conn, trimmed)? {
             return Ok(agent);
         }
 
-        let like = format!("{trimmed}%");
-        let mut stmt = match conn.prepare(
-            "SELECT
-                id,
-                type,
-                state,
-                COALESCE(state_reason, ''),
-                COALESCE(state_confidence, ''),
-                NULLIF(last_activity_at, ''),
-                NULLIF(paused_until, ''),
-                COALESCE(account_id, '')
-             FROM agents
-             WHERE id LIKE ?1
-             ORDER BY id
-             LIMIT 2",
-        ) {
-            Ok(stmt) => stmt,
-            Err(err) if err.to_string().contains("no such table: agents") => {
-                return Err(format!("agent '{trimmed}' not found"));
-            }
-            Err(err) => return Err(err.to_string()),
-        };
-
-        let rows = stmt
-            .query_map(rusqlite::params![like], scan_agent_row)
-            .map_err(|err| err.to_string())?;
-        let mut matches = Vec::new();
-        for row in rows {
-            matches.push(row.map_err(|err| err.to_string())?);
-        }
-        match matches.len() {
-            0 => Err(format!("agent '{trimmed}' not found")),
-            1 => Ok(matches.remove(0)),
-            _ => Err(format!("agent '{trimmed}' is ambiguous")),
-        }
+        Err(format!("agent '{trimmed}' not found"))
     }
 
     fn load_agent_context(&self) -> Result<Option<String>, String> {
@@ -398,6 +381,7 @@ impl ExplainBackend for SqliteExplainBackend {
 
         let db = self.open_db()?;
         let conn = db.conn();
+
         let row = conn
             .query_row(
                 "SELECT id
@@ -410,8 +394,47 @@ impl ExplainBackend for SqliteExplainBackend {
             )
             .optional();
         match row {
-            Ok(value) => Ok(value),
-            Err(err) if err.to_string().contains("no such table: agents") => Ok(None),
+            Ok(Some(value)) => Ok(Some(value)),
+            Ok(None) => {
+                let fallback = conn
+                    .query_row(
+                        "SELECT id
+                         FROM persistent_agents
+                         WHERE workspace_id = ?1
+                         ORDER BY id
+                         LIMIT 1",
+                        rusqlite::params![context.workspace_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional();
+                match fallback {
+                    Ok(value) => Ok(value),
+                    Err(err) if err.to_string().contains("no such table: persistent_agents") => {
+                        Ok(None)
+                    }
+                    Err(err) => Err(err.to_string()),
+                }
+            }
+            Err(err) if err.to_string().contains("no such table: agents") => {
+                let fallback = conn
+                    .query_row(
+                        "SELECT id
+                         FROM persistent_agents
+                         WHERE workspace_id = ?1
+                         ORDER BY id
+                         LIMIT 1",
+                        rusqlite::params![context.workspace_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional();
+                match fallback {
+                    Ok(value) => Ok(value),
+                    Err(err) if err.to_string().contains("no such table: persistent_agents") => {
+                        Ok(None)
+                    }
+                    Err(err) => Err(err.to_string()),
+                }
+            }
             Err(err) => Err(err.to_string()),
         }
     }
@@ -529,6 +552,186 @@ impl ExplainBackend for SqliteExplainBackend {
             Err(err) => Err(err.to_string()),
         }
     }
+
+    fn list_agent_events(
+        &self,
+        agent_id: &str,
+        limit: i64,
+    ) -> Result<Vec<AgentEventRecord>, String> {
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+        let max = if limit <= 0 { 100 } else { limit };
+
+        let db = self.open_db()?;
+        let conn = db.conn();
+        let mut stmt = match conn.prepare(
+            "SELECT kind, outcome, detail, timestamp
+             FROM persistent_agent_events
+             WHERE agent_id = ?1
+             ORDER BY timestamp DESC, id DESC
+             LIMIT ?2",
+        ) {
+            Ok(stmt) => stmt,
+            Err(err)
+                if err
+                    .to_string()
+                    .contains("no such table: persistent_agent_events") =>
+            {
+                return Ok(Vec::new());
+            }
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let rows = stmt
+            .query_map(rusqlite::params![agent_id, max], |row| {
+                Ok(AgentEventRecord {
+                    kind: row.get(0)?,
+                    outcome: row.get(1)?,
+                    detail: row.get(2)?,
+                    timestamp: row.get(3)?,
+                })
+            })
+            .map_err(|err| err.to_string())?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|err| err.to_string())?);
+        }
+        Ok(out)
+    }
+}
+
+fn resolve_agent_from_agents_table(
+    conn: &rusqlite::Connection,
+    target: &str,
+) -> Result<Option<AgentRecord>, String> {
+    let exact = conn
+        .query_row(
+            "SELECT
+                id,
+                type,
+                state,
+                COALESCE(state_reason, ''),
+                COALESCE(state_confidence, ''),
+                NULLIF(last_activity_at, ''),
+                NULLIF(paused_until, ''),
+                COALESCE(account_id, '')
+             FROM agents
+             WHERE id = ?1",
+            rusqlite::params![target],
+            scan_agent_row,
+        )
+        .optional();
+    let exact = match exact {
+        Ok(value) => value,
+        Err(err) if err.to_string().contains("no such table: agents") => return Ok(None),
+        Err(err) => return Err(err.to_string()),
+    };
+    if exact.is_some() {
+        return Ok(exact);
+    }
+
+    let mut stmt = match conn.prepare(
+        "SELECT
+            id,
+            type,
+            state,
+            COALESCE(state_reason, ''),
+            COALESCE(state_confidence, ''),
+            NULLIF(last_activity_at, ''),
+            NULLIF(paused_until, ''),
+            COALESCE(account_id, '')
+         FROM agents
+         WHERE id LIKE ?1
+         ORDER BY id
+         LIMIT 2",
+    ) {
+        Ok(stmt) => stmt,
+        Err(err) if err.to_string().contains("no such table: agents") => return Ok(None),
+        Err(err) => return Err(err.to_string()),
+    };
+
+    let like = format!("{target}%");
+    let rows = stmt
+        .query_map(rusqlite::params![like], scan_agent_row)
+        .map_err(|err| err.to_string())?;
+    let mut matches = Vec::new();
+    for row in rows {
+        matches.push(row.map_err(|err| err.to_string())?);
+    }
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(Some(matches.remove(0))),
+        _ => Err(format!("agent '{target}' is ambiguous")),
+    }
+}
+
+fn resolve_agent_from_persistent_table(
+    conn: &rusqlite::Connection,
+    target: &str,
+) -> Result<Option<AgentRecord>, String> {
+    let exact = conn
+        .query_row(
+            "SELECT
+                id,
+                harness,
+                state,
+                NULLIF(last_activity_at, ''),
+                NULLIF(created_at, ''),
+                ttl_seconds,
+                workspace_id
+             FROM persistent_agents
+             WHERE id = ?1",
+            rusqlite::params![target],
+            scan_persistent_agent_row,
+        )
+        .optional();
+    let exact = match exact {
+        Ok(value) => value,
+        Err(err) if err.to_string().contains("no such table: persistent_agents") => {
+            return Ok(None)
+        }
+        Err(err) => return Err(err.to_string()),
+    };
+    if exact.is_some() {
+        return Ok(exact);
+    }
+
+    let mut stmt = match conn.prepare(
+        "SELECT
+            id,
+            harness,
+            state,
+            NULLIF(last_activity_at, ''),
+            NULLIF(created_at, ''),
+            ttl_seconds,
+            workspace_id
+         FROM persistent_agents
+         WHERE id LIKE ?1
+         ORDER BY id
+         LIMIT 2",
+    ) {
+        Ok(stmt) => stmt,
+        Err(err) if err.to_string().contains("no such table: persistent_agents") => {
+            return Ok(None)
+        }
+        Err(err) => return Err(err.to_string()),
+    };
+
+    let like = format!("{target}%");
+    let rows = stmt
+        .query_map(rusqlite::params![like], scan_persistent_agent_row)
+        .map_err(|err| err.to_string())?;
+    let mut matches = Vec::new();
+    for row in rows {
+        matches.push(row.map_err(|err| err.to_string())?);
+    }
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(Some(matches.remove(0))),
+        _ => Err(format!("agent '{target}' is ambiguous")),
+    }
 }
 
 fn scan_agent_row(row: &rusqlite::Row) -> rusqlite::Result<AgentRecord> {
@@ -548,6 +751,30 @@ fn scan_agent_row(row: &rusqlite::Row) -> rusqlite::Result<AgentRecord> {
         last_activity,
         paused_until,
         account_id,
+        created_at: None,
+        ttl_seconds: None,
+        persistent: false,
+    })
+}
+
+fn scan_persistent_agent_row(row: &rusqlite::Row) -> rusqlite::Result<AgentRecord> {
+    let id: String = row.get(0)?;
+    let harness: String = row.get(1)?;
+    let state: String = row.get(2)?;
+    let last_activity: Option<String> = row.get(3)?;
+    let created_at: Option<String> = row.get(4)?;
+    let ttl_seconds: Option<i64> = row.get(5)?;
+    Ok(AgentRecord {
+        id,
+        agent_type: map_agent_type(&harness),
+        state: map_persistent_agent_state(&state),
+        state_info: StateInfo::default(),
+        last_activity,
+        paused_until: None,
+        account_id: String::new(),
+        created_at,
+        ttl_seconds,
+        persistent: true,
     })
 }
 
@@ -578,7 +805,7 @@ fn scan_queue_item_row(row: &rusqlite::Row) -> rusqlite::Result<QueueItemRecord>
 fn map_agent_type(value: &str) -> AgentType {
     match value {
         "opencode" => AgentType::OpenCode,
-        "claude-code" => AgentType::ClaudeCode,
+        "claude" | "claude_code" | "claude-code" => AgentType::ClaudeCode,
         "codex" => AgentType::Codex,
         "gemini" => AgentType::Gemini,
         _ => AgentType::Generic,
@@ -587,13 +814,27 @@ fn map_agent_type(value: &str) -> AgentType {
 
 fn map_agent_state(value: &str) -> AgentState {
     match value {
-        "working" => AgentState::Working,
+        "working" | "running" => AgentState::Working,
         "idle" => AgentState::Idle,
-        "awaiting_approval" => AgentState::AwaitingApproval,
+        "awaiting_approval" | "waiting_approval" => AgentState::AwaitingApproval,
         "rate_limited" => AgentState::RateLimited,
-        "error" => AgentState::Error,
+        "error" | "failed" => AgentState::Error,
         "paused" => AgentState::Paused,
         "starting" => AgentState::Starting,
+        _ => AgentState::Stopped,
+    }
+}
+
+fn map_persistent_agent_state(value: &str) -> AgentState {
+    match value {
+        "unspecified" => AgentState::Starting,
+        "starting" => AgentState::Starting,
+        "running" => AgentState::Working,
+        "idle" => AgentState::Idle,
+        "waiting_approval" => AgentState::AwaitingApproval,
+        "paused" => AgentState::Paused,
+        "stopping" | "stopped" => AgentState::Stopped,
+        "failed" => AgentState::Error,
         _ => AgentState::Stopped,
     }
 }
@@ -882,6 +1123,7 @@ fn explain_agent(
 ) -> Result<(), String> {
     let agent = backend.resolve_agent(target)?;
     let queue_items = backend.list_queue(&agent.id)?;
+    let events = backend.list_agent_events(&agent.id, EXPLAIN_EVENT_LIMIT)?;
 
     let mut explanation = build_agent_explanation(&agent, &queue_items);
 
@@ -901,6 +1143,8 @@ fn explain_agent(
             explanation.account_status = Some(acct_status);
         }
     }
+
+    apply_observability(&mut explanation, &agent, &events);
 
     if parsed.json || parsed.jsonl {
         return write_agent_json(&explanation, parsed, stdout);
@@ -924,6 +1168,8 @@ struct AgentExplanationJson<'a> {
     queue_status: QueueExplanationJson,
     #[serde(skip_serializing_if = "Option::is_none")]
     account_status: Option<AccountExplanationJson<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observability: Option<ObservabilityJson<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_activity: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -954,6 +1200,19 @@ struct AccountExplanationJson<'a> {
     is_in_cooldown: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ObservabilityJson<'a> {
+    persistent: bool,
+    stale: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stale_reason: Option<&'a str>,
+    recent_failure_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_failure: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_send_to_idle_ms: Option<i64>,
+}
+
 struct AgentExplanation {
     agent_id: String,
     agent_type: AgentType,
@@ -964,6 +1223,7 @@ struct AgentExplanation {
     suggestions: Vec<String>,
     queue_status: QueueExplanation,
     account_status: Option<AccountExplanation>,
+    observability: Option<ObservabilitySummary>,
     last_activity: Option<String>,
     paused_until: Option<String>,
 }
@@ -978,6 +1238,15 @@ struct AccountExplanation {
     profile_name: String,
     cooldown_until: Option<String>,
     is_in_cooldown: bool,
+}
+
+struct ObservabilitySummary {
+    persistent: bool,
+    stale: bool,
+    stale_reason: Option<String>,
+    recent_failure_count: usize,
+    last_failure: Option<String>,
+    last_send_to_idle_ms: Option<i64>,
 }
 
 fn build_agent_explanation(
@@ -1000,6 +1269,7 @@ fn build_agent_explanation(
             blocked_items: 0,
         },
         account_status: None,
+        observability: None,
         last_activity: agent.last_activity.clone(),
         paused_until: agent.paused_until.clone(),
     };
@@ -1089,6 +1359,111 @@ fn build_agent_explanation(
     explanation
 }
 
+fn apply_observability(
+    explanation: &mut AgentExplanation,
+    agent: &AgentRecord,
+    events: &[AgentEventRecord],
+) {
+    let mut summary = ObservabilitySummary {
+        persistent: agent.persistent,
+        stale: false,
+        stale_reason: None,
+        recent_failure_count: 0,
+        last_failure: None,
+        last_send_to_idle_ms: None,
+    };
+
+    if agent.persistent {
+        if let Some(reason) = stale_reason(agent) {
+            summary.stale = true;
+            summary.stale_reason = Some(reason.clone());
+            explanation.is_blocked = true;
+            explanation.block_reasons.push(format!("stale: {reason}"));
+            explanation
+                .suggestions
+                .push("Inspect and clean stale agents: forge agent gc --dry-run".to_string());
+        }
+    }
+
+    for event in events {
+        let outcome = event.outcome.to_ascii_lowercase();
+        if outcome.contains("error") || outcome.contains("fail") {
+            summary.recent_failure_count += 1;
+            if summary.last_failure.is_none() {
+                let message = event
+                    .detail
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or(&event.outcome)
+                    .to_string();
+                summary.last_failure = Some(message);
+            }
+        }
+
+        if event.kind == "metric_send_to_idle_duration" {
+            if let Some(value) = event.detail.as_deref().and_then(extract_metric_value_ms) {
+                summary.last_send_to_idle_ms = Some(value);
+            }
+        }
+    }
+
+    if summary.recent_failure_count > 0 {
+        explanation.is_blocked = true;
+        explanation
+            .block_reasons
+            .push(format!("recent failures: {}", summary.recent_failure_count));
+        explanation.suggestions.push(format!(
+            "Inspect recent audit trail: forge agent summary {}",
+            short_id(&agent.id)
+        ));
+    }
+
+    if summary.persistent
+        || summary.recent_failure_count > 0
+        || summary.last_send_to_idle_ms.is_some()
+    {
+        explanation.observability = Some(summary);
+    }
+}
+
+fn stale_reason(agent: &AgentRecord) -> Option<String> {
+    let now = chrono::Utc::now();
+
+    if let (Some(created_at), Some(ttl)) = (agent.created_at.as_deref(), agent.ttl_seconds) {
+        if ttl > 0 {
+            if let Some(created) = parse_timestamp_utc(created_at) {
+                let age = now.signed_duration_since(created).num_seconds().max(0);
+                if age >= ttl {
+                    return Some(format!("ttl expired ({age}s >= {ttl}s)"));
+                }
+            }
+        }
+    }
+
+    if matches!(
+        agent.state,
+        AgentState::Idle | AgentState::Stopped | AgentState::Error
+    ) {
+        if let Some(last) = agent.last_activity.as_deref().and_then(parse_timestamp_utc) {
+            let idle_for = now.signed_duration_since(last).num_seconds().max(0);
+            if idle_for >= PERSISTENT_STALE_IDLE_SECONDS {
+                return Some(format!(
+                    "idle for {}s (>= {}s)",
+                    idle_for, PERSISTENT_STALE_IDLE_SECONDS
+                ));
+            }
+        }
+    }
+
+    None
+}
+
+fn extract_metric_value_ms(detail: &str) -> Option<i64> {
+    serde_json::from_str::<serde_json::Value>(detail)
+        .ok()
+        .and_then(|value| value.get("value_ms").and_then(|item| item.as_i64()))
+}
+
 fn write_agent_explanation_human(
     e: &AgentExplanation,
     stdout: &mut dyn Write,
@@ -1161,6 +1536,24 @@ fn write_agent_explanation_human(
         writeln!(stdout).map_err(|err| err.to_string())?;
     }
 
+    if let Some(obs) = &e.observability {
+        writeln!(stdout, "Observability:").map_err(|err| err.to_string())?;
+        writeln!(stdout, "  Persistent: {}", obs.persistent).map_err(|err| err.to_string())?;
+        writeln!(stdout, "  Stale: {}", obs.stale).map_err(|err| err.to_string())?;
+        if let Some(reason) = &obs.stale_reason {
+            writeln!(stdout, "  Stale reason: {reason}").map_err(|err| err.to_string())?;
+        }
+        writeln!(stdout, "  Recent failures: {}", obs.recent_failure_count)
+            .map_err(|err| err.to_string())?;
+        if let Some(last_failure) = &obs.last_failure {
+            writeln!(stdout, "  Last failure: {last_failure}").map_err(|err| err.to_string())?;
+        }
+        if let Some(ms) = obs.last_send_to_idle_ms {
+            writeln!(stdout, "  Last send->idle: {ms}ms").map_err(|err| err.to_string())?;
+        }
+        writeln!(stdout).map_err(|err| err.to_string())?;
+    }
+
     // Suggestions
     if !e.suggestions.is_empty() {
         writeln!(stdout, "Suggestions:").map_err(|err| err.to_string())?;
@@ -1208,6 +1601,14 @@ impl AgentExplanation {
                     cooldown_until: acct.cooldown_until.as_deref(),
                     is_in_cooldown: acct.is_in_cooldown,
                 }),
+            observability: self.observability.as_ref().map(|obs| ObservabilityJson {
+                persistent: obs.persistent,
+                stale: obs.stale,
+                stale_reason: obs.stale_reason.as_deref(),
+                recent_failure_count: obs.recent_failure_count,
+                last_failure: obs.last_failure.as_deref(),
+                last_send_to_idle_ms: obs.last_send_to_idle_ms,
+            }),
             last_activity: self.last_activity.as_deref(),
             paused_until: self.paused_until.as_deref(),
         }
@@ -1561,6 +1962,9 @@ mod tests {
             last_activity: None,
             paused_until: None,
             account_id: String::new(),
+            created_at: None,
+            ttl_seconds: None,
+            persistent: false,
         }
     }
 
@@ -2225,6 +2629,50 @@ mod tests {
         let out = run_for_test(&["explain", "agent_12"], &backend);
         assert_eq!(out.exit_code, 0);
         assert!(out.stdout.contains("is idle"));
+    }
+
+    #[test]
+    fn explain_persistent_agent_includes_observability_context() {
+        let now = chrono::Utc::now();
+        let mut agent = make_agent("persistent_123", AgentState::Idle);
+        agent.persistent = true;
+        agent.created_at = Some((now - chrono::Duration::seconds(7200)).to_rfc3339());
+        agent.last_activity = Some((now - chrono::Duration::seconds(7200)).to_rfc3339());
+        agent.ttl_seconds = Some(60);
+
+        let backend = InMemoryExplainBackend {
+            agents: vec![agent],
+            agent_events: vec![
+                (
+                    "persistent_123".to_string(),
+                    AgentEventRecord {
+                        kind: "metric_send_to_idle_duration".to_string(),
+                        outcome: "success".to_string(),
+                        detail: Some("{\"value_ms\":512}".to_string()),
+                        timestamp: "2026-02-12T00:00:00Z".to_string(),
+                    },
+                ),
+                (
+                    "persistent_123".to_string(),
+                    AgentEventRecord {
+                        kind: "send".to_string(),
+                        outcome: "error: backend failure".to_string(),
+                        detail: Some("backend failure".to_string()),
+                        timestamp: "2026-02-12T00:00:01Z".to_string(),
+                    },
+                ),
+            ],
+            ..Default::default()
+        };
+
+        let out = run_for_test(&["explain", "--json", "persistent_123"], &backend);
+        assert_eq!(out.exit_code, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(parsed["observability"]["persistent"], true);
+        assert_eq!(parsed["observability"]["stale"], true);
+        assert_eq!(parsed["observability"]["recent_failure_count"], 1);
+        assert_eq!(parsed["observability"]["last_send_to_idle_ms"], 512);
+        assert!(parsed["is_blocked"].as_bool().unwrap());
     }
 
     #[test]
