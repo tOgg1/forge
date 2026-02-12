@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -54,6 +55,19 @@ struct AgentListJson {
 #[derive(Debug, Serialize)]
 struct BoolResultJson {
     ok: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RunResultJson {
+    agent_id: String,
+    reused: bool,
+    revived: bool,
+    observed_state: String,
+    wait_target: Option<String>,
+    task_id: Option<String>,
+    tags: Vec<String>,
+    labels: HashMap<String, String>,
+    quick_tail: String,
 }
 
 // ── Backend trait ─────────────────────────────────────────────────────────────
@@ -218,6 +232,7 @@ struct ParsedArgs {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Subcommand {
+    Run(RunArgs),
     Spawn(SpawnArgs),
     Send(SendArgs),
     Wait(WaitArgs),
@@ -282,6 +297,21 @@ struct ReviveArgs {
     agent_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunArgs {
+    text: String,
+    agent_id: String,
+    workspace_id: String,
+    agent_type: String,
+    command: String,
+    wait_for: String,
+    wait_timeout: u64,
+    revive: bool,
+    task_id: String,
+    tags: Vec<String>,
+    labels: Vec<String>,
+}
+
 // ── Public entry points ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -327,6 +357,7 @@ fn execute(
 ) -> Result<(), String> {
     let parsed = parse_args(args)?;
     match &parsed.subcommand {
+        Subcommand::Run(run_args) => exec_run(backend, run_args, &parsed, stdout),
         Subcommand::Spawn(spawn_args) => exec_spawn(backend, spawn_args, &parsed, stdout),
         Subcommand::Send(send_args) => exec_send(backend, send_args, &parsed, stdout),
         Subcommand::Wait(wait_args) => exec_wait(backend, wait_args, &parsed, stdout),
@@ -343,6 +374,148 @@ fn execute(
 }
 
 // ── Subcommand implementations ───────────────────────────────────────────────
+
+fn exec_run(
+    backend: &dyn AgentBackend,
+    args: &RunArgs,
+    parsed: &ParsedArgs,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    if args.text.trim().is_empty() {
+        return Err("error: task text is required for agent run".to_string());
+    }
+
+    let agent_id = if args.agent_id.is_empty() {
+        next_auto_agent_id()
+    } else {
+        args.agent_id.clone()
+    };
+    let workspace_id = if args.workspace_id.is_empty() {
+        "default".to_string()
+    } else {
+        args.workspace_id.clone()
+    };
+    let (default_command, default_adapter) = defaults_for_agent_type(&args.agent_type);
+    let command = if args.command.is_empty() {
+        default_command.to_string()
+    } else {
+        args.command.clone()
+    };
+    let wait_target = if args.wait_for.is_empty() {
+        None
+    } else {
+        Some(parse_agent_state(&args.wait_for)?)
+    };
+    let labels = parse_run_labels(&args.labels)?;
+
+    let mut reused = false;
+    let mut revived = false;
+
+    let existing = match backend.get_agent(&agent_id) {
+        Ok(snapshot) => Some(snapshot),
+        Err(err) if err.contains("not found") => None,
+        Err(err) => return Err(err),
+    };
+
+    let start_snapshot = if let Some(snapshot) = existing {
+        if snapshot.state.is_terminal() {
+            if !args.revive {
+                return Err(format!(
+                    "agent '{}' is in terminal state '{}'; use --revive to restart it",
+                    snapshot.id, snapshot.state
+                ));
+            }
+            backend.kill_agent(KillAgentParams {
+                agent_id: snapshot.id.clone(),
+                force: true,
+                grace_period: None,
+            })?;
+            revived = true;
+            spawn_for_run(
+                backend,
+                &agent_id,
+                &workspace_id,
+                &command,
+                default_adapter,
+                &args.agent_type,
+            )?
+        } else {
+            reused = true;
+            snapshot
+        }
+    } else {
+        if args.revive && !args.agent_id.is_empty() {
+            revived = true;
+        }
+        spawn_for_run(
+            backend,
+            &agent_id,
+            &workspace_id,
+            &command,
+            default_adapter,
+            &args.agent_type,
+        )?
+    };
+
+    let run_text = build_run_message(args);
+    backend.send_message(SendMessageParams {
+        agent_id: agent_id.clone(),
+        text: run_text.clone(),
+        send_enter: true,
+        keys: Vec::new(),
+    })?;
+
+    let observed = if let Some(target) = wait_target {
+        backend.wait_state(WaitStateParams {
+            agent_id: agent_id.clone(),
+            target_states: vec![target],
+            timeout: Duration::from_secs(args.wait_timeout),
+            poll_interval: Duration::from_millis(500),
+        })?
+    } else {
+        backend.get_agent(&agent_id).unwrap_or(start_snapshot)
+    };
+
+    let quick_tail = quick_tail_from_text(&run_text);
+    let result = RunResultJson {
+        agent_id: observed.id.clone(),
+        reused,
+        revived,
+        observed_state: observed.state.to_string(),
+        wait_target: wait_target.map(|state| state.to_string()),
+        task_id: empty_to_none(&args.task_id),
+        tags: args.tags.clone(),
+        labels,
+        quick_tail: quick_tail.clone(),
+    };
+
+    if parsed.json {
+        serde_json::to_writer_pretty(&mut *stdout, &result).map_err(|e| e.to_string())?;
+        writeln!(stdout).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    if parsed.jsonl {
+        serde_json::to_writer(&mut *stdout, &result).map_err(|e| e.to_string())?;
+        writeln!(stdout).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    if !parsed.quiet {
+        let mode = if revived {
+            "revived"
+        } else if reused {
+            "reused"
+        } else {
+            "spawned"
+        };
+        writeln!(
+            stdout,
+            "{}\t{}\t{}\t{}",
+            result.agent_id, result.observed_state, mode, quick_tail
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
 fn exec_spawn(
     backend: &dyn AgentBackend,
@@ -501,6 +674,115 @@ fn exec_revive(
     ))
 }
 
+fn spawn_for_run(
+    backend: &dyn AgentBackend,
+    agent_id: &str,
+    workspace_id: &str,
+    command: &str,
+    default_adapter: &str,
+    agent_type: &str,
+) -> Result<AgentSnapshot, String> {
+    let working_dir = std::env::current_dir()
+        .ok()
+        .and_then(|path| path.to_str().map(ToOwned::to_owned))
+        .unwrap_or_else(|| ".".to_string());
+    let (_, mapped_adapter) = defaults_for_agent_type(agent_type);
+    let adapter = if mapped_adapter.is_empty() {
+        default_adapter.to_string()
+    } else {
+        mapped_adapter.to_string()
+    };
+    backend.spawn_agent(SpawnAgentParams {
+        agent_id: agent_id.to_string(),
+        workspace_id: workspace_id.to_string(),
+        command: command.to_string(),
+        args: Vec::new(),
+        env: HashMap::new(),
+        working_dir,
+        session_name: agent_id.to_string(),
+        adapter,
+        requested_mode: AgentRequestMode::Continuous,
+        allow_oneshot_fallback: false,
+    })
+}
+
+fn defaults_for_agent_type(agent_type: &str) -> (&str, &str) {
+    match agent_type {
+        "claude" | "claude_code" => ("claude", "claude_code"),
+        "opencode" => ("opencode", "opencode"),
+        "droid" => ("droid", "droid"),
+        "codex" | "" => ("codex", "codex"),
+        _ => ("codex", "codex"),
+    }
+}
+
+fn build_run_message(args: &RunArgs) -> String {
+    let mut lines = Vec::new();
+    if !args.task_id.is_empty() {
+        lines.push(format!("Task-ID: {}", args.task_id));
+    }
+    if !args.tags.is_empty() {
+        lines.push(format!("Tags: {}", args.tags.join(",")));
+    }
+    if !args.labels.is_empty() {
+        lines.push(format!("Labels: {}", args.labels.join(",")));
+    }
+    if lines.is_empty() {
+        return args.text.clone();
+    }
+    lines.push(String::new());
+    lines.push(args.text.clone());
+    lines.join("\n")
+}
+
+fn parse_run_labels(raw: &[String]) -> Result<HashMap<String, String>, String> {
+    let mut labels = HashMap::new();
+    for entry in raw {
+        let Some((key, value)) = entry.split_once('=') else {
+            return Err(format!(
+                "invalid --label value '{}'; expected KEY=VALUE format",
+                entry
+            ));
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if key.is_empty() || value.is_empty() {
+            return Err(format!(
+                "invalid --label value '{}'; expected non-empty KEY and VALUE",
+                entry
+            ));
+        }
+        labels.insert(key.to_string(), value.to_string());
+    }
+    Ok(labels)
+}
+
+fn empty_to_none(value: &str) -> Option<String> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn quick_tail_from_text(text: &str) -> String {
+    let line = text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("");
+    if line.len() <= 96 {
+        line.to_string()
+    } else {
+        format!("{}...", &line[..93])
+    }
+}
+
+fn next_auto_agent_id() -> String {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    let next = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    format!("agent-run-{next}")
+}
+
 // ── Output helpers ───────────────────────────────────────────────────────────
 
 fn write_agent_output(
@@ -633,6 +915,16 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             quiet,
             subcommand: Subcommand::Help,
         }),
+        Some("run") => {
+            index += 1;
+            let run_args = parse_run_args(args, index)?;
+            Ok(ParsedArgs {
+                json,
+                jsonl,
+                quiet,
+                subcommand: Subcommand::Run(run_args),
+            })
+        }
         Some("spawn") => {
             index += 1;
             let spawn_args = parse_spawn_args(args, index)?;
@@ -717,6 +1009,93 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             "unknown agent subcommand: '{other}'. Run `forge agent help` for usage."
         )),
     }
+}
+
+fn parse_run_args(args: &[String], mut index: usize) -> Result<RunArgs, String> {
+    let mut result = RunArgs {
+        text: String::new(),
+        agent_id: String::new(),
+        workspace_id: String::new(),
+        agent_type: "codex".to_string(),
+        command: String::new(),
+        wait_for: String::new(),
+        wait_timeout: 300,
+        revive: false,
+        task_id: String::new(),
+        tags: Vec::new(),
+        labels: Vec::new(),
+    };
+
+    while let Some(token) = args.get(index) {
+        match token.as_str() {
+            "-h" | "--help" => return Err(RUN_HELP.to_string()),
+            "--agent" => {
+                result.agent_id = take_value(args, index, "--agent")?;
+                index += 2;
+            }
+            "--workspace" | "-w" => {
+                result.workspace_id = take_value(args, index, "--workspace")?;
+                index += 2;
+            }
+            "--type" => {
+                result.agent_type = take_value(args, index, "--type")?;
+                index += 2;
+            }
+            "--command" | "-c" => {
+                result.command = take_value(args, index, "--command")?;
+                index += 2;
+            }
+            "--wait" => {
+                result.wait_for = take_value(args, index, "--wait")?;
+                index += 2;
+            }
+            "--timeout" => {
+                let timeout = take_value(args, index, "--timeout")?;
+                result.wait_timeout = timeout
+                    .parse::<u64>()
+                    .map_err(|_| format!("invalid timeout value: '{timeout}'"))?;
+                index += 2;
+            }
+            "--revive" => {
+                result.revive = true;
+                index += 1;
+            }
+            "--task-id" => {
+                result.task_id = take_value(args, index, "--task-id")?;
+                index += 2;
+            }
+            "--tag" => {
+                result.tags.push(take_value(args, index, "--tag")?);
+                index += 2;
+            }
+            "--label" => {
+                result.labels.push(take_value(args, index, "--label")?);
+                index += 2;
+            }
+            "--text" | "-t" => {
+                result.text = take_value(args, index, "--text")?;
+                index += 2;
+            }
+            flag if flag.starts_with('-') => {
+                return Err(format!("error: unknown flag for agent run: '{flag}'"));
+            }
+            positional => {
+                if result.text.is_empty() {
+                    result.text = positional.to_string();
+                    index += 1;
+                } else {
+                    return Err(format!(
+                        "error: unexpected positional argument: '{positional}'"
+                    ));
+                }
+            }
+        }
+    }
+
+    if result.text.trim().is_empty() {
+        return Err("error: task text is required for agent run".to_string());
+    }
+    Ok(result)
 }
 
 fn parse_spawn_args(args: &[String], mut index: usize) -> Result<SpawnArgs, String> {
@@ -1033,6 +1412,7 @@ Usage:
   forge agent <subcommand> [options]
 
 Subcommands:
+  run         Reuse/spawn an agent and send a task
   spawn       Spawn a new persistent agent
   send        Send a message to an agent
   wait        Wait for an agent to reach a target state
@@ -1060,6 +1440,25 @@ Flags:
       --working-dir string working directory
       --session string     tmux session name
       --adapter string     adapter name";
+
+const RUN_HELP: &str = "\
+Reuse/spawn an agent and send a delegated task
+
+Usage:
+  forge agent run [task-text] [flags]
+
+Flags:
+      --agent string       agent id to reuse/spawn
+  -w, --workspace string   workspace ID (default: \"default\")
+      --type string        agent harness type (default: codex)
+  -c, --command string     command override
+      --wait string        wait for state (e.g. idle)
+      --timeout int        wait timeout in seconds (default: 300)
+      --revive             restart terminal/missing agent id before send
+      --task-id string     correlation id for parent task
+      --tag string         correlation tag (repeatable)
+      --label string       correlation label KEY=VALUE (repeatable)
+  -t, --text string        task text";
 
 const SEND_HELP: &str = "\
 Send a message to an agent
@@ -1217,6 +1616,47 @@ mod tests {
     }
 
     #[test]
+    fn parse_run_with_flags() {
+        let args = vec![
+            "agent".to_string(),
+            "run".to_string(),
+            "fix tests".to_string(),
+            "--agent".to_string(),
+            "ag-1".to_string(),
+            "--type".to_string(),
+            "claude".to_string(),
+            "--wait".to_string(),
+            "idle".to_string(),
+            "--task-id".to_string(),
+            "forge-45p".to_string(),
+            "--tag".to_string(),
+            "m10".to_string(),
+            "--label".to_string(),
+            "epic=persistent".to_string(),
+        ];
+        let parsed = parse_ok(&args);
+        match &parsed.subcommand {
+            Subcommand::Run(a) => {
+                assert_eq!(a.text, "fix tests");
+                assert_eq!(a.agent_id, "ag-1");
+                assert_eq!(a.agent_type, "claude");
+                assert_eq!(a.wait_for, "idle");
+                assert_eq!(a.task_id, "forge-45p");
+                assert_eq!(a.tags, vec!["m10"]);
+                assert_eq!(a.labels, vec!["epic=persistent"]);
+            }
+            other => panic!("expected Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_run_requires_text() {
+        let args = vec!["agent".to_string(), "run".to_string()];
+        let err = parse_err(&args);
+        assert!(err.contains("task text is required"));
+    }
+
+    #[test]
     fn parse_send_positional_text() {
         let args = vec![
             "agent".to_string(),
@@ -1366,6 +1806,7 @@ mod tests {
         let out = run_for_test(&["agent"], &backend);
         assert_eq!(out.exit_code, 0);
         assert!(out.stdout.contains("Manage persistent agents"));
+        assert!(out.stdout.contains("run"));
         assert!(out.stdout.contains("spawn"));
         assert!(out.stdout.contains("send"));
         assert!(out.stdout.contains("wait"));
@@ -1493,6 +1934,78 @@ mod tests {
         let out = run_for_test(&["agent", "spawn", "my-agent"], &backend);
         assert_eq!(out.exit_code, 1);
         assert!(out.stderr.contains("--command is required"));
+    }
+
+    #[test]
+    fn agent_run_create_path_json() {
+        let backend = InMemoryAgentBackend::new();
+        let out = run_for_test(
+            &[
+                "agent",
+                "--json",
+                "run",
+                "ship m10 helper",
+                "--agent",
+                "ag-run-1",
+                "--type",
+                "claude",
+                "--task-id",
+                "forge-45p",
+            ],
+            &backend,
+        );
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        let parsed = parse_json(&out.stdout);
+        assert_eq!(parsed["agent_id"], "ag-run-1");
+        assert_eq!(parsed["reused"], false);
+        assert_eq!(parsed["revived"], false);
+        assert_eq!(parsed["observed_state"], "starting");
+        assert_eq!(parsed["task_id"], "forge-45p");
+    }
+
+    #[test]
+    fn agent_run_reuse_path_json() {
+        let backend =
+            InMemoryAgentBackend::new().with_agent(test_snapshot("ag-reuse", AgentState::Idle));
+        let out = run_for_test(
+            &[
+                "agent",
+                "--json",
+                "run",
+                "continue prior work",
+                "--agent",
+                "ag-reuse",
+            ],
+            &backend,
+        );
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        let parsed = parse_json(&out.stdout);
+        assert_eq!(parsed["agent_id"], "ag-reuse");
+        assert_eq!(parsed["reused"], true);
+        assert_eq!(parsed["revived"], false);
+    }
+
+    #[test]
+    fn agent_run_revive_path_json() {
+        let backend =
+            InMemoryAgentBackend::new().with_agent(test_snapshot("ag-dead", AgentState::Stopped));
+        let out = run_for_test(
+            &[
+                "agent",
+                "--json",
+                "run",
+                "restart and continue",
+                "--agent",
+                "ag-dead",
+                "--revive",
+            ],
+            &backend,
+        );
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        let parsed = parse_json(&out.stdout);
+        assert_eq!(parsed["agent_id"], "ag-dead");
+        assert_eq!(parsed["reused"], false);
+        assert_eq!(parsed["revived"], true);
     }
 
     #[test]
@@ -1629,6 +2142,10 @@ mod tests {
         let backend = InMemoryAgentBackend::new();
 
         // Each subcommand's --help returns help text via stderr (exit 1).
+        let run_out = run_for_test(&["agent", "run", "--help"], &backend);
+        assert_eq!(run_out.exit_code, 1);
+        assert!(run_out.stderr.contains("Reuse/spawn an agent"));
+
         let spawn_out = run_for_test(&["agent", "spawn", "--help"], &backend);
         assert_eq!(spawn_out.exit_code, 1);
         assert!(spawn_out.stderr.contains("Spawn a new persistent agent"));
