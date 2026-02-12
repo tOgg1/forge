@@ -219,6 +219,16 @@ impl TerminalColorCapability {
     }
 
     #[must_use]
+    pub fn from_slug(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "ansi16" | "16" => Some(Self::Ansi16),
+            "ansi256" | "256" => Some(Self::Ansi256),
+            "truecolor" | "24bit" => Some(Self::TrueColor),
+            _ => None,
+        }
+    }
+
+    #[must_use]
     pub fn adjusted_minimum_ratio(self, base_minimum: f64) -> f64 {
         match self {
             Self::TrueColor => base_minimum,
@@ -226,6 +236,34 @@ impl TerminalColorCapability {
             Self::Ansi16 => (base_minimum - 0.7).max(2.5),
         }
     }
+}
+
+#[must_use]
+pub fn detect_terminal_color_capability() -> TerminalColorCapability {
+    if let Ok(override_value) = std::env::var("FORGE_TUI_COLOR_CAPABILITY") {
+        if let Some(capability) = TerminalColorCapability::from_slug(&override_value) {
+            return capability;
+        }
+    }
+
+    let term = std::env::var("TERM").ok();
+    let colorterm = std::env::var("COLORTERM").ok();
+    let no_color = std::env::var_os("NO_COLOR").is_some();
+    let force_color = std::env::var("FORCE_COLOR")
+        .ok()
+        .and_then(|raw| parse_force_color_level(&raw))
+        .or_else(|| {
+            std::env::var("CLICOLOR_FORCE")
+                .ok()
+                .and_then(|raw| parse_force_color_level(&raw))
+        });
+
+    detect_terminal_color_capability_with(
+        term.as_deref(),
+        colorterm.as_deref(),
+        no_color,
+        force_color,
+    )
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -256,6 +294,18 @@ pub fn resolve_palette(name: &str) -> Palette {
         "ocean" => OCEAN_PALETTE,
         "sunset" => SUNSET_PALETTE,
         _ => DEFAULT_PALETTE,
+    }
+}
+
+#[must_use]
+pub fn resolve_palette_for_capability(name: &str, capability: TerminalColorCapability) -> Palette {
+    match capability {
+        // ANSI16 often collapses subtle palettes into low-contrast pairs.
+        // Force the high-contrast palette to preserve readability.
+        TerminalColorCapability::Ansi16 => HIGH_CONTRAST_PALETTE,
+        TerminalColorCapability::Ansi256 | TerminalColorCapability::TrueColor => {
+            resolve_palette(name)
+        }
     }
 }
 
@@ -634,6 +684,63 @@ fn normalize_id(value: &str) -> String {
     output.trim_matches('-').to_owned()
 }
 
+fn detect_terminal_color_capability_with(
+    term: Option<&str>,
+    colorterm: Option<&str>,
+    no_color: bool,
+    force_color: Option<u8>,
+) -> TerminalColorCapability {
+    if no_color {
+        return TerminalColorCapability::Ansi16;
+    }
+
+    if let Some(level) = force_color {
+        return match level {
+            0 | 1 => TerminalColorCapability::Ansi16,
+            2 => TerminalColorCapability::Ansi256,
+            _ => TerminalColorCapability::TrueColor,
+        };
+    }
+
+    if colorterm.is_some_and(|value| contains_ci(value, "truecolor"))
+        || colorterm.is_some_and(|value| contains_ci(value, "24bit"))
+    {
+        return TerminalColorCapability::TrueColor;
+    }
+
+    if let Some(term) = term {
+        if contains_ci(term, "truecolor")
+            || contains_ci(term, "24bit")
+            || contains_ci(term, "direct")
+        {
+            return TerminalColorCapability::TrueColor;
+        }
+        if contains_ci(term, "256color") {
+            return TerminalColorCapability::Ansi256;
+        }
+        if term.trim().eq_ignore_ascii_case("dumb") {
+            return TerminalColorCapability::Ansi16;
+        }
+    }
+
+    TerminalColorCapability::Ansi256
+}
+
+fn parse_force_color_level(raw: &str) -> Option<u8> {
+    let normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() || normalized == "true" || normalized == "yes" {
+        return Some(1);
+    }
+    if normalized == "false" || normalized == "no" {
+        return Some(0);
+    }
+    normalized.parse::<u8>().ok()
+}
+
+fn contains_ci(value: &str, needle: &str) -> bool {
+    value.to_ascii_lowercase().contains(needle)
+}
+
 fn is_hex_color(value: &str) -> bool {
     if value.len() != 7 || !value.starts_with('#') {
         return false;
@@ -746,10 +853,10 @@ fn relative_luminance((r, g, b): (u8, u8, u8)) -> f64 {
 mod tests {
     use super::{
         curated_theme_packs, cycle_palette, cycle_theme_pack, export_theme_pack, import_theme_pack,
-        resolve_palette, resolve_theme_pack, validate_curated_theme_contrast,
-        validate_curated_theme_contrast_fail_fast, validate_theme_packs_contrast,
-        TerminalColorCapability, ThemePackError, ThemeSemanticSlot, DEFAULT_PALETTE,
-        HIGH_CONTRAST_PALETTE, REQUIRED_SEMANTIC_SLOTS,
+        resolve_palette, resolve_palette_for_capability, resolve_theme_pack,
+        validate_curated_theme_contrast, validate_curated_theme_contrast_fail_fast,
+        validate_theme_packs_contrast, TerminalColorCapability, ThemePackError, ThemeSemanticSlot,
+        DEFAULT_PALETTE, HIGH_CONTRAST_PALETTE, REQUIRED_SEMANTIC_SLOTS,
     };
 
     #[test]
@@ -761,6 +868,12 @@ mod tests {
     #[test]
     fn resolve_palette_matches_named_palettes() {
         assert_eq!(resolve_palette("high-contrast"), HIGH_CONTRAST_PALETTE);
+    }
+
+    #[test]
+    fn resolve_palette_for_capability_uses_high_contrast_for_ansi16() {
+        let palette = resolve_palette_for_capability("sunset", TerminalColorCapability::Ansi16);
+        assert_eq!(palette, HIGH_CONTRAST_PALETTE);
     }
 
     #[test]
@@ -903,5 +1016,41 @@ mod tests {
             }
             Ok(_) => panic!("expected fail-fast violation"),
         }
+    }
+
+    #[test]
+    fn detects_truecolor_from_colorterm() {
+        let capability = super::detect_terminal_color_capability_with(
+            Some("xterm-256color"),
+            Some("truecolor"),
+            false,
+            None,
+        );
+        assert_eq!(capability, TerminalColorCapability::TrueColor);
+    }
+
+    #[test]
+    fn detects_ansi256_from_term() {
+        let capability = super::detect_terminal_color_capability_with(
+            Some("screen-256color"),
+            None,
+            false,
+            None,
+        );
+        assert_eq!(capability, TerminalColorCapability::Ansi256);
+    }
+
+    #[test]
+    fn detects_ansi16_when_no_color_is_set() {
+        let capability =
+            super::detect_terminal_color_capability_with(Some("xterm-256color"), None, true, None);
+        assert_eq!(capability, TerminalColorCapability::Ansi16);
+    }
+
+    #[test]
+    fn force_color_level_overrides_detection() {
+        let capability =
+            super::detect_terminal_color_capability_with(Some("dumb"), None, false, Some(3));
+        assert_eq!(capability, TerminalColorCapability::TrueColor);
     }
 }

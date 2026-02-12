@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use forge_tui::app::{App, LoopView};
 use forge_tui::polling_pipeline::{PollScheduler, PollingConfig, PollingQueue};
+use forge_tui::theme::detect_terminal_color_capability;
 
 #[derive(Debug, Clone, Default)]
 struct LiveLoopSnapshot {
@@ -170,7 +171,8 @@ fn render_snapshot_lines_for_path(db_path: &Path) -> Vec<String> {
         }
     };
 
-    let mut app = App::new("default", 200);
+    let capability = detect_terminal_color_capability();
+    let mut app = App::new_with_capability("default", capability, 200);
     app.set_loops(snapshot.loops.clone());
     lines.extend(app.render().snapshot().lines().map(str::to_owned));
     lines.push(String::new());

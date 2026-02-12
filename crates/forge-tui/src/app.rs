@@ -17,7 +17,9 @@ use crate::keymap::{KeyChord, KeyCommand, KeyScope, Keymap, ModeScope};
 use crate::layouts::{
     fit_pane_layout, layout_index_for, normalize_layout_index, PaneLayout, PANE_LAYOUTS,
 };
-use crate::theme::{cycle_palette, resolve_palette, Palette};
+use crate::theme::{
+    cycle_palette, resolve_palette_for_capability, Palette, TerminalColorCapability,
+};
 
 // ---------------------------------------------------------------------------
 // Constants – matching Go defaults
@@ -696,6 +698,7 @@ pub struct App {
     // -- display --
     width: usize,
     height: usize,
+    color_capability: TerminalColorCapability,
     palette: Palette,
     keymap: Keymap,
     command_palette: CommandPalette,
@@ -709,7 +712,17 @@ impl App {
     /// Create a new loop TUI app with the given palette name.
     #[must_use]
     pub fn new(palette_name: &str, log_lines: usize) -> Self {
-        let palette = resolve_palette(palette_name);
+        Self::new_with_capability(palette_name, TerminalColorCapability::TrueColor, log_lines)
+    }
+
+    /// Create a new loop TUI app with explicit terminal color capability.
+    #[must_use]
+    pub fn new_with_capability(
+        palette_name: &str,
+        capability: TerminalColorCapability,
+        log_lines: usize,
+    ) -> Self {
+        let palette = resolve_palette_for_capability(palette_name, capability);
         let log_lines = if log_lines == 0 {
             DEFAULT_LOG_LINES
         } else {
@@ -767,6 +780,7 @@ impl App {
 
             width: 120,
             height: 40,
+            color_capability: capability,
             palette,
             keymap: Keymap::default_forge_tui(),
             command_palette: CommandPalette::new_default(),
@@ -2894,7 +2908,7 @@ impl App {
     pub fn render(&self) -> RenderFrame {
         let width = self.width.max(1);
         let height = self.height.max(1);
-        let theme = crate::default_theme();
+        let theme = crate::theme_for_capability(self.color_capability);
 
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
 
@@ -3223,7 +3237,7 @@ impl App {
     }
 
     fn render_inbox_pane(&self, width: usize, height: usize) -> RenderFrame {
-        let theme = crate::default_theme();
+        let theme = crate::theme_for_capability(self.color_capability);
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
         if width == 0 || height == 0 {
             return frame;
@@ -4222,6 +4236,12 @@ mod tests {
         assert_eq!(app.palette().name, "high-contrast");
         app.update(key(Key::Char('t')));
         assert_eq!(app.palette().name, "ocean");
+    }
+
+    #[test]
+    fn ansi16_capability_forces_high_contrast_palette() {
+        let app = App::new_with_capability("ocean", TerminalColorCapability::Ansi16, 12);
+        assert_eq!(app.palette().name, "high-contrast");
     }
 
     // -- zen mode --

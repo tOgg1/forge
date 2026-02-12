@@ -12,6 +12,7 @@ pub mod app;
 pub mod blocker_graph;
 pub mod bulk_action_planner;
 pub mod command_palette;
+pub mod daily_summary;
 pub mod emergency_safe_stop;
 pub mod extension_actions;
 pub mod extension_api;
@@ -31,6 +32,7 @@ pub mod layouts;
 pub mod log_compare;
 pub mod log_query;
 pub mod logs_tab;
+pub mod loop_health_score;
 pub mod multi_logs;
 pub mod navigation_graph;
 pub mod overview_tab;
@@ -38,6 +40,7 @@ pub mod polling_pipeline;
 pub mod readiness_board;
 pub mod runs_tab;
 pub mod session_restore;
+pub mod stale_takeover;
 pub mod swarm_dogpile;
 pub mod swarm_governor;
 pub mod swarm_stop_monitor;
@@ -56,6 +59,24 @@ pub fn crate_label() -> &'static str {
 #[must_use]
 pub fn default_theme() -> ThemeSpec {
     ThemeSpec::for_kind(ThemeKind::Dark)
+}
+
+/// Map terminal color capability to adapter theme tokens.
+#[must_use]
+pub fn theme_for_capability(capability: theme::TerminalColorCapability) -> ThemeSpec {
+    match capability {
+        theme::TerminalColorCapability::Ansi16 => ThemeSpec::for_kind(ThemeKind::HighContrast),
+        theme::TerminalColorCapability::Ansi256 | theme::TerminalColorCapability::TrueColor => {
+            ThemeSpec::for_kind(ThemeKind::Dark)
+        }
+    }
+}
+
+/// Resolve runtime theme from current terminal capability hints.
+#[must_use]
+pub fn detected_theme() -> ThemeSpec {
+    let capability = theme::detect_terminal_color_capability();
+    theme_for_capability(capability)
 }
 
 /// Build a tiny bootstrap frame via adapter render abstraction.
@@ -99,7 +120,7 @@ pub fn map_input(event: InputEvent) -> UiAction {
 mod tests {
     use super::{
         bootstrap_frame, crate_label, default_theme, loop_dashboard_widgets, loop_queue_columns,
-        map_input,
+        map_input, theme_for_capability,
     };
     use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent, Modifiers, UiAction};
     use forge_ftui_adapter::snapshot::assert_render_frame_snapshot;
@@ -115,6 +136,12 @@ mod tests {
         let theme = default_theme();
         assert_eq!(theme.kind, ThemeKind::Dark);
         assert_eq!(theme.color(StyleToken::Accent), 39);
+    }
+
+    #[test]
+    fn ansi16_uses_high_contrast_theme_tokens() {
+        let theme = theme_for_capability(super::theme::TerminalColorCapability::Ansi16);
+        assert_eq!(theme.kind, ThemeKind::HighContrast);
     }
 
     #[test]
