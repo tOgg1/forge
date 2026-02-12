@@ -1,7 +1,28 @@
 {
   "schema_version": "sv.tasks.v1",
-  "generated_at": "2026-02-12T15:54:32.912954Z",
+  "generated_at": "2026-02-12T15:55:18.233266Z",
   "tasks": [
+    {
+      "id": "forge-bzn",
+      "title": "TUI: Incident replay mode",
+      "status": "closed",
+      "priority": "P2",
+      "created_at": "2026-02-08T10:29:08.297908Z",
+      "updated_at": "2026-02-12T15:55:18.222618Z",
+      "created_by": "codex",
+      "updated_by": "rewrite-tui-r6-codex-2",
+      "body": "Capture and replay TUI state/events over time for incident reconstruction.",
+      "epic": "forge-xt0",
+      "project": "prj-krh6zdh0",
+      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
+      "workspace": "forge",
+      "branch": "main",
+      "started_at": "2026-02-12T15:31:13.652500Z",
+      "started_by": "rewrite-tui-r6-codex-2",
+      "closed_at": "2026-02-12T15:55:18.222618Z",
+      "closed_by": "rewrite-tui-r6-codex-2",
+      "comments_count": 0
+    },
     {
       "id": "forge-45t",
       "title": "TUI: Contextual onboarding and key hints",
@@ -169,25 +190,6 @@
       "started_by": "rewrite-tui-r6-codex-1",
       "comments_count": 2,
       "last_comment_at": "2026-02-12T15:39:53.222317Z"
-    },
-    {
-      "id": "forge-bzn",
-      "title": "TUI: Incident replay mode",
-      "status": "in_progress",
-      "priority": "P2",
-      "created_at": "2026-02-08T10:29:08.297908Z",
-      "updated_at": "2026-02-12T15:31:13.652500Z",
-      "created_by": "codex",
-      "updated_by": "rewrite-tui-r6-codex-2",
-      "body": "Capture and replay TUI state/events over time for incident reconstruction.",
-      "epic": "forge-xt0",
-      "project": "prj-krh6zdh0",
-      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
-      "workspace": "forge",
-      "branch": "main",
-      "started_at": "2026-02-12T15:31:13.652500Z",
-      "started_by": "rewrite-tui-r6-codex-2",
-      "comments_count": 0
     },
     {
       "id": "forge-2b5",

@@ -161,3 +161,80 @@ Reported via:
 - `fmail send @forge-orchestrator "forge-45t: blocked"`
 ```
 
+## 2026-02-12T15:56:01Z
+
+- run_id: 4894887f-2a97-4e0e-9c58-5ef564ad65ae
+- loop_name: rewrite-tui-r6-codex-2
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T15:38:48Z
+- finished_at: 2026-02-12T15:56:01Z
+- exit_code: 0
+
+```
++
++## Validation
++
++- `cargo fmt --check`
++- `cargo clippy --workspace --all-targets -- -D warnings`
++- `EDITOR=true VISUAL=true GIT_EDITOR=true cargo test --workspace`
+diff --git a/docs/tui-next-roadmap-2026-02-10.md b/docs/tui-next-roadmap-2026-02-10.md
+index 2261f033b95c0bbfa6062f0c8a344595aaa0cd2f..73340e2190ba006f396db6827edd32c40433f8b7
+--- a/docs/tui-next-roadmap-2026-02-10.md
++++ b/docs/tui-next-roadmap-2026-02-10.md
+@@ -61,6 +61,7 @@
+ - `forge-vz1` delivered in `docs/tui-605-activity-stream-agent-repo-task.md` with bounded real-time activity stream modeling, filters by `agent/repo/task/kind/text`, and jump-link metadata for task/log pivots in `crates/forge-tui/src/activity_stream.rs`.
+ - `forge-z33` delivered in `docs/tui-606-communication-quality-stale-thread-alerts.md` with unanswered-ask checks, stale-thread alerts, closure-note hygiene detection, and actionable communication remediation hints in `crates/forge-tui/src/communication_quality.rs`.
+ - `forge-67x` delivered in `docs/tui-607-alert-rail-failures-stuck-loops.md` with sticky alert-rail planning for failures/stuck loops/queue growth, bounded sticky recovery windows, and deterministic quick-jump loop targeting in `crates/forge-tui/src/alert_rail.rs`.
++- `forge-bc7` delivered in `docs/tui-207-activity-heatmap-sparklines.md` with compact per-loop trend visuals for run/error/duration/latency plus an error-aware activity heatmap model in `crates/forge-tui/src/activity_heatmap.rs`.
+ - `forge-rky` delivered in `docs/tui-502-controlled-ramp-wizard.md` with staged ramp-up and health-gate progression logic in `crates/forge-tui/src/swarm_templates.rs`.
+ - `forge-k1s` delivered in `docs/tui-503-concurrency-governor.md` with concurrency governor + starvation-throttle recommendations in `crates/forge-tui/src/swarm_governor.rs`.
+ - `forge-0q3` delivered in `docs/tui-504-dogpile-detector-redistribution.md` with duplicate-claim detection + redistribution action planning in `crates/forge-tui/src/swarm_dogpile.rs`.
+@@ -86,6 +87,7 @@
+ - `forge-exd` delivered in `docs/tui-906-reference-plugins-extension-docs.md` with signed reference plugin bundle APIs, generated extension developer guide content, and permission safety lint warnings in `crates/forge-tui/src/extension_reference.rs`.
+ - `forge-9hq` delivered in `docs/tui-801-theme-packs-semantic-slots.md` with curated semantic-slot theme packs, status/token-class mappings, and validated JSON import/export support in `crates/forge-tui/src/theme.rs`.
+ - `forge-zzw` delivered in `docs/tui-802-accessibility-contrast-validator.md` with capability-aware contrast validation (`truecolor`/`ansi256`/`ansi16`), fail-fast violation reporting, and aggregate accessibility reports in `crates/forge-tui/src/theme.rs`.
++- `forge-5m9` delivered in `docs/tui-108-theme-accessibility-presets-quick-switching.md` with explicit accessibility presets (`high-contrast`, `low-light`, `colorblind-safe`) and quick preset switching (`T`) plus full theme cycling (`t`) in `crates/forge-tui/src/theme.rs` and `crates/forge-tui/src/app.rs`.
+ - `forge-d8z` delivered in `docs/tui-803-density-modes-focus-mode.md` with `comfortable/compact` density controls, deep focus mode (`Z`) for distraction-minimized debugging, and density-aware multi-log matrix fitting in `crates/forge-tui/src/app.rs` and `crates/forge-tui/src/multi_logs.rs`.
+ - `forge-nkh` delivered in `docs/tui-804-keyboard-macro-recorder-runner.md` with keyboard macro recording/finalization, safety review checks, reviewable macro rendering, and repeat-aware run planning in `crates/forge-tui/src/keyboard_macro.rs`.
+ - `forge-bjj` delivered in `docs/tui-805-adaptive-capability-detection-ansi16-ansi256-truecolor.md` with runtime terminal capability detection (`TERM`/`COLORTERM`/`NO_COLOR`/`FORCE_COLOR`), ANSI16 readability fallback to high-contrast palette, capability-aware adapter theme mapping, and runtime wiring in `crates/forge-tui/src/theme.rs`, `crates/forge-tui/src/lib.rs`, `crates/forge-tui/src/app.rs`, and `crates/forge-tui/src/bin/forge-tui.rs`.
+diff --git a/docs/ux/tui-theme.md b/docs/ux/tui-theme.md
+index 1cd129eef7f0ed45d0104c9b05d21c96feff88a9..2f728a7de68978c7a98b638dbe7c427b9705debb
+--- a/docs/ux/tui-theme.md
++++ b/docs/ux/tui-theme.md
+@@ -52,9 +52,13 @@
+ 
+ ## Palettes
+ 
+-Two baseline palettes are required:
++Baseline curated palettes:
+ 
+ 1. **Default**: balanced contrast with a modern feel.
+-2. **High-contrast**: for accessibility and low-contrast terminals.
++2. **High-contrast**: maximum readability for constrained terminals.
++3. **Low-light**: softer dark palette for long sessions.
++4. **Colorblind-safe**: accessibility-oriented warning/error/success separation.
++
++Additional style variants (for operator preference): `ocean`, `sunset`.
+ 
+ See `internal/tui/styles` for the concrete palette definitions.
+
+tokens used
+299,521
+Hi Tormod. Momentum kept; loop drained cleanly.
+
+- Closed `forge-45t` and `forge-bzn` (self-owned `in_progress`), with `sv` + `fmail` protocol updates and orchestrator done pings.
+- Full gates run for each task, all pass:
+  - `cargo fmt --check`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `EDITOR=true VISUAL=true GIT_EDITOR=true cargo test --workspace`
+- Ran 3 consecutive snapshots after close: no eligible `TUI-*` `open/ready`, no self-owned `in_progress`.
+- Sent idle notices on `task` and `@forge-orchestrator`.
+
+Current workspace diffs are tracker/ledger only: `.tasks/tasks.jsonl`, `.tasks/tasks.snapshot.json`, `.forge/ledgers/rewrite-tui-r6-committer-162700.md`.
+```
+
