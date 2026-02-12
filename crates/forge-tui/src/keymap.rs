@@ -20,6 +20,7 @@ pub enum ModeScope {
     Wizard,
     Help,
     Palette,
+    Search,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -170,6 +171,14 @@ pub enum KeyCommand {
     PaletteMovePrev,
     PaletteQueryBackspace,
     PaletteExecute,
+    OpenSearch,
+    SearchClose,
+    SearchMoveNext,
+    SearchMovePrev,
+    SearchQueryBackspace,
+    SearchExecute,
+    SearchNextMatch,
+    SearchPrevMatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -504,6 +513,73 @@ impl Keymap {
                 KeyChord::plain(Tok::Enter),
                 Cmd::PaletteExecute,
                 "execute palette",
+            ),
+            // -- Search mode --
+            bind(
+                Scope::Mode(ModeScope::Main),
+                KeyChord::ctrl_char('f'),
+                Cmd::OpenSearch,
+                "open search",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Search),
+                KeyChord::plain(Tok::Escape),
+                Cmd::SearchClose,
+                "close search",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Search),
+                KeyChord::plain(Tok::Down),
+                Cmd::SearchMoveNext,
+                "next search result",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Search),
+                KeyChord::plain(Tok::Tab),
+                Cmd::SearchMoveNext,
+                "next search result",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Search),
+                KeyChord::plain(Tok::Up),
+                Cmd::SearchMovePrev,
+                "previous search result",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Search),
+                KeyChord::shift_tab(),
+                Cmd::SearchMovePrev,
+                "previous search result",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Search),
+                KeyChord::plain(Tok::Backspace),
+                Cmd::SearchQueryBackspace,
+                "search query backspace",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Search),
+                KeyChord::ctrl_char('h'),
+                Cmd::SearchQueryBackspace,
+                "search query backspace",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Search),
+                KeyChord::plain(Tok::Enter),
+                Cmd::SearchExecute,
+                "jump to search result",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Search),
+                KeyChord::ctrl_char('n'),
+                Cmd::SearchNextMatch,
+                "next match",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Search),
+                KeyChord::ctrl_char('p'),
+                Cmd::SearchPrevMatch,
+                "previous match",
             ),
         ];
         Self { bindings }

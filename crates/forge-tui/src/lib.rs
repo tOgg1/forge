@@ -48,6 +48,7 @@ pub mod polling_pipeline;
 pub mod readiness_board;
 pub mod resilience_matrix;
 pub mod runs_tab;
+pub mod search_overlay;
 pub mod session_restore;
 pub mod stale_takeover;
 pub mod status_strip;

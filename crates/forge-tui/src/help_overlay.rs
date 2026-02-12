@@ -17,7 +17,7 @@ pub fn render_help_overlay(width: usize, height: usize, theme: ThemeSpec) -> Ren
         }
         let role = match row {
             0 => TextRole::Accent,
-            2 | 6 | 11 | 16 => TextRole::Muted,
+            2 | 8 | 12 | 18 => TextRole::Muted,
             _ => TextRole::Primary,
         };
         frame.draw_text(0, row, &truncate(line, width), role);
@@ -35,6 +35,11 @@ pub fn help_lines() -> Vec<&'static str> {
         "  q quit | ? toggle help | ]/[ tab cycle | 1..4 jump tabs | t theme | z zen",
         "  j/k or arrows move loop | / filter | l expanded logs | n new loop wizard",
         "  S/K/D stop/kill/delete | r resume | space pin/unpin | c clear pins",
+        "  ctrl+f universal search | ctrl+p command palette",
+        "",
+        "Search (ctrl+f):",
+        "  type to search across loops, runs, logs | tab/arrows cycle results",
+        "  ctrl+n/ctrl+p next/prev match | enter jump to source | esc close",
         "",
         "Logs + Runs:",
         "  v source cycle (live/latest-run/selected-run)",
@@ -87,7 +92,7 @@ mod tests {
         assert_render_frame_snapshot(
             "forge_tui_help_overlay",
             &frame,
-            "Forge TUI Help                                                  \n                                                                \nGlobal:                                                         \n  q quit | ? toggle help | ]/[ tab cycle | 1..4 jump tabs | t t…\n  j/k or arrows move loop | / filter | l expanded logs | n new …\n  S/K/D stop/kill/delete | r resume | space pin/unpin | c clear…\n                                                                \nLogs + Runs:                                                    \n  v source cycle (live/latest-run/selected-run)                 \n  x semantic layer cycle (raw/events/errors/tools/diff)         ",
+            "Forge TUI Help                                                  \n                                                                \nGlobal:                                                         \n  q quit | ? toggle help | ]/[ tab cycle | 1..4 jump tabs | t t…\n  j/k or arrows move loop | / filter | l expanded logs | n new …\n  S/K/D stop/kill/delete | r resume | space pin/unpin | c clear…\n  ctrl+f universal search | ctrl+p command palette              \n                                                                \nSearch (ctrl+f):                                                \n  type to search across loops, runs, logs | tab/arrows cycle re…",
         );
     }
 }

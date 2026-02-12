@@ -17,6 +17,7 @@ use crate::keymap::{KeyChord, KeyCommand, KeyScope, Keymap, ModeScope};
 use crate::layouts::{
     fit_pane_layout, layout_index_for, normalize_layout_index, PaneLayout, PANE_LAYOUTS,
 };
+use crate::search_overlay::SearchOverlay;
 use crate::theme::{
     cycle_palette, resolve_palette_for_capability, Palette, TerminalColorCapability,
 };
@@ -98,6 +99,7 @@ pub enum UiMode {
     Confirm,
     Wizard,
     Help,
+    Search,
 }
 
 // ---------------------------------------------------------------------------
@@ -675,6 +677,7 @@ pub struct App {
     claim_events: Vec<ClaimEventView>,
     selected_claim_conflict: usize,
     handoff_snapshot: Option<HandoffSnapshotView>,
+    onboarding_dismissed_tabs: HashSet<MainTab>,
 
     // -- filter --
     filter_text: String,
@@ -702,6 +705,7 @@ pub struct App {
     palette: Palette,
     keymap: Keymap,
     command_palette: CommandPalette,
+    search_overlay: SearchOverlay,
     quitting: bool,
 
     // -- view registry (for tab content) --
@@ -762,6 +766,7 @@ impl App {
             claim_events: Vec::new(),
             selected_claim_conflict: 0,
             handoff_snapshot: None,
+            onboarding_dismissed_tabs: HashSet::new(),
 
             filter_text: String::new(),
             filter_state: "all".to_owned(),
@@ -784,6 +789,7 @@ impl App {
             palette,
             keymap: Keymap::default_forge_tui(),
             command_palette: CommandPalette::new_default(),
+            search_overlay: SearchOverlay::new(),
             quitting: false,
 
             views: HashMap::new(),
@@ -964,6 +970,7 @@ impl App {
             UiMode::Wizard => ModeScope::Wizard,
             UiMode::Help => ModeScope::Help,
             UiMode::Palette => ModeScope::Palette,
+            UiMode::Search => ModeScope::Search,
         };
         [
             KeyScope::View(self.tab),
@@ -2083,6 +2090,7 @@ impl App {
                 UiMode::Confirm => self.update_confirm_mode(key_event),
                 UiMode::Wizard => self.update_wizard_mode(key_event),
                 UiMode::Help => self.update_help_mode(key_event),
+                UiMode::Search => self.update_search_mode(key_event),
                 UiMode::Main => self.update_main_mode(key_event),
             }
         } else {
@@ -2095,6 +2103,12 @@ impl App {
             self.command_palette
                 .open(self.palette_context(), DEFAULT_SEARCH_BUDGET);
             self.mode = UiMode::Palette;
+            return Command::None;
+        }
+        if matches!(self.resolve_key_command(key), Some(KeyCommand::OpenSearch)) {
+            self.populate_search_index();
+            self.search_overlay.open();
+            self.mode = UiMode::Search;
             return Command::None;
         }
 
@@ -2150,6 +2164,14 @@ impl App {
             }
             Key::Char('M') => {
                 self.cycle_density_mode(1);
+                Command::Fetch
+            }
+            Key::Char('i') => {
+                self.dismiss_onboarding_for_tab(self.tab);
+                Command::Fetch
+            }
+            Key::Char('I') => {
+                self.recall_onboarding_for_tab(self.tab);
                 Command::Fetch
             }
             Key::Char('/') => {
@@ -2831,6 +2853,99 @@ impl App {
         }
     }
 
+    fn update_search_mode(&mut self, key: KeyEvent) -> Command {
+        match self.resolve_key_command(key) {
+            Some(KeyCommand::SearchClose) => {
+                self.mode = UiMode::Main;
+                Command::None
+            }
+            Some(KeyCommand::SearchMoveNext) => {
+                self.search_overlay.move_selection(1);
+                Command::None
+            }
+            Some(KeyCommand::SearchMovePrev) => {
+                self.search_overlay.move_selection(-1);
+                Command::None
+            }
+            Some(KeyCommand::SearchQueryBackspace) => {
+                self.search_overlay.pop_char();
+                Command::None
+            }
+            Some(KeyCommand::SearchNextMatch) => {
+                self.search_overlay.next_match();
+                Command::None
+            }
+            Some(KeyCommand::SearchPrevMatch) => {
+                self.search_overlay.prev_match();
+                Command::None
+            }
+            Some(KeyCommand::SearchExecute) => {
+                if let Some(target) = self.search_overlay.accept() {
+                    self.mode = UiMode::Main;
+                    self.jump_to_search_target(target);
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            _ => match key.key {
+                Key::Char(ch) if !key.modifiers.ctrl && !key.modifiers.alt => {
+                    self.search_overlay.push_char(ch);
+                    Command::None
+                }
+                _ => Command::None,
+            },
+        }
+    }
+
+    fn populate_search_index(&mut self) {
+        let index = self.search_overlay.index_mut();
+        crate::search_overlay::index_loops(index, &self.loops);
+        crate::search_overlay::index_runs(index, &self.run_history, &self.selected_id);
+        crate::search_overlay::index_logs(index, &self.selected_log, &self.selected_id);
+    }
+
+    fn jump_to_search_target(&mut self, target: crate::search_overlay::SearchJumpTarget) {
+        use crate::search_overlay::SearchJumpTarget;
+        match target {
+            SearchJumpTarget::Loop { loop_id } => {
+                self.select_loop_by_id(&loop_id);
+                self.set_tab(MainTab::Overview);
+                self.set_status(StatusKind::Info, &format!("Jumped to loop {loop_id}"));
+            }
+            SearchJumpTarget::Run { run_id } => {
+                self.set_tab(MainTab::Runs);
+                self.set_status(StatusKind::Info, &format!("Jumped to run {run_id}"));
+            }
+            SearchJumpTarget::Log { loop_id } => {
+                let clean_id = loop_id.strip_prefix("log:").unwrap_or(&loop_id);
+                self.select_loop_by_id(clean_id);
+                self.set_tab(MainTab::Logs);
+                self.set_status(StatusKind::Info, &format!("Jumped to logs for {clean_id}"));
+            }
+        }
+    }
+
+    fn select_loop_by_id(&mut self, loop_id: &str) {
+        if loop_id.is_empty() {
+            return;
+        }
+        for (idx, lv) in self.filtered.iter().enumerate() {
+            if lv.id == loop_id {
+                self.selected_idx = idx;
+                self.selected_id = loop_id.to_owned();
+                return;
+            }
+        }
+        // Fallback: try in full loop list
+        for lv in &self.loops {
+            if lv.id == loop_id {
+                self.selected_id = loop_id.to_owned();
+                return;
+            }
+        }
+    }
+
     fn run_action(&mut self, action: ActionType, loop_id: &str) -> Command {
         if self.action_busy {
             self.set_status(StatusKind::Info, "Another action is still running");
@@ -2953,6 +3068,26 @@ impl App {
                     frame.draw_text(0, content_start + idx, line, role);
                 }
             }
+            UiMode::Search => {
+                let lines = self.search_overlay.render_lines(width, content_height);
+                for (idx, search_line) in lines.iter().enumerate() {
+                    if idx >= content_height {
+                        break;
+                    }
+                    let role = if idx == 0 {
+                        TextRole::Accent
+                    } else if idx == 1 {
+                        TextRole::Muted
+                    } else if search_line.selected {
+                        TextRole::Primary
+                    } else if search_line.highlighted {
+                        TextRole::Success
+                    } else {
+                        TextRole::Muted
+                    };
+                    frame.draw_text(0, content_start + idx, &search_line.text, role);
+                }
+            }
             UiMode::Confirm => {
                 if let Some(ref confirm) = self.confirm {
                     let prompt = &confirm.prompt;
@@ -3040,6 +3175,10 @@ impl App {
             }
         }
 
+        if self.should_render_onboarding_overlay() {
+            self.render_onboarding_overlay(&mut frame, width, content_height, content_start);
+        }
+
         // Status line.
         if !self.status_text.is_empty() {
             let status_y = height.saturating_sub(2);
@@ -3060,11 +3199,11 @@ impl App {
         // Footer hint line.
         let footer_y = height.saturating_sub(1);
         let hint = if self.focus_mode == FocusMode::DeepDebug {
-            "deep focus  Z toggle  M density  z zen  q quit  ? help"
+            "deep focus  Z toggle  M density  z zen  i dismiss-hints  I recall-hints  q quit  ? help"
         } else if self.density_mode == DensityMode::Compact {
-            "? q ctrl+p / 1-5 j/k z Z M"
+            "? q ctrl+p / 1-5 j/k z Z M i I"
         } else {
-            "? help  q quit  ctrl+p palette  / filter  1-5 tabs  j/k sel  S stop  K kill  M density  Z focus"
+            "? help  q quit  ctrl+p palette  ctrl+f search  / filter  1-5 tabs  j/k sel  S stop  K kill  M density  Z focus"
         };
         let truncated = if hint.len() > width {
             &hint[..width]
@@ -3094,6 +3233,7 @@ impl App {
             UiMode::Help => "  mode:Help",
             UiMode::Confirm => "  mode:Confirm",
             UiMode::ExpandedLogs => "  mode:Expanded Logs",
+            UiMode::Search => "  mode:Search",
             UiMode::Main => "",
         };
         let header = format!(
@@ -3546,6 +3686,8 @@ impl App {
             "  z         zen mode (focus right pane)".to_owned(),
             "  Z         deep focus mode (distraction-minimized)".to_owned(),
             "  M         cycle density (comfortable/compact)".to_owned(),
+            "  i         dismiss first-run contextual hints for current tab".to_owned(),
+            "  I         recall first-run contextual hints for current tab".to_owned(),
             "  /         filter mode".to_owned(),
             "".to_owned(),
         ];
@@ -3564,6 +3706,108 @@ impl App {
             };
             frame.draw_text(0, y_offset + i, truncated, TextRole::Primary);
         }
+    }
+}
+
+impl App {
+    fn should_render_onboarding_overlay(&self) -> bool {
+        self.mode == UiMode::Main && !self.onboarding_dismissed_tabs.contains(&self.tab)
+    }
+
+    fn dismiss_onboarding_for_tab(&mut self, tab: MainTab) {
+        if self.onboarding_dismissed_tabs.insert(tab) {
+            self.set_status(
+                StatusKind::Info,
+                &format!(
+                    "Onboarding hints dismissed for {} (press I to recall)",
+                    tab.label()
+                ),
+            );
+        } else {
+            self.set_status(
+                StatusKind::Info,
+                &format!(
+                    "Onboarding hints already dismissed for {} (press I to recall)",
+                    tab.label()
+                ),
+            );
+        }
+    }
+
+    fn recall_onboarding_for_tab(&mut self, tab: MainTab) {
+        if self.onboarding_dismissed_tabs.remove(&tab) {
+            self.set_status(
+                StatusKind::Info,
+                &format!("Onboarding hints recalled for {}", tab.label()),
+            );
+        } else {
+            self.set_status(
+                StatusKind::Info,
+                &format!("Onboarding hints already visible for {}", tab.label()),
+            );
+        }
+    }
+
+    fn render_onboarding_overlay(
+        &self,
+        frame: &mut RenderFrame,
+        width: usize,
+        content_height: usize,
+        y_offset: usize,
+    ) {
+        if width == 0 || content_height == 0 {
+            return;
+        }
+        let lines = self.onboarding_lines(width);
+        for (idx, (role, line)) in lines.into_iter().enumerate() {
+            if idx >= content_height {
+                break;
+            }
+            frame.draw_text(0, y_offset + idx, &line, role);
+        }
+    }
+
+    fn onboarding_lines(&self, width: usize) -> Vec<(TextRole, String)> {
+        let (line_a, line_b) = match self.tab {
+            MainTab::Overview => (
+                "overview: j/k select loop, 2 jump logs, n open wizard, ctrl+p command palette",
+                "overview workflow: inspect state here, then pivot to runs/logs for root-cause",
+            ),
+            MainTab::Logs => (
+                "logs: v cycle source, x cycle layer, u/d scroll, l expand pane",
+                "logs workflow: pick run with ,/. then inspect raw/events/errors/tools/diff",
+            ),
+            MainTab::Runs => (
+                "runs: ,/. select run, x layer, u/d scroll output, l expand pane",
+                "runs workflow: compare recent exits, then drill into run output window",
+            ),
+            MainTab::MultiLogs => (
+                "multi logs: m layout, C compare mode, u/d sync scroll, g/G first-last page",
+                "multi workflow: pin loops with space, compare lanes side-by-side, clear with c",
+            ),
+            MainTab::Inbox => (
+                "inbox: f filter, enter mark read, a ack, h handoff snapshot, r quick reply",
+                "inbox workflow: resolve claim conflicts with o/O, then post closure note",
+            ),
+        };
+        let mut lines = Vec::with_capacity(4);
+        lines.push((
+            TextRole::Accent,
+            trim_to_width(
+                &format!("first-run hints: {}", self.tab.label().to_ascii_lowercase()),
+                width,
+            ),
+        ));
+        lines.push((TextRole::Primary, trim_to_width(line_a, width)));
+        lines.push((TextRole::Primary, trim_to_width(line_b, width)));
+        lines.push((
+            TextRole::Muted,
+            trim_to_width(
+                "i dismiss hints for this tab  |  I recall hints  |  ? full help",
+                width,
+            ),
+        ));
+        lines
     }
 }
 
@@ -3936,6 +4180,7 @@ mod tests {
         app.set_inbox_messages(sample_inbox_messages());
         app.set_claim_events(sample_claim_events());
         app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('i'))); // dismiss onboarding overlay
         let frame = app.render();
         let snapshot = frame.snapshot();
         assert!(snapshot.contains("Inbox filter:all"));
@@ -4012,6 +4257,50 @@ mod tests {
         let mut app = App::new("default", 12);
         app.update(key(Key::Char('?')));
         assert_eq!(app.mode(), UiMode::Help);
+    }
+
+    #[test]
+    fn first_run_onboarding_overlay_renders_by_default() {
+        let mut app = app_with_loops(3);
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 120,
+            height: 30,
+        }));
+        let snapshot = app.render().snapshot();
+        assert!(snapshot.contains("first-run hints: overview"));
+        assert!(snapshot.contains("overview: j/k select loop"));
+        assert!(snapshot.contains("i dismiss hints for this tab"));
+    }
+
+    #[test]
+    fn dismiss_onboarding_hides_overlay_per_tab() {
+        let mut app = app_with_loops(3);
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 120,
+            height: 30,
+        }));
+        app.update(key(Key::Char('i')));
+        assert!(app.status_text().contains("dismissed for Overview"));
+        let overview = app.render().snapshot();
+        assert!(!overview.contains("first-run hints: overview"));
+
+        app.update(key(Key::Char('2')));
+        let logs = app.render().snapshot();
+        assert!(logs.contains("first-run hints: logs"));
+    }
+
+    #[test]
+    fn recall_onboarding_restores_overlay_for_tab() {
+        let mut app = app_with_loops(3);
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 120,
+            height: 30,
+        }));
+        app.update(key(Key::Char('i')));
+        app.update(key(Key::Char('I')));
+        assert!(app.status_text().contains("recalled for Overview"));
+        let snapshot = app.render().snapshot();
+        assert!(snapshot.contains("first-run hints: overview"));
     }
 
     #[test]
@@ -4974,7 +5263,8 @@ mod tests {
 
     #[test]
     fn overview_empty_state_guides_loop_creation() {
-        let app = App::new("default", 12);
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('i'))); // dismiss onboarding overlay
         let frame = app.render();
 
         let all_rows = frame.snapshot();
