@@ -49,7 +49,6 @@ fn root_help_omits_dropped_legacy_command_groups() {
 
     for command in [
         "accounts",
-        "agent",
         "attach",
         "node",
         "recipe",
@@ -99,7 +98,6 @@ fn unknown_command_text_error() {
 fn dropped_legacy_commands_are_unknown() {
     for command in [
         "accounts",
-        "agent",
         "attach",
         "node",
         "recipe",

@@ -349,6 +349,7 @@ dependencies = [
  "prost-types",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tonic",
 ]
 
@@ -356,8 +357,10 @@ dependencies = [
 name = "forge-cli"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "fmail-core",
+ "forge-agent",
  "forge-db",
  "forge-loop",
  "forge-rpc",
@@ -465,6 +468,7 @@ version = "0.1.0"
 dependencies = [
  "forge-db",
  "forge-ftui-adapter",
+ "regex",
  "serde_json",
 ]
 

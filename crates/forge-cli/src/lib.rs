@@ -2,6 +2,7 @@ use std::env;
 use std::io::Write;
 use std::sync::OnceLock;
 
+pub mod agent;
 pub mod audit;
 pub mod clean;
 pub mod completion;
@@ -92,6 +93,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
                 return 1;
             }
             0
+        }
+        Some("agent") => {
+            let backend = agent::ForgedAgentBackend::open_from_env();
+            let forwarded = forward_args(remaining, &flags);
+            agent::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("hook") => {
             let backend = hook::FilesystemHookBackend;
@@ -362,6 +368,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  forge <command> [options]")?;
     writeln!(out)?;
     writeln!(out, "Commands:")?;
+    writeln!(out, "  agent     Manage persistent agents")?;
     writeln!(out, "  audit     View the Forge audit log")?;
     writeln!(out, "  clean     Remove inactive loops")?;
     writeln!(out, "  completion  Generate shell completion scripts")?;
@@ -470,15 +477,20 @@ pub struct RootCommandOutput {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::{
-        audit, clean, completion, config, context, crate_label, doctor, explain, export, hook,
-        init, inject, kill, lock, logs, loop_internal, mail, mem, migrate, msg, pool, profile,
-        prompt, ps, queue, resume, rm, run, run_for_test, run_with_args, scale, send, seq, skills,
-        status, stop, template, tui, up, wait, work, workflow,
+        agent, audit, clean, completion, config, context, crate_label, doctor, explain, export,
+        hook, init, inject, kill, lock, logs, loop_internal, mail, mem, migrate, msg, pool,
+        profile, prompt, ps, queue, resume, rm, run, run_for_test, run_with_args, scale, send, seq,
+        skills, status, stop, template, tui, up, wait, work, workflow,
     };
 
     #[test]
     fn crate_label_is_stable() {
         assert_eq!(crate_label(), "forge-cli");
+    }
+
+    #[test]
+    fn agent_module_is_accessible() {
+        let _ = agent::InMemoryAgentBackend::new();
     }
 
     #[test]
@@ -697,6 +709,7 @@ mod tests {
             Err(err) => panic!("stdout should be utf-8: {err}"),
         };
         assert!(rendered.contains("Control plane for AI coding agents"));
+        assert!(rendered.contains("agent"));
         assert!(rendered.contains("audit"));
         assert!(rendered.contains("clean"));
         assert!(rendered.contains("config"));

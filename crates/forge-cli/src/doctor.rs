@@ -3,6 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use forge_agent::capability::capability_for_harness;
 use serde::Serialize;
 use tabwriter::TabWriter;
 
@@ -170,6 +171,39 @@ impl FilesystemDoctorBackend {
             self.check_git(),
             self.check_ssh(),
         ]
+    }
+
+    fn harness_capability_checks(&self) -> Vec<DoctorCheck> {
+        const HARNESSES: [(&str, &str); 4] = [
+            ("codex", "codex"),
+            ("claude", "claude"),
+            ("opencode", "opencode"),
+            ("droid", "droid"),
+        ];
+
+        HARNESSES
+            .iter()
+            .map(|(harness, binary)| {
+                let capability = capability_for_harness(harness);
+                let available = self.binary_exists(binary);
+
+                DoctorCheck {
+                    category: "agent".to_string(),
+                    name: format!("harness:{harness}"),
+                    status: if available {
+                        CheckStatus::Pass
+                    } else {
+                        CheckStatus::Warn
+                    },
+                    details: Some(if available {
+                        capability.detail_line()
+                    } else {
+                        format!("{}; binary not found in PATH", capability.detail_line())
+                    }),
+                    error: None,
+                }
+            })
+            .collect()
     }
 
     fn check_tmux(&self) -> DoctorCheck {
@@ -423,6 +457,7 @@ impl FilesystemDoctorBackend {
 impl DoctorBackend for FilesystemDoctorBackend {
     fn run_checks(&self) -> Vec<DoctorCheck> {
         let mut checks = self.dependency_checks();
+        checks.extend(self.harness_capability_checks());
         checks.extend(self.configuration_checks());
         checks
     }
@@ -541,7 +576,7 @@ fn write_human(report: &DoctorReport, stdout: &mut dyn Write) -> Result<(), Stri
     writeln!(stdout).map_err(|e| e.to_string())?;
 
     // Group by category, in fixed order matching Go
-    let categories = ["dependencies", "config", "database", "nodes"];
+    let categories = ["dependencies", "agent", "config", "database", "nodes"];
     let mut tw = TabWriter::new(&mut *stdout).padding(2);
 
     for cat in &categories {
@@ -686,6 +721,7 @@ Run comprehensive diagnostics on your Forge environment.
 
 Checks include:
 - Dependencies: tmux, opencode, ssh, git
+- Agent harness capabilities: interactive support, idle/approval signal support
 - Configuration: config file, database, migrations
 - Nodes: connectivity and health
 - Accounts: vault access and profiles
@@ -1347,5 +1383,28 @@ mod tests {
             db.details.as_deref(),
             Some(database_file.to_string_lossy().as_ref())
         );
+    }
+
+    #[test]
+    fn filesystem_backend_reports_harness_capability_matrix() {
+        let temp = TempDir::new("doctor-capability-matrix");
+        let backend =
+            FilesystemDoctorBackend::new(Some(temp.path.clone()), Some(OsString::from("")));
+        let checks = backend.run_checks();
+
+        let codex = find_check(&checks, "agent", "harness:codex");
+        assert_eq!(codex.status, CheckStatus::Warn);
+        let details = codex.details.as_deref().unwrap_or_default();
+        assert!(details.contains("interactive_agent=true"));
+        assert!(details.contains("reliable_idle_detection=true"));
+        assert!(details.contains("approval_signal=true"));
+        assert!(details.contains("default_mode=interactive"));
+        assert!(details.contains("binary not found in PATH"));
+
+        let opencode = find_check(&checks, "agent", "harness:opencode");
+        assert_eq!(opencode.status, CheckStatus::Warn);
+        let details = opencode.details.as_deref().unwrap_or_default();
+        assert!(details.contains("reliable_idle_detection=false"));
+        assert!(details.contains("approval_signal=false"));
     }
 }
