@@ -12,11 +12,12 @@ Hard guardrails
 - Use `sv` + `fmail` every iteration.
 
 Task pick policy
-1. Preferred: highest-priority `open/ready` task with title prefix `TUI-`.
-2. Only take `in_progress` if:
+1. Preferred: highest-priority `open/ready` non-epic task with title prefix `TUI-` or `TUI:`.
+2. Fallback: if no ready match, pick highest-priority non-epic `open` task with title prefix `TUI-` or `TUI:`.
+3. Only take `in_progress` if:
 - clearly self-owned, or
 - stale (`>=45m` no update), and you post takeover claim.
-3. If `sv task start <id>` races/fails, pick next ready `TUI-*`.
+4. If `sv task start <id>` races/fails, pick next matching task.
 
 Run protocol (repeat)
 1. `export FMAIL_AGENT="${FORGE_LOOP_NAME:-tui-codex}"`
@@ -26,7 +27,8 @@ Run protocol (repeat)
 - `sv task list --status in_progress --json`
 - `fmail log task -n 200`
 4. Select task id:
-- `task_id=$(sv task ready --json | jq -r '.data.tasks[] | select(.title|startswith("TUI-")) | .id' | head -n1)`
+- `task_id=$(sv task ready --json | jq -r '.data.tasks[]? | select((.title|type)=="string") | select((.title|test("^TUI[-:]")) and (.title|test("Epic";"i")|not)) | .id' | head -n1)`
+- `if [ -z "$task_id" ]; then task_id=$(sv task list --status open --json | jq -r '.data.tasks[]? | select((.title|type)=="string") | select((.title|test("^TUI[-:]")) and (.title|test("Epic";"i")|not)) | .id' | head -n1); fi`
 5. If empty for 3 consecutive snapshots, stop iteration as idle.
 6. Claim:
 - `sv task start "$task_id"`
@@ -42,7 +44,7 @@ Run protocol (repeat)
 10. Close only on full pass:
 - `sv task close "$task_id"`
 - `fmail send task "$task_id closed by $FMAIL_AGENT" || true`
-11. Immediately continue with next ready `TUI-*` task.
+11. Immediately continue with next matching `TUI-*`/`TUI:` non-epic task.
 
 Blocked protocol
 - Keep task `in_progress`.

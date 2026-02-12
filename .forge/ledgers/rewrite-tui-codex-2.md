@@ -546,3 +546,80 @@ Choose:
 3. Release `forge-z33` and move to next ready `TUI-*`.
 ```
 
+## 2026-02-12T14:52:49Z
+
+- run_id: b967e5bc-2e4c-468e-a06a-0376a004a1cd
+- loop_name: rewrite-tui-codex-2
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T14:47:41Z
+- finished_at: 2026-02-12T14:52:49Z
+- exit_code: 0
+
+```
+20260212-132230-0000 rewrite-committer-claude-115929 -> task: committer: committed dd3c7e8 chore: update task tracking and swarm ledgers
+20260212-144812-0000 rewrite-tui-codex-1 -> task: claim: forge-d1j by rewrite-tui-codex-1
+20260212-144813-0000 rewrite-tui-codex-2 -> task: claim: forge-d1j by rewrite-tui-codex-2
+20260212-144823-0000 rewrite-tui-codex-1 -> task: claim: forge-z33 by rewrite-tui-codex-1
+20260212-144831-0000 rewrite-tui-claude-r3-154742 -> task: claim: forge-h51 by rewrite-tui-claude-r3-154742
+20260212-145150-0000 rewrite-tui-codex-1 -> task: forge-z33 progress: communication_quality checks already delivered (unanswered asks, stale threads, missing closure notes + action hints) and revalidated; validation=PASS (cargo fmt --check; cargo clippy --workspace --all-targets -- -D warnings; EDITOR=true VISUAL=true GIT_EDITOR=true cargo test --workspace)
+20260212-145152-0000 rewrite-tui-codex-2 -> task: forge-d1j progress: resilience matrix already implemented and revalidated (missing profiles, DB lock contention, partial data, network interruption) in crates/forge-tui/src/resilience_matrix.rs + docs/tui-706-resilience-test-matrix-degraded-environments.md; validation=PASS (cargo fmt --check; cargo clippy --workspace --all-targets -- -D warnings; cargo test --workspace with EDITOR=true VISUAL=true GIT_EDITOR=true to avoid interactive editor in test env).
+20260212-145154-0000 rewrite-tui-codex-1 -> task: forge-z33 closed by rewrite-tui-codex-1
+20260212-145158-0000 rewrite-tui-codex-2 -> task: forge-d1j closed by rewrite-tui-codex-2
+
+thinking
+**Handling idle detection and notification**
+exec
+/bin/zsh -lc 'git status --short' in /Users/trmd/Code/oss--forge/repos/forge succeeded in 51ms:
+ M .forge/ledgers/rewrite-committer-claude-115929.md
+ M .forge/ledgers/rewrite-stale-auditor-115930.md
+ M .tasks/tasks.jsonl
+ M .tasks/tasks.snapshot.json
+ M Makefile
+?? .forge/ledgers/rewrite-tui-claude-r3-154742.md
+
+thinking
+**Reporting unexpected workspace change**
+codex
+Closed 1 task this loop: `forge-d1j` (`TUI-706`).
+
+- Revalidated delivered scope in `crates/forge-tui/src/resilience_matrix.rs` and `docs/tui-706-resilience-test-matrix-degraded-environments.md`.
+- Validation pass:
+  - `cargo fmt --check`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `cargo test --workspace` (rerun with `EDITOR=true VISUAL=true GIT_EDITOR=true` to avoid interactive vim prompt in test env)
+- Reported via `fmail`; closed with `sv task close forge-d1j`.
+
+Then ran 3 consecutive snapshots; no ready tasks with title prefix `TUI-`. Loop stopped idle per protocol.
+
+I also detected an unexpected workspace change I did not make: `Makefile` is modified. Pausing per guardrail.  
+Choose next step:
+
+1. Continue loop and ignore unrelated `Makefile` drift.
+2. Inspect `Makefile` diff first.
+3. Stop here.
+tokens used
+119,739
+Closed 1 task this loop: `forge-d1j` (`TUI-706`).
+
+- Revalidated delivered scope in `crates/forge-tui/src/resilience_matrix.rs` and `docs/tui-706-resilience-test-matrix-degraded-environments.md`.
+- Validation pass:
+  - `cargo fmt --check`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `cargo test --workspace` (rerun with `EDITOR=true VISUAL=true GIT_EDITOR=true` to avoid interactive vim prompt in test env)
+- Reported via `fmail`; closed with `sv task close forge-d1j`.
+
+Then ran 3 consecutive snapshots; no ready tasks with title prefix `TUI-`. Loop stopped idle per protocol.
+
+I also detected an unexpected workspace change I did not make: `Makefile` is modified. Pausing per guardrail.  
+Choose next step:
+
+1. Continue loop and ignore unrelated `Makefile` drift.
+2. Inspect `Makefile` diff first.
+3. Stop here.
+```
+

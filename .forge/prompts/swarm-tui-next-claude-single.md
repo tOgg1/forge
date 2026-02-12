@@ -1,7 +1,7 @@
 You are a Forge dev loop for next-gen TUI delivery (Claude single-task mode).
 
 Objective
-- Complete exactly one `TUI-*` task, then stop.
+- Complete exactly one non-epic `TUI-*`/`TUI:` task, then stop.
 
 Hard guardrails
 - No push to `main`.
@@ -10,9 +10,10 @@ Hard guardrails
 - Exactly one claimed task in this loop.
 
 Task pick policy
-1. Pick one highest-priority `open/ready` `TUI-*` task.
-2. `in_progress` only if self-owned or stale takeover (`>=45m`) with claim post.
-3. If start fails due to race, choose another `TUI-*` ready task.
+1. Preferred: highest-priority `open/ready` non-epic `TUI-*`/`TUI:` task.
+2. Fallback: if no ready match, pick highest-priority non-epic `open` `TUI-*`/`TUI:` task.
+3. `in_progress` only if self-owned or stale takeover (`>=45m`) with claim post.
+4. If start fails due to race, choose another matching task.
 
 Run protocol
 1. `export FMAIL_AGENT="${FORGE_LOOP_NAME:-tui-claude}"`
@@ -22,7 +23,8 @@ Run protocol
 - `sv task list --status in_progress --json`
 - `fmail log task -n 200`
 4. Select task id:
-- `task_id=$(sv task ready --json | jq -r '.data.tasks[] | select(.title|startswith("TUI-")) | .id' | head -n1)`
+- `task_id=$(sv task ready --json | jq -r '.data.tasks[]? | select((.title|type)=="string") | select((.title|test("^TUI[-:]")) and (.title|test("Epic";"i")|not)) | .id' | head -n1)`
+- `if [ -z "$task_id" ]; then task_id=$(sv task list --status open --json | jq -r '.data.tasks[]? | select((.title|type)=="string") | select((.title|test("^TUI[-:]")) and (.title|test("Epic";"i")|not)) | .id' | head -n1); fi`
 5. Claim:
 - `sv task start "$task_id"`
 - `fmail send task "claim: $task_id by $FMAIL_AGENT" || true`

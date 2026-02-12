@@ -469,3 +469,80 @@ Next-task scan:
 - Loop stopped idle per policy.
 ```
 
+## 2026-02-12T14:52:44Z
+
+- run_id: f4b65159-f1bb-46e5-bac8-8e0743758dca
+- loop_name: rewrite-tui-codex-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T14:47:41Z
+- finished_at: 2026-02-12T14:52:44Z
+- exit_code: 0
+
+```
+20260212-145154-0000 rewrite-tui-codex-1 -> task: forge-z33 closed by rewrite-tui-codex-1
+20260212-145158-0000 rewrite-tui-codex-2 -> task: forge-d1j closed by rewrite-tui-codex-2
+
+thinking
+**Crafting concise final report**
+codex
+hi. momentum kept; one more TUI task shipped clean.
+
+- Closed `forge-z33` (`TUI-606`).
+- Revalidated delivered scope in `crates/forge-tui/src/communication_quality.rs` + `docs/tui-606-communication-quality-stale-thread-alerts.md`.
+- Validation pass:
+1. `cargo fmt --check`
+2. `cargo clippy --workspace --all-targets -- -D warnings`
+3. `cargo test --workspace` (rerun with `EDITOR=true VISUAL=true GIT_EDITOR=true` to avoid vim prompt hang)
+
+Loop flow summary:
+- Snapshot/claim/report/close via `sv` + `fmail` done.
+- Next task race: `forge-d1j` already taken/closed by `rewrite-tui-codex-2`.
+- No ready tasks with title prefix `TUI-` for 3 consecutive snapshots.
+- One active non-matching task remains: `forge-h51` (`TUI: ...`) owned by `rewrite-tui-claude-r3-154742`.
+- Iteration stopped idle per policy.
+
+Skill contract (ops set):
+- Spawn: existing single dev loop; no new spawn.
+- Health checks:
+1. `sv task ready --json`
+2. `sv task list --status in_progress --json`
+3. `fmail log task -n 200`
+4. required cargo gates above
+- Wind-down:
+1. stop when 3 consecutive snapshots return empty `TUI-*`
+2. keep no active claimed task on exit
+tokens used
+149,247
+hi. momentum kept; one more TUI task shipped clean.
+
+- Closed `forge-z33` (`TUI-606`).
+- Revalidated delivered scope in `crates/forge-tui/src/communication_quality.rs` + `docs/tui-606-communication-quality-stale-thread-alerts.md`.
+- Validation pass:
+1. `cargo fmt --check`
+2. `cargo clippy --workspace --all-targets -- -D warnings`
+3. `cargo test --workspace` (rerun with `EDITOR=true VISUAL=true GIT_EDITOR=true` to avoid vim prompt hang)
+
+Loop flow summary:
+- Snapshot/claim/report/close via `sv` + `fmail` done.
+- Next task race: `forge-d1j` already taken/closed by `rewrite-tui-codex-2`.
+- No ready tasks with title prefix `TUI-` for 3 consecutive snapshots.
+- One active non-matching task remains: `forge-h51` (`TUI: ...`) owned by `rewrite-tui-claude-r3-154742`.
+- Iteration stopped idle per policy.
+
+Skill contract (ops set):
+- Spawn: existing single dev loop; no new spawn.
+- Health checks:
+1. `sv task ready --json`
+2. `sv task list --status in_progress --json`
+3. `fmail log task -n 200`
+4. required cargo gates above
+- Wind-down:
+1. stop when 3 consecutive snapshots return empty `TUI-*`
+2. keep no active claimed task on exit
+```
+
