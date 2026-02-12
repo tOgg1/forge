@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use forge_tui::app::{App, LoopView};
+use forge_tui::polling_pipeline::{PollScheduler, PollingConfig, PollingQueue};
 
 #[derive(Debug, Clone, Default)]
 struct LiveLoopSnapshot {
@@ -72,15 +73,54 @@ fn main() {
 
 fn run_interactive() {
     let mut renderer = IncrementalRenderEngine::default();
+    let db_path = resolve_database_path();
+    let mut scheduler = PollScheduler::new(PollingConfig::default(), &polling_pipeline_key());
+    let mut queue = PollingQueue::new(scheduler.config().max_pending_snapshots);
+    let mut next_poll_deadline = Instant::now();
+
     print!("\x1b[2J");
     let _ = std::io::stdout().flush();
+
     loop {
-        let mut lines = render_snapshot_lines();
-        lines.push(String::new());
-        lines.push("refresh: 2s   exit: Ctrl+C".to_string());
-        let _ = renderer.repaint(std::io::stdout(), &lines);
-        thread::sleep(Duration::from_secs(2));
+        let mut now = Instant::now();
+        while now >= next_poll_deadline {
+            let lines = render_snapshot_lines_for_path(&db_path);
+            let _ = queue.push(lines);
+            next_poll_deadline += scheduler.next_interval(queue.len());
+            now = Instant::now();
+        }
+
+        if let Some(mut lines) = queue.drain_latest() {
+            lines.push(String::new());
+            lines.push(render_poll_status_line(&scheduler, &queue));
+            let _ = renderer.repaint(std::io::stdout(), &lines);
+        }
+
+        let sleep_for = next_poll_deadline.saturating_duration_since(Instant::now());
+        if sleep_for.is_zero() {
+            thread::yield_now();
+        } else {
+            thread::sleep(sleep_for.min(Duration::from_millis(250)));
+        }
     }
+}
+
+fn polling_pipeline_key() -> String {
+    let host = std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("HOST"))
+        .unwrap_or_else(|_| "forge-tui".to_owned());
+    format!("{host}:{}", std::process::id())
+}
+
+fn render_poll_status_line(scheduler: &PollScheduler, queue: &PollingQueue<Vec<String>>) -> String {
+    let config = scheduler.config();
+    format!(
+        "refresh: {}ms + jitter<= {}ms  queue:max={} dropped={}  exit: Ctrl+C",
+        config.base_interval_ms,
+        config.max_jitter_ms,
+        queue.max_depth_seen(),
+        queue.dropped_total()
+    )
 }
 
 fn plan_render_diff(previous: &[String], next: &[String]) -> RenderDiffPlan {
@@ -116,9 +156,13 @@ fn render_snapshot_text() -> String {
 }
 
 fn render_snapshot_lines() -> Vec<String> {
-    let mut lines = Vec::new();
     let db_path = resolve_database_path();
-    let snapshot = match load_live_loop_snapshot(&db_path) {
+    render_snapshot_lines_for_path(&db_path)
+}
+
+fn render_snapshot_lines_for_path(db_path: &Path) -> Vec<String> {
+    let mut lines = Vec::new();
+    let snapshot = match load_live_loop_snapshot(db_path) {
         Ok(snapshot) => snapshot,
         Err(err) => {
             lines.push(format!("error: load live loop snapshot: {err}"));
