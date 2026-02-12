@@ -98,7 +98,8 @@ pub fn operation_allows_state(operation: AgentOperation, state: AgentState) -> b
     match operation {
         AgentOperation::SendMessage => matches!(
             state,
-            AgentState::Running
+            AgentState::Starting
+                | AgentState::Running
                 | AgentState::Idle
                 | AgentState::WaitingApproval
                 | AgentState::Paused
@@ -109,10 +110,7 @@ pub fn operation_allows_state(operation: AgentOperation, state: AgentState) -> b
                 AgentState::Running | AgentState::WaitingApproval | AgentState::Paused
             )
         }
-        AgentOperation::Kill => !matches!(
-            state,
-            AgentState::Unspecified | AgentState::Stopped | AgentState::Failed
-        ),
+        AgentOperation::Kill => !matches!(state, AgentState::Unspecified),
         AgentOperation::Revive => matches!(state, AgentState::Stopped | AgentState::Failed),
     }
 }
@@ -183,6 +181,7 @@ mod tests {
     #[test]
     fn send_requires_interactive_state() {
         for state in [
+            AgentState::Starting,
             AgentState::Running,
             AgentState::Idle,
             AgentState::WaitingApproval,
@@ -192,7 +191,6 @@ mod tests {
         }
         for state in [
             AgentState::Unspecified,
-            AgentState::Starting,
             AgentState::Stopping,
             AgentState::Stopped,
             AgentState::Failed,
@@ -202,19 +200,21 @@ mod tests {
     }
 
     #[test]
-    fn kill_rejected_for_terminal_states() {
+    fn kill_allows_terminal_states_but_rejects_unspecified() {
         assert!(validate_operation_state("a1", AgentOperation::Kill, AgentState::Running).is_ok());
-        let err = match validate_operation_state("a1", AgentOperation::Kill, AgentState::Stopped) {
-            Ok(()) => panic!("expected invalid kill state"),
-            Err(err) => err,
-        };
+        assert!(validate_operation_state("a1", AgentOperation::Kill, AgentState::Stopped).is_ok());
+        let err =
+            match validate_operation_state("a1", AgentOperation::Kill, AgentState::Unspecified) {
+                Ok(()) => panic!("expected invalid kill state"),
+                Err(err) => err,
+            };
         match err {
             AgentServiceError::InvalidState {
                 current_state,
                 operation,
                 ..
             } => {
-                assert_eq!(current_state, "stopped");
+                assert_eq!(current_state, "unspecified");
                 assert_eq!(operation, "kill_agent");
             }
             other => panic!("expected InvalidState, got {other:?}"),
