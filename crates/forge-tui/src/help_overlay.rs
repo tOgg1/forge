@@ -32,7 +32,7 @@ pub fn help_lines() -> Vec<&'static str> {
         "Forge TUI Help",
         "",
         "Global:",
-        "  q quit | ? toggle help | ]/[ tab cycle | 1..4 jump tabs | t theme | z zen",
+        "  q quit | ? toggle help | ]/[ tab cycle | 1..4 jump tabs | t/T themes | z zen",
         "  j/k or arrows move loop | / filter | l expanded logs | n new loop wizard",
         "  S/K/D stop/kill/delete | r resume | space pin/unpin | c clear pins",
         "  ctrl+f universal search | ctrl+p command palette",
@@ -92,7 +92,7 @@ mod tests {
         assert_render_frame_snapshot(
             "forge_tui_help_overlay",
             &frame,
-            "Forge TUI Help                                                  \n                                                                \nGlobal:                                                         \n  q quit | ? toggle help | ]/[ tab cycle | 1..4 jump tabs | t t…\n  j/k or arrows move loop | / filter | l expanded logs | n new …\n  S/K/D stop/kill/delete | r resume | space pin/unpin | c clear…\n  ctrl+f universal search | ctrl+p command palette              \n                                                                \nSearch (ctrl+f):                                                \n  type to search across loops, runs, logs | tab/arrows cycle re…",
+            "Forge TUI Help                                                  \n                                                                \nGlobal:                                                         \n  q quit | ? toggle help | ]/[ tab cycle | 1..4 jump tabs | t/T…\n  j/k or arrows move loop | / filter | l expanded logs | n new …\n  S/K/D stop/kill/delete | r resume | space pin/unpin | c clear…\n  ctrl+f universal search | ctrl+p command palette              \n                                                                \nSearch (ctrl+f):                                                \n  type to search across loops, runs, logs | tab/arrows cycle re…",
         );
     }
 }

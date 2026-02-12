@@ -146,6 +146,7 @@ pub enum KeyCommand {
     MoveSelectionPrev,
     OpenFilter,
     CycleTheme,
+    CycleAccessibilityTheme,
     ToggleZen,
     OpenWizard,
     ResumeSelected,
@@ -309,6 +310,12 @@ impl Keymap {
                 KeyChord::plain(Tok::Char('t')),
                 Cmd::CycleTheme,
                 "cycle theme",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Main),
+                KeyChord::plain(Tok::Char('T')),
+                Cmd::CycleAccessibilityTheme,
+                "cycle accessibility theme",
             ),
             bind(
                 Scope::Mode(ModeScope::Main),

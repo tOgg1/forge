@@ -25,7 +25,16 @@ pub struct Palette {
     pub info: &'static str,
 }
 
-pub const PALETTE_ORDER: [&str; 4] = ["default", "high-contrast", "ocean", "sunset"];
+pub const PALETTE_ORDER: [&str; 6] = [
+    "default",
+    "high-contrast",
+    "low-light",
+    "colorblind-safe",
+    "ocean",
+    "sunset",
+];
+
+pub const ACCESSIBILITY_PRESET_ORDER: [&str; 3] = ["high-contrast", "low-light", "colorblind-safe"];
 
 pub const DEFAULT_PALETTE: Palette = Palette {
     name: "default",
@@ -57,6 +66,38 @@ const HIGH_CONTRAST_PALETTE: Palette = Palette {
     warning: "#FFB000",
     error: "#FF4040",
     info: "#66CCFF",
+};
+
+const LOW_LIGHT_PALETTE: Palette = Palette {
+    name: "low-light",
+    background: "#05070A",
+    panel: "#0A1016",
+    panel_alt: "#0E141B",
+    text: "#E4E8EE",
+    text_muted: "#9AA5B5",
+    border: "#2A3644",
+    accent: "#8AB4F8",
+    focus: "#F4C95D",
+    success: "#7BD88F",
+    warning: "#F2C572",
+    error: "#FF7A90",
+    info: "#8AD4FF",
+};
+
+const COLORBLIND_SAFE_PALETTE: Palette = Palette {
+    name: "colorblind-safe",
+    background: "#0E1117",
+    panel: "#151A24",
+    panel_alt: "#1B2230",
+    text: "#EAF0F6",
+    text_muted: "#A7B3C6",
+    border: "#324055",
+    accent: "#4EA1FF",
+    focus: "#FFD166",
+    success: "#2EC4B6",
+    warning: "#FFB347",
+    error: "#FF6B6B",
+    info: "#7CC8FF",
 };
 
 const OCEAN_PALETTE: Palette = Palette {
@@ -291,6 +332,8 @@ pub fn resolve_palette(name: &str) -> Palette {
     match trimmed.as_str() {
         "default" => DEFAULT_PALETTE,
         "high-contrast" => HIGH_CONTRAST_PALETTE,
+        "low-light" => LOW_LIGHT_PALETTE,
+        "colorblind-safe" => COLORBLIND_SAFE_PALETTE,
         "ocean" => OCEAN_PALETTE,
         "sunset" => SUNSET_PALETTE,
         _ => DEFAULT_PALETTE,
@@ -330,6 +373,37 @@ pub fn cycle_palette(current: &str, delta: i32) -> Palette {
     }
     idx %= PALETTE_ORDER.len() as i32;
     resolve_palette(PALETTE_ORDER[idx as usize])
+}
+
+#[must_use]
+pub fn cycle_accessibility_preset(current: &str, delta: i32) -> Palette {
+    if ACCESSIBILITY_PRESET_ORDER.is_empty() {
+        return HIGH_CONTRAST_PALETTE;
+    }
+
+    let current = current.trim().to_ascii_lowercase();
+    let mut idx = -1i32;
+    for (i, candidate) in ACCESSIBILITY_PRESET_ORDER.iter().enumerate() {
+        if *candidate == current {
+            idx = i as i32;
+            break;
+        }
+    }
+
+    if idx < 0 {
+        return if delta < 0 {
+            resolve_palette(ACCESSIBILITY_PRESET_ORDER[ACCESSIBILITY_PRESET_ORDER.len() - 1])
+        } else {
+            resolve_palette(ACCESSIBILITY_PRESET_ORDER[0])
+        };
+    }
+
+    idx += delta;
+    while idx < 0 {
+        idx += ACCESSIBILITY_PRESET_ORDER.len() as i32;
+    }
+    idx %= ACCESSIBILITY_PRESET_ORDER.len() as i32;
+    resolve_palette(ACCESSIBILITY_PRESET_ORDER[idx as usize])
 }
 
 #[must_use]
@@ -543,6 +617,8 @@ fn theme_title(id: &str) -> &'static str {
     match id {
         "default" => "Default",
         "high-contrast" => "High Contrast",
+        "low-light" => "Low Light",
+        "colorblind-safe" => "Colorblind Safe",
         "ocean" => "Ocean",
         "sunset" => "Sunset",
         _ => "Custom",
@@ -852,11 +928,12 @@ fn relative_luminance((r, g, b): (u8, u8, u8)) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        curated_theme_packs, cycle_palette, cycle_theme_pack, export_theme_pack, import_theme_pack,
-        resolve_palette, resolve_palette_for_capability, resolve_theme_pack,
-        validate_curated_theme_contrast, validate_curated_theme_contrast_fail_fast,
-        validate_theme_packs_contrast, TerminalColorCapability, ThemePackError, ThemeSemanticSlot,
-        DEFAULT_PALETTE, HIGH_CONTRAST_PALETTE, REQUIRED_SEMANTIC_SLOTS,
+        curated_theme_packs, cycle_accessibility_preset, cycle_palette, cycle_theme_pack,
+        export_theme_pack, import_theme_pack, resolve_palette, resolve_palette_for_capability,
+        resolve_theme_pack, validate_curated_theme_contrast,
+        validate_curated_theme_contrast_fail_fast, validate_theme_packs_contrast,
+        TerminalColorCapability, ThemePackError, ThemeSemanticSlot, COLORBLIND_SAFE_PALETTE,
+        DEFAULT_PALETTE, HIGH_CONTRAST_PALETTE, LOW_LIGHT_PALETTE, REQUIRED_SEMANTIC_SLOTS,
     };
 
     #[test]
@@ -868,6 +945,8 @@ mod tests {
     #[test]
     fn resolve_palette_matches_named_palettes() {
         assert_eq!(resolve_palette("high-contrast"), HIGH_CONTRAST_PALETTE);
+        assert_eq!(resolve_palette("low-light"), LOW_LIGHT_PALETTE);
+        assert_eq!(resolve_palette("colorblind-safe"), COLORBLIND_SAFE_PALETTE);
     }
 
     #[test]
@@ -879,14 +958,35 @@ mod tests {
     #[test]
     fn cycle_palette_wraps_and_normalizes() {
         assert_eq!(cycle_palette("default", 1).name, "high-contrast");
+        assert_eq!(cycle_palette("default", 2).name, "low-light");
         assert_eq!(cycle_palette("default", -1).name, "sunset");
         assert_eq!(cycle_palette("  OCEAN ", 1).name, "sunset");
     }
 
     #[test]
+    fn cycle_accessibility_preset_wraps() {
+        assert_eq!(
+            cycle_accessibility_preset("high-contrast", 1).name,
+            "low-light"
+        );
+        assert_eq!(
+            cycle_accessibility_preset("low-light", 1).name,
+            "colorblind-safe"
+        );
+        assert_eq!(
+            cycle_accessibility_preset("high-contrast", -1).name,
+            "colorblind-safe"
+        );
+        assert_eq!(
+            cycle_accessibility_preset("default", 1).name,
+            "high-contrast"
+        );
+    }
+
+    #[test]
     fn curated_theme_packs_include_required_semantic_slots() {
         let packs = curated_theme_packs();
-        assert_eq!(packs.len(), 4);
+        assert_eq!(packs.len(), 6);
         assert_eq!(packs[0].id, "default");
 
         for pack in packs {
@@ -902,16 +1002,16 @@ mod tests {
 
     #[test]
     fn export_import_theme_pack_round_trip() {
-        let pack = resolve_theme_pack("ocean");
+        let pack = resolve_theme_pack("colorblind-safe");
         let raw = export_theme_pack(&pack);
         let parsed = import_theme_pack(&raw);
 
         match parsed {
             Ok(parsed) => {
-                assert_eq!(parsed.id, "ocean");
+                assert_eq!(parsed.id, "colorblind-safe");
                 assert_eq!(
                     parsed.slots.get(&ThemeSemanticSlot::StatusWarning),
-                    Some(&"#FFC857".to_owned())
+                    Some(&"#FFB347".to_owned())
                 );
                 assert_eq!(
                     parsed.slots.get(&ThemeSemanticSlot::TokenKeyword),
@@ -940,6 +1040,7 @@ mod tests {
     fn resolve_and_cycle_theme_pack_match_palette_order() {
         assert_eq!(resolve_theme_pack("not-real").id, "default");
         assert_eq!(cycle_theme_pack("default", 1).id, "high-contrast");
+        assert_eq!(cycle_theme_pack("default", 2).id, "low-light");
         assert_eq!(cycle_theme_pack("default", -1).id, "sunset");
     }
 
@@ -953,7 +1054,7 @@ mod tests {
             let result = validate_curated_theme_contrast_fail_fast(capability);
             match result {
                 Ok(report) => {
-                    assert_eq!(report.themes_checked, 4);
+                    assert_eq!(report.themes_checked, 6);
                     assert_eq!(report.violations.len(), 0);
                     assert!(report.pairs_checked > 0);
                 }

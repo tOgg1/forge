@@ -52,9 +52,13 @@ Use semantic roles instead of hard-coded colors:
 
 ## Palettes
 
-Two baseline palettes are required:
+Baseline curated palettes:
 
 1. **Default**: balanced contrast with a modern feel.
-2. **High-contrast**: for accessibility and low-contrast terminals.
+2. **High-contrast**: maximum readability for constrained terminals.
+3. **Low-light**: softer dark palette for long sessions.
+4. **Colorblind-safe**: accessibility-oriented warning/error/success separation.
+
+Additional style variants (for operator preference): `ocean`, `sunset`.
 
 See `internal/tui/styles` for the concrete palette definitions.

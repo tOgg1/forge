@@ -216,9 +216,17 @@ impl Config {
             return Err("tui.refresh_interval must be greater than 0".into());
         }
         match self.tui.theme.to_lowercase().trim() {
-            "default" | "high-contrast" | "ocean" | "sunset" => {}
+            "default"
+            | "high-contrast"
+            | "low-light"
+            | "colorblind-safe"
+            | "ocean"
+            | "sunset" => {}
             _ => {
-                return Err("tui.theme must be one of default, high-contrast, ocean, sunset".into())
+                return Err(
+                    "tui.theme must be one of default, high-contrast, low-light, colorblind-safe, ocean, sunset"
+                        .into(),
+                )
             }
         }
 

@@ -19,7 +19,8 @@ use crate::layouts::{
 };
 use crate::search_overlay::SearchOverlay;
 use crate::theme::{
-    cycle_palette, resolve_palette_for_capability, Palette, TerminalColorCapability,
+    cycle_accessibility_preset, cycle_palette, resolve_palette_for_capability, Palette,
+    TerminalColorCapability,
 };
 
 // ---------------------------------------------------------------------------
@@ -1514,6 +1515,14 @@ impl App {
         self.set_status(StatusKind::Info, &format!("Theme: {}", self.palette.name));
     }
 
+    pub fn cycle_accessibility_theme(&mut self) {
+        self.palette = cycle_accessibility_preset(self.palette.name, 1);
+        self.set_status(
+            StatusKind::Info,
+            &format!("Accessibility preset: {}", self.palette.name),
+        );
+    }
+
     pub fn cycle_density_mode(&mut self, delta: i32) {
         let options = &DensityMode::ORDER;
         let mut idx = 0i32;
@@ -2154,6 +2163,10 @@ impl App {
                 self.cycle_theme();
                 Command::None
             }
+            Key::Char('T') => {
+                self.cycle_accessibility_theme();
+                Command::None
+            }
             Key::Char('z') => {
                 self.toggle_zen_mode();
                 Command::Fetch
@@ -2622,6 +2635,10 @@ impl App {
             }
             Key::Char('t') => {
                 self.cycle_theme();
+                Command::None
+            }
+            Key::Char('T') => {
+                self.cycle_accessibility_theme();
                 Command::None
             }
             Key::Char('z') => {
@@ -3203,7 +3220,7 @@ impl App {
         } else if self.density_mode == DensityMode::Compact {
             "? q ctrl+p / 1-5 j/k z Z M i I"
         } else {
-            "? help  q quit  ctrl+p palette  ctrl+f search  / filter  1-5 tabs  j/k sel  S stop  K kill  M density  Z focus"
+            "? help  q quit  ctrl+p palette  ctrl+f search  / filter  1-5 tabs  j/k sel  t/T theme  M density  Z focus"
         };
         let truncated = if hint.len() > width {
             &hint[..width]
@@ -3682,7 +3699,8 @@ impl App {
             "Global:".to_owned(),
             "  ?         toggle help".to_owned(),
             "  q         quit".to_owned(),
-            "  t         cycle theme".to_owned(),
+            "  t         cycle all themes".to_owned(),
+            "  T         quick cycle accessibility presets".to_owned(),
             "  z         zen mode (focus right pane)".to_owned(),
             "  Z         deep focus mode (distraction-minimized)".to_owned(),
             "  M         cycle density (comfortable/compact)".to_owned(),
@@ -4524,7 +4542,18 @@ mod tests {
         app.update(key(Key::Char('t')));
         assert_eq!(app.palette().name, "high-contrast");
         app.update(key(Key::Char('t')));
-        assert_eq!(app.palette().name, "ocean");
+        assert_eq!(app.palette().name, "low-light");
+    }
+
+    #[test]
+    fn shift_t_cycles_accessibility_theme_presets() {
+        let mut app = App::new("default", 12);
+        app.update(key(Key::Char('T')));
+        assert_eq!(app.palette().name, "high-contrast");
+        app.update(key(Key::Char('T')));
+        assert_eq!(app.palette().name, "low-light");
+        app.update(key(Key::Char('T')));
+        assert_eq!(app.palette().name, "colorblind-safe");
     }
 
     #[test]
