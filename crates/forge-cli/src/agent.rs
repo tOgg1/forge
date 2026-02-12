@@ -3924,6 +3924,54 @@ Will resume after unblock"
     }
 
     #[test]
+    fn agent_spawn_capability_mismatch_is_actionable() {
+        let backend =
+            InMemoryAgentBackend::new().with_spawn_error(AgentServiceError::CapabilityMismatch {
+                adapter: "codex".to_string(),
+                requested_mode: "continuous".to_string(),
+                command_mode: "one-shot".to_string(),
+                hint: "switch to interactive command".to_string(),
+            });
+        let out = run_for_test(
+            &["agent", "spawn", "ag-cap", "--command", "codex exec"],
+            &backend,
+        );
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("capability mismatch"));
+        assert!(out.stderr.contains("one-shot"));
+    }
+
+    #[test]
+    fn agent_spawn_transport_unavailable_surfaces_fallback_error() {
+        let backend =
+            InMemoryAgentBackend::new().with_spawn_error(AgentServiceError::TransportUnavailable {
+                message: "dial tcp 127.0.0.1:50051: connect: connection refused".to_string(),
+            });
+        let out = run_for_test(
+            &["agent", "spawn", "ag-offline", "--command", "codex"],
+            &backend,
+        );
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("forged daemon unavailable"));
+        assert!(out.stderr.contains("connection refused"));
+    }
+
+    #[test]
+    fn agent_send_with_multiple_agents_keeps_peer_visible_in_ps() {
+        let backend = InMemoryAgentBackend::new()
+            .with_agent(test_snapshot("ag-a", AgentState::Idle))
+            .with_agent(test_snapshot("ag-b", AgentState::Idle));
+
+        let send_out = run_for_test(&["agent", "send", "ag-a", "ping"], &backend);
+        assert_eq!(send_out.exit_code, 0, "stderr: {}", send_out.stderr);
+
+        let ps_out = run_for_test(&["agent", "--json", "ps"], &backend);
+        assert_eq!(ps_out.exit_code, 0, "stderr: {}", ps_out.stderr);
+        let parsed = parse_json(&ps_out.stdout);
+        assert_eq!(parsed["total"], 2);
+    }
+
+    #[test]
     fn agent_run_create_path_json() {
         let backend = InMemoryAgentBackend::new();
         let out = run_for_test(
