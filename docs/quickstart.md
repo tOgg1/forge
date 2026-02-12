@@ -74,6 +74,47 @@ Forge sets `PI_CODING_AGENT_DIR` from `profile.auth_home` automatically.
 ./build/forge ps
 ```
 
+## Delegated persistent agent flow (<10 min)
+
+Use this when parent wants ad-hoc delegated work, outside loop iteration flow.
+
+```bash
+# 1) Spawn/reuse child and wait for completion state
+./build/forge agent run "Audit current branch and list risky diffs" \
+  --agent delegate-1 \
+  --type codex \
+  --wait idle
+
+# 2) Reuse same child for a follow-up
+./build/forge agent run "Create a 3-step patch plan" \
+  --agent delegate-1 \
+  --wait idle
+
+# 3) Add correlation metadata for parent/task tracing
+./build/forge agent run "Draft commit message options" \
+  --agent delegate-1 \
+  --task-id forge-ftz \
+  --tag docs \
+  --label epic=M10 \
+  --wait idle
+```
+
+Harness mode guidance:
+
+- Persistent delegation needs interactive harness mode.
+- If spawn reports mode/capability mismatch, choose an interactive harness command/profile and retry.
+- If agent is terminal (`stopped`/`error`), retry with `--revive`.
+
+Migration note:
+
+```bash
+# old naming
+./build/forge subagent run "Summarize open work"
+
+# new naming
+./build/forge agent run "Summarize open work"
+```
+
 Ownership modes for runner spawn:
 
 - `--spawn-owner local` (default): always detached local spawn.

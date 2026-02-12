@@ -18,6 +18,7 @@ Key features:
 - **Loops**: background processes per repo
 - **Profiles + Pools**: harness + auth homes with concurrency caps
 - **Queue**: message, pause, stop, kill, next-prompt override
+- **Persistent agents**: parent-oriented delegated work via `forge agent run` / `forge agent send`
 - **Smart stop**: quantitative (command-based) + qualitative (judge iteration) stop rules
 - **Logs + Ledgers**: logs centralized in the data dir, ledgers committed per repo
 - **TUI**: themed loop dashboard with tabs (`Overview`, `Logs`, `Runs`, `Multi Logs`), harness-aware log highlighting, and configurable multi-log layouts up to `4x4`
@@ -88,6 +89,30 @@ forge logs <loop-name> -f
 forge
 ```
 
+## Delegated Agent Quickstart (<10 min)
+
+Use persistent agents when parent wants to delegate one task, then re-engage same child later.
+
+```bash
+# Recipe 1: fastest path (spawn/reuse + send + wait)
+forge agent run "Review PR #42 and list blockers" --agent reviewer-1 --type codex --wait idle
+
+# Recipe 2: reuse same child for follow-up task
+forge agent run "Now propose fix order with risk levels" --agent reviewer-1 --wait idle
+
+# Recipe 3: include parent correlation metadata
+forge agent run "Draft release notes from latest commits" \
+  --agent writer-1 \
+  --task-id forge-ftz \
+  --tag docs \
+  --label epic=M10 \
+  --wait idle
+```
+
+Harness mode guidance:
+- Persistent delegation requires an interactive harness session.
+- If spawn fails with a mode/capability mismatch, switch to an interactive harness command/profile.
+
 ## Repo Layout
 
 Forge keeps committed repo state in `.forge/`:
@@ -135,6 +160,22 @@ See `docs/skills.md` for details.
 ## CLI Reference
 
 See `docs/cli.md` for the full CLI surface.
+
+## Migration Note: `subagent` -> `agent`
+
+Legacy command group `forge subagent ...` is replaced by `forge agent ...`.
+
+```bash
+# old
+forge subagent spawn reviewer-1 --command codex
+forge subagent send reviewer-1 "Summarize open issues"
+forge subagent wait reviewer-1 --until idle
+
+# new
+forge agent spawn reviewer-1 --command codex
+forge agent send reviewer-1 "Summarize open issues"
+forge agent wait reviewer-1 --until idle
+```
 
 ## Loop runner ownership
 

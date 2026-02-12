@@ -14,6 +14,71 @@ If you are in JSON mode, add `--no-color` to keep output plain.
 
 If any command fails, see the matching section below.
 
+## Delegated agent failure playbook (`forge agent`)
+
+Quick checks:
+
+```bash
+./build/forge agent ps
+./build/forge agent show <agent-id>
+./build/forge agent run "health-check ping" --agent <agent-id> --wait idle
+```
+
+### Error: terminal state (`stopped`/`error`) on delegated run/send
+
+Symptom:
+- `agent '<id>' is in terminal state ...; use --revive to restart it`
+
+Fix:
+```bash
+./build/forge agent run "continue previous task" --agent <agent-id> --revive --wait idle
+```
+
+### Error: harness mode / capability mismatch
+
+Symptom:
+- spawn fails with mode/capability mismatch for continuous agent flow
+
+Cause:
+- selected harness/profile is one-shot mode, not interactive/reusable
+
+Fix:
+```bash
+# use interactive harness command/profile, then retry
+./build/forge agent spawn <agent-id> --command codex
+./build/forge agent send <agent-id> "resume delegated task"
+```
+
+### Error: wait timeout
+
+Symptom:
+- wait returns timeout while agent still working or stuck
+
+Fix:
+```bash
+./build/forge agent show <agent-id>
+./build/forge agent wait <agent-id> --until idle --timeout 900
+# if stuck:
+./build/forge agent interrupt <agent-id>
+./build/forge agent run "continue from last stable point" --agent <agent-id> --wait idle
+```
+
+### Error: old command name `subagent` no longer exists
+
+Symptom:
+- `unknown command: subagent`
+
+Fix (exact replacements):
+```bash
+# old
+./build/forge subagent run "triage failures"
+./build/forge subagent send reviewer-1 "follow up"
+
+# new
+./build/forge agent run "triage failures"
+./build/forge agent send reviewer-1 "follow up"
+```
+
 ## tmux not found
 
 Symptoms:

@@ -50,6 +50,61 @@ Alias mapping:
 
 ## Core commands
 
+### `forge agent` (persistent delegated agents)
+
+Parent-oriented delegated workflow for non-loop tasks. Reuse one child across multiple tasks.
+
+Key subcommands:
+
+- `forge agent run [task-text] [--agent <id>] [--type <harness>] [--wait idle] [--revive]`
+- `forge agent spawn [agent-id] --command <cmd>`
+- `forge agent send <agent-id> <text>`
+- `forge agent wait <agent-id> --until <state>`
+- `forge agent ps`
+- `forge agent show <agent-id>`
+- `forge agent interrupt <agent-id>`
+- `forge agent kill <agent-id> [--force]`
+
+Real recipes:
+
+```bash
+# Recipe 1: one-command delegated run (spawn/reuse + send + optional wait)
+forge agent run "Review service errors and summarize root cause" --agent triage-1 --type codex --wait idle
+
+# Recipe 2: explicit spawn + iterative sends
+forge agent spawn triage-2 --command codex
+forge agent send triage-2 "Analyze failing tests in CI run 1284"
+forge agent wait triage-2 --until idle
+forge agent send triage-2 "Now propose minimal patch set"
+
+# Recipe 3: terminal-state recovery + correlation metadata
+forge agent run "Continue previous migration audit" \
+  --agent migration-auditor \
+  --revive \
+  --task-id forge-ftz \
+  --tag persistent \
+  --label epic=M10 \
+  --wait idle
+```
+
+Harness mode guidance:
+
+- Persistent agents require interactive session capability.
+- One-shot harness modes are not reusable for send/wait workflows.
+- If you see a capability/mode mismatch error on spawn, switch harness command/profile to an interactive mode and retry.
+
+Migration note (`subagent` -> `agent`):
+
+```bash
+# old
+forge subagent run "Investigate flaky test"
+forge subagent send reviewer-1 "Follow up with fix plan"
+
+# new
+forge agent run "Investigate flaky test"
+forge agent send reviewer-1 "Follow up with fix plan"
+```
+
 ### `forge` / `forge tui`
 
 Launch the loop TUI.
