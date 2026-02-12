@@ -160,3 +160,80 @@ Next unblock to continue:
 3. Rerun full gates; close `forge-bhm`; pick next `TUI-*`.
 ```
 
+## 2026-02-12T15:50:03Z
+
+- run_id: e2ed0af8-0b83-400d-b26f-7f8a639bbfba
+- loop_name: rewrite-tui-r6-codex-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T15:40:52Z
+- finished_at: 2026-02-12T15:50:03Z
+- exit_code: 0
+
+```
+}
+         if Instant::now() >= deadline {
+             panic!(
+                 "timed out waiting for logs marker count >= {min_count}\n{}",
+-                last_logs.unwrap_or_default()
++                stdout
+             );
+         }
+         thread::sleep(Duration::from_millis(250));
+     }
+ }
+ 
++struct RforgeLogsContext<'a> {
++    rforge_bin: &'a Path,
++    repo_path: &'a Path,
++    db_path: &'a Path,
++    data_dir: &'a Path,
++    daemon_target: &'a str,
++}
++
+ #[test]
+ fn rforged_and_rforge_up_spawn_owner_daemon_e2e_tmp_repo() {
+     let temp = TempDir::new("rforged-rforge-daemon-e2e");
+@@ -600,12 +597,15 @@
+     let short_prefix: String = short_id.chars().take(4).collect();
+     assert_eq!(short_prefix.len(), 4, "short_id prefix should have 4 chars");
+ 
++    let logs_context = RforgeLogsContext {
++        rforge_bin: &rforge_bin,
++        repo_path: &repo_path,
++        db_path: &db_path,
++        data_dir: &data_dir,
++        daemon_target: &daemon_target,
++    };
+     let logs = wait_for_log_marker_count(
+-        &rforge_bin,
+-        &repo_path,
+-        &db_path,
+-        &data_dir,
+-        &daemon_target,
++        &logs_context,
+         short_prefix.as_str(),
+         RUN_MARKER,
+         2,
+
+tokens used
+309,299
+Loop run complete. Good throughput.
+
+- Closed `forge-6k1` (`TUI: Keyboard macros`) after revalidation.
+- Closed `forge-p34` (`TUI: Session bookmarks`) as duplicate-delivered (`crates/forge-tui/src/log_anchors.rs`, `docs/tui-206-bookmark-annotation-log-anchors.md`).
+- Closed `forge-m7v` (`TUI: Time scrubber for loop timeline`) as duplicate-delivered (`crates/forge-tui/src/timeline_scrubber.rs`, `docs/tui-203-timeline-scrubber-heatmap.md`).
+- Full gates passed on latest run:
+  - `cargo fmt --check`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `cargo test --workspace`
+- Reported each task via `fmail` (`task` + `@forge-orchestrator`) and sent close notices.
+- 3 consecutive snapshots: no eligible `open/ready` `TUI-*` non-epic tasks. Loop now idle per protocol.
+
+Workspace state now: only task/ledger metadata dirty (`.tasks/*`, `.forge/ledgers/*`).
+```
+
