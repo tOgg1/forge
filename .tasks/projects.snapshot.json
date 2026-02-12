@@ -1,7 +1,17 @@
 {
   "schema_version": "sv.projects.v1",
-  "generated_at": "2026-02-11T05:54:43.161845Z",
+  "generated_at": "2026-02-11T18:37:01.456483Z",
   "projects": [
+    {
+      "id": "prj-krh6zdh0",
+      "name": "grand-vision",
+      "description": "New grand vision workstream (TUI excellence + persistent agents).",
+      "archived": false,
+      "created_at": "2026-02-09T06:56:03.132899Z",
+      "updated_at": "2026-02-11T18:37:01.445854Z",
+      "created_by": "codex",
+      "updated_by": "rforged-runtime-parity-specialist"
+    },
     {
       "id": "prj-2gawkgmn",
       "name": "rforged-runtime-parity",
@@ -29,16 +39,6 @@
       "archived": false,
       "created_at": "2026-02-09T15:26:13.152087Z",
       "updated_at": "2026-02-09T15:26:13.152087Z",
-      "created_by": "codex",
-      "updated_by": "codex"
-    },
-    {
-      "id": "prj-krh6zdh0",
-      "name": "grand-vision",
-      "description": "New grand vision workstream (TUI excellence + persistent subagents).",
-      "archived": false,
-      "created_at": "2026-02-09T06:56:03.132899Z",
-      "updated_at": "2026-02-09T06:56:03.132899Z",
       "created_by": "codex",
       "updated_by": "codex"
     },
