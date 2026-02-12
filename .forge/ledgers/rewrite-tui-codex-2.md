@@ -392,3 +392,80 @@ Next:
 2. You want to wait for owner/unblock, then I rerun gates and close `forge-bjj`.
 ```
 
+## 2026-02-12T12:05:45Z
+
+- run_id: ca52f99e-2a6e-45cb-87a0-ac37fa930c7c
+- loop_name: rewrite-tui-codex-2
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T11:54:46Z
+- finished_at: 2026-02-12T12:05:45Z
+- exit_code: 0
+
+```
+summary     Generate concise parent rehydration summary
+-  gc          Evict stale parked agents
++  gc          Evict stale parked persistent agents
+   interrupt   Interrupt an agent (Ctrl+C)
+   kill        Kill an agent
+   revive      Revive a stopped/failed agent
+@@ -2230,6 +2238,19 @@
+ Usage:
+   forge agent summary <agent-id>";
+ 
++const GC_HELP: &str = "\
++Evict stale parked persistent agents
++
++Usage:
++  forge agent gc [flags]
++
++Flags:
++  -w, --workspace string   filter by workspace
++      --idle-timeout int   evict idle agents at/after this age in seconds
++      --max-age int        evict agents at/after this total age in seconds
++      --limit int          max parked agents scanned (default: 500)
++      --dry-run            report candidates without deleting";
++
+ const INTERRUPT_HELP: &str = "\
+ Interrupt an agent (send Ctrl+C)
+ 
+@@ -2821,7 +2842,8 @@
+ 
+         let verify_db = forge_db::Db::open(forge_db::Config::new(&db_path))
+             .unwrap_or_else(|err| panic!("open verify db {}: {err}", db_path.display()));
+-        let verify_repo = forge_db::persistent_agent_repository::PersistentAgentRepository::new(&verify_db);
++        let verify_repo =
++            forge_db::persistent_agent_repository::PersistentAgentRepository::new(&verify_db);
+         assert!(verify_repo.get("ag-stale-idle").is_err());
+         assert!(verify_repo.get("ag-active-running").is_ok());
+ 
+@@ -3215,7 +3237,9 @@
+ 
+         let gc_out = run_for_test(&["agent", "gc", "--help"], &backend);
+         assert_eq!(gc_out.exit_code, 1);
+-        assert!(gc_out.stderr.contains("Evict stale parked persistent agents"));
++        assert!(gc_out
++            .stderr
++            .contains("Evict stale parked persistent agents"));
+ 
+         let kill_out = run_for_test(&["agent", "kill", "--help"], &backend);
+         assert_eq!(kill_out.exit_code, 1);
+
+tokens used
+457,249
+hi. solid throughput; one task shipped, next task parked with clear blocker.
+
+- closed `forge-bjj` (`TUI-805`) after full gate pass:
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `EDITOR=true VISUAL=true GIT_EDITOR=true cargo test --workspace`.
+- claimed `forge-daf` (`TUI-604`), confirmed implementation exists (`crates/forge-tui/src/task_notes.rs`, `docs/tui-604-shared-notes-breadcrumbs.md`).
+- `forge-daf` now blocked by concurrent workspace regression in `crates/forge-cli/src/agent.rs:417` (`Subcommand::Gc` non-exhaustive match during validation).
+- blocker posted to `fmail` task topic + `@forge-orchestrator`; kept `forge-daf` `in_progress` per protocol.
+
+1. wait for owner of `forge-cli` GC edits to land fix, then I rerun gate + close `forge-daf`.
+2. let me hotfix `crates/forge-cli/src/agent.rs:417` now, rerun gate, and close `forge-daf` immediately.
+```
+
