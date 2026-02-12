@@ -161,3 +161,80 @@ Next unblock options:
 2. Or allow task-level close with partial gate while workspace is unstable.
 ```
 
+## 2026-02-12T11:22:21Z
+
+- run_id: f4e4009c-9c26-4f42-a8a7-cb54197f091f
+- loop_name: rewrite-tui-codex-2
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T11:12:01Z
+- finished_at: 2026-02-12T11:22:21Z
+- exit_code: 0
+
+```
++
++- New module: `crates/forge-tui/src/log_compare.rs`
++- Exported from crate root: `crates/forge-tui/src/lib.rs`
++- Multi Logs integration: `crates/forge-tui/src/multi_logs.rs`
++- App state + key handling: `crates/forge-tui/src/app.rs`
++
++### Compare model
++
++- `synchronized_windows(...)`:
++  - left pane uses shared scroll baseline
++  - right pane anchors by matching timestamp token when available
++  - fallback anchor uses line-ratio mapping when timestamps do not match
++- `diff_hint(...)` + `summarize_diff_hints(...)`:
++  - row markers: `=` same, `!` different, `<` left-only, `>` right-only
++
++### UI behavior
++
++- Multi Logs compare toggle: `C`
++- Shared compare scroll: `u/d` and `Ctrl+u/Ctrl+d`
++- Compare header includes selected pair, page info, anchor, and scroll value.
++- Compare subheader includes hint counters (same/diff/left/right).
++
++## Regression tests
++
++Added coverage for:
++
++- timestamp-preferred anchor synchronization
++- ratio fallback synchronization
++- diff-hint classification and summary counts
++- compare-mode toggle render path
++- compare-mode shared scroll key interactions
++- rendered row-level hint glyphs in compare pane
++
++## Validation
++
++- `cargo fmt --check`
++- `cargo clippy --workspace --all-targets -- -D warnings`
++- `cargo test --workspace`
+
+tokens used
+369,531
+`forge-n5v` implemented; left `in_progress` (blocked by external workspace drift).
+
+Changes made:
+- Added compare engine: `crates/forge-tui/src/log_compare.rs`
+- Wired compare mode state/keys (`C`, shared `u/d` + `Ctrl+u/d`): `crates/forge-tui/src/app.rs`
+- Added side-by-side render + sync anchors + diff hints + interaction tests: `crates/forge-tui/src/multi_logs.rs`
+- Exported module: `crates/forge-tui/src/lib.rs`
+- Added task doc: `docs/tui-205-cross-loop-log-compare.md`
+
+Validation:
+- `cargo fmt --check` -> FAIL (external): `crates/forge-db/tests/migration_013_test.rs:97` formatting drift.
+- `cargo clippy --workspace --all-targets -- -D warnings` -> PASS.
+- `EDITOR=true VISUAL=true GIT_EDITOR=true cargo test --workspace` -> FAIL (external): `crates/forge-cli/tests/migrate_go_oracle_fixture_test.rs:74` oracle expects pre-migration-13 output.
+
+Protocol/reporting done:
+- Sent `fmail` progress + structured blockers on `task` topic.
+- Sent `fmail` status to `@forge-orchestrator`: blocked.
+- Added `sv` blocker comment on task: `sv task comment forge-n5v ...`.
+- Did not close task (blocked protocol).
+```
+
