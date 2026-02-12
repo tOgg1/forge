@@ -9,6 +9,8 @@ pub mod loop_repository;
 pub mod loop_run_repository;
 pub mod loop_work_state_repository;
 pub mod mail_repository;
+pub mod persistent_agent_event_repository;
+pub mod persistent_agent_repository;
 pub mod pool_repository;
 pub mod port_repository;
 pub mod profile_repository;

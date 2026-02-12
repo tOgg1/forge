@@ -6,7 +6,7 @@
         "migrate",
         "status"
       ],
-      "stdout": "VERSION  DESCRIPTION            STATUS   APPLIED AT\n-------  -----------            ------   ----------\n1        initial schema         pending  -\n2        node connection prefs  pending  -\n3        queue item attempts    pending  -\n4        usage history          pending  -\n5        port allocations       pending  -\n6        mail and file locks    pending  -\n7        loop runtime           pending  -\n8        loop short id          pending  -\n9        loop limits            pending  -\n11       loop kv                pending  -\n12       loop work state        pending  -\n",
+      "stdout": "VERSION  DESCRIPTION            STATUS   APPLIED AT\n-------  -----------            ------   ----------\n1        initial schema         pending  -\n2        node connection prefs  pending  -\n3        queue item attempts    pending  -\n4        usage history          pending  -\n5        port allocations       pending  -\n6        mail and file locks    pending  -\n7        loop runtime           pending  -\n8        loop short id          pending  -\n9        loop limits            pending  -\n11       loop kv                pending  -\n12       loop work state        pending  -\n13       persistent agents      pending  -\n",
       "exit_code": 0
     },
     {
@@ -16,7 +16,7 @@
         "migrate",
         "status"
       ],
-      "stdout": "[\n  {\n    \"Version\": 1,\n    \"Description\": \"initial schema\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 2,\n    \"Description\": \"node connection prefs\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 3,\n    \"Description\": \"queue item attempts\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 4,\n    \"Description\": \"usage history\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 5,\n    \"Description\": \"port allocations\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 6,\n    \"Description\": \"mail and file locks\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 7,\n    \"Description\": \"loop runtime\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 8,\n    \"Description\": \"loop short id\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 9,\n    \"Description\": \"loop limits\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 11,\n    \"Description\": \"loop kv\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 12,\n    \"Description\": \"loop work state\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  }\n]\n",
+      "stdout": "[\n  {\n    \"Version\": 1,\n    \"Description\": \"initial schema\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 2,\n    \"Description\": \"node connection prefs\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 3,\n    \"Description\": \"queue item attempts\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 4,\n    \"Description\": \"usage history\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 5,\n    \"Description\": \"port allocations\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 6,\n    \"Description\": \"mail and file locks\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 7,\n    \"Description\": \"loop runtime\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 8,\n    \"Description\": \"loop short id\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 9,\n    \"Description\": \"loop limits\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 11,\n    \"Description\": \"loop kv\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 12,\n    \"Description\": \"loop work state\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  },\n  {\n    \"Version\": 13,\n    \"Description\": \"persistent agents\",\n    \"Applied\": false,\n    \"AppliedAt\": \"\"\n  }\n]\n",
       "exit_code": 0
     },
     {
@@ -44,7 +44,7 @@
         "migrate",
         "up"
       ],
-      "stderr": "Applied 11 migration(s)",
+      "stderr": "Applied 12 migration(s)",
       "exit_code": 0
     },
     {
@@ -71,9 +71,9 @@
         "migrate",
         "up",
         "--to",
-        "12"
+        "13"
       ],
-      "stderr": "Migrated to version 12",
+      "stderr": "Migrated to version 13",
       "exit_code": 0
     }
   ]
