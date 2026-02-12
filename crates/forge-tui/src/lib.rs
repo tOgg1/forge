@@ -14,6 +14,7 @@ pub mod blocker_graph;
 pub mod bulk_action_planner;
 pub mod command_palette;
 pub mod communication_quality;
+pub mod crash_safe_state;
 pub mod daily_summary;
 pub mod emergency_safe_stop;
 pub mod extension_actions;
