@@ -6,7 +6,12 @@
 //!   3. Call Ping and GetStatus RPCs.
 //!   4. Send SIGTERM and verify clean exit.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::too_many_arguments,
+    unused_assignments
+)]
 
 use std::fs;
 use std::future::Future;
@@ -452,48 +457,45 @@ fn rforged_binary_serves_ping_and_get_status_then_exits_on_sigterm() {
 }
 
 fn wait_for_log_marker_count(
-    rforge_bin: &Path,
-    repo_path: &Path,
-    db_path: &Path,
-    data_dir: &Path,
-    daemon_target: &str,
+    context: &RforgeLogsContext<'_>,
     loop_prefix: &str,
     marker: &str,
     min_count: usize,
     timeout: Duration,
 ) -> String {
     let deadline = Instant::now() + timeout;
-    let mut last_logs: Option<String> = None;
 
     loop {
         let logs = run_rforge(
-            rforge_bin,
-            repo_path,
-            db_path,
-            data_dir,
-            daemon_target,
+            context.rforge_bin,
+            context.repo_path,
+            context.db_path,
+            context.data_dir,
+            context.daemon_target,
             &["logs", loop_prefix],
         );
         assert_command_ok(&logs, "rforge logs <short-prefix>");
-        last_logs = Some(logs.stdout);
+        let stdout = logs.stdout;
 
-        if count_occurrences(
-            last_logs
-                .as_ref()
-                .expect("last logs should be set before marker check"),
-            marker,
-        ) >= min_count
-        {
-            return last_logs.expect("last logs should be set before return");
+        if count_occurrences(&stdout, marker) >= min_count {
+            return stdout;
         }
         if Instant::now() >= deadline {
             panic!(
                 "timed out waiting for logs marker count >= {min_count}\n{}",
-                last_logs.unwrap_or_default()
+                stdout
             );
         }
         thread::sleep(Duration::from_millis(250));
     }
+}
+
+struct RforgeLogsContext<'a> {
+    rforge_bin: &'a Path,
+    repo_path: &'a Path,
+    db_path: &'a Path,
+    data_dir: &'a Path,
+    daemon_target: &'a str,
 }
 
 #[test]
@@ -595,12 +597,15 @@ fn rforged_and_rforge_up_spawn_owner_daemon_e2e_tmp_repo() {
     let short_prefix: String = short_id.chars().take(4).collect();
     assert_eq!(short_prefix.len(), 4, "short_id prefix should have 4 chars");
 
+    let logs_context = RforgeLogsContext {
+        rforge_bin: &rforge_bin,
+        repo_path: &repo_path,
+        db_path: &db_path,
+        data_dir: &data_dir,
+        daemon_target: &daemon_target,
+    };
     let logs = wait_for_log_marker_count(
-        &rforge_bin,
-        &repo_path,
-        &db_path,
-        &data_dir,
-        &daemon_target,
+        &logs_context,
         short_prefix.as_str(),
         RUN_MARKER,
         2,
