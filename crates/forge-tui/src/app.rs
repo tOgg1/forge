@@ -664,6 +664,7 @@ pub struct App {
     focus_mode: FocusMode,
     layout_idx: usize,
     multi_page: usize,
+    multi_compare_mode: bool,
     multi_logs: HashMap<String, LogTailView>,
     pinned: HashSet<String>,
     inbox_messages: Vec<InboxMessageView>,
@@ -739,6 +740,7 @@ impl App {
             focus_mode: FocusMode::Standard,
             layout_idx: layout_index_for(2, 2),
             multi_page: 0,
+            multi_compare_mode: false,
             multi_logs: HashMap::new(),
             pinned: HashSet::new(),
             inbox_messages: Vec::new(),
@@ -969,6 +971,11 @@ impl App {
     #[must_use]
     pub fn multi_page(&self) -> usize {
         self.multi_page
+    }
+
+    #[must_use]
+    pub fn multi_compare_mode(&self) -> bool {
+        self.multi_compare_mode
     }
 
     #[must_use]
@@ -1780,6 +1787,19 @@ impl App {
         );
     }
 
+    pub fn toggle_multi_compare_mode(&mut self) {
+        self.multi_compare_mode = !self.multi_compare_mode;
+        self.log_scroll = 0;
+        if self.multi_compare_mode {
+            self.set_status(
+                StatusKind::Info,
+                "Multi compare: on (shared scroll + diff hints)",
+            );
+        } else {
+            self.set_status(StatusKind::Info, "Multi compare: off");
+        }
+    }
+
     pub fn ordered_multi_target_views(&self) -> Vec<&LoopView> {
         let mut ordered: Vec<&LoopView> = Vec::with_capacity(self.filtered.len());
         let mut added = HashSet::new();
@@ -2196,7 +2216,10 @@ impl App {
                 }
             }
             Key::Char('u') if key.modifiers.ctrl => {
-                if self.tab == MainTab::Logs || self.tab == MainTab::Runs {
+                if self.tab == MainTab::Logs
+                    || self.tab == MainTab::Runs
+                    || (self.tab == MainTab::MultiLogs && self.multi_compare_mode)
+                {
                     let page = self.log_scroll_page_size() as i32;
                     self.scroll_logs(page);
                     Command::Fetch
@@ -2205,7 +2228,10 @@ impl App {
                 }
             }
             Key::Char('d') if key.modifiers.ctrl => {
-                if self.tab == MainTab::Logs || self.tab == MainTab::Runs {
+                if self.tab == MainTab::Logs
+                    || self.tab == MainTab::Runs
+                    || (self.tab == MainTab::MultiLogs && self.multi_compare_mode)
+                {
                     let page = self.log_scroll_page_size() as i32;
                     self.scroll_logs(-page);
                     Command::Fetch
@@ -2214,7 +2240,10 @@ impl App {
                 }
             }
             Key::Char('u') => {
-                if self.tab == MainTab::Logs || self.tab == MainTab::Runs {
+                if self.tab == MainTab::Logs
+                    || self.tab == MainTab::Runs
+                    || (self.tab == MainTab::MultiLogs && self.multi_compare_mode)
+                {
                     let page = self.log_scroll_page_size() as i32;
                     self.scroll_logs(page);
                     Command::Fetch
@@ -2223,7 +2252,10 @@ impl App {
                 }
             }
             Key::Char('d') => {
-                if self.tab == MainTab::Logs || self.tab == MainTab::Runs {
+                if self.tab == MainTab::Logs
+                    || self.tab == MainTab::Runs
+                    || (self.tab == MainTab::MultiLogs && self.multi_compare_mode)
+                {
                     let page = self.log_scroll_page_size() as i32;
                     self.scroll_logs(-page);
                     Command::Fetch
@@ -2240,6 +2272,14 @@ impl App {
             Key::Char('c') => {
                 self.clear_pinned();
                 Command::Fetch
+            }
+            Key::Char('C') => {
+                if self.tab == MainTab::MultiLogs {
+                    self.toggle_multi_compare_mode();
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
             }
             Key::Char('m') => {
                 if self.tab == MainTab::MultiLogs {
@@ -3469,6 +3509,8 @@ impl App {
             "".to_owned(),
             "Multi Logs:".to_owned(),
             "  m         cycle layout".to_owned(),
+            "  C         toggle side-by-side compare mode".to_owned(),
+            "  u/d       shared compare scroll (when compare enabled)".to_owned(),
             "  space     toggle pin".to_owned(),
             "  c         clear pinned".to_owned(),
             "  ,/.       page left/right".to_owned(),

@@ -7,6 +7,7 @@
 use crate::app::{App, LogLayer, LogTailView, LoopView};
 use crate::filter::loop_display_id;
 use crate::layouts::{fit_pane_layout, layout_cell_size};
+use crate::log_compare::{diff_hint, summarize_diff_hints, synchronized_windows, DiffHint};
 use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 
 // ---------------------------------------------------------------------------
@@ -34,6 +35,28 @@ fn display_name(value: &str, fallback: &str) -> String {
         fallback.to_owned()
     } else {
         value.to_lowercase()
+    }
+}
+
+fn compare_lines(tail: &LogTailView) -> Vec<String> {
+    if tail.lines.is_empty() {
+        let message = if tail.message.trim().is_empty() {
+            "Log is empty."
+        } else {
+            tail.message.trim()
+        };
+        vec![message.to_owned()]
+    } else {
+        tail.lines.clone()
+    }
+}
+
+fn role_for_diff_hint(hint: DiffHint) -> TextRole {
+    match hint {
+        DiffHint::Equal => TextRole::Success,
+        DiffHint::Different => TextRole::Danger,
+        DiffHint::LeftOnly | DiffHint::RightOnly => TextRole::Accent,
+        DiffHint::Empty => TextRole::Muted,
     }
 }
 
@@ -165,6 +188,18 @@ impl App {
             return frame;
         }
 
+        if self.multi_compare_mode() {
+            return self.render_compare_logs_pane(
+                width,
+                height,
+                page,
+                total_pages,
+                start,
+                end,
+                total_targets,
+            );
+        }
+
         // Header line.
         let header = truncate(
             &format!(
@@ -185,7 +220,7 @@ impl App {
             // Subheader line.
             let subheader = truncate(
                 &format!(
-                    "layer:{}  pin:<space> clear:c  layout:m  page:,/. g/G  order:pinned first",
+                    "layer:{}  pin:<space> clear:c  compare:C  layout:m  page:,/. g/G  order:pinned first",
                     self.log_layer().label(),
                 ),
                 width,
@@ -218,6 +253,175 @@ impl App {
                 }
                 index += 1;
             }
+        }
+
+        frame
+    }
+
+    fn compare_pair_ids(&self) -> Option<(String, String)> {
+        let ordered = self.ordered_multi_target_views();
+        if ordered.len() < 2 {
+            return None;
+        }
+        let selected_id = self
+            .selected_view()
+            .map(|view| view.id.clone())
+            .unwrap_or_else(|| ordered[0].id.clone());
+        let left_index = ordered
+            .iter()
+            .position(|view| view.id == selected_id)
+            .unwrap_or(0);
+        let left_id = ordered[left_index].id.clone();
+        let right_id = ordered
+            .iter()
+            .enumerate()
+            .find(|(index, view)| *index != left_index && self.is_pinned(&view.id))
+            .or_else(|| {
+                ordered
+                    .iter()
+                    .enumerate()
+                    .find(|(index, _)| *index != left_index)
+            })
+            .map(|(_, view)| view.id.clone())?;
+        Some((left_id, right_id))
+    }
+
+    fn render_compare_logs_pane(
+        &self,
+        width: usize,
+        height: usize,
+        page: usize,
+        total_pages: usize,
+        start: usize,
+        end: usize,
+        total_targets: usize,
+    ) -> RenderFrame {
+        let theme = crate::default_theme();
+        let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
+        let Some((left_id, right_id)) = self.compare_pair_ids() else {
+            frame.draw_text(
+                0,
+                0,
+                "Compare mode needs at least two loops. Pin another loop or change filters.",
+                TextRole::Muted,
+            );
+            return frame;
+        };
+        let Some(left_view) = self
+            .filtered()
+            .iter()
+            .find(|view| view.id == left_id)
+            .or_else(|| self.loops().iter().find(|view| view.id == left_id))
+        else {
+            frame.draw_text(
+                0,
+                0,
+                "Compare mode unavailable: missing left loop.",
+                TextRole::Danger,
+            );
+            return frame;
+        };
+        let Some(right_view) = self
+            .filtered()
+            .iter()
+            .find(|view| view.id == right_id)
+            .or_else(|| self.loops().iter().find(|view| view.id == right_id))
+        else {
+            frame.draw_text(
+                0,
+                0,
+                "Compare mode unavailable: missing right loop.",
+                TextRole::Danger,
+            );
+            return frame;
+        };
+
+        let divider_width = 3usize;
+        if width <= divider_width + 6 || height <= 3 {
+            frame.draw_text(
+                0,
+                0,
+                "Compare mode: enlarge terminal viewport.",
+                TextRole::Muted,
+            );
+            return frame;
+        }
+
+        let left_width = (width - divider_width) / 2;
+        let right_width = width - divider_width - left_width;
+        let content_start = 3usize;
+        let content_rows = height.saturating_sub(content_start).max(1);
+        let empty_tail = LogTailView::default();
+        let left_tail = self.multi_logs().get(&left_id).unwrap_or(&empty_tail);
+        let right_tail = self.multi_logs().get(&right_id).unwrap_or(&empty_tail);
+        let left_lines = compare_lines(left_tail);
+        let right_lines = compare_lines(right_tail);
+        let synced =
+            synchronized_windows(&left_lines, &right_lines, content_rows, self.log_scroll());
+        let left_window = &left_lines[synced.left.start_line..synced.left.end_line];
+        let right_window = &right_lines[synced.right.start_line..synced.right.end_line];
+        let diff_summary = summarize_diff_hints(left_window, right_window);
+        let anchor = synced
+            .left
+            .anchor_timestamp
+            .clone()
+            .unwrap_or_else(|| format!("line {}", synced.left.anchor_line.saturating_add(1)));
+        let left_display = loop_display_id(&left_view.id, &left_view.short_id);
+        let right_display = loop_display_id(&right_view.id, &right_view.short_id);
+        let header = truncate(
+            &format!(
+                "Compare {}:{} <> {}:{}  page={}/{} showing={}-{}/{}  anchor={}  scroll={}",
+                left_display,
+                left_view.name,
+                right_display,
+                right_view.name,
+                page + 1,
+                total_pages,
+                start + 1,
+                end,
+                total_targets,
+                anchor,
+                synced.scroll_from_bottom,
+            ),
+            width,
+        );
+        frame.draw_text(0, 0, &header, TextRole::Accent);
+        let subheader = truncate(
+            &format!(
+                "layer:{}  toggle:C  sync:u/d ctrl+u/d  hints: same={} diff={} left={} right={}",
+                self.log_layer().label(),
+                diff_summary.equal,
+                diff_summary.different,
+                diff_summary.left_only,
+                diff_summary.right_only,
+            ),
+            width,
+        );
+        frame.draw_text(0, 1, &subheader, TextRole::Muted);
+        frame.draw_text(0, 2, &"-".repeat(width), TextRole::Muted);
+
+        for row in 0..content_rows {
+            let y = content_start + row;
+            let left = left_window.get(row).map(String::as_str);
+            let right = right_window.get(row).map(String::as_str);
+            let hint = diff_hint(left, right);
+            let left_text = pad_right(&truncate(left.unwrap_or(""), left_width), left_width);
+            let right_text = pad_right(&truncate(right.unwrap_or(""), right_width), right_width);
+            frame.draw_text(0, y, &left_text, TextRole::Primary);
+            frame.draw_text(left_width, y, " ", TextRole::Muted);
+            frame.draw_text(
+                left_width + 1,
+                y,
+                &hint.glyph().to_string(),
+                role_for_diff_hint(hint),
+            );
+            frame.draw_text(left_width + 2, y, " ", TextRole::Muted);
+            frame.draw_text(
+                left_width + divider_width,
+                y,
+                &right_text,
+                TextRole::Primary,
+            );
         }
 
         frame
@@ -546,6 +750,122 @@ mod tests {
             snapshot.contains("hello from loop-0"),
             "expected log content:\n{snapshot}"
         );
+    }
+
+    #[test]
+    fn compare_mode_toggle_renders_side_by_side_header() {
+        let mut app = multi_app(2);
+        let mut logs = HashMap::new();
+        logs.insert(
+            "loop-0".to_owned(),
+            LogTailView {
+                lines: vec![
+                    "2026-02-12T11:00:00Z start".to_owned(),
+                    "2026-02-12T11:00:01Z sync".to_owned(),
+                ],
+                message: String::new(),
+            },
+        );
+        logs.insert(
+            "loop-1".to_owned(),
+            LogTailView {
+                lines: vec![
+                    "2026-02-12T11:00:00Z start".to_owned(),
+                    "2026-02-12T11:00:01Z sync".to_owned(),
+                ],
+                message: String::new(),
+            },
+        );
+        app.set_multi_logs(logs);
+
+        app.update(key(Key::Char('C')));
+        assert!(app.multi_compare_mode());
+        let frame = app.render_multi_logs_pane(120, 24);
+        let header = frame.row_text(0);
+        let subheader = frame.row_text(1);
+        assert!(
+            header.contains("Compare"),
+            "expected compare header: {header}"
+        );
+        assert!(
+            header.contains("<>"),
+            "expected paired loops in header: {header}"
+        );
+        assert!(
+            subheader.contains("sync:u/d"),
+            "expected compare controls in subheader: {subheader}"
+        );
+    }
+
+    #[test]
+    fn compare_mode_scroll_keys_update_shared_scroll() {
+        let mut app = multi_app(2);
+        let mut logs = HashMap::new();
+        logs.insert(
+            "loop-0".to_owned(),
+            LogTailView {
+                lines: (0..80)
+                    .map(|idx| format!("2026-02-12T11:00:{idx:02}Z left-{idx}"))
+                    .collect(),
+                message: String::new(),
+            },
+        );
+        logs.insert(
+            "loop-1".to_owned(),
+            LogTailView {
+                lines: (0..80)
+                    .map(|idx| format!("2026-02-12T11:00:{idx:02}Z right-{idx}"))
+                    .collect(),
+                message: String::new(),
+            },
+        );
+        app.set_multi_logs(logs);
+
+        app.update(key(Key::Char('C')));
+        assert_eq!(app.log_scroll(), 0);
+        app.update(key(Key::Char('u')));
+        let after_up = app.log_scroll();
+        assert!(after_up > 0, "expected compare scroll to move up");
+        app.update(key(Key::Char('d')));
+        assert!(
+            app.log_scroll() < after_up,
+            "expected compare scroll to move back down"
+        );
+    }
+
+    #[test]
+    fn compare_mode_renders_row_level_diff_hints() {
+        let mut app = multi_app(2);
+        let mut logs = HashMap::new();
+        logs.insert(
+            "loop-0".to_owned(),
+            LogTailView {
+                lines: vec![
+                    "2026-02-12T11:00:00Z same".to_owned(),
+                    "2026-02-12T11:00:01Z left-change".to_owned(),
+                    "2026-02-12T11:00:02Z left-only".to_owned(),
+                ],
+                message: String::new(),
+            },
+        );
+        logs.insert(
+            "loop-1".to_owned(),
+            LogTailView {
+                lines: vec![
+                    "2026-02-12T11:00:00Z same".to_owned(),
+                    "2026-02-12T11:00:01Z right-change".to_owned(),
+                ],
+                message: String::new(),
+            },
+        );
+        app.set_multi_logs(logs);
+
+        app.update(key(Key::Char('C')));
+        let frame = app.render_multi_logs_pane(60, 14);
+        let hint_x = ((60 - 3) / 2) + 1;
+        assert_eq!(frame.cell(hint_x, 3).unwrap().glyph, '=');
+        assert_eq!(frame.cell(hint_x, 4).unwrap().glyph, '!');
+        assert_eq!(frame.cell(hint_x, 5).unwrap().glyph, '<');
     }
 
     // -- render_mini_log_pane --
