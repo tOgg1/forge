@@ -382,7 +382,6 @@ fn normalize_tags(tags: &[String]) -> Vec<String> {
     tags
 }
 
-
 #[cfg(test)]
 #[path = "incident_replay_tests.rs"]
 mod tests;
