@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use chrono::Utc;
 
+use crate::capability::validate_spawn_guardrails;
 use crate::error::AgentServiceError;
 use crate::service::AgentService;
 use crate::types::{
@@ -128,6 +129,18 @@ impl MockAgentService {
         }
     }
 
+    /// Update an agent's state in the mock registry. Useful for simulating
+    /// delayed state transitions during wait tests.
+    pub fn set_agent_state(&self, agent_id: &str, state: AgentState) {
+        let mut agents = match self.agents.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(agent) = agents.get_mut(agent_id) {
+            agent.state = state;
+        }
+    }
+
     fn take_error(lock: &Mutex<Option<AgentServiceError>>) -> Option<AgentServiceError> {
         match lock.lock() {
             Ok(mut guard) => guard.take(),
@@ -158,6 +171,7 @@ impl AgentService for MockAgentService {
         &self,
         params: SpawnAgentParams,
     ) -> Result<AgentSnapshot, AgentServiceError> {
+        validate_spawn_guardrails(&params)?;
         self.record(MockCall::Spawn(params.clone()));
 
         if let Some(err) = Self::take_error(&self.spawn_error) {

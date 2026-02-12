@@ -10,6 +10,7 @@ use tonic::transport::Endpoint;
 use forge_rpc::forged::v1 as proto;
 use forge_rpc::forged::v1::forged_service_client::ForgedServiceClient;
 
+use crate::capability::validate_spawn_guardrails;
 use crate::error::AgentServiceError;
 use crate::event::{AgentEvent, AgentEventKind, AgentEventOutcome, AgentEventSink};
 use crate::service::AgentService;
@@ -96,6 +97,7 @@ impl AgentService for ForgedTransport {
                 message: "command is required".into(),
             });
         }
+        let capability = validate_spawn_guardrails(&params)?;
 
         let mut client = self.connect().await?;
 
@@ -127,7 +129,11 @@ impl AgentService for ForgedTransport {
             Some(params.agent_id),
             AgentEventKind::Spawn,
             AgentEventOutcome::Success,
-            format!("spawned with command {:?}", params.command),
+            format!(
+                "spawned with command {:?} ({})",
+                params.command,
+                capability.detail_line()
+            ),
         );
 
         Ok(snapshot)

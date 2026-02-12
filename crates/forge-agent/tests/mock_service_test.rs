@@ -12,8 +12,8 @@ use forge_agent::error::AgentServiceError;
 use forge_agent::mock::{test_snapshot, MockAgentService};
 use forge_agent::service::AgentService;
 use forge_agent::types::{
-    AgentState, KillAgentParams, ListAgentsFilter, SendMessageParams, SpawnAgentParams,
-    WaitStateParams,
+    AgentRequestMode, AgentState, KillAgentParams, ListAgentsFilter, SendMessageParams,
+    SpawnAgentParams, WaitStateParams,
 };
 
 fn test_spawn_params(id: &str) -> SpawnAgentParams {
@@ -21,11 +21,13 @@ fn test_spawn_params(id: &str) -> SpawnAgentParams {
         agent_id: id.to_string(),
         workspace_id: "test-ws".to_string(),
         command: "claude".to_string(),
-        args: vec!["-p".to_string(), "test prompt".to_string()],
+        args: vec!["--prompt".to_string(), "test prompt".to_string()],
         env: HashMap::new(),
         working_dir: "/tmp".to_string(),
         session_name: String::new(),
         adapter: "claude_code".to_string(),
+        requested_mode: AgentRequestMode::Continuous,
+        allow_oneshot_fallback: false,
     }
 }
 
@@ -496,6 +498,13 @@ fn error_retryable_classification() {
         agent_id: "".into()
     }
     .is_retryable());
+    assert!(!AgentServiceError::CapabilityMismatch {
+        adapter: "codex".into(),
+        requested_mode: "continuous".into(),
+        command_mode: "one-shot".into(),
+        hint: "use interactive codex command".into(),
+    }
+    .is_retryable());
 }
 
 // ── AgentState type tests ──
@@ -525,4 +534,42 @@ fn agent_state_display() {
     assert_eq!(AgentState::Running.to_string(), "running");
     assert_eq!(AgentState::WaitingApproval.to_string(), "waiting_approval");
     assert_eq!(AgentState::Stopped.to_string(), "stopped");
+}
+
+#[tokio::test]
+async fn spawn_rejects_oneshot_command_for_continuous_mode() {
+    let svc = MockAgentService::new();
+    let mut params = test_spawn_params("a1");
+    params.adapter = "codex".to_string();
+    params.command = "codex exec".to_string();
+
+    let err = svc.spawn_agent(params).await.unwrap_err();
+    match err {
+        AgentServiceError::CapabilityMismatch {
+            adapter,
+            requested_mode,
+            command_mode,
+            hint,
+        } => {
+            assert_eq!(adapter, "codex");
+            assert_eq!(requested_mode, "continuous");
+            assert_eq!(command_mode, "one-shot");
+            assert!(hint.contains("interactive codex command"));
+        }
+        other => panic!("expected CapabilityMismatch, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn spawn_allows_oneshot_command_with_explicit_override() {
+    let svc = MockAgentService::new();
+    let mut params = test_spawn_params("a1");
+    params.adapter = "codex".to_string();
+    params.command = "codex exec".to_string();
+    params
+        .env
+        .insert("FORGE_AGENT_ALLOW_ONESHOT".to_string(), "1".to_string());
+
+    let snapshot = svc.spawn_agent(params).await.unwrap();
+    assert_eq!(snapshot.id, "a1");
 }

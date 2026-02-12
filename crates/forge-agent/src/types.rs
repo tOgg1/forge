@@ -60,6 +60,23 @@ impl AgentState {
     pub fn is_active(self) -> bool {
         !self.is_terminal() && self != Self::Unspecified
     }
+
+    /// Parse a state from its string representation.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "unspecified" => Some(Self::Unspecified),
+            "starting" => Some(Self::Starting),
+            "running" => Some(Self::Running),
+            "idle" => Some(Self::Idle),
+            "waiting_approval" => Some(Self::WaitingApproval),
+            "paused" => Some(Self::Paused),
+            "stopping" => Some(Self::Stopping),
+            "stopped" => Some(Self::Stopped),
+            "failed" => Some(Self::Failed),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for AgentState {
@@ -93,6 +110,22 @@ pub struct AgentSnapshot {
     pub last_activity_at: DateTime<Utc>,
 }
 
+/// Requested agent mode from caller intent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AgentRequestMode {
+    Continuous,
+    OneShot,
+}
+
+impl AgentRequestMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Continuous => "continuous",
+            Self::OneShot => "one-shot",
+        }
+    }
+}
+
 /// Parameters for spawning a new agent.
 #[derive(Debug, Clone)]
 pub struct SpawnAgentParams {
@@ -104,6 +137,8 @@ pub struct SpawnAgentParams {
     pub working_dir: String,
     pub session_name: String,
     pub adapter: String,
+    pub requested_mode: AgentRequestMode,
+    pub allow_oneshot_fallback: bool,
 }
 
 /// Parameters for sending a message/input to an agent.

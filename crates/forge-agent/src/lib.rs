@@ -6,12 +6,14 @@
 //!
 //! Each operation emits an `AgentEvent` for audit/debugging via the `AgentEventSink` trait.
 
+pub mod capability;
 pub mod error;
 pub mod event;
 pub mod forged;
 pub mod mock;
 pub mod service;
 pub mod types;
+pub mod wait;
 
 /// Stable crate label used for bootstrap smoke tests.
 pub fn crate_label() -> &'static str {

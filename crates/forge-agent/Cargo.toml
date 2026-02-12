@@ -15,6 +15,7 @@ forge-rpc = { path = "../forge-rpc" }
 prost-types = "0.13"
 thiserror = "2"
 tokio = { version = "1", features = ["time", "sync"] }
+tokio-util = "0.7"
 tonic = { version = "0.12", features = ["transport"] }
 
 [dev-dependencies]

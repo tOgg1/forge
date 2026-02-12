@@ -43,6 +43,14 @@ pub enum AgentServiceError {
         agent_id: String,
         last_observed_state: String,
     },
+
+    /// Requested agent mode does not match harness command capability.
+    CapabilityMismatch {
+        adapter: String,
+        requested_mode: String,
+        command_mode: String,
+        hint: String,
+    },
 }
 
 impl fmt::Display for AgentServiceError {
@@ -80,6 +88,15 @@ impl fmt::Display for AgentServiceError {
                 f,
                 "wait cancelled for agent {agent_id:?}: last observed state {last_observed_state:?}"
             ),
+            Self::CapabilityMismatch {
+                adapter,
+                requested_mode,
+                command_mode,
+                hint,
+            } => write!(
+                f,
+                "capability mismatch: adapter {adapter:?} requested {requested_mode:?} but command mode is {command_mode:?}; {hint}"
+            ),
         }
     }
 }
@@ -91,7 +108,9 @@ impl AgentServiceError {
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            Self::TransportUnavailable { .. } | Self::WaitTimeout { .. } | Self::WaitCancelled { .. }
+            Self::TransportUnavailable { .. }
+                | Self::WaitTimeout { .. }
+                | Self::WaitCancelled { .. }
         )
     }
 }
