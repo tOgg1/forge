@@ -40,8 +40,13 @@ RUST_DIR := .
 # Installation directories
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
-GOBIN ?= $(shell go env GOPATH)/bin
-RUST_INSTALL_DIR ?= $(GOBIN)
+LOCAL_BIN_DIR ?= $(HOME)/.cargo/bin
+INSTALL_DIR ?= $(LOCAL_BIN_DIR)
+# Backward-compatible command-line override: `GOBIN=/custom/bin make install`
+ifeq ($(origin GOBIN), command line)
+INSTALL_DIR := $(GOBIN)
+endif
+RUST_INSTALL_DIR ?= $(LOCAL_BIN_DIR)
 
 # Platforms for cross-compilation
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
@@ -157,22 +162,22 @@ dev:
 
 ## Installation targets
 
-# Install to GOPATH/bin (default, no sudo required)
+# Install to local bin dir (default, no sudo required)
 install: build
-	@echo "Installing to $(GOBIN)..."
-	@mkdir -p $(GOBIN)
-	@install -m 755 $(BUILD_DIR)/$(BINARY_CLI) $(GOBIN)/.$(BINARY_CLI).tmp
-	@mv $(GOBIN)/.$(BINARY_CLI).tmp $(GOBIN)/$(BINARY_CLI)
-	@install -m 755 $(BUILD_DIR)/$(BINARY_DAEMON) $(GOBIN)/.$(BINARY_DAEMON).tmp
-	@mv $(GOBIN)/.$(BINARY_DAEMON).tmp $(GOBIN)/$(BINARY_DAEMON)
-	@install -m 755 $(BUILD_DIR)/$(BINARY_RUNNER) $(GOBIN)/.$(BINARY_RUNNER).tmp
-	@mv $(GOBIN)/.$(BINARY_RUNNER).tmp $(GOBIN)/$(BINARY_RUNNER)
-	@install -m 755 $(BUILD_DIR)/$(BINARY_FMAIL) $(GOBIN)/.$(BINARY_FMAIL).tmp
-	@mv $(GOBIN)/.$(BINARY_FMAIL).tmp $(GOBIN)/$(BINARY_FMAIL)
-	@echo "Installed $(BINARY_CLI), $(BINARY_DAEMON), $(BINARY_RUNNER), and $(BINARY_FMAIL) to $(GOBIN)"
+	@echo "Installing to $(INSTALL_DIR)..."
+	@mkdir -p $(INSTALL_DIR)
+	@install -m 755 $(BUILD_DIR)/$(BINARY_CLI) $(INSTALL_DIR)/.$(BINARY_CLI).tmp
+	@mv $(INSTALL_DIR)/.$(BINARY_CLI).tmp $(INSTALL_DIR)/$(BINARY_CLI)
+	@install -m 755 $(BUILD_DIR)/$(BINARY_DAEMON) $(INSTALL_DIR)/.$(BINARY_DAEMON).tmp
+	@mv $(INSTALL_DIR)/.$(BINARY_DAEMON).tmp $(INSTALL_DIR)/$(BINARY_DAEMON)
+	@install -m 755 $(BUILD_DIR)/$(BINARY_RUNNER) $(INSTALL_DIR)/.$(BINARY_RUNNER).tmp
+	@mv $(INSTALL_DIR)/.$(BINARY_RUNNER).tmp $(INSTALL_DIR)/$(BINARY_RUNNER)
+	@install -m 755 $(BUILD_DIR)/$(BINARY_FMAIL) $(INSTALL_DIR)/.$(BINARY_FMAIL).tmp
+	@mv $(INSTALL_DIR)/.$(BINARY_FMAIL).tmp $(INSTALL_DIR)/$(BINARY_FMAIL)
+	@echo "Installed $(BINARY_CLI), $(BINARY_DAEMON), $(BINARY_RUNNER), and $(BINARY_FMAIL) to $(INSTALL_DIR)"
 	@echo ""
-	@echo "Make sure $(GOBIN) is in your PATH:"
-	@echo "  export PATH=\"\$$PATH:$(GOBIN)\""
+	@echo "Make sure $(INSTALL_DIR) is in your PATH:"
+	@echo "  export PATH=\"\$$PATH:$(INSTALL_DIR)\""
 
 # Alias for install
 install-local: install
@@ -206,14 +211,14 @@ install-rust-system: build-rust
 	@install -m 755 $(BUILD_DIR)/$(RUST_BINARY_FMAIL) $(BINDIR)/$(RUST_BINARY_FMAIL)
 	@echo "Installed $(RUST_BINARY_CLI), $(RUST_BINARY_DAEMON), and $(RUST_BINARY_FMAIL) to $(BINDIR)"
 
-# Uninstall from GOPATH/bin
+# Uninstall from local bin dir
 uninstall:
-	@echo "Removing from $(GOBIN)..."
-	@rm -f $(GOBIN)/$(BINARY_CLI)
-	@rm -f $(GOBIN)/$(BINARY_DAEMON)
-	@rm -f $(GOBIN)/$(BINARY_RUNNER)
-	@rm -f $(GOBIN)/$(BINARY_FMAIL)
-	@echo "Removed $(BINARY_CLI), $(BINARY_DAEMON), $(BINARY_RUNNER), and $(BINARY_FMAIL) from $(GOBIN)"
+	@echo "Removing from $(INSTALL_DIR)..."
+	@rm -f $(INSTALL_DIR)/$(BINARY_CLI)
+	@rm -f $(INSTALL_DIR)/$(BINARY_DAEMON)
+	@rm -f $(INSTALL_DIR)/$(BINARY_RUNNER)
+	@rm -f $(INSTALL_DIR)/$(BINARY_FMAIL)
+	@echo "Removed $(BINARY_CLI), $(BINARY_DAEMON), $(BINARY_RUNNER), and $(BINARY_FMAIL) from $(INSTALL_DIR)"
 
 uninstall-rust:
 	@echo "Removing Rust side-by-side binaries from $(RUST_INSTALL_DIR)..."
@@ -374,13 +379,13 @@ help:
 	@echo "  clean          Remove build artifacts"
 	@echo ""
 	@echo "Install Targets:"
-	@echo "  install        Build and install to GOPATH/bin (recommended)"
+	@echo "  install        Build and install to local bin dir (recommended; default: ~/.cargo/bin)"
 	@echo "  install-local  Alias for install"
 	@echo "  install-system Build and install to /usr/local/bin (requires sudo)"
-	@echo "  install-rust   Build and install Rust side-by-side binaries to RUST_INSTALL_DIR (default: GOPATH/bin)"
+	@echo "  install-rust   Build and install Rust side-by-side binaries to RUST_INSTALL_DIR (default: ~/.cargo/bin)"
 	@echo "  install-rust-system Build and install Rust side-by-side binaries to /usr/local/bin (requires sudo)"
 	@echo "  go-install     Use 'go install' directly"
-	@echo "  uninstall      Remove from GOPATH/bin"
+	@echo "  uninstall      Remove from local bin dir (default: ~/.cargo/bin)"
 	@echo "  uninstall-system Remove from /usr/local/bin (requires sudo)"
 	@echo "  uninstall-rust Remove Rust side-by-side binaries from RUST_INSTALL_DIR"
 	@echo "  uninstall-rust-system Remove Rust side-by-side binaries from /usr/local/bin (requires sudo)"
@@ -405,7 +410,7 @@ help:
 	@echo "Quick Start:"
 	@echo "  make build                    # Build to ./build/"
 	@echo "  make build RUST_FIRST=0       # Build default binaries from legacy Go targets (old/go)"
-	@echo "  make install                  # Build + install to GOPATH/bin"
+	@echo "  make install                  # Build + install to local bin dir (~/.cargo/bin)"
 	@echo "  sudo make install-system      # Build + install to /usr/local/bin"
 	@echo ""
 	@echo "Variables (override with VAR=value):"
@@ -413,7 +418,9 @@ help:
 	@echo "  COMMIT         $(COMMIT)"
 	@echo "  PREFIX         $(PREFIX)"
 	@echo "  BINDIR         $(BINDIR)"
+	@echo "  LOCAL_BIN_DIR  $(LOCAL_BIN_DIR)"
+	@echo "  INSTALL_DIR    $(INSTALL_DIR)"
 	@echo "  GOBIN          $(GOBIN)"
-	@echo "  RUST_INSTALL_DIR $(RUST_INSTALL_DIR)"
 	@echo "  GO_LAYOUT_MODE $(GO_LAYOUT_MODE)"
+	@echo "  RUST_INSTALL_DIR $(RUST_INSTALL_DIR)"
 	@echo "  RUST_FIRST     $(RUST_FIRST)"
