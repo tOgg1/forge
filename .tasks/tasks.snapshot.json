@@ -1,7 +1,26 @@
 {
   "schema_version": "sv.tasks.v1",
-  "generated_at": "2026-02-12T13:09:57.149069Z",
+  "generated_at": "2026-02-12T13:19:40.997783Z",
   "tasks": [
+    {
+      "id": "forge-d1j",
+      "title": "TUI-706 Resilience test matrix for degraded environments",
+      "status": "open",
+      "priority": "P1",
+      "created_at": "2026-02-10T18:17:23.395189Z",
+      "updated_at": "2026-02-12T13:19:40.986771Z",
+      "created_by": "rust-full-codex-b",
+      "updated_by": "rewrite-stale-auditor-115930",
+      "body": "Test behavior under missing profiles, DB lock contention, partial data, and network interruptions.",
+      "epic": "forge-er1",
+      "project": "prj-v5pc07bf",
+      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
+      "workspace": "forge",
+      "branch": "main",
+      "started_at": "2026-02-12T12:27:33.250851Z",
+      "started_by": "rewrite-tui-codex-1",
+      "comments_count": 0
+    },
     {
       "id": "forge-ktk",
       "title": "M10: Persistent agents (non-loop delegation)",
@@ -120,25 +139,6 @@
       "started_by": "rewrite-tui-codex-1",
       "closed_at": "2026-02-12T12:35:55.420829Z",
       "closed_by": "rewrite-tui-codex-1",
-      "comments_count": 0
-    },
-    {
-      "id": "forge-d1j",
-      "title": "TUI-706 Resilience test matrix for degraded environments",
-      "status": "in_progress",
-      "priority": "P1",
-      "created_at": "2026-02-10T18:17:23.395189Z",
-      "updated_at": "2026-02-12T12:27:33.250851Z",
-      "created_by": "rust-full-codex-b",
-      "updated_by": "rewrite-tui-codex-1",
-      "body": "Test behavior under missing profiles, DB lock contention, partial data, and network interruptions.",
-      "epic": "forge-er1",
-      "project": "prj-v5pc07bf",
-      "workspace_id": "57e06952-45d2-4c3f-962b-ef2db43bee18",
-      "workspace": "forge",
-      "branch": "main",
-      "started_at": "2026-02-12T12:27:33.250851Z",
-      "started_by": "rewrite-tui-codex-1",
       "comments_count": 0
     },
     {
