@@ -15,6 +15,7 @@ path = "src/bin/forge-tui.rs"
 [dependencies]
 forge-ftui-adapter = { path = "../forge-ftui-adapter" }
 forge-db = { path = "../forge-db" }
+regex = "1"
 serde_json = { workspace = true }
 
 [lints]

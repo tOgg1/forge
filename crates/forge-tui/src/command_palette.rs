@@ -32,6 +32,8 @@ pub enum PaletteActionId {
     DeleteSelectedLoop,
     CycleTheme,
     ToggleZenMode,
+    CycleDensityMode,
+    ToggleFocusMode,
     Custom(u16),
 }
 
@@ -171,6 +173,22 @@ pub fn default_action_registry() -> Vec<PaletteAction> {
             "Toggle Zen Mode",
             "view zen",
             &["focus", "split"],
+            None,
+            false,
+        ),
+        PaletteAction::new(
+            PaletteActionId::CycleDensityMode,
+            "Cycle Density Mode",
+            "view density",
+            &["compact", "comfortable", "layout"],
+            None,
+            false,
+        ),
+        PaletteAction::new(
+            PaletteActionId::ToggleFocusMode,
+            "Toggle Deep Focus Mode",
+            "view focus",
+            &["deep", "debug", "minimal", "distraction"],
             None,
             false,
         ),
@@ -510,12 +528,14 @@ mod tests {
     #[test]
     fn default_registry_is_typed_and_stable() {
         let registry = default_action_registry();
-        assert_eq!(registry.len(), 13);
+        assert_eq!(registry.len(), 15);
         assert_eq!(registry[0].id, PaletteActionId::SwitchOverview);
         assert_eq!(registry[1].id, PaletteActionId::SwitchLogs);
         assert_eq!(registry[4].id, PaletteActionId::SwitchInbox);
         assert_eq!(registry[6].id, PaletteActionId::NewLoopWizard);
         assert_eq!(registry[12].id, PaletteActionId::ToggleZenMode);
+        assert_eq!(registry[13].id, PaletteActionId::CycleDensityMode);
+        assert_eq!(registry[14].id, PaletteActionId::ToggleFocusMode);
     }
 
     #[test]

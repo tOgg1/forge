@@ -660,6 +660,8 @@ pub struct App {
 
     // -- focus/layout --
     focus_right: bool,
+    density_mode: DensityMode,
+    focus_mode: FocusMode,
     layout_idx: usize,
     multi_page: usize,
     multi_logs: HashMap<String, LogTailView>,
@@ -733,6 +735,8 @@ impl App {
             log_lines,
 
             focus_right: false,
+            density_mode: DensityMode::Comfortable,
+            focus_mode: FocusMode::Standard,
             layout_idx: layout_index_for(2, 2),
             multi_page: 0,
             multi_logs: HashMap::new(),
@@ -846,6 +850,16 @@ impl App {
     #[must_use]
     pub fn focus_right(&self) -> bool {
         self.focus_right
+    }
+
+    #[must_use]
+    pub fn density_mode(&self) -> DensityMode {
+        self.density_mode
+    }
+
+    #[must_use]
+    pub fn focus_mode(&self) -> FocusMode {
+        self.focus_mode
     }
 
     #[must_use]
@@ -1442,6 +1456,8 @@ impl App {
             self.clamp_multi_page();
         } else if tab == MainTab::Inbox {
             self.clamp_inbox_selection();
+        } else if self.focus_mode == FocusMode::DeepDebug {
+            self.focus_right = true;
         } else if self.focus_right {
             self.focus_right = false;
         }
@@ -1468,6 +1484,63 @@ impl App {
     pub fn cycle_theme(&mut self) {
         self.palette = cycle_palette(self.palette.name, 1);
         self.set_status(StatusKind::Info, &format!("Theme: {}", self.palette.name));
+    }
+
+    pub fn cycle_density_mode(&mut self, delta: i32) {
+        let options = &DensityMode::ORDER;
+        let mut idx = 0i32;
+        for (i, mode) in options.iter().enumerate() {
+            if *mode == self.density_mode {
+                idx = i as i32;
+                break;
+            }
+        }
+        idx += delta;
+        while idx < 0 {
+            idx += options.len() as i32;
+        }
+        self.density_mode = options[(idx as usize) % options.len()];
+        if self.tab == MainTab::MultiLogs {
+            self.clamp_multi_page();
+        }
+        self.set_status(
+            StatusKind::Info,
+            &format!("Density: {}", self.density_mode.label()),
+        );
+    }
+
+    #[allow(dead_code)]
+    fn toggle_zen_mode(&mut self) {
+        self.focus_right = !self.focus_right;
+        if self.tab == MainTab::MultiLogs {
+            self.clamp_multi_page();
+        }
+        if self.focus_right {
+            self.set_status(StatusKind::Info, "Zen mode: right pane focus");
+        } else {
+            self.set_status(StatusKind::Info, "Zen mode: split view");
+        }
+    }
+
+    #[allow(dead_code)]
+    fn toggle_deep_focus_mode(&mut self) {
+        self.focus_mode = if self.focus_mode == FocusMode::Standard {
+            FocusMode::DeepDebug
+        } else {
+            FocusMode::Standard
+        };
+        if self.focus_mode == FocusMode::DeepDebug {
+            self.focus_right = true;
+        } else if self.tab != MainTab::MultiLogs {
+            self.focus_right = false;
+        }
+        if self.tab == MainTab::MultiLogs {
+            self.clamp_multi_page();
+        }
+        self.set_status(
+            StatusKind::Info,
+            &format!("Focus mode: {}", self.focus_mode.label()),
+        );
     }
 
     // -- selection -----------------------------------------------------------
@@ -1730,15 +1803,51 @@ impl App {
     #[must_use]
     pub fn effective_multi_layout(&self) -> PaneLayout {
         let (width, height) = self.multi_viewport_size();
-        let grid_height = (height - MULTI_HEADER_ROWS).max(MULTI_MIN_CELL_HEIGHT);
+        let grid_height = (height - self.multi_header_rows()).max(self.multi_min_cell_height());
         fit_pane_layout(
             self.current_layout(),
             width,
             grid_height,
-            MULTI_CELL_GAP,
-            MULTI_MIN_CELL_WIDTH,
-            MULTI_MIN_CELL_HEIGHT,
+            self.multi_cell_gap(),
+            self.multi_min_cell_width(),
+            self.multi_min_cell_height(),
         )
+    }
+
+    #[must_use]
+    pub(crate) fn multi_header_rows(&self) -> i32 {
+        if self.focus_mode == FocusMode::DeepDebug || self.density_mode == DensityMode::Compact {
+            1
+        } else {
+            MULTI_HEADER_ROWS
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn multi_cell_gap(&self) -> i32 {
+        if self.density_mode == DensityMode::Compact {
+            0
+        } else {
+            MULTI_CELL_GAP
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn multi_min_cell_width(&self) -> i32 {
+        if self.density_mode == DensityMode::Compact {
+            32
+        } else {
+            MULTI_MIN_CELL_WIDTH
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn multi_min_cell_height(&self) -> i32 {
+        if self.density_mode == DensityMode::Compact {
+            6
+        } else {
+            MULTI_MIN_CELL_HEIGHT
+        }
     }
 
     #[must_use]
@@ -1781,15 +1890,21 @@ impl App {
     fn multi_viewport_size(&self) -> (i32, i32) {
         let width = self.width as i32;
         let height = self.height as i32;
-        let overhead: i32 =
-            4 + match self.mode {
-                UiMode::Palette
-                | UiMode::Filter
-                | UiMode::Confirm
-                | UiMode::Wizard
-                | UiMode::Help => 3,
-                _ => 0,
-            } + if self.status_text.is_empty() { 0 } else { 1 };
+        let base_overhead = match self.focus_mode {
+            FocusMode::Standard => 4,
+            FocusMode::DeepDebug => 2,
+        };
+        let mode_overhead = match self.mode {
+            UiMode::Palette | UiMode::Filter | UiMode::Confirm | UiMode::Wizard | UiMode::Help => 3,
+            _ => 0,
+        };
+        let density_adjust = if self.density_mode == DensityMode::Compact {
+            1
+        } else {
+            0
+        };
+        let overhead: i32 = (base_overhead + mode_overhead - density_adjust).max(1)
+            + if self.status_text.is_empty() { 0 } else { 1 };
         let pane_height = (height - overhead).max(10);
         let right_width = if self.focus_right {
             width
@@ -1992,20 +2107,16 @@ impl App {
                 Command::None
             }
             Key::Char('z') => {
-                self.focus_right = !self.focus_right;
-                if self.tab == MainTab::MultiLogs {
-                    self.clamp_multi_page();
-                }
-                if self.focus_right {
-                    self.set_status(StatusKind::Info, "Zen mode: right pane focus");
-                } else {
-                    self.set_status(StatusKind::Info, "Zen mode: split view");
-                }
-                if self.tab == MainTab::MultiLogs {
-                    Command::Fetch
-                } else {
-                    Command::None
-                }
+                self.toggle_zen_mode();
+                Command::Fetch
+            }
+            Key::Char('Z') => {
+                self.toggle_deep_focus_mode();
+                Command::Fetch
+            }
+            Key::Char('M') => {
+                self.cycle_density_mode(1);
+                Command::Fetch
             }
             Key::Char('/') => {
                 self.mode = UiMode::Filter;
@@ -2333,20 +2444,16 @@ impl App {
                 Command::None
             }
             PaletteActionId::ToggleZenMode => {
-                self.focus_right = !self.focus_right;
-                if self.tab == MainTab::MultiLogs {
-                    self.clamp_multi_page();
-                }
-                if self.focus_right {
-                    self.set_status(StatusKind::Info, "Zen mode: right pane focus");
-                } else {
-                    self.set_status(StatusKind::Info, "Zen mode: split view");
-                }
-                if self.tab == MainTab::MultiLogs {
-                    Command::Fetch
-                } else {
-                    Command::None
-                }
+                self.toggle_zen_mode();
+                Command::Fetch
+            }
+            PaletteActionId::CycleDensityMode => {
+                self.cycle_density_mode(1);
+                Command::Fetch
+            }
+            PaletteActionId::ToggleFocusMode => {
+                self.toggle_deep_focus_mode();
+                Command::Fetch
             }
             PaletteActionId::Custom(_) => Command::None,
         }
@@ -2442,8 +2549,16 @@ impl App {
                 Command::None
             }
             Key::Char('z') => {
-                self.focus_right = !self.focus_right;
-                Command::None
+                self.toggle_zen_mode();
+                Command::Fetch
+            }
+            Key::Char('Z') => {
+                self.toggle_deep_focus_mode();
+                Command::Fetch
+            }
+            Key::Char('M') => {
+                self.cycle_density_mode(1);
+                Command::Fetch
             }
             Key::Char('j') | Key::Down => {
                 self.move_selection(1);
@@ -2751,12 +2866,14 @@ impl App {
         let header = self.render_header_text(width);
         frame.draw_text(0, 0, &header, TextRole::Accent);
 
-        // Tab bar line.
-        let tab_bar = self.render_tab_bar(width);
-        frame.draw_text(0, 1, &tab_bar, TextRole::Primary);
-
         // Content area.
-        let content_start = 2;
+        let content_start = if self.focus_mode == FocusMode::DeepDebug {
+            1
+        } else {
+            let tab_bar = self.render_tab_bar(width);
+            frame.draw_text(0, 1, &tab_bar, TextRole::Primary);
+            2
+        };
         let footer_lines = if self.status_text.is_empty() { 1 } else { 2 };
         let content_height = height.saturating_sub(content_start + footer_lines).max(1);
 
@@ -2888,7 +3005,13 @@ impl App {
 
         // Footer hint line.
         let footer_y = height.saturating_sub(1);
-        let hint = "? help  q quit  ctrl+p palette  / filter  1-5 tabs  j/k sel  S stop  K kill";
+        let hint = if self.focus_mode == FocusMode::DeepDebug {
+            "deep focus  Z toggle  M density  z zen  q quit  ? help"
+        } else if self.density_mode == DensityMode::Compact {
+            "? q ctrl+p / 1-5 j/k z Z M"
+        } else {
+            "? help  q quit  ctrl+p palette  / filter  1-5 tabs  j/k sel  S stop  K kill  M density  Z focus"
+        };
         let truncated = if hint.len() > width {
             &hint[..width]
         } else {
@@ -2920,10 +3043,12 @@ impl App {
             UiMode::Main => "",
         };
         let header = format!(
-            " Forge Loops  [{tab}]  {count}  theme:{theme}{mode}",
+            " Forge Loops  [{tab}]  {count}  theme:{theme}  density:{density}  focus:{focus}{mode}",
             tab = self.tab.label(),
             count = count_label,
             theme = self.palette.name,
+            density = self.density_mode.label(),
+            focus = self.focus_mode.label(),
             mode = mode_label,
         );
         if header.len() > width {
@@ -2938,10 +3063,15 @@ impl App {
             .iter()
             .enumerate()
             .map(|(i, t)| {
-                if *t == self.tab {
-                    format!("[{}:{}]", i + 1, t.label())
+                let label = if self.density_mode == DensityMode::Compact {
+                    t.short_label()
                 } else {
-                    format!(" {}:{} ", i + 1, t.label())
+                    t.label()
+                };
+                if *t == self.tab {
+                    format!("[{}:{}]", i + 1, label)
+                } else {
+                    format!(" {}:{} ", i + 1, label)
                 }
             })
             .collect();
@@ -3358,6 +3488,8 @@ impl App {
             "  q         quit".to_owned(),
             "  t         cycle theme".to_owned(),
             "  z         zen mode (focus right pane)".to_owned(),
+            "  Z         deep focus mode (distraction-minimized)".to_owned(),
+            "  M         cycle density (comfortable/compact)".to_owned(),
             "  /         filter mode".to_owned(),
             "".to_owned(),
         ];
@@ -4060,6 +4192,53 @@ mod tests {
         assert!(app.focus_right());
         app.update(key(Key::Char('z')));
         assert!(!app.focus_right());
+    }
+
+    #[test]
+    fn m_cycles_density_modes() {
+        let mut app = App::new("default", 12);
+        assert_eq!(app.density_mode(), DensityMode::Comfortable);
+        app.update(key(Key::Char('M')));
+        assert_eq!(app.density_mode(), DensityMode::Compact);
+        assert!(app.status_text().contains("Density: compact"));
+        app.update(key(Key::Char('M')));
+        assert_eq!(app.density_mode(), DensityMode::Comfortable);
+    }
+
+    #[test]
+    fn shift_z_toggles_deep_focus_and_collapses_tab_bar() {
+        let mut app = app_with_loops(3);
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 120,
+            height: 36,
+        }));
+        let baseline = app.render();
+        assert!(baseline.row_text(1).contains("[1:Overview]"));
+
+        app.update(key(Key::Char('Z')));
+        assert_eq!(app.focus_mode(), FocusMode::DeepDebug);
+        assert!(app.focus_right());
+        let focused = app.render();
+        assert!(!focused.row_text(1).contains("[1:Overview]"));
+        assert!(focused.row_text(0).contains("focus:deep"));
+
+        app.update(key(Key::Char('Z')));
+        assert_eq!(app.focus_mode(), FocusMode::Standard);
+        assert!(!app.focus_right());
+    }
+
+    #[test]
+    fn compact_density_increases_multi_page_capacity() {
+        let mut app = app_with_loops(24);
+        app.set_tab(MainTab::MultiLogs);
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 120,
+            height: 30,
+        }));
+        let comfortable = app.multi_page_size();
+        app.update(key(Key::Char('M')));
+        let compact = app.multi_page_size();
+        assert!(compact >= comfortable);
     }
 
     // -- log source/layer cycling --

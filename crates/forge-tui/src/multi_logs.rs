@@ -4,10 +4,7 @@
 //! `renderMiniLogEmptyPane`, and `renderLogBlock` from
 //! `internal/looptui/looptui.go`.
 
-use crate::app::{
-    App, LogLayer, LogTailView, LoopView, MULTI_CELL_GAP, MULTI_HEADER_ROWS, MULTI_MIN_CELL_HEIGHT,
-    MULTI_MIN_CELL_WIDTH,
-};
+use crate::app::{App, LogLayer, LogTailView, LoopView};
 use crate::filter::loop_display_id;
 use crate::layouts::{fit_pane_layout, layout_cell_size};
 use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
@@ -128,17 +125,21 @@ impl App {
         let theme = crate::default_theme();
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
 
-        let grid_height = ((height as i32) - MULTI_HEADER_ROWS).max(MULTI_MIN_CELL_HEIGHT);
+        let header_rows = self.multi_header_rows().max(1);
+        let cell_gap = self.multi_cell_gap();
+        let min_cell_width = self.multi_min_cell_width();
+        let min_cell_height = self.multi_min_cell_height();
+        let grid_height = ((height as i32) - header_rows).max(min_cell_height);
         let requested = self.current_layout();
         let layout = fit_pane_layout(
             requested,
             width as i32,
             grid_height,
-            MULTI_CELL_GAP,
-            MULTI_MIN_CELL_WIDTH,
-            MULTI_MIN_CELL_HEIGHT,
+            cell_gap,
+            min_cell_width,
+            min_cell_height,
         );
-        let (cell_w, cell_h) = layout_cell_size(layout, width as i32, grid_height, MULTI_CELL_GAP);
+        let (cell_w, cell_h) = layout_cell_size(layout, width as i32, grid_height, cell_gap);
         let cell_w = cell_w.max(1) as usize;
         let cell_h = cell_h.max(1) as usize;
 
@@ -180,19 +181,21 @@ impl App {
         );
         frame.draw_text(0, 0, &header, TextRole::Accent);
 
-        // Subheader line.
-        let subheader = truncate(
-            &format!(
-                "layer:{}  pin:<space> clear:c  layout:m  page:,/. g/G  order:pinned first",
-                self.log_layer().label(),
-            ),
-            width,
-        );
-        frame.draw_text(0, 1, &subheader, TextRole::Muted);
+        if header_rows > 1 {
+            // Subheader line.
+            let subheader = truncate(
+                &format!(
+                    "layer:{}  pin:<space> clear:c  layout:m  page:,/. g/G  order:pinned first",
+                    self.log_layer().label(),
+                ),
+                width,
+            );
+            frame.draw_text(0, 1, &subheader, TextRole::Muted);
+        }
 
         // Grid of mini panes.
-        let header_rows = MULTI_HEADER_ROWS as usize;
-        let gap = MULTI_CELL_GAP.max(0) as usize;
+        let header_rows = header_rows as usize;
+        let gap = cell_gap.max(0) as usize;
         let mut index = 0;
 
         for row in 0..layout.rows as usize {

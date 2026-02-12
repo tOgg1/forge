@@ -17,13 +17,16 @@ pub mod extension_event_bus;
 pub mod extension_package_manager;
 pub mod extension_reference;
 pub mod extension_sandbox;
+pub mod failure_focus;
 pub mod filter;
+pub mod fleet_selection;
 pub mod global_search_index;
 pub mod help_overlay;
 pub mod keymap;
 pub mod lane_model;
 pub mod layout_presets;
 pub mod layouts;
+pub mod log_query;
 pub mod logs_tab;
 pub mod multi_logs;
 pub mod navigation_graph;
@@ -36,7 +39,7 @@ pub mod swarm_stop_monitor;
 pub mod swarm_templates;
 pub mod swarm_wind_down;
 pub mod theme;
-
+pub mod timeline_scrubber;
 /// Stable crate label used by bootstrap smoke tests.
 pub fn crate_label() -> &'static str {
     "forge-tui"
