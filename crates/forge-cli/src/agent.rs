@@ -4599,6 +4599,11 @@ Will resume after unblock"
     #[test]
     fn agent_run_inherits_parent_context_into_spawn_env() {
         let backend = InMemoryAgentBackend::new();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let agent_id = format!("ag-context-{nonce}");
 
         with_temp_env(
             &[
@@ -4607,10 +4612,14 @@ Will resume after unblock"
                 (PROFILE_ENV_KEY, "ops"),
             ],
             || {
-                let out = run_for_test(
-                    &["agent", "run", "delegate audit", "--agent", "ag-context"],
-                    &backend,
-                );
+                let args = vec![
+                    "agent",
+                    "run",
+                    "delegate audit",
+                    "--agent",
+                    agent_id.as_str(),
+                ];
+                let out = run_for_test(&args, &backend);
                 assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
             },
         );
@@ -4637,28 +4646,30 @@ Will resume after unblock"
     #[test]
     fn agent_run_create_path_json() {
         let backend = InMemoryAgentBackend::new();
-        let out = run_for_test(
-            &[
-                "agent",
-                "--json",
-                "run",
-                "ship m10 helper",
-                "--agent",
-                "ag-run-1",
-                "--type",
-                "claude",
-                "--task-id",
-                "forge-45p",
-            ],
-            &backend,
-        );
-        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-        let parsed = parse_json(&out.stdout);
-        assert_eq!(parsed["agent_id"], "ag-run-1");
-        assert_eq!(parsed["reused"], false);
-        assert_eq!(parsed["revived"], false);
-        assert_eq!(parsed["observed_state"], "starting");
-        assert_eq!(parsed["task_id"], "forge-45p");
+        with_observability_db_path("run-create-json", |_| {
+            let out = run_for_test(
+                &[
+                    "agent",
+                    "--json",
+                    "run",
+                    "ship m10 helper",
+                    "--agent",
+                    "ag-run-1",
+                    "--type",
+                    "claude",
+                    "--task-id",
+                    "forge-45p",
+                ],
+                &backend,
+            );
+            assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+            let parsed = parse_json(&out.stdout);
+            assert_eq!(parsed["agent_id"], "ag-run-1");
+            assert_eq!(parsed["reused"], false);
+            assert_eq!(parsed["revived"], false);
+            assert_eq!(parsed["observed_state"], "starting");
+            assert_eq!(parsed["task_id"], "forge-45p");
+        });
     }
 
     #[test]
