@@ -469,3 +469,80 @@ hi. solid throughput; one task shipped, next task parked with clear blocker.
 2. let me hotfix `crates/forge-cli/src/agent.rs:417` now, rerun gate, and close `forge-daf` immediately.
 ```
 
+## 2026-02-12T12:15:08Z
+
+- run_id: ce52954e-f21e-42df-bed9-388118217ab9
+- loop_name: rewrite-tui-codex-2
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T12:06:15Z
+- finished_at: 2026-02-12T12:15:08Z
+- exit_code: 0
+
+```
++
++Added tests in `crates/forge-tui/src/communication_quality.rs` for:
++
++- unanswered-ask escalation detection
++- stale-thread detection on active tasks
++- missing-closure-note detection on terminal tasks
++- closure-note suppression when note exists
++- deterministic alert sort order by severity/idle age
++
++## Validation
++
++- `cargo fmt --check`
++- `cargo clippy --workspace --all-targets -- -D warnings`
++- `cargo test --workspace`
+diff --git a/docs/tui-next-roadmap-2026-02-10.md b/docs/tui-next-roadmap-2026-02-10.md
+index 139f85f8122ce9c769492093bcd8c846848d0513..c7537e8d63506404a9f14eaa14767e4cc50355dd
+--- a/docs/tui-next-roadmap-2026-02-10.md
++++ b/docs/tui-next-roadmap-2026-02-10.md
+@@ -57,6 +57,8 @@
+ - `forge-73b` delivered in `docs/tui-501-swarm-template-library.md` with reusable `small/medium/full` swarm templates in `crates/forge-tui/src/swarm_templates.rs`.
+ - `forge-nse` delivered in `docs/tui-603-handoff-snapshot-generator.md` with Inbox handoff snapshot generation (`h`) and compact package rendering in `crates/forge-tui/src/app.rs`.
+ - `forge-daf` delivered in `docs/tui-604-shared-notes-breadcrumbs.md` with per-task shared notes, timestamped/attributed breadcrumbs, merged timeline rows, and notes-pane rendering helpers in `crates/forge-tui/src/task_notes.rs`.
++- `forge-vz1` delivered in `docs/tui-605-activity-stream-agent-repo-task.md` with bounded real-time activity stream modeling, filters by `agent/repo/task/kind/text`, and jump-link metadata for task/log pivots in `crates/forge-tui/src/activity_stream.rs`.
++- `forge-z33` delivered in `docs/tui-606-communication-quality-stale-thread-alerts.md` with unanswered-ask checks, stale-thread alerts, closure-note hygiene detection, and actionable communication remediation hints in `crates/forge-tui/src/communication_quality.rs`.
+ - `forge-rky` delivered in `docs/tui-502-controlled-ramp-wizard.md` with staged ramp-up and health-gate progression logic in `crates/forge-tui/src/swarm_templates.rs`.
+ - `forge-k1s` delivered in `docs/tui-503-concurrency-governor.md` with concurrency governor + starvation-throttle recommendations in `crates/forge-tui/src/swarm_governor.rs`.
+ - `forge-0q3` delivered in `docs/tui-504-dogpile-detector-redistribution.md` with duplicate-claim detection + redistribution action planning in `crates/forge-tui/src/swarm_dogpile.rs`.
+@@ -85,3 +87,4 @@
+ - `forge-m7a` delivered in `docs/tui-203-timeline-scrubber-heatmap.md` with timeline bucket aggregation, activity+error density heatmap rendering, ratio-based scrub seek, empty-bucket fallback, and stable anchored viewport math in `crates/forge-tui/src/timeline_scrubber.rs`.
+ - `forge-110` delivered in `docs/tui-204-failure-jump-root-cause-focus.md` with first-failure jump detection, root-cause chain extraction, command-context linkage, and cause-line highlight metadata/jump helpers in `crates/forge-tui/src/failure_focus.rs`.
+ - `forge-67r` delivered in `docs/tui-806-configurable-status-strip-widget-slots.md` with configurable top/bottom status strips, pluggable widget registration, schema-versioned persisted ordering/enabled state, and deterministic strip plan/render helpers in `crates/forge-tui/src/status_strip.rs`.
++- `forge-8v2` delivered in `docs/tui-206-bookmark-annotation-log-anchors.md` with local log-anchor bookmarks, lightweight annotations, deterministic JSON handoff export/import (with duplicate-safe merge warnings), markdown handoff output, and compact anchor-row rendering helpers in `crates/forge-tui/src/log_anchors.rs`.
+
+tokens used
+352,438
+Closed this loop work:
+1. `forge-daf` (`TUI-604`) closed after full pass.
+validation: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` all pass.
+
+2. `forge-vz1` (`TUI-605`) shipped + closed.
+code: `crates/forge-tui/src/activity_stream.rs`, `crates/forge-tui/src/lib.rs`
+docs: `docs/tui-605-activity-stream-agent-repo-task.md`, `docs/tui-next-roadmap-2026-02-10.md`
+validation: full pass.
+
+Current task:
+1. `forge-z33` (`TUI-606`) implemented, kept `in_progress` (blocked).
+code: `crates/forge-tui/src/communication_quality.rs`, `crates/forge-tui/src/lib.rs`
+docs: `docs/tui-606-communication-quality-stale-thread-alerts.md`, `docs/tui-next-roadmap-2026-02-10.md`
+
+Blocker posted (task + orchestrator):
+- command: `cargo clippy --workspace --all-targets -- -D warnings && EDITOR=true VISUAL=true GIT_EDITOR=true cargo test --workspace`
+- file/line: `crates/forge-cli/src/explain.rs:342`, `crates/forge-cli/src/explain.rs:580`, `crates/forge-cli/src/explain.rs:1593`
+- reason: missing `list_agent_events` impl + missing `AgentRecord` fields (`created_at`, `persistent`, `ttl_seconds`)
+- requested unblock: land `explain.rs` parity fix or rebase to fixed commit.
+
+Also detected concurrent unexpected workspace changes while running (`crates/forge-tui/src/log_anchors.rs`, `docs/tui-206-bookmark-annotation-log-anchors.md`). Stopped before picking next task.  
+Choose:
+1. I fix `crates/forge-cli/src/explain.rs` unblock now.
+2. Wait/rebase after owner lands fix.
+3. Release `forge-z33` and move to next ready `TUI-*`.
+```
+

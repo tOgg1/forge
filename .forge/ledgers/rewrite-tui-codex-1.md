@@ -238,3 +238,80 @@ tokens used
 - Claims/progress/blockers/close posted to `task` + `@forge-orchestrator`.
 ```
 
+## 2026-02-12T12:18:19Z
+
+- run_id: a953e9cf-3291-4b84-a77a-31142e084041
+- loop_name: rewrite-tui-codex-1
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T11:33:27Z
+- finished_at: 2026-02-12T12:18:19Z
+- exit_code: 0
+
+```
+- `forge-3yh` delivered in `docs/tui-103-keymap-engine.md`, centralized keymap engine in `crates/forge-tui/src/keymap.rs`, and diagnostics integration in `crates/forge-tui/src/app.rs`.
+ - `forge-exn` delivered in `docs/tui-301-fleet-selection-engine.md` with expressive id/name/repo/profile/pool/state/tag/stale filters and pre-action preview generation in `crates/forge-tui/src/fleet_selection.rs`.
++- `forge-s1r` delivered in `docs/tui-302-bulk-action-planner-stop-scale-msg-inject.md` with dry-run bulk planning for `stop/scale/msg/inject`, conflict diagnostics, rollback hints, and transparent queued command previews in `crates/forge-tui/src/bulk_action_planner.rs`.
+ - `forge-5bh` delivered in `docs/tui-303-safety-policies-destructive-action-guardrails.md` with policy-aware blocking for destructive actions (protected pools/tags + batch thresholds), escalation hints, explicit confirmation handoff, and structured override audit entries in `crates/forge-tui/src/actions.rs`.
+ - `forge-yj4` delivered in `docs/tui-306-emergency-safe-stop-all-workflow.md` with one-key emergency safe-stop workflow modeling, scope preview filters, staged stop execution state, and post-stop integrity checks/escalation hints in `crates/forge-tui/src/emergency_safe_stop.rs`.
+ - `forge-ezv` delivered in `docs/tui-601-fmail-inbox-panel.md` with Inbox tab state/render/actions in `crates/forge-tui/src/app.rs`.
+@@ -56,6 +57,8 @@
+ - `forge-73b` delivered in `docs/tui-501-swarm-template-library.md` with reusable `small/medium/full` swarm templates in `crates/forge-tui/src/swarm_templates.rs`.
+ - `forge-nse` delivered in `docs/tui-603-handoff-snapshot-generator.md` with Inbox handoff snapshot generation (`h`) and compact package rendering in `crates/forge-tui/src/app.rs`.
+ - `forge-daf` delivered in `docs/tui-604-shared-notes-breadcrumbs.md` with per-task shared notes, timestamped/attributed breadcrumbs, merged timeline rows, and notes-pane rendering helpers in `crates/forge-tui/src/task_notes.rs`.
++- `forge-vz1` delivered in `docs/tui-605-activity-stream-agent-repo-task.md` with bounded real-time activity stream modeling, filters by `agent/repo/task/kind/text`, and jump-link metadata for task/log pivots in `crates/forge-tui/src/activity_stream.rs`.
++- `forge-z33` delivered in `docs/tui-606-communication-quality-stale-thread-alerts.md` with unanswered-ask checks, stale-thread alerts, closure-note hygiene detection, and actionable communication remediation hints in `crates/forge-tui/src/communication_quality.rs`.
+ - `forge-rky` delivered in `docs/tui-502-controlled-ramp-wizard.md` with staged ramp-up and health-gate progression logic in `crates/forge-tui/src/swarm_templates.rs`.
+ - `forge-k1s` delivered in `docs/tui-503-concurrency-governor.md` with concurrency governor + starvation-throttle recommendations in `crates/forge-tui/src/swarm_governor.rs`.
+ - `forge-0q3` delivered in `docs/tui-504-dogpile-detector-redistribution.md` with duplicate-claim detection + redistribution action planning in `crates/forge-tui/src/swarm_dogpile.rs`.
+@@ -65,6 +68,7 @@
+ - `forge-318` delivered in `docs/tui-403-blocker-graph-bottleneck-view.md` with dependency-edge normalization, impact-ranked bottlenecks, and actionable task drill-down links in `crates/forge-tui/src/blocker_graph.rs`.
+ - `forge-350` delivered in `docs/tui-402-throughput-cycle-time-dashboards.md` with throughput/completion charts, cycle-time and queue-aging tables, and deterministic velocity summaries in `crates/forge-tui/src/analytics_dashboard.rs`.
+ - `forge-1fx` delivered in `docs/tui-404-readiness-board-priority-risk-overlays.md` with project/epic filterable readiness-board rows, priority overlays, stale-risk and owner-gap signals, and deterministic risk-first ordering in `crates/forge-tui/src/readiness_board.rs`.
++- `forge-mdc` delivered in `docs/tui-405-next-best-task-recommendation-engine.md` with operator-context-aware next-task ranking using priority/readiness/dependency/ownership/context scoring and explainable recommendation reasons in `crates/forge-tui/src/task_recommendation.rs`.
+ - `forge-2er` delivered in `docs/tui-702-data-polling-pipeline-backpressure-jitter.md` with bounded polling queues, deterministic jittered poll intervals, backlog-driven backpressure penalties, and interactive-loop integration in `crates/forge-tui/src/polling_pipeline.rs` and `crates/forge-tui/src/bin/forge-tui.rs`.
+ - `forge-r1d` delivered in `docs/tui-105-global-search-index.md` with incremental cross-entity indexing, repo/profile/tag filters, partial-match semantics, and relevance+recency ranking in `crates/forge-tui/src/global_search_index.rs`.
+ - `forge-chf` delivered in `docs/tui-106-session-restore-delta-digest.md` with privacy-safe session snapshots, opt-out restore/persist controls, availability-aware restore fallbacks, and deterministic context delta digests in `crates/forge-tui/src/session_restore.rs`.
+@@ -78,5 +82,10 @@
+ - `forge-9hq` delivered in `docs/tui-801-theme-packs-semantic-slots.md` with curated semantic-slot theme packs, status/token-class mappings, and validated JSON import/export support in `crates/forge-tui/src/theme.rs`.
+ - `forge-zzw` delivered in `docs/tui-802-accessibility-contrast-validator.md` with capability-aware contrast validation (`truecolor`/`ansi256`/`ansi16`), fail-fast violation reporting, and aggregate accessibility reports in `crates/forge-tui/src/theme.rs`.
+ - `forge-d8z` delivered in `docs/tui-803-density-modes-focus-mode.md` with `comfortable/compact` density controls, deep focus mode (`Z`) for distraction-minimized debugging, and density-aware multi-log matrix fitting in `crates/forge-tui/src/app.rs` and `crates/forge-tui/src/multi_logs.rs`.
++- `forge-nkh` delivered in `docs/tui-804-keyboard-macro-recorder-runner.md` with keyboard macro recording/finalization, safety review checks, reviewable macro rendering, and repeat-aware run planning in `crates/forge-tui/src/keyboard_macro.rs`.
++- `forge-bjj` delivered in `docs/tui-805-adaptive-capability-detection-ansi16-ansi256-truecolor.md` with runtime terminal capability detection (`TERM`/`COLORTERM`/`NO_COLOR`/`FORCE_COLOR`), ANSI16 readability fallback to high-contrast palette, capability-aware adapter theme mapping, and runtime wiring in `crates/forge-tui/src/theme.rs`, `crates/forge-tui/src/lib.rs`, `crates/forge-tui/src/app.rs`, and `crates/forge-tui/src/bin/forge-tui.rs`.
+ - `forge-m7a` delivered in `docs/tui-203-timeline-scrubber-heatmap.md` with timeline bucket aggregation, activity+error density heatmap rendering, ratio-based scrub seek, empty-bucket fallback, and stable anchored viewport math in `crates/forge-tui/src/timeline_scrubber.rs`.
+ - `forge-110` delivered in `docs/tui-204-failure-jump-root-cause-focus.md` with first-failure jump detection, root-cause chain extraction, command-context linkage, and cause-line highlight metadata/jump helpers in `crates/forge-tui/src/failure_focus.rs`.
++- `forge-67r` delivered in `docs/tui-806-configurable-status-strip-widget-slots.md` with configurable top/bottom status strips, pluggable widget registration, schema-versioned persisted ordering/enabled state, and deterministic strip plan/render helpers in `crates/forge-tui/src/status_strip.rs`.
++- `forge-8v2` delivered in `docs/tui-206-bookmark-annotation-log-anchors.md` with local log-anchor bookmarks, lightweight annotations, deterministic JSON handoff export/import (with duplicate-safe merge warnings), markdown handoff output, and compact anchor-row rendering helpers in `crates/forge-tui/src/log_anchors.rs`.
++- `forge-98e` delivered in `docs/tui-705-performance-benchmark-suite-slo-gates.md` with view benchmark suite configuration, per-iteration latency/throughput sampling, explicit p50/p95/throughput SLO gate evaluation, CI gate summary formatting, and schema-versioned suite persistence helpers in `crates/forge-tui/src/performance_gates.rs`.
+
+tokens used
+1,482,638
+hi. strong loop; 3 tasks shipped + 1 blocked with clear unblock.
+
+Closed:
+1. `forge-67r` (`TUI-806`)  
+implemented `crates/forge-tui/src/status_strip.rs` + `docs/tui-806-configurable-status-strip-widget-slots.md`; roadmap updated; full gates passed; task closed.
+2. `forge-8v2` (`TUI-206`)  
+implemented `crates/forge-tui/src/log_anchors.rs` + `docs/tui-206-bookmark-annotation-log-anchors.md`; roadmap updated; full gates passed; task closed.
+3. `forge-2er` (`TUI-702`)  
+existing delivery revalidated (`polling_pipeline` + docs/roadmap already present); full gates passed; task closed.
+
+In progress + blocked:
+1. `forge-98e` (`TUI-705`)  
+implemented `crates/forge-tui/src/performance_gates.rs` + `docs/tui-705-performance-benchmark-suite-slo-gates.md`; roadmap updated; targeted tests pass.  
+blocked on workspace drift during required full gates:
+- command: `cargo fmt --check` / `cargo clippy --workspace --all-targets -- -D warnings`
+- file: `crates/forge-cli/src/explain.rs:260`
+- file: `crates/forge-cli/src/explain.rs:365`
+- issue: duplicated `fn load_agent_context` token breaks parse + trait impl compile
+- requested unblock: fix `explain.rs` syntax/trait drift, then rerun full gates and close `forge-98e`.
+
+Comms/state:
+- used `sv` + `fmail` each iteration (claim/progress/done/blocked).
+- orchestrator notified `done` for closed tasks, `blocked` for `forge-98e`.
+```
+
