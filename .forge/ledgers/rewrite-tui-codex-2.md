@@ -238,3 +238,157 @@ Protocol/reporting done:
 - Did not close task (blocked protocol).
 ```
 
+## 2026-02-12T11:45:47Z
+
+- run_id: 81240aac-884e-48c2-ad44-4b0c8ab90cca
+- loop_name: rewrite-tui-codex-2
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T11:22:51Z
+- finished_at: 2026-02-12T11:45:47Z
+- exit_code: 0
+
+```
++## Validation
++
++- `cargo fmt --check`
++- `cargo clippy --workspace --all-targets -- -D warnings`
++- `cargo test --workspace`
+diff --git a/docs/tui-next-roadmap-2026-02-10.md b/docs/tui-next-roadmap-2026-02-10.md
+index 2d370961f4c38d5af2cd439015573d04d05eb524..d49b6ded7c5059c53efea5fcc1b6c6c06fc491d7
+--- a/docs/tui-next-roadmap-2026-02-10.md
++++ b/docs/tui-next-roadmap-2026-02-10.md
+@@ -49,6 +49,9 @@
+ - `forge-8dc` delivered in `docs/tui-102-command-palette.md`, `crates/forge-tui/src/command_palette.rs`, and `Ctrl+P` integration in `crates/forge-tui/src/app.rs`.
+ - `forge-3yh` delivered in `docs/tui-103-keymap-engine.md`, centralized keymap engine in `crates/forge-tui/src/keymap.rs`, and diagnostics integration in `crates/forge-tui/src/app.rs`.
+ - `forge-exn` delivered in `docs/tui-301-fleet-selection-engine.md` with expressive id/name/repo/profile/pool/state/tag/stale filters and pre-action preview generation in `crates/forge-tui/src/fleet_selection.rs`.
++- `forge-s1r` delivered in `docs/tui-302-bulk-action-planner-stop-scale-msg-inject.md` with dry-run bulk planning for `stop/scale/msg/inject`, conflict diagnostics, rollback hints, and transparent queued command previews in `crates/forge-tui/src/bulk_action_planner.rs`.
++- `forge-5bh` delivered in `docs/tui-303-safety-policies-destructive-action-guardrails.md` with policy-aware blocking for destructive actions (protected pools/tags + batch thresholds), escalation hints, explicit confirmation handoff, and structured override audit entries in `crates/forge-tui/src/actions.rs`.
++- `forge-yj4` delivered in `docs/tui-306-emergency-safe-stop-all-workflow.md` with one-key emergency safe-stop workflow modeling, scope preview filters, staged stop execution state, and post-stop integrity checks/escalation hints in `crates/forge-tui/src/emergency_safe_stop.rs`.
+ - `forge-ezv` delivered in `docs/tui-601-fmail-inbox-panel.md` with Inbox tab state/render/actions in `crates/forge-tui/src/app.rs`.
+ - `forge-jws` delivered in `docs/tui-602-claim-feed-conflicts.md` with claim timeline, conflict alerts, and resolution shortcuts in `crates/forge-tui/src/app.rs`.
+ - `forge-73b` delivered in `docs/tui-501-swarm-template-library.md` with reusable `small/medium/full` swarm templates in `crates/forge-tui/src/swarm_templates.rs`.
+@@ -63,6 +66,7 @@
+ - `forge-318` delivered in `docs/tui-403-blocker-graph-bottleneck-view.md` with dependency-edge normalization, impact-ranked bottlenecks, and actionable task drill-down links in `crates/forge-tui/src/blocker_graph.rs`.
+ - `forge-350` delivered in `docs/tui-402-throughput-cycle-time-dashboards.md` with throughput/completion charts, cycle-time and queue-aging tables, and deterministic velocity summaries in `crates/forge-tui/src/analytics_dashboard.rs`.
+ - `forge-1fx` delivered in `docs/tui-404-readiness-board-priority-risk-overlays.md` with project/epic filterable readiness-board rows, priority overlays, stale-risk and owner-gap signals, and deterministic risk-first ordering in `crates/forge-tui/src/readiness_board.rs`.
++- `forge-mdc` delivered in `docs/tui-405-next-best-task-recommendation-engine.md` with operator-context-aware next-task ranking using priority/readiness/dependency/ownership/context scoring and explainable recommendation reasons in `crates/forge-tui/src/task_recommendation.rs`.
+ - `forge-2er` delivered in `docs/tui-702-data-polling-pipeline-backpressure-jitter.md` with bounded polling queues, deterministic jittered poll intervals, backlog-driven backpressure penalties, and interactive-loop integration in `crates/forge-tui/src/polling_pipeline.rs` and `crates/forge-tui/src/bin/forge-tui.rs`.
+ - `forge-r1d` delivered in `docs/tui-105-global-search-index.md` with incremental cross-entity indexing, repo/profile/tag filters, partial-match semantics, and relevance+recency ranking in `crates/forge-tui/src/global_search_index.rs`.
+ - `forge-chf` delivered in `docs/tui-106-session-restore-delta-digest.md` with privacy-safe session snapshots, opt-out restore/persist controls, availability-aware restore fallbacks, and deterministic context delta digests in `crates/forge-tui/src/session_restore.rs`.
+
+tokens used
+880,783
+Loop run complete. 7 `TUI-*` tasks closed this session:
+
+1. `forge-qxw` `TUI-701` incremental render diff/repaint
+2. `forge-exn` `TUI-301` fleet selection engine
+3. `forge-n5v` `TUI-205` cross-loop compare
+4. `forge-5bh` `TUI-303` safety guardrails + override audit
+5. `forge-yj4` `TUI-306` emergency safe-stop-all workflow
+6. `forge-mdc` `TUI-405` next-best-task recommendation engine
+7. `forge-wzb` `TUI-304` loop health score + SLA timers
+
+Key artifacts added/updated:
+- `crates/forge-tui/src/loop_health_score.rs`
+- `docs/tui-304-loop-health-score-sla-timers.md`
+- `docs/tui-405-next-best-task-recommendation-engine.md`
+- `docs/tui-306-emergency-safe-stop-all-workflow.md`
+- `docs/tui-next-roadmap-2026-02-10.md`
+- `crates/forge-tui/src/lib.rs`
+
+Validation status for each close:  
+`cargo fmt --check` PASS  
+`cargo clippy --workspace --all-targets -- -D warnings` PASS  
+`cargo test --workspace` PASS
+
+Comms done each iteration:
+- `fmail` claim/progress/close + orchestrator done ping
+- `sv task start/close`
+
+Current loop state:
+- no self-owned `in_progress` tasks
+- next ready `TUI-*`: `forge-8v2` (`TUI-206`)
+```
+
+## 2026-02-12T11:54:16Z
+
+- run_id: 8cda9357-76c5-47cf-a25b-4130f440a91c
+- loop_name: rewrite-tui-codex-2
+- status: success
+- profile: codex3
+- harness: codex
+- prompt_source: base
+- prompt_path: /Users/trmd/Code/oss--forge/repos/forge/.forge/prompts/swarm-tui-next-codex-continuous.md
+- prompt_override: false
+- started_at: 2026-02-12T11:46:17Z
+- finished_at: 2026-02-12T11:54:16Z
+- exit_code: 0
+
+```
++            false,
++            None,
++        );
++        assert_eq!(capability, TerminalColorCapability::Ansi256);
++    }
++
++    #[test]
++    fn detects_ansi16_when_no_color_is_set() {
++        let capability =
++            super::detect_terminal_color_capability_with(Some("xterm-256color"), None, true, None);
++        assert_eq!(capability, TerminalColorCapability::Ansi16);
++    }
++
++    #[test]
++    fn force_color_level_overrides_detection() {
++        let capability =
++            super::detect_terminal_color_capability_with(Some("dumb"), None, false, Some(3));
++        assert_eq!(capability, TerminalColorCapability::TrueColor);
++    }
+ }
+diff --git a/docs/tui-next-roadmap-2026-02-10.md b/docs/tui-next-roadmap-2026-02-10.md
+index d49b6ded7c5059c53efea5fcc1b6c6c06fc491d7..a7cb11ae3b5575be01d0315824b0dfbe48ba8a10
+--- a/docs/tui-next-roadmap-2026-02-10.md
++++ b/docs/tui-next-roadmap-2026-02-10.md
+@@ -80,5 +80,6 @@
+ - `forge-9hq` delivered in `docs/tui-801-theme-packs-semantic-slots.md` with curated semantic-slot theme packs, status/token-class mappings, and validated JSON import/export support in `crates/forge-tui/src/theme.rs`.
+ - `forge-zzw` delivered in `docs/tui-802-accessibility-contrast-validator.md` with capability-aware contrast validation (`truecolor`/`ansi256`/`ansi16`), fail-fast violation reporting, and aggregate accessibility reports in `crates/forge-tui/src/theme.rs`.
+ - `forge-d8z` delivered in `docs/tui-803-density-modes-focus-mode.md` with `comfortable/compact` density controls, deep focus mode (`Z`) for distraction-minimized debugging, and density-aware multi-log matrix fitting in `crates/forge-tui/src/app.rs` and `crates/forge-tui/src/multi_logs.rs`.
++- `forge-bjj` delivered in `docs/tui-805-adaptive-capability-detection-ansi16-ansi256-truecolor.md` with runtime terminal capability detection (`TERM`/`COLORTERM`/`NO_COLOR`/`FORCE_COLOR`), ANSI16 readability fallback to high-contrast palette, capability-aware adapter theme mapping, and runtime wiring in `crates/forge-tui/src/theme.rs`, `crates/forge-tui/src/lib.rs`, `crates/forge-tui/src/app.rs`, and `crates/forge-tui/src/bin/forge-tui.rs`.
+ - `forge-m7a` delivered in `docs/tui-203-timeline-scrubber-heatmap.md` with timeline bucket aggregation, activity+error density heatmap rendering, ratio-based scrub seek, empty-bucket fallback, and stable anchored viewport math in `crates/forge-tui/src/timeline_scrubber.rs`.
+ - `forge-110` delivered in `docs/tui-204-failure-jump-root-cause-focus.md` with first-failure jump detection, root-cause chain extraction, command-context linkage, and cause-line highlight metadata/jump helpers in `crates/forge-tui/src/failure_focus.rs`.
+
+tokens used
+203,333
+`forge-bjj` claimed + implemented; task kept `in_progress` (blocked).
+
+Done:
+- Runtime capability detection + overrides in `crates/forge-tui/src/theme.rs`
+- Capability-aware palette fallback (`ansi16` => high-contrast) in `crates/forge-tui/src/theme.rs`
+- Capability-aware app constructor/wiring in `crates/forge-tui/src/app.rs`
+- Runtime detection wired in `crates/forge-tui/src/bin/forge-tui.rs`
+- Capability->theme mapping in `crates/forge-tui/src/lib.rs`
+- Docs: `docs/tui-805-adaptive-capability-detection-ansi16-ansi256-truecolor.md`
+- Roadmap update: `docs/tui-next-roadmap-2026-02-10.md`
+
+Validation:
+- `cargo fmt --check` PASS
+- `cargo clippy --workspace --all-targets -- -D warnings` PASS
+- `EDITOR=true VISUAL=true GIT_EDITOR=true cargo test --workspace` FAIL (completion goldens drift)
+- While attempting golden refresh, new external syntax drift detected:
+  - command: `EDITOR=true VISUAL=true GIT_EDITOR=true cargo run -q -p forge-cli --bin forge-cli -- completion bash`
+  - blocker: `crates/forge-cli/src/agent.rs:2331` (syntax error, unknown prefix)
+
+Comms sent:
+- `fmail send task` blocker/progress posted
+- `fmail send @forge-orchestrator` status=`blocked` posted
+
+Next:
+1. You want me to patch `crates/forge-cli/src/agent.rs:2331` + refresh completion goldens, then rerun full gates.
+2. You want to wait for owner/unblock, then I rerun gates and close `forge-bjj`.
+```
+
