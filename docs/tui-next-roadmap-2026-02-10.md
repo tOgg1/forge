@@ -48,6 +48,7 @@ Implementation notes:
 - `forge-cey` delivered in `docs/tui-101-navigation-ia.md` and `crates/forge-tui/src/navigation_graph.rs`.
 - `forge-8dc` delivered in `docs/tui-102-command-palette.md`, `crates/forge-tui/src/command_palette.rs`, and `Ctrl+P` integration in `crates/forge-tui/src/app.rs`.
 - `forge-3yh` delivered in `docs/tui-103-keymap-engine.md`, centralized keymap engine in `crates/forge-tui/src/keymap.rs`, and diagnostics integration in `crates/forge-tui/src/app.rs`.
+- `forge-45t` delivered in `docs/tui-107-contextual-onboarding-key-hints.md` with tab-contextual first-run onboarding overlays, in-tab key/workflow hints, and per-tab dismiss/recall controls (`i`/`I`) in `crates/forge-tui/src/app.rs`.
 - `forge-exn` delivered in `docs/tui-301-fleet-selection-engine.md` with expressive id/name/repo/profile/pool/state/tag/stale filters and pre-action preview generation in `crates/forge-tui/src/fleet_selection.rs`.
 - `forge-s1r` delivered in `docs/tui-302-bulk-action-planner-stop-scale-msg-inject.md` with dry-run bulk planning for `stop/scale/msg/inject`, conflict diagnostics, rollback hints, and transparent queued command previews in `crates/forge-tui/src/bulk_action_planner.rs`.
 - `forge-5bh` delivered in `docs/tui-303-safety-policies-destructive-action-guardrails.md` with policy-aware blocking for destructive actions (protected pools/tags + batch thresholds), escalation hints, explicit confirmation handoff, and structured override audit entries in `crates/forge-tui/src/actions.rs`.
