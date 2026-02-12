@@ -9,8 +9,8 @@ pub mod actions;
 pub mod analytics_dashboard;
 pub mod analytics_fact_model;
 pub mod app;
-pub mod bulk_action_planner;
 pub mod blocker_graph;
+pub mod bulk_action_planner;
 pub mod command_palette;
 pub mod emergency_safe_stop;
 pub mod extension_actions;
@@ -44,6 +44,7 @@ pub mod swarm_stop_monitor;
 pub mod swarm_templates;
 pub mod swarm_wind_down;
 pub mod task_notes;
+pub mod task_recommendation;
 pub mod theme;
 pub mod timeline_scrubber;
 /// Stable crate label used by bootstrap smoke tests.
