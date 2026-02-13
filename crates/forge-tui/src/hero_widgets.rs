@@ -5,6 +5,7 @@
 //! command-center feel.
 
 use forge_ftui_adapter::render::TextRole;
+use std::collections::BTreeMap;
 
 use crate::app::{LoopView, RunView};
 
@@ -17,6 +18,41 @@ use crate::app::{LoopView, RunView};
 pub struct HeroLine {
     pub text: String,
     pub role: TextRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrendDirection {
+    Up,
+    Down,
+    Flat,
+}
+
+impl TrendDirection {
+    #[must_use]
+    pub fn glyph(self) -> char {
+        match self {
+            Self::Up => '↑',
+            Self::Down => '↓',
+            Self::Flat => '→',
+        }
+    }
+}
+
+impl Default for TrendDirection {
+    fn default() -> Self {
+        Self::Flat
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ThroughputMeter {
+    pub runs_per_min: usize,
+    pub messages_per_min: usize,
+    pub errors_per_min: usize,
+    pub runs_trend: TrendDirection,
+    pub messages_trend: TrendDirection,
+    pub errors_trend: TrendDirection,
+    pub runs_sparkline: String,
 }
 
 /// Aggregate fleet snapshot powering the hero widgets.
@@ -40,6 +76,8 @@ pub struct FleetSnapshot {
 
     pub loops_with_errors: usize,
     pub total_error_lines: usize,
+
+    pub throughput: ThroughputMeter,
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +128,7 @@ pub fn build_fleet_snapshot(loops: &[LoopView], run_history: &[RunView]) -> Flee
         }
     }
 
+    snap.throughput = compute_throughput_meter(run_history);
     snap
 }
 
@@ -161,6 +200,29 @@ fn render_throughput(snap: &FleetSnapshot, width: usize) -> Vec<HeroLine> {
     lines.push(HeroLine {
         text: truncate(&gauge_line, content_w),
         role,
+    });
+
+    let meter = &snap.throughput;
+    let meter_line = format!(
+        "  rate r/m {}{}  m/m {}{}  e/m {}{}  {}",
+        meter.runs_per_min,
+        meter.runs_trend.glyph(),
+        meter.messages_per_min,
+        meter.messages_trend.glyph(),
+        meter.errors_per_min,
+        meter.errors_trend.glyph(),
+        meter.runs_sparkline
+    );
+    let meter_role = if meter.errors_per_min >= 2 {
+        TextRole::Danger
+    } else if meter.errors_per_min == 1 || meter.runs_trend == TrendDirection::Down {
+        TextRole::Warning
+    } else {
+        TextRole::Success
+    };
+    lines.push(HeroLine {
+        text: truncate(&meter_line, content_w),
+        role: meter_role,
     });
 
     lines
@@ -341,6 +403,111 @@ fn truncate(text: &str, max: usize) -> String {
     out
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct MinuteBucket {
+    runs: usize,
+    messages: usize,
+    errors: usize,
+}
+
+fn compute_throughput_meter(run_history: &[RunView]) -> ThroughputMeter {
+    let mut buckets: BTreeMap<String, MinuteBucket> = BTreeMap::new();
+    for run in run_history {
+        let Some(minute_key) = minute_bucket_key(&run.started_at) else {
+            continue;
+        };
+        let entry = buckets.entry(minute_key).or_default();
+        entry.runs = entry.runs.saturating_add(1);
+        entry.messages = entry.messages.saturating_add(run.output_lines.len());
+        if is_error_status(&run.status) {
+            entry.errors = entry.errors.saturating_add(1);
+        }
+    }
+
+    if buckets.is_empty() {
+        return ThroughputMeter::default();
+    }
+
+    let values = buckets.values().copied().collect::<Vec<_>>();
+    let current = values.last().copied().unwrap_or_default();
+    let previous = if values.len() >= 2 {
+        values[values.len() - 2]
+    } else {
+        MinuteBucket::default()
+    };
+    let run_history_slice = values
+        .iter()
+        .rev()
+        .take(8)
+        .copied()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+    let run_sparkline = sparkline(
+        &run_history_slice
+            .iter()
+            .map(|bucket| bucket.runs)
+            .collect::<Vec<_>>(),
+    );
+
+    ThroughputMeter {
+        runs_per_min: current.runs,
+        messages_per_min: current.messages,
+        errors_per_min: current.errors,
+        runs_trend: trend(current.runs, previous.runs),
+        messages_trend: trend(current.messages, previous.messages),
+        errors_trend: trend(current.errors, previous.errors),
+        runs_sparkline: run_sparkline,
+    }
+}
+
+fn minute_bucket_key(started_at: &str) -> Option<String> {
+    let trimmed = started_at.trim();
+    if trimmed.chars().count() < 16 {
+        return None;
+    }
+    let key = trimmed.chars().take(16).collect::<String>();
+    if !key.contains('T') || !key.contains(':') {
+        return None;
+    }
+    Some(key)
+}
+
+fn trend(current: usize, previous: usize) -> TrendDirection {
+    if current > previous {
+        TrendDirection::Up
+    } else if current < previous {
+        TrendDirection::Down
+    } else {
+        TrendDirection::Flat
+    }
+}
+
+fn is_error_status(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "error" | "failed" | "killed"
+    )
+}
+
+fn sparkline(values: &[usize]) -> String {
+    if values.is_empty() {
+        return "-".to_owned();
+    }
+    let max_value = values.iter().copied().max().unwrap_or(0);
+    if max_value == 0 {
+        return "·".repeat(values.len().max(1));
+    }
+    let blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let mut out = String::with_capacity(values.len());
+    for value in values {
+        let idx = ((*value * 7) / max_value).min(7);
+        out.push(blocks[idx]);
+    }
+    out
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -388,24 +555,37 @@ mod tests {
                 id: "run-1".to_owned(),
                 status: "success".to_owned(),
                 exit_code: Some(0),
+                started_at: "2026-02-13T12:00:01Z".to_owned(),
+                output_lines: vec!["ok".to_owned(), "done".to_owned()],
                 ..Default::default()
             },
             RunView {
                 id: "run-2".to_owned(),
                 status: "success".to_owned(),
                 exit_code: Some(0),
+                started_at: "2026-02-13T12:00:35Z".to_owned(),
+                output_lines: vec!["message".to_owned()],
                 ..Default::default()
             },
             RunView {
                 id: "run-3".to_owned(),
                 status: "error".to_owned(),
                 exit_code: Some(1),
+                started_at: "2026-02-13T12:01:04Z".to_owned(),
+                output_lines: vec![
+                    "error".to_owned(),
+                    "stack".to_owned(),
+                    "line".to_owned(),
+                    "tail".to_owned(),
+                ],
                 ..Default::default()
             },
             RunView {
                 id: "run-4".to_owned(),
                 status: "running".to_owned(),
                 exit_code: None,
+                started_at: "2026-02-13T12:01:41Z".to_owned(),
+                output_lines: vec!["a".to_owned(), "b".to_owned(), "c".to_owned()],
                 ..Default::default()
             },
         ]
@@ -427,6 +607,12 @@ mod tests {
         assert_eq!(snap.success_runs, 2);
         assert_eq!(snap.error_runs, 1);
         assert_eq!(snap.running_runs, 1);
+        assert_eq!(snap.throughput.runs_per_min, 2);
+        assert_eq!(snap.throughput.messages_per_min, 7);
+        assert_eq!(snap.throughput.errors_per_min, 1);
+        assert_eq!(snap.throughput.runs_trend, TrendDirection::Flat);
+        assert_eq!(snap.throughput.messages_trend, TrendDirection::Up);
+        assert_eq!(snap.throughput.errors_trend, TrendDirection::Up);
     }
 
     #[test]
@@ -513,6 +699,17 @@ mod tests {
         };
         let lines = render_throughput(&snap, 80);
         assert_eq!(lines[1].role, TextRole::Danger);
+    }
+
+    #[test]
+    fn throughput_rate_line_includes_meter_arrows_and_sparkline() {
+        let snap = build_fleet_snapshot(&sample_loops(), &sample_runs());
+        let lines = render_throughput(&snap, 120);
+        assert!(lines.len() >= 3);
+        assert!(lines[2].text.contains("r/m 2→"));
+        assert!(lines[2].text.contains("m/m 7↑"));
+        assert!(lines[2].text.contains("e/m 1↑"));
+        assert!(lines[2].text.contains('▁') || lines[2].text.contains('█'));
     }
 
     #[test]
