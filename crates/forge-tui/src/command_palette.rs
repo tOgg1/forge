@@ -25,6 +25,7 @@ pub enum PaletteActionId {
     SwitchMultiLogs,
     SwitchInbox,
     OpenFilter,
+    ExportCurrentView,
     NewLoopWizard,
     ResumeSelectedLoop,
     StopSelectedLoop,
@@ -117,6 +118,14 @@ pub fn default_action_registry() -> Vec<PaletteAction> {
             "Open Filter",
             "filter",
             &["search", "query", "status"],
+            None,
+            false,
+        ),
+        PaletteAction::new(
+            PaletteActionId::ExportCurrentView,
+            "Export Current View",
+            "view export",
+            &["share", "artifact", "snapshot", "html", "svg", "text"],
             None,
             false,
         ),
@@ -528,14 +537,15 @@ mod tests {
     #[test]
     fn default_registry_is_typed_and_stable() {
         let registry = default_action_registry();
-        assert_eq!(registry.len(), 15);
+        assert_eq!(registry.len(), 16);
         assert_eq!(registry[0].id, PaletteActionId::SwitchOverview);
         assert_eq!(registry[1].id, PaletteActionId::SwitchLogs);
         assert_eq!(registry[4].id, PaletteActionId::SwitchInbox);
-        assert_eq!(registry[6].id, PaletteActionId::NewLoopWizard);
-        assert_eq!(registry[12].id, PaletteActionId::ToggleZenMode);
-        assert_eq!(registry[13].id, PaletteActionId::CycleDensityMode);
-        assert_eq!(registry[14].id, PaletteActionId::ToggleFocusMode);
+        assert_eq!(registry[6].id, PaletteActionId::ExportCurrentView);
+        assert_eq!(registry[7].id, PaletteActionId::NewLoopWizard);
+        assert_eq!(registry[13].id, PaletteActionId::ToggleZenMode);
+        assert_eq!(registry[14].id, PaletteActionId::CycleDensityMode);
+        assert_eq!(registry[15].id, PaletteActionId::ToggleFocusMode);
     }
 
     #[test]
@@ -569,6 +579,18 @@ mod tests {
         palette.open(ctx, DEFAULT_SEARCH_BUDGET);
         palette.set_query("inbox".to_owned(), ctx, DEFAULT_SEARCH_BUDGET);
         assert_eq!(palette.matches()[0].id, PaletteActionId::SwitchInbox);
+    }
+
+    #[test]
+    fn export_query_resolves_export_action() {
+        let mut palette = CommandPalette::new_default();
+        let ctx = PaletteContext {
+            tab: MainTab::Overview,
+            has_selection: false,
+        };
+        palette.open(ctx, DEFAULT_SEARCH_BUDGET);
+        palette.set_query("export".to_owned(), ctx, DEFAULT_SEARCH_BUDGET);
+        assert_eq!(palette.matches()[0].id, PaletteActionId::ExportCurrentView);
     }
 
     #[test]

@@ -1,5 +1,5 @@
  Forge Loops  [Inbox]  2 threads, 2 unread  theme:default  density:comfortable  
- 1:Overview    2:Logs    3:Runs    4:Multi Logs   [5:Inbox]                     
+ 1:Overview    2:Logs    3:Runs    4:Multi Logs    5:Inbox                      
 Inbox filter:all  threads:2  unread:2  pending-ack:2  claims:3  conflicts:1     
 ╭─ Threads ────────────────────╮ ╭─ thread:thread-hotfix  msgs:1  participants:╮
 │▸ m-33 u:1 a:1 incident forge-│ │enter=read  a=ack  h=handoff  r=reply  o=next│
@@ -21,4 +21,4 @@ Inbox filter:all  threads:2  unread:2  pending-ack:2  claims:3  conflicts:1
 │! 2026-02-13T12:10:00Z forge-333 <- agent-x                                   │
 │  2026-02-13T12:09:00Z forge-9r4 <- agent-z                                   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-? help  q quit  ctrl+p palette  ctrl+f search  / filter  1-5 tabs  j/k sel  t/T 
+? help  q quit  ctrl+p palette  / filter  ctrl+f search  1-5 tabs  j/k sel  E ex

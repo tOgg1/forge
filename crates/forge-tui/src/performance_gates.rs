@@ -662,8 +662,14 @@ mod tests {
             },
             duration: format!("{}s", 5 + index),
             profile_name: "ops-prod".to_owned(),
+            profile_id: "p-prod".to_owned(),
             harness: "codex".to_owned(),
             auth_kind: "sso".to_owned(),
+            started_at: "2026-02-13T12:00:00Z".to_owned(),
+            output_lines: vec![
+                "run output line one".to_owned(),
+                "run output line two".to_owned(),
+            ],
         }
     }
 

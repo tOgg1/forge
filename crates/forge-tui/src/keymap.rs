@@ -145,6 +145,7 @@ pub enum KeyCommand {
     MoveSelectionNext,
     MoveSelectionPrev,
     OpenFilter,
+    ExportCurrentView,
     CycleTheme,
     CycleAccessibilityTheme,
     ToggleZen,
@@ -305,6 +306,12 @@ impl Keymap {
                 KeyChord::plain(Tok::Char('/')),
                 Cmd::OpenFilter,
                 "open filter",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Main),
+                KeyChord::plain(Tok::Char('E')),
+                Cmd::ExportCurrentView,
+                "export current view",
             ),
             bind(
                 Scope::Mode(ModeScope::Main),

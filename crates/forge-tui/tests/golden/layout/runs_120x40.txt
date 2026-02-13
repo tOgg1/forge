@@ -1,12 +1,10 @@
  Forge Loops  [Runs]  6/6 loops  theme:default  density:comfortable  focus:standard  follow:ON                          
- 1:Overview    2:Logs   [3:Runs]   4:Multi Logs    5:Inbox                                                              
+ 1:Overview    2:Logs    3:Runs    4:Multi Logs    5:Inbox                                                              
 ╭─ Run Timeline  loop:l02  layer:raw ──────────────────────────────────────────────────────────────────────────────────╮
-│▸|- run-0172 [ERR ] [exit:1] [4m12s] prod-sre                                                                         │
-│ |- run-0171 [OK  ] [exit:0] [3m09s] prod-sre                                                                         │
-│ `- run-0170 [STOP] [exit:137] [45s] prod-sre                                                                         │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
+│  ID         Status  Exit       Duration   Profile                                                                    │
+│▸ run-0172   [ERR ]  [exit:1]   [4m12s]    prod-sre                                                                   │
+│  run-0171   [OK  ]  [exit:0]   [3m09s]    prod-sre                                                                   │
+│  run-0170   [STOP]  [exit:137] [45s]      prod-sre                                                                   │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
@@ -31,10 +29,12 @@
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Selected run-0172 [ERR ] [exit:1] profile=prod-sre started= ────────────────────────────────────────────────────────╮
+╭─ Output: run-0172 [ERR ] ────────────────────────────────────────────────────────────────────────────────────────────╮
 │Run output is empty.                                                                                                  │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-? help  q quit  ctrl+p palette  ctrl+f search  / filter  1-5 tabs  j/k sel  t/T theme  M density  Z focus  F follow     
+? help  q quit  ctrl+p palette  / filter  ctrl+f search  1-5 tabs  j/k sel  E export                                    

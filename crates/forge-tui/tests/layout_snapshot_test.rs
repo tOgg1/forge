@@ -101,8 +101,11 @@ fn sample_runs() -> Vec<RunView> {
             exit_code: Some(1),
             duration: "4m12s".to_owned(),
             profile_name: "prod-sre".to_owned(),
+            profile_id: "profile-prod-sre".to_owned(),
             harness: "codex".to_owned(),
             auth_kind: "ssh".to_owned(),
+            started_at: String::new(),
+            output_lines: Vec::new(),
         },
         RunView {
             id: "run-0171".to_owned(),
@@ -110,8 +113,11 @@ fn sample_runs() -> Vec<RunView> {
             exit_code: Some(0),
             duration: "3m09s".to_owned(),
             profile_name: "prod-sre".to_owned(),
+            profile_id: "profile-prod-sre".to_owned(),
             harness: "codex".to_owned(),
             auth_kind: "ssh".to_owned(),
+            started_at: String::new(),
+            output_lines: Vec::new(),
         },
         RunView {
             id: "run-0170".to_owned(),
@@ -119,8 +125,11 @@ fn sample_runs() -> Vec<RunView> {
             exit_code: Some(137),
             duration: "45s".to_owned(),
             profile_name: "prod-sre".to_owned(),
+            profile_id: "profile-prod-sre".to_owned(),
             harness: "codex".to_owned(),
             auth_kind: "ssh".to_owned(),
+            started_at: String::new(),
+            output_lines: Vec::new(),
         },
     ]
 }

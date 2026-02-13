@@ -6,11 +6,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+use forge_cli::logs::{render_lines_for_layer, LogRenderLayer};
 use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent};
-use forge_ftui_adapter::render::{FrameSize, Rect, RenderFrame, TextRole};
+use forge_ftui_adapter::render::{CellStyle, FrameSize, Rect, RenderFrame, StyledSpan, TextRole};
 use forge_ftui_adapter::style::ThemeSpec;
 use forge_ftui_adapter::widgets::BorderStyle;
 
+use crate::adaptive_hints::{AdaptiveHintRanker, HintSpec};
 use crate::command_palette::{
     CommandPalette, PaletteActionId, PaletteContext, DEFAULT_SEARCH_BUDGET,
 };
@@ -163,6 +165,30 @@ impl FocusMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessibilityQuickMode {
+    Contrast,
+    Typography,
+    MotionReduced,
+}
+
+impl AccessibilityQuickMode {
+    const ORDER: [AccessibilityQuickMode; 3] = [
+        AccessibilityQuickMode::Contrast,
+        AccessibilityQuickMode::Typography,
+        AccessibilityQuickMode::MotionReduced,
+    ];
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Contrast => "contrast",
+            Self::Typography => "typography",
+            Self::MotionReduced => "motion-reduced",
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ActionType
 // ---------------------------------------------------------------------------
@@ -273,8 +299,13 @@ pub struct RunView {
     /// Preformatted duration (e.g. "12s", "1m0s", "running", "-").
     pub duration: String,
     pub profile_name: String,
+    pub profile_id: String,
     pub harness: String,
     pub auth_kind: String,
+    /// RFC3339 UTC timestamp when run started.
+    pub started_at: String,
+    /// Parsed output tail lines (newest window), used by Runs sticky output pane.
+    pub output_lines: Vec<String>,
 }
 
 /// Tail view of log content. Matches Go's `logTailView`.
@@ -380,6 +411,13 @@ pub struct ConfirmState {
     pub action: ActionType,
     pub loop_id: String,
     pub prompt: String,
+    pub selected: ConfirmRailSelection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmRailSelection {
+    Cancel,
+    Confirm,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -449,6 +487,7 @@ pub enum Command {
     None,
     Quit,
     Fetch,
+    ExportCurrentView,
     Batch(Vec<Command>),
     RunAction(ActionKind),
 }
@@ -670,6 +709,8 @@ pub struct App {
     focus_right: bool,
     density_mode: DensityMode,
     focus_mode: FocusMode,
+    accessibility_quick_mode: AccessibilityQuickMode,
+    reduced_motion: bool,
     layout_idx: usize,
     multi_page: usize,
     multi_compare_mode: bool,
@@ -705,9 +746,10 @@ pub struct App {
     // -- display --
     width: usize,
     height: usize,
-    color_capability: TerminalColorCapability,
+    pub(crate) color_capability: TerminalColorCapability,
     palette: Palette,
     keymap: Keymap,
+    hint_ranker: AdaptiveHintRanker,
     command_palette: CommandPalette,
     search_overlay: SearchOverlay,
     quitting: bool,
@@ -761,6 +803,8 @@ impl App {
             focus_right: false,
             density_mode: DensityMode::Comfortable,
             focus_mode: FocusMode::Standard,
+            accessibility_quick_mode: AccessibilityQuickMode::Contrast,
+            reduced_motion: false,
             layout_idx: layout_index_for(2, 2),
             multi_page: 0,
             multi_compare_mode: false,
@@ -794,6 +838,7 @@ impl App {
             color_capability: capability,
             palette,
             keymap: Keymap::default_forge_tui(),
+            hint_ranker: AdaptiveHintRanker::default(),
             command_palette: CommandPalette::new_default(),
             search_overlay: SearchOverlay::new(),
             quitting: false,
@@ -888,6 +933,16 @@ impl App {
     #[must_use]
     pub fn density_mode(&self) -> DensityMode {
         self.density_mode
+    }
+
+    #[must_use]
+    pub fn accessibility_quick_mode(&self) -> AccessibilityQuickMode {
+        self.accessibility_quick_mode
+    }
+
+    #[must_use]
+    pub fn reduced_motion(&self) -> bool {
+        self.reduced_motion
     }
 
     #[must_use]
@@ -1563,6 +1618,77 @@ impl App {
         );
     }
 
+    fn supports_split_focus_graph(&self) -> bool {
+        matches!(
+            self.tab,
+            MainTab::Overview | MainTab::Logs | MainTab::Runs | MainTab::MultiLogs | MainTab::Inbox
+        )
+    }
+
+    fn traverse_focus_graph(&mut self, delta: i32) -> bool {
+        if !self.supports_split_focus_graph() {
+            return false;
+        }
+        let nodes = [false, true];
+        let current = if self.focus_right { 1i32 } else { 0i32 };
+        let next = (current + delta).rem_euclid(nodes.len() as i32) as usize;
+        self.focus_right = nodes[next];
+        if self.tab == MainTab::MultiLogs {
+            self.clamp_multi_page();
+        }
+        self.set_status(
+            StatusKind::Info,
+            if self.focus_right {
+                "Focus: right pane"
+            } else {
+                "Focus: left pane"
+            },
+        );
+        true
+    }
+
+    pub fn cycle_accessibility_quick_mode(&mut self) {
+        let mut idx = 0usize;
+        for (i, mode) in AccessibilityQuickMode::ORDER.iter().enumerate() {
+            if *mode == self.accessibility_quick_mode {
+                idx = i;
+                break;
+            }
+        }
+        let next = AccessibilityQuickMode::ORDER[(idx + 1) % AccessibilityQuickMode::ORDER.len()];
+        self.apply_accessibility_quick_mode(next);
+    }
+
+    fn apply_accessibility_quick_mode(&mut self, mode: AccessibilityQuickMode) {
+        let (palette_name, density_mode, reduced_motion) = match mode {
+            AccessibilityQuickMode::Contrast => ("high-contrast", DensityMode::Comfortable, false),
+            AccessibilityQuickMode::Typography => ("colorblind-safe", DensityMode::Compact, false),
+            AccessibilityQuickMode::MotionReduced => ("low-light", DensityMode::Comfortable, true),
+        };
+
+        self.palette = resolve_palette_for_capability(palette_name, self.color_capability);
+        self.density_mode = density_mode;
+        self.reduced_motion = reduced_motion;
+        self.accessibility_quick_mode = mode;
+        if self.tab == MainTab::MultiLogs {
+            self.clamp_multi_page();
+        }
+        self.set_status(
+            StatusKind::Info,
+            &format!(
+                "Accessibility mode: {} (theme:{} density:{} motion:{})",
+                mode.label(),
+                self.palette.name,
+                self.density_mode.label(),
+                if self.reduced_motion {
+                    "reduced"
+                } else {
+                    "full"
+                }
+            ),
+        );
+    }
+
     #[allow(dead_code)]
     fn toggle_zen_mode(&mut self) {
         self.focus_right = !self.focus_right;
@@ -2106,6 +2232,7 @@ impl App {
             action,
             loop_id: loop_id.to_owned(),
             prompt,
+            selected: ConfirmRailSelection::Cancel,
         });
         self.mode = UiMode::Confirm;
         Command::None
@@ -2125,9 +2252,13 @@ impl App {
         }
 
         if let InputEvent::Key(key_event) = event {
-            if matches!(self.resolve_key_command(key_event), Some(KeyCommand::Quit)) {
+            let resolved = self.resolve_key_command(key_event);
+            if matches!(resolved, Some(KeyCommand::Quit)) {
                 self.quitting = true;
                 return Command::Quit;
+            }
+            if let Some(command) = resolved {
+                self.hint_ranker.record(command);
             }
 
             match self.mode {
@@ -2205,6 +2336,10 @@ impl App {
                 self.cycle_accessibility_theme();
                 Command::None
             }
+            Key::Char('A') => {
+                self.cycle_accessibility_quick_mode();
+                Command::Fetch
+            }
             Key::Char('z') => {
                 self.toggle_zen_mode();
                 Command::Fetch
@@ -2230,6 +2365,35 @@ impl App {
                 self.filter_focus = FilterFocus::Text;
                 Command::None
             }
+            Key::Tab if key.modifiers.shift => {
+                if self.traverse_focus_graph(-1) {
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Tab => {
+                if self.traverse_focus_graph(1) {
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Left => {
+                if self.traverse_focus_graph(-1) {
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Right => {
+                if self.traverse_focus_graph(1) {
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('E') => Command::ExportCurrentView,
             Key::Char('j') | Key::Down => {
                 if self.tab == MainTab::Inbox {
                     self.move_inbox_selection(1);
@@ -2552,6 +2716,7 @@ impl App {
                 self.filter_focus = FilterFocus::Text;
                 Command::None
             }
+            PaletteActionId::ExportCurrentView => Command::ExportCurrentView,
             PaletteActionId::NewLoopWizard => {
                 self.mode = UiMode::Wizard;
                 self.wizard = WizardState::with_defaults(
@@ -2769,8 +2934,37 @@ impl App {
             return Command::None;
         }
 
+        let set_confirm_selection = |confirm: &mut ConfirmState, delta: i32| {
+            let options = [ConfirmRailSelection::Cancel, ConfirmRailSelection::Confirm];
+            let current = match confirm.selected {
+                ConfirmRailSelection::Cancel => 0i32,
+                ConfirmRailSelection::Confirm => 1i32,
+            };
+            let next = (current + delta).rem_euclid(options.len() as i32) as usize;
+            confirm.selected = options[next];
+        };
+
+        let submit_confirm = |confirm: ConfirmState| -> Command {
+            let force =
+                confirm.action == ActionType::Delete && confirm.prompt.contains("Force delete");
+            let action = match confirm.action {
+                ActionType::Stop => ActionKind::Stop {
+                    loop_id: confirm.loop_id,
+                },
+                ActionType::Kill => ActionKind::Kill {
+                    loop_id: confirm.loop_id,
+                },
+                ActionType::Delete => ActionKind::Delete {
+                    loop_id: confirm.loop_id,
+                    force,
+                },
+                _ => return Command::None,
+            };
+            Command::RunAction(action)
+        };
+
         match key.key {
-            Key::Char('q') | Key::Escape | Key::Char('n') | Key::Char('N') | Key::Enter => {
+            Key::Char('q') | Key::Escape | Key::Char('n') | Key::Char('N') => {
                 self.mode = UiMode::Main;
                 self.confirm = None;
                 self.set_status(StatusKind::Info, "Action cancelled");
@@ -2781,26 +2975,41 @@ impl App {
                 self.mode = UiMode::Help;
                 Command::None
             }
+            Key::Tab | Key::Right => {
+                if let Some(confirm) = self.confirm.as_mut() {
+                    if key.key == Key::Tab && key.modifiers.shift {
+                        set_confirm_selection(confirm, -1);
+                    } else {
+                        set_confirm_selection(confirm, 1);
+                    }
+                }
+                Command::None
+            }
+            Key::Left => {
+                if let Some(confirm) = self.confirm.as_mut() {
+                    set_confirm_selection(confirm, -1);
+                }
+                Command::None
+            }
+            Key::Enter => {
+                let confirm = self.confirm.take();
+                self.mode = UiMode::Main;
+                if let Some(confirm) = confirm {
+                    if confirm.selected == ConfirmRailSelection::Confirm {
+                        submit_confirm(confirm)
+                    } else {
+                        self.set_status(StatusKind::Info, "Action cancelled");
+                        Command::None
+                    }
+                } else {
+                    Command::None
+                }
+            }
             Key::Char('y') | Key::Char('Y') => {
                 let confirm = self.confirm.take();
                 self.mode = UiMode::Main;
                 if let Some(confirm) = confirm {
-                    let force = confirm.action == ActionType::Delete
-                        && confirm.prompt.contains("Force delete");
-                    let action = match confirm.action {
-                        ActionType::Stop => ActionKind::Stop {
-                            loop_id: confirm.loop_id,
-                        },
-                        ActionType::Kill => ActionKind::Kill {
-                            loop_id: confirm.loop_id,
-                        },
-                        ActionType::Delete => ActionKind::Delete {
-                            loop_id: confirm.loop_id,
-                            force,
-                        },
-                        _ => return Command::None,
-                    };
-                    Command::RunAction(action)
+                    submit_confirm(confirm)
                 } else {
                     Command::None
                 }
@@ -3114,11 +3323,11 @@ impl App {
         let header = self.render_header_text(width);
         frame.draw_styled_text(0, 0, &header, pal.accent, pal.panel, true);
 
-        // Tab bar with styled active tab.
+        // Tab rail with styled active/inactive badge spans.
         let content_start = if self.focus_mode == FocusMode::DeepDebug {
             1
         } else {
-            self.render_styled_tab_bar(&mut frame, width, &pal);
+            self.render_tab_rail(&mut frame, width, &pal);
             2
         };
         let footer_lines = if self.status_text.is_empty() { 1 } else { 2 };
@@ -3171,7 +3380,45 @@ impl App {
                     let prompt = &confirm.prompt;
                     let truncated = trim_to_width(prompt, width);
                     frame.draw_text(0, content_start, &truncated, TextRole::Danger);
-                    frame.draw_text(0, content_start + 1, "  y/n", TextRole::Muted);
+                    let cancel_selected = confirm.selected == ConfirmRailSelection::Cancel;
+                    let confirm_selected = confirm.selected == ConfirmRailSelection::Confirm;
+                    let cancel_label = if cancel_selected {
+                        "[Cancel]"
+                    } else {
+                        " Cancel "
+                    };
+                    let confirm_label = if confirm_selected {
+                        "[Confirm]"
+                    } else {
+                        " Confirm "
+                    };
+                    frame.draw_text(0, content_start + 1, "Action rail:", TextRole::Muted);
+                    frame.draw_text(
+                        13,
+                        content_start + 1,
+                        cancel_label,
+                        if cancel_selected {
+                            TextRole::Accent
+                        } else {
+                            TextRole::Muted
+                        },
+                    );
+                    frame.draw_text(
+                        23,
+                        content_start + 1,
+                        confirm_label,
+                        if confirm_selected {
+                            TextRole::Danger
+                        } else {
+                            TextRole::Muted
+                        },
+                    );
+                    frame.draw_text(
+                        0,
+                        content_start + 2,
+                        "tab/left/right switch  enter select  y confirm  n cancel",
+                        TextRole::Muted,
+                    );
                 }
             }
             UiMode::Filter => {
@@ -3225,6 +3472,10 @@ impl App {
                         content_rect,
                         self.focus_right,
                     );
+                } else if self.mode == UiMode::Main && self.tab == MainTab::Logs {
+                    let logs_frame =
+                        self.render_logs_pane(width, content_height, &pal, self.focus_right);
+                    blit_frame(&mut frame, &logs_frame, 0, content_start);
                 } else if self.mode == UiMode::Main && self.tab == MainTab::Runs {
                     let runs_state = crate::runs_tab::RunsTabState {
                         runs: self
@@ -3235,20 +3486,20 @@ impl App {
                                 status: rv.status.clone(),
                                 exit_code: rv.exit_code,
                                 profile_name: rv.profile_name.clone(),
-                                profile_id: String::new(),
+                                profile_id: rv.profile_id.clone(),
                                 harness: rv.harness.clone(),
-                                started_at: String::new(),
+                                started_at: rv.started_at.clone(),
                                 duration_display: rv.duration.clone(),
-                                output_lines: Vec::new(),
+                                output_lines: rv.output_lines.clone(),
                             })
                             .collect(),
                         selected_run: self.selected_run,
-                        layer_label: "raw".to_owned(),
+                        layer_label: self.log_layer.label().to_owned(),
                         loop_display_id: self
                             .selected_view()
                             .map(|lv| crate::filter::loop_display_id(&lv.id, &lv.short_id))
                             .unwrap_or_default(),
-                        log_scroll: 0,
+                        log_scroll: self.log_scroll,
                     };
                     let runs_frame = crate::runs_tab::render_runs_paneled(
                         &runs_state,
@@ -3304,14 +3555,8 @@ impl App {
 
         // Footer hint line with panel background stripe.
         let footer_y = height.saturating_sub(1);
-        let hint = if self.focus_mode == FocusMode::DeepDebug {
-            "deep focus  Z toggle  M density  z zen  i dismiss-hints  I recall-hints  q quit  ? help"
-        } else if self.density_mode == DensityMode::Compact {
-            "? q ctrl+p / 1-5 j/k z Z M F i I"
-        } else {
-            "? help  q quit  ctrl+p palette  ctrl+f search  / filter  1-5 tabs  j/k sel  t/T theme  M density  Z focus  F follow"
-        };
-        let truncated = trim_to_width(hint, width);
+        let hint = self.footer_hint_line();
+        let truncated = trim_to_width(&hint, width);
         // Footer bar: fill with panel bg, then draw text
         frame.fill_bg(
             Rect {
@@ -3325,6 +3570,148 @@ impl App {
         frame.draw_styled_text(0, footer_y, &truncated, pal.text_muted, pal.panel, false);
 
         frame
+    }
+
+    fn footer_hint_line(&self) -> String {
+        let max_hints = if self.focus_mode == FocusMode::DeepDebug {
+            6
+        } else if self.density_mode == DensityMode::Compact {
+            7
+        } else {
+            8
+        };
+        let ranked = self.hint_ranker.rank(&self.footer_hint_specs(), max_hints);
+        ranked
+            .into_iter()
+            .map(HintSpec::render)
+            .collect::<Vec<String>>()
+            .join("  ")
+    }
+
+    fn footer_hint_specs(&self) -> Vec<HintSpec> {
+        let mut hints = if self.focus_mode == FocusMode::DeepDebug {
+            vec![
+                HintSpec::new("?", "help", 10, Some(KeyCommand::ToggleHelp)),
+                HintSpec::new("q", "quit", 9, Some(KeyCommand::Quit)),
+                HintSpec::new("Z", "toggle focus", 7, None),
+                HintSpec::new("M", "density", 6, None),
+                HintSpec::new("z", "zen", 6, Some(KeyCommand::ToggleZen)),
+                HintSpec::new("A", "a11y-mode", 6, None),
+                HintSpec::new("E", "export", 6, Some(KeyCommand::ExportCurrentView)),
+                HintSpec::new("i", "dismiss-hints", 4, None),
+                HintSpec::new("I", "recall-hints", 4, None),
+                HintSpec::new("ctrl+p", "palette", 5, Some(KeyCommand::OpenPalette)),
+            ]
+        } else if self.density_mode == DensityMode::Compact {
+            vec![
+                HintSpec::new("?", "help", 10, Some(KeyCommand::ToggleHelp)),
+                HintSpec::new("q", "quit", 9, Some(KeyCommand::Quit)),
+                HintSpec::new("ctrl+p", "palette", 8, Some(KeyCommand::OpenPalette)),
+                HintSpec::new("/", "filter", 8, Some(KeyCommand::OpenFilter)),
+                HintSpec::new("1-5", "tabs", 7, Some(KeyCommand::SwitchTabOverview)),
+                HintSpec::new("j/k", "sel", 7, Some(KeyCommand::MoveSelectionNext)),
+                HintSpec::new("ctrl+f", "search", 6, Some(KeyCommand::OpenSearch)),
+                HintSpec::new("z", "zen", 6, Some(KeyCommand::ToggleZen)),
+                HintSpec::new("A", "a11y-mode", 6, None),
+                HintSpec::new("E", "export", 6, Some(KeyCommand::ExportCurrentView)),
+                HintSpec::new("F", "follow", 5, Some(KeyCommand::ToggleFollow)),
+                HintSpec::new("M", "density", 5, None),
+                HintSpec::new("Z", "focus", 5, None),
+            ]
+        } else {
+            vec![
+                HintSpec::new("?", "help", 10, Some(KeyCommand::ToggleHelp)),
+                HintSpec::new("q", "quit", 9, Some(KeyCommand::Quit)),
+                HintSpec::new("ctrl+p", "palette", 9, Some(KeyCommand::OpenPalette)),
+                HintSpec::new("/", "filter", 8, Some(KeyCommand::OpenFilter)),
+                HintSpec::new("ctrl+f", "search", 8, Some(KeyCommand::OpenSearch)),
+                HintSpec::new("1-5", "tabs", 8, Some(KeyCommand::SwitchTabOverview)),
+                HintSpec::new("j/k", "sel", 7, Some(KeyCommand::MoveSelectionNext)),
+                HintSpec::new("E", "export", 7, Some(KeyCommand::ExportCurrentView)),
+                HintSpec::new("t/T", "theme", 6, Some(KeyCommand::CycleTheme)),
+                HintSpec::new("A", "a11y-mode", 6, None),
+                HintSpec::new("M", "density", 6, None),
+                HintSpec::new("Z", "focus", 6, None),
+                HintSpec::new("F", "follow", 5, Some(KeyCommand::ToggleFollow)),
+            ]
+        };
+        match self.tab {
+            MainTab::Logs => {
+                hints.push(HintSpec::new(
+                    "v",
+                    "source",
+                    6,
+                    Some(KeyCommand::LogsCycleSource),
+                ));
+                hints.push(HintSpec::new(
+                    "x",
+                    "layer",
+                    6,
+                    Some(KeyCommand::CycleLogLayer),
+                ));
+                hints.push(HintSpec::new(
+                    "u/d",
+                    "scroll",
+                    5,
+                    Some(KeyCommand::ScrollLogsDown),
+                ));
+            }
+            MainTab::Runs => {
+                hints.push(HintSpec::new(
+                    "x",
+                    "layer",
+                    6,
+                    Some(KeyCommand::CycleLogLayer),
+                ));
+                hints.push(HintSpec::new(
+                    ",/.",
+                    "run",
+                    6,
+                    Some(KeyCommand::RunSelectionNext),
+                ));
+                hints.push(HintSpec::new(
+                    "u/d",
+                    "scroll",
+                    5,
+                    Some(KeyCommand::ScrollLogsDown),
+                ));
+            }
+            MainTab::MultiLogs => {
+                hints.push(HintSpec::new(
+                    "m",
+                    "layout",
+                    7,
+                    Some(KeyCommand::MultiCycleLayout),
+                ));
+                hints.push(HintSpec::new(
+                    "g/G",
+                    "pages",
+                    6,
+                    Some(KeyCommand::MultiPageNext),
+                ));
+                hints.push(HintSpec::new(
+                    ",/.",
+                    "page",
+                    6,
+                    Some(KeyCommand::MultiPageNext),
+                ));
+                hints.push(HintSpec::new(
+                    "x",
+                    "layer",
+                    6,
+                    Some(KeyCommand::CycleLogLayer),
+                ));
+                hints.push(HintSpec::new("C", "compare", 7, None));
+            }
+            MainTab::Inbox => {
+                hints.push(HintSpec::new("f", "inbox-filter", 7, None));
+                hints.push(HintSpec::new("a", "ack", 7, None));
+                hints.push(HintSpec::new("h", "handoff", 7, None));
+                hints.push(HintSpec::new("o/O", "claim", 6, None));
+            }
+            MainTab::Overview => {}
+        }
+        hints
     }
 
     fn render_header_text(&self, width: usize) -> String {
@@ -3394,9 +3781,13 @@ impl App {
         trim_to_width(&bar, width)
     }
 
-    /// Render tab bar with colored active-tab indicator.
-    fn render_styled_tab_bar(&self, frame: &mut RenderFrame, width: usize, pal: &ResolvedPalette) {
-        // Fill row with panel_alt background
+    /// Render tab rail into the frame at row 1 using styled badge spans.
+    ///
+    /// Each tab is a styled badge: active tabs get accent/bold styling on the
+    /// panel background, inactive tabs get muted styling on panel_alt.  A
+    /// two-space gap separates adjacent tabs.
+    fn render_tab_rail(&self, frame: &mut RenderFrame, width: usize, pal: &ResolvedPalette) {
+        // Fill row with panel_alt background.
         frame.fill_bg(
             Rect {
                 x: 0,
@@ -3407,32 +3798,54 @@ impl App {
             pal.panel_alt,
         );
 
-        let mut col = 0usize;
+        let active_style = CellStyle {
+            fg: pal.accent,
+            bg: pal.panel,
+            bold: true,
+            dim: false,
+            underline: false,
+        };
+        let inactive_style = CellStyle {
+            fg: pal.text_muted,
+            bg: pal.panel_alt,
+            bold: false,
+            dim: false,
+            underline: false,
+        };
+        let gap_style = CellStyle {
+            fg: pal.panel_alt,
+            bg: pal.panel_alt,
+            bold: false,
+            dim: false,
+            underline: false,
+        };
+
+        let mut spans: Vec<StyledSpan<'_>> = Vec::with_capacity(MainTab::ORDER.len() * 2);
+        let mut labels: Vec<String> = Vec::with_capacity(MainTab::ORDER.len());
+
         for (i, t) in MainTab::ORDER.iter().enumerate() {
             let label = if self.density_mode == DensityMode::Compact {
                 t.short_label()
             } else {
                 t.label()
             };
-            let is_active = *t == self.tab;
-            let text = if is_active {
-                format!("[{}:{}]", i + 1, label)
-            } else {
-                format!(" {}:{} ", i + 1, label)
-            };
-            let fg = if is_active {
-                pal.accent
-            } else {
-                pal.text_muted
-            };
-            let bg = if is_active { pal.panel } else { pal.panel_alt };
-            frame.draw_styled_text(col, 1, &text, fg, bg, is_active);
-            col += text.len();
-            if col < width {
-                // Gap between tabs
-                col += 2;
-            }
+            labels.push(format!(" {}:{} ", i + 1, label));
         }
+
+        for (i, t) in MainTab::ORDER.iter().enumerate() {
+            if i > 0 {
+                spans.push(StyledSpan::cell("  ", gap_style));
+            }
+            let is_active = *t == self.tab;
+            let style = if is_active {
+                active_style
+            } else {
+                inactive_style
+            };
+            spans.push(StyledSpan::cell(&labels[i], style));
+        }
+
+        frame.draw_spans(0, 1, &spans);
     }
 
     fn render_wizard_lines(&self, width: usize) -> Vec<String> {
@@ -3526,6 +3939,122 @@ impl App {
         } else {
             format!("{label}: {display}")
         }
+    }
+
+    fn render_logs_pane(
+        &self,
+        width: usize,
+        height: usize,
+        pal: &ResolvedPalette,
+        focus_right: bool,
+    ) -> RenderFrame {
+        let theme = crate::theme_for_capability(self.color_capability);
+        let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
+        if width < 4 || height < 4 {
+            return frame;
+        }
+
+        frame.fill_bg(
+            Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
+            pal.background,
+        );
+
+        let border_role = if focus_right {
+            TextRole::Accent
+        } else {
+            TextRole::Muted
+        };
+        let title = if let Some(selected) = self.selected_view() {
+            format!(
+                "Logs · {}:{}",
+                crate::filter::loop_display_id(&selected.id, &selected.short_id),
+                selected.name
+            )
+        } else {
+            "Logs".to_owned()
+        };
+        let inner = frame.draw_panel(
+            Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
+            &title,
+            BorderStyle::Rounded,
+            frame.color_for_role(border_role),
+            pal.panel,
+        );
+        if inner.width == 0 || inner.height == 0 {
+            return frame;
+        }
+
+        let rendered_lines = render_lines_for_layer(
+            &self.selected_log.lines,
+            map_log_render_layer(self.log_layer),
+            true,
+        );
+
+        let info_line = format!(
+            "source:{}  layer:{}  follow:{}  scroll:{}  lines:{}",
+            self.log_source.label(),
+            self.log_layer.label(),
+            if self.follow_mode { "on" } else { "off" },
+            self.log_scroll,
+            rendered_lines.len()
+        );
+        frame.draw_styled_text(
+            inner.x,
+            inner.y,
+            &trim_to_width(&info_line, inner.width),
+            pal.text_muted,
+            pal.panel,
+            false,
+        );
+
+        let available = inner.height.saturating_sub(1);
+        if available == 0 {
+            return frame;
+        }
+
+        if rendered_lines.is_empty() {
+            let message = if self.selected_log.message.trim().is_empty() {
+                "No log content yet"
+            } else {
+                self.selected_log.message.trim()
+            };
+            frame.draw_styled_text(
+                inner.x,
+                inner.y + 1,
+                &trim_to_width(message, inner.width),
+                pal.text_muted,
+                pal.panel,
+                false,
+            );
+            return frame;
+        }
+
+        let (start, end, _) =
+            crate::multi_logs::log_window_bounds(rendered_lines.len(), available, self.log_scroll);
+        for (offset, line) in rendered_lines[start..end].iter().enumerate() {
+            let role = if line.starts_with("! [ANOM:") {
+                TextRole::Danger
+            } else {
+                TextRole::Primary
+            };
+            frame.draw_text(
+                inner.x,
+                inner.y + 1 + offset,
+                &trim_to_width(line, inner.width),
+                role,
+            );
+        }
+        frame
     }
 
     fn render_inbox_pane(
@@ -3909,6 +4438,7 @@ impl App {
             "  D         delete selected loop".to_owned(),
             "  r         resume selected loop".to_owned(),
             "  n         new loop wizard".to_owned(),
+            "  E         export current view as text/html/svg".to_owned(),
             "".to_owned(),
             "Command Palette:".to_owned(),
             "  Ctrl+P    open command palette".to_owned(),
@@ -3945,6 +4475,9 @@ impl App {
             "  q         quit".to_owned(),
             "  t         cycle all themes".to_owned(),
             "  T         quick cycle accessibility presets".to_owned(),
+            "  tab/shift+tab focus next/prev pane (wrap)".to_owned(),
+            "  left/right   directional pane focus traversal".to_owned(),
+            "  A         cycle accessibility quick modes (contrast/typography/motion)".to_owned(),
             "  z         zen mode (focus right pane)".to_owned(),
             "  Z         deep focus mode (distraction-minimized)".to_owned(),
             "  M         cycle density (comfortable/compact)".to_owned(),
@@ -4109,6 +4642,16 @@ fn extract_prefixed_token(text: &str, prefix: &str) -> Option<String> {
 
 fn format_mail_id(id: i64) -> String {
     format!("m-{id}")
+}
+
+fn map_log_render_layer(layer: LogLayer) -> LogRenderLayer {
+    match layer {
+        LogLayer::Raw => LogRenderLayer::Raw,
+        LogLayer::Events => LogRenderLayer::Events,
+        LogLayer::Errors => LogRenderLayer::Errors,
+        LogLayer::Tools => LogRenderLayer::Tools,
+        LogLayer::Diff => LogRenderLayer::Diff,
+    }
 }
 
 fn trim_to_width(value: &str, width: usize) -> String {
@@ -4388,6 +4931,47 @@ mod tests {
     }
 
     #[test]
+    fn tab_and_shift_tab_wrap_focus_graph_in_main_mode() {
+        let mut app = app_with_loops(3);
+        app.update(key(Key::Char('2')));
+        assert!(!app.focus_right());
+
+        let cmd = app.update(key(Key::Tab));
+        assert_eq!(cmd, Command::Fetch);
+        assert!(app.focus_right());
+
+        let cmd = app.update(key(Key::Tab));
+        assert_eq!(cmd, Command::Fetch);
+        assert!(!app.focus_right());
+
+        let cmd = app.update(InputEvent::Key(KeyEvent {
+            key: Key::Tab,
+            modifiers: Modifiers {
+                shift: true,
+                ctrl: false,
+                alt: false,
+            },
+        }));
+        assert_eq!(cmd, Command::Fetch);
+        assert!(app.focus_right());
+    }
+
+    #[test]
+    fn left_right_wrap_focus_graph_without_dead_end() {
+        let mut app = app_with_loops(3);
+        app.update(key(Key::Char('5')));
+        assert!(!app.focus_right());
+
+        let cmd = app.update(key(Key::Left));
+        assert_eq!(cmd, Command::Fetch);
+        assert!(app.focus_right());
+
+        let cmd = app.update(key(Key::Right));
+        assert_eq!(cmd, Command::Fetch);
+        assert!(!app.focus_right());
+    }
+
+    #[test]
     fn inbox_filter_cycles_and_clamps_selection() {
         let mut app = App::new("default", 12);
         app.set_inbox_messages(sample_inbox_messages());
@@ -4630,6 +5214,18 @@ mod tests {
     }
 
     #[test]
+    fn palette_enter_executes_export_action() {
+        let mut app = App::new("default", 12);
+        app.update(ctrl_key('p'));
+        for ch in ['e', 'x', 'p'] {
+            app.update(key(Key::Char(ch)));
+        }
+        let cmd = app.update(key(Key::Enter));
+        assert_eq!(cmd, Command::ExportCurrentView);
+        assert_eq!(app.mode(), UiMode::Main);
+    }
+
+    #[test]
     fn palette_enter_executes_selected_loop_action() {
         let mut app = app_with_loops(2);
         app.update(ctrl_key('p'));
@@ -4651,6 +5247,13 @@ mod tests {
         assert_eq!(app.mode(), UiMode::Help);
         app.update(key(Key::Escape));
         assert_eq!(app.mode(), UiMode::Palette);
+    }
+
+    #[test]
+    fn export_key_dispatches_export_command() {
+        let mut app = App::new("default", 12);
+        let cmd = app.update(key(Key::Char('E')));
+        assert_eq!(cmd, Command::ExportCurrentView);
     }
 
     // -- selection --
@@ -4797,6 +5400,42 @@ mod tests {
     }
 
     #[test]
+    fn shift_a_cycles_accessibility_quick_modes() {
+        let mut app = App::new("default", 12);
+        assert_eq!(
+            app.accessibility_quick_mode(),
+            AccessibilityQuickMode::Contrast
+        );
+        assert!(!app.reduced_motion());
+
+        app.update(key(Key::Char('A')));
+        assert_eq!(
+            app.accessibility_quick_mode(),
+            AccessibilityQuickMode::Typography
+        );
+        assert_eq!(app.palette().name, "colorblind-safe");
+        assert_eq!(app.density_mode(), DensityMode::Compact);
+        assert!(!app.reduced_motion());
+
+        app.update(key(Key::Char('A')));
+        assert_eq!(
+            app.accessibility_quick_mode(),
+            AccessibilityQuickMode::MotionReduced
+        );
+        assert_eq!(app.palette().name, "low-light");
+        assert_eq!(app.density_mode(), DensityMode::Comfortable);
+        assert!(app.reduced_motion());
+
+        app.update(key(Key::Char('A')));
+        assert_eq!(
+            app.accessibility_quick_mode(),
+            AccessibilityQuickMode::Contrast
+        );
+        assert_eq!(app.palette().name, "high-contrast");
+        assert!(!app.reduced_motion());
+    }
+
+    #[test]
     fn ansi16_capability_forces_high_contrast_palette() {
         let app = App::new_with_capability("ocean", TerminalColorCapability::Ansi16, 12);
         assert_eq!(app.palette().name, "high-contrast");
@@ -4833,13 +5472,13 @@ mod tests {
             height: 36,
         }));
         let baseline = app.render();
-        assert!(baseline.row_text(1).contains("[1:Overview]"));
+        assert!(baseline.row_text(1).contains("1:Overview"));
 
         app.update(key(Key::Char('Z')));
         assert_eq!(app.focus_mode(), FocusMode::DeepDebug);
         assert!(app.focus_right());
         let focused = app.render();
-        assert!(!focused.row_text(1).contains("[1:Overview]"));
+        assert!(!focused.row_text(1).contains("1:Overview"));
         assert!(focused.row_text(0).contains("focus:deep"));
 
         app.update(key(Key::Char('Z')));
@@ -4859,6 +5498,76 @@ mod tests {
         app.update(key(Key::Char('M')));
         let compact = app.multi_page_size();
         assert!(compact >= comfortable);
+    }
+
+    #[test]
+    fn footer_hints_promote_recent_follow_action() {
+        let mut app = app_with_loops(3);
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 200,
+            height: 30,
+        }));
+        app.update(key(Key::Char('2')));
+        let baseline = app.footer_hint_line();
+        assert!(
+            !baseline.contains("F follow"),
+            "follow hint should be omitted before recency boost: {baseline}"
+        );
+
+        app.update(key(Key::Char('F')));
+        let ranked = app.footer_hint_line();
+        let ranked_follow = match ranked.find("F follow") {
+            Some(idx) => idx,
+            None => panic!("missing follow hint after usage: {ranked}"),
+        };
+        let ranked_palette = match ranked.find("ctrl+p palette") {
+            Some(idx) => idx,
+            None => panic!("missing palette hint after usage: {ranked}"),
+        };
+        assert!(ranked_follow < ranked_palette, "ranked hints: {ranked}");
+    }
+
+    #[test]
+    fn footer_hints_follow_latest_recency_signal() {
+        let mut app = app_with_loops(3);
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 200,
+            height: 30,
+        }));
+        app.update(key(Key::Char('2')));
+        app.update(key(Key::Char('F')));
+        app.update(key(Key::Char('/')));
+        app.update(key(Key::Escape));
+        let ranked = app.footer_hint_line();
+        let filter_idx = match ranked.find("/ filter") {
+            Some(idx) => idx,
+            None => panic!("missing filter hint: {ranked}"),
+        };
+        let follow_idx = match ranked.find("F follow") {
+            Some(idx) => idx,
+            None => panic!("missing follow hint: {ranked}"),
+        };
+        assert!(filter_idx < follow_idx, "ranked hints: {ranked}");
+    }
+
+    #[test]
+    fn footer_hints_never_exceed_eight_items() {
+        let mut app = app_with_loops(4);
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 200,
+            height: 30,
+        }));
+
+        let normal = app.footer_hint_line();
+        assert!(normal.split("  ").count() <= 8, "normal hints: {normal}");
+
+        app.update(key(Key::Char('M')));
+        let compact = app.footer_hint_line();
+        assert!(compact.split("  ").count() <= 8, "compact hints: {compact}");
+
+        app.update(key(Key::Char('Z')));
+        let deep = app.footer_hint_line();
+        assert!(deep.split("  ").count() <= 8, "deep hints: {deep}");
     }
 
     // -- log source/layer cycling --
@@ -4899,6 +5608,27 @@ mod tests {
         assert_eq!(app.log_scroll(), 0);
         app.update(key(Key::Char('u')));
         assert!(app.log_scroll() > 0);
+    }
+
+    #[test]
+    fn logs_tab_renders_real_logs_pane_not_placeholder() {
+        let mut app = app_with_loops(2);
+        app.set_tab(MainTab::Logs);
+        app.set_selected_log(LogTailView {
+            lines: vec!["error: failed to connect".to_owned()],
+            message: "last log line".to_owned(),
+        });
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 120,
+            height: 30,
+        }));
+        app.update(key(Key::Char('i')));
+
+        let snapshot = app.render().snapshot();
+        assert!(snapshot.contains("source:live  layer:raw"));
+        assert!(snapshot.contains("error: failed to connect"));
+        assert!(!snapshot.contains("Logs tab  |"));
+        assert!(!snapshot.contains("placeholder content"));
     }
 
     // -- follow mode --
@@ -5067,6 +5797,84 @@ mod tests {
             app.selected_run_view().map(|r| r.id.as_str()),
             Some("run-0")
         );
+    }
+
+    #[test]
+    fn runs_pane_selection_drives_output_context() {
+        let mut app = App::new("default", 12);
+        app.set_tab(MainTab::Runs);
+        app.set_run_history(vec![
+            RunView {
+                id: "run-a".into(),
+                status: "success".into(),
+                exit_code: Some(0),
+                duration: "10s".into(),
+                profile_name: "prod-sre".into(),
+                profile_id: "profile-a".into(),
+                harness: "codex".into(),
+                auth_kind: "ssh".into(),
+                started_at: "2026-02-13T12:00:00Z".into(),
+                output_lines: vec!["output-a-line-1".into(), "output-a-line-2".into()],
+            },
+            RunView {
+                id: "run-b".into(),
+                status: "error".into(),
+                exit_code: Some(1),
+                duration: "11s".into(),
+                profile_name: "prod-sre".into(),
+                profile_id: "profile-a".into(),
+                harness: "codex".into(),
+                auth_kind: "ssh".into(),
+                started_at: "2026-02-13T12:01:00Z".into(),
+                output_lines: vec!["output-b-line-1".into(), "output-b-line-2".into()],
+            },
+        ]);
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 110,
+            height: 24,
+        }));
+        app.update(key(Key::Char('i')));
+
+        let first = app.render().snapshot();
+        assert!(first.contains("output-a-line-1"), "snapshot:\n{first}");
+        assert!(!first.contains("output-b-line-1"), "snapshot:\n{first}");
+
+        app.update(key(Key::Char('.')));
+        let second = app.render().snapshot();
+        assert!(second.contains("output-b-line-1"), "snapshot:\n{second}");
+    }
+
+    #[test]
+    fn runs_pane_respects_output_scroll_offset() {
+        let mut app = App::new("default", 12);
+        app.set_tab(MainTab::Runs);
+        app.set_run_history(vec![RunView {
+            id: "run-scroll".into(),
+            status: "success".into(),
+            exit_code: Some(0),
+            duration: "9s".into(),
+            profile_name: "prod-sre".into(),
+            profile_id: "profile-a".into(),
+            harness: "codex".into(),
+            auth_kind: "ssh".into(),
+            started_at: "2026-02-13T12:02:00Z".into(),
+            output_lines: (0..220)
+                .map(|idx| format!("scroll-line-{idx:03}"))
+                .collect(),
+        }]);
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 110,
+            height: 24,
+        }));
+        app.update(key(Key::Char('i')));
+
+        let before = app.render().snapshot();
+        assert!(before.contains("scroll-line-219"), "snapshot:\n{before}");
+
+        app.update(key(Key::Char('u')));
+        let after = app.render().snapshot();
+        assert!(after.contains("scroll-line-193"), "snapshot:\n{after}");
+        assert!(!after.contains("scroll-line-219"), "snapshot:\n{after}");
     }
 
     // -- expanded logs mode --
@@ -5623,6 +6431,31 @@ mod tests {
         app.update(key(Key::Char('S')));
         let cmd = app.update(key(Key::Char('y')));
         assert_eq!(app.mode(), UiMode::Main);
+        match cmd {
+            Command::RunAction(ActionKind::Stop { loop_id }) => {
+                assert_eq!(loop_id, "loop-0");
+            }
+            other => panic!("Expected RunAction(Stop), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn confirm_enter_uses_safe_cancel_by_default() {
+        let mut app = app_with_loops(3);
+        app.update(key(Key::Char('S')));
+        let cmd = app.update(key(Key::Enter));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(app.mode(), UiMode::Main);
+        assert!(app.confirm().is_none());
+        assert!(app.status_text().contains("cancelled"));
+    }
+
+    #[test]
+    fn confirm_action_rail_tab_then_enter_submits() {
+        let mut app = app_with_loops(3);
+        app.update(key(Key::Char('S')));
+        app.update(key(Key::Tab));
+        let cmd = app.update(key(Key::Enter));
         match cmd {
             Command::RunAction(ActionKind::Stop { loop_id }) => {
                 assert_eq!(loop_id, "loop-0");

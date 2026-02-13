@@ -8,6 +8,7 @@ use forge_ftui_adapter::widgets::{self, TableColumnSpec, WidgetSpec};
 pub mod actions;
 pub mod activity_heatmap;
 pub mod activity_stream;
+pub mod adaptive_hints;
 pub mod alert_rail;
 pub mod analytics_dashboard;
 pub mod analytics_fact_model;
@@ -19,6 +20,7 @@ pub mod communication_quality;
 pub mod crash_safe_state;
 pub mod daily_summary;
 pub mod emergency_safe_stop;
+pub mod error_correlation;
 pub mod extension_actions;
 pub mod extension_api;
 pub mod extension_event_bus;
@@ -50,10 +52,12 @@ pub mod navigation_graph;
 pub mod overview_tab;
 pub mod performance_gates;
 pub mod polling_pipeline;
+pub mod postmortem_draft;
 pub mod readiness_board;
 pub mod resilience_matrix;
 pub mod runs_tab;
 pub mod search_overlay;
+pub mod semantic_log_clustering;
 pub mod session_restore;
 pub mod stale_takeover;
 pub mod status_strip;
@@ -66,6 +70,8 @@ pub mod task_notes;
 pub mod task_recommendation;
 pub mod theme;
 pub mod timeline_scrubber;
+pub mod triage_score_queue;
+pub mod view_export;
 /// Stable crate label used by bootstrap smoke tests.
 pub fn crate_label() -> &'static str {
     "forge-tui"

@@ -17,8 +17,13 @@ use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent, Modifiers, ResizeEven
 use forge_ftui_adapter::render::{CellStyle, RenderFrame};
 use forge_tui::app::{
     ActionKind, ActionResult, ActionType, App, Command, LogLayer, LogSource, LogTailView, RunView,
+    StatusKind,
 };
+use forge_tui::log_pipeline::{annotate_lines_with_anomaly_markers, detect_rule_based_anomalies};
 use forge_tui::theme::detect_terminal_color_capability;
+use forge_tui::view_export::{
+    default_basename, epoch_millis_now, export_frame_to_files, ViewExportMeta,
+};
 
 const REFRESH_INTERVAL: Duration = Duration::from_millis(900);
 const FOLLOW_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
@@ -152,7 +157,7 @@ impl RuntimeBackend {
                 if let Some(lines) = run_output_tails.get(index) {
                     if !lines.is_empty() {
                         return LogTailView {
-                            lines: lines.clone(),
+                            lines: annotate_anomaly_lines(lines),
                             message: String::new(),
                         };
                     }
@@ -220,11 +225,8 @@ impl RuntimeBackend {
         if raw_lines.is_empty() {
             return Ok(Vec::new());
         }
-        Ok(logs::render_lines_for_layer(
-            &raw_lines,
-            map_log_render_layer(layer),
-            true,
-        ))
+        let rendered = logs::render_lines_for_layer(&raw_lines, map_log_render_layer(layer), true);
+        Ok(annotate_anomaly_lines(&rendered))
     }
 
     fn execute_action(&mut self, action: ActionKind) -> ActionResult {
@@ -354,6 +356,11 @@ impl RuntimeBackend {
     }
 }
 
+fn annotate_anomaly_lines(lines: &[String]) -> Vec<String> {
+    let anomalies = detect_rule_based_anomalies(lines);
+    annotate_lines_with_anomaly_markers(lines, &anomalies)
+}
+
 #[derive(Debug, Default)]
 struct RunBundle {
     views: Vec<RunView>,
@@ -402,6 +409,7 @@ fn load_run_bundle(db_path: &PathBuf, loop_id: &str) -> Result<RunBundle, String
         } else {
             "-".to_owned()
         };
+        let output_lines = split_log_lines(&run.output_tail, LIVE_LOG_LINE_LIMIT);
 
         bundle.views.push(RunView {
             id: run.id.clone(),
@@ -409,12 +417,13 @@ fn load_run_bundle(db_path: &PathBuf, loop_id: &str) -> Result<RunBundle, String
             exit_code: run.exit_code,
             duration,
             profile_name,
+            profile_id: run.profile_id.clone(),
             harness,
             auth_kind,
+            started_at: run.started_at.clone(),
+            output_lines: output_lines.clone(),
         });
-        bundle
-            .output_tails
-            .push(split_log_lines(&run.output_tail, LIVE_LOG_LINE_LIMIT));
+        bundle.output_tails.push(output_lines);
     }
 
     Ok(bundle)
@@ -438,6 +447,13 @@ fn dispatch_command(
             }
             Ok(dirty)
         }
+        Command::ExportCurrentView => {
+            match export_current_view(app) {
+                Ok(message) => app.set_status(StatusKind::Ok, &message),
+                Err(err) => app.set_status(StatusKind::Err, &format!("export current view: {err}")),
+            }
+            Ok(true)
+        }
         Command::RunAction(action) => {
             let result = backend.execute_action(action);
             let follow_up = app.handle_action_result(result);
@@ -445,6 +461,47 @@ fn dispatch_command(
             Ok(true)
         }
     }
+}
+
+fn export_current_view(app: &App) -> Result<String, String> {
+    let frame = app.render();
+    let generated_epoch_ms = epoch_millis_now();
+    let basename = default_basename(app.tab().label(), generated_epoch_ms);
+    let export_dir = resolve_export_directory();
+    let meta = ViewExportMeta {
+        view_label: app.tab().label().to_owned(),
+        mode_label: format!("{:?}", app.mode()),
+        generated_epoch_ms,
+    };
+    let files = export_frame_to_files(&frame, &export_dir, &basename, &meta)?;
+    let text = files
+        .text_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("view.txt");
+    let html = files
+        .html_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("view.html");
+    let svg = files
+        .svg_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("view.svg");
+    Ok(format!(
+        "Exported {text}, {html}, {svg} -> {}",
+        export_dir.display()
+    ))
+}
+
+fn resolve_export_directory() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORGE_TUI_EXPORT_DIR") {
+        if !path.is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    PathBuf::from(".forge-exports")
 }
 
 fn terminal_size() -> io::Result<(usize, usize)> {

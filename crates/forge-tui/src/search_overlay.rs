@@ -424,8 +424,11 @@ mod tests {
             exit_code: Some(0),
             duration: "12s".to_owned(),
             profile_name: "default".to_owned(),
+            profile_id: "profile-default".to_owned(),
             harness: "claude".to_owned(),
             auth_kind: "api-key".to_owned(),
+            started_at: "2026-02-13T12:00:00Z".to_owned(),
+            output_lines: vec!["ok".to_owned()],
         }];
         index_runs(overlay.index_mut(), &runs, "loop-1");
         overlay.push_char('s');
