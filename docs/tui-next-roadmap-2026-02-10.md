@@ -45,6 +45,9 @@ Suggested first spawn set:
 - `forge-5s3` PAR-101 logs corpus pack
 
 Implementation notes:
+- `forge-5s3` delivered in `docs/par-101-logs-corpus-pack.md` with sanitized real transcript fixtures for Codex/Claude/OpenCode/Pi, line-span token class expectations, and an automated baseline gate (`>=50` distinct patterns, no unknown classes) in `crates/forge-cli/tests/log_highlighting_corpus_test.rs`.
+- `forge-0b7` delivered in `docs/par-109-theme-engine-ansi-tiers-no-color.md` with centralized capability-aware highlight theme policy (`ansi16`/`ansi256`/`truecolor`), explicit no-color precedence (`--no-color` + `NO_COLOR`), light/dark contrast variants, and deterministic token-style mapping in `crates/forge-cli/src/highlight_spec.rs`.
+- `forge-8a5` delivered in `docs/par-105-diff-renderer-parity-plus.md` with git/unified diff metadata rendering, hunk highlighting, `+/-` line styling, intraline fragment emphasis, malformed-diff safety, and large-hunk regression coverage in `crates/forge-cli/src/diff_renderer.rs` and `crates/forge-cli/src/logs.rs`.
 - `forge-cey` delivered in `docs/tui-101-navigation-ia.md` and `crates/forge-tui/src/navigation_graph.rs`.
 - `forge-8dc` delivered in `docs/tui-102-command-palette.md`, `crates/forge-tui/src/command_palette.rs`, and `Ctrl+P` integration in `crates/forge-tui/src/app.rs`.
 - `forge-3yh` delivered in `docs/tui-103-keymap-engine.md`, centralized keymap engine in `crates/forge-tui/src/keymap.rs`, and diagnostics integration in `crates/forge-tui/src/app.rs`.
