@@ -1,0 +1,50 @@
+ Forge Loops  [Inbox]  2 threads, 2 unread  theme:default  density:comfortable  focus:standard                                                                                                          
+ 1:Overview    2:Logs    3:Runs    4:Multi Logs   [5:Inbox]                                                                                                                                             
+Inbox filter:all  threads:2  unread:2  pending-ack:2  claims:3  conflicts:1                                                                                                                             
+> m-33 u:1 a:1 incident forge-333                                               | thread:thread-hotfix  msgs:1  participants:1                                                                          
+  m-32 u:1 a:1 handoff forge-9r4 loop-2                                         | enter=read  a=ack  h=handoff  r=reply  o=next-conflict  O=resolution                                                  
+                                                                                | operator panel                                                                                                        
+                                                                                | reply target:agent-c  ack-pending:1 (r/a)                                                                             
+                                                                                | conflict task:forge-333  agent-y vs agent-x                                                                           
+                                                                                | resolution (O): takeover claim: forge-333 by <agent>                                                                  
+                                                                                | handoff package preview (press h to save)                                                                             
+                                                                                | task=forge-333 loop=loop-2                                                                                            
+                                                                                | status: loop=running unread=1 pending-ack=1                                                                           
+                                                                                | context: thread=thread-hotfix latest=m-33 from=agent-c messages=1 participants=1                                      
+                                                                                | links: task:sv task show forge-333 | loop:forge logs loop-2 | mail:fmail log task -n 200 | rg thread-hotfix           
+                                                                                | pending-risks: unread messages=1; ack pending=1; ownership conflict: agent-y vs agent-x                               
+                                                                                | recent thread messages                                                                                                
+                                                                                | *! m-33 agent-c incident forge-333                                                                                    
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+                                                                                |                                                                                                                       
+claim timeline (latest)                                                                                                                                                                                 
+! 2026-02-13T12:13:10Z forge-333 <- agent-y                                                                                                                                                             
+! 2026-02-13T12:10:00Z forge-333 <- agent-x                                                                                                                                                             
+  2026-02-13T12:09:00Z forge-9r4 <- agent-z                                                                                                                                                             
+? help  q quit  ctrl+p palette  ctrl+f search  / filter  1-5 tabs  j/k sel  t/T theme  M density  Z focus  F follow                                                                                     
