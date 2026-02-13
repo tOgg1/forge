@@ -8,8 +8,11 @@ use crate::app::{App, LogLayer, LogTailView, LoopView};
 use crate::filter::loop_display_id;
 use crate::layouts::{fit_pane_layout, layout_cell_size};
 use crate::log_compare::{diff_hint, summarize_diff_hints, synchronized_windows, DiffHint};
+use crate::log_pipeline::{annotate_lines_with_anomaly_markers, detect_rule_based_anomalies};
+use crate::semantic_log_clustering::{cluster_semantic_errors_by_loop, compact_cluster_summary};
+use crate::theme::ResolvedPalette;
 use forge_cli::logs::{render_lines_for_layer, LogRenderLayer};
-use forge_ftui_adapter::render::{FrameSize, Rect, RenderFrame, TextRole};
+use forge_ftui_adapter::render::{FrameSize, Rect, RenderFrame, TermColor};
 use forge_ftui_adapter::widgets::BorderStyle;
 
 // ---------------------------------------------------------------------------
@@ -57,13 +60,54 @@ fn compare_lines(tail: &LogTailView) -> Vec<String> {
     }
 }
 
-fn role_for_diff_hint(hint: DiffHint) -> TextRole {
+fn color_for_diff_hint(hint: DiffHint, pal: &ResolvedPalette) -> TermColor {
     match hint {
-        DiffHint::Equal => TextRole::Success,
-        DiffHint::Different => TextRole::Danger,
-        DiffHint::LeftOnly | DiffHint::RightOnly => TextRole::Accent,
-        DiffHint::Empty => TextRole::Muted,
+        DiffHint::Equal => pal.success,
+        DiffHint::Different => pal.error,
+        DiffHint::LeftOnly | DiffHint::RightOnly => pal.accent,
+        DiffHint::Empty => pal.text_muted,
     }
+}
+
+/// Map loop health state to a border color.
+fn health_border_color(view: &LoopView, pal: &ResolvedPalette) -> TermColor {
+    let has_error = !view.last_error.trim().is_empty();
+    if has_error {
+        return pal.error;
+    }
+    match view.state.as_str() {
+        "running" | "sleeping" => pal.success,
+        "stopped" | "waiting" => pal.warning,
+        _ => pal.border,
+    }
+}
+
+/// Helper: draw text with explicit fg on a specified bg color.
+fn draw_text_on_bg(
+    frame: &mut RenderFrame,
+    x: usize,
+    y: usize,
+    text: &str,
+    fg: TermColor,
+    bg: TermColor,
+) {
+    frame.draw_styled_text(x, y, text, fg, bg, false);
+}
+
+fn cluster_summary_for_targets(targets: &[&LoopView], app: &App) -> String {
+    let streams: Vec<(String, Vec<String>)> = targets
+        .iter()
+        .map(|target| {
+            let lines = app
+                .multi_logs()
+                .get(&target.id)
+                .map(|tail| tail.lines.clone())
+                .unwrap_or_default();
+            (target.id.clone(), lines)
+        })
+        .collect();
+    let clusters = cluster_semantic_errors_by_loop(&streams);
+    compact_cluster_summary(&clusters, 32)
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +177,8 @@ fn render_log_block(
     if rendered.is_empty() {
         return vec![truncate(empty_layer_message(layer), width)];
     }
+    let anomalies = detect_rule_based_anomalies(&rendered);
+    let rendered = annotate_lines_with_anomaly_markers(&rendered, &anomalies);
 
     let (start, end, _) = log_window_bounds(rendered.len(), available, 0);
     let window = &rendered[start..end];
@@ -173,11 +219,20 @@ impl App {
 
     /// Render the multi-logs pane into a `RenderFrame`.
     #[must_use]
-    pub fn render_multi_logs_pane(&self, width: usize, height: usize) -> RenderFrame {
+    pub fn render_multi_logs_pane(
+        &self,
+        width: usize,
+        height: usize,
+        pal: &ResolvedPalette,
+    ) -> RenderFrame {
         let width = width.max(1);
         let height = height.max(1);
-        let theme = crate::default_theme();
+        let theme = crate::theme_for_capability(self.color_capability);
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
+        frame.fill_bg(
+            Rect { x: 0, y: 0, width, height },
+            pal.background,
+        );
 
         let header_rows = self.multi_header_rows().max(1);
         let cell_gap = self.multi_cell_gap();
@@ -201,33 +256,25 @@ impl App {
         let total_targets = self.ordered_multi_target_views().len();
 
         if total_targets == 0 {
-            frame.draw_text(
-                0,
-                0,
+            draw_text_on_bg(
+                &mut frame, 0, 0,
                 "No loops selected. Pin with <space> or create loops.",
-                TextRole::Muted,
+                pal.text_muted, pal.background,
             );
             return frame;
         }
         if targets.is_empty() {
-            frame.draw_text(
-                0,
-                0,
+            draw_text_on_bg(
+                &mut frame, 0, 0,
                 "No loops on this page. Use ,/. or g/G.",
-                TextRole::Muted,
+                pal.text_muted, pal.background,
             );
             return frame;
         }
 
         if self.multi_compare_mode() {
             return self.render_compare_logs_pane(
-                width,
-                height,
-                page,
-                total_pages,
-                start,
-                end,
-                total_targets,
+                width, height, page, total_pages, start, end, total_targets, pal,
             );
         }
 
@@ -235,28 +282,23 @@ impl App {
         let header = truncate(
             &format!(
                 "View 4 Matrix  requested={} effective={}  page={}/{}  showing={}-{}/{}",
-                requested.label(),
-                layout.label(),
-                page + 1,
-                total_pages,
-                start + 1,
-                end,
-                total_targets,
+                requested.label(), layout.label(),
+                page + 1, total_pages, start + 1, end, total_targets,
             ),
             width,
         );
-        frame.draw_text(0, 0, &header, TextRole::Accent);
+        draw_text_on_bg(&mut frame, 0, 0, &header, pal.accent, pal.background);
 
         if header_rows > 1 {
-            // Subheader line.
+            let cluster_summary = cluster_summary_for_targets(&targets, self);
             let subheader = truncate(
                 &format!(
-                    "layer:{}  pin:<space> clear:c  compare:C  layout:m  page:,/. g/G  order:pinned first",
-                    self.log_layer().label(),
+                    "layer:{}  {}  pin:<space> clear:c  compare:C  layout:m  page:,/. g/G  order:pinned first",
+                    self.log_layer().label(), cluster_summary,
                 ),
                 width,
             );
-            frame.draw_text(0, 1, &subheader, TextRole::Muted);
+            draw_text_on_bg(&mut frame, 0, 1, &subheader, pal.text_muted, pal.background);
         }
 
         // Grid of mini panes.
@@ -269,11 +311,10 @@ impl App {
             for col in 0..layout.cols as usize {
                 let x_base = col * (cell_w + gap);
                 let mini = if index < targets.len() {
-                    self.render_mini_log_pane(targets[index], cell_w, cell_h)
+                    self.render_mini_log_pane(targets[index], cell_w, cell_h, pal)
                 } else {
-                    Self::render_mini_log_empty_pane(cell_w, cell_h)
+                    Self::render_mini_log_empty_pane(cell_w, cell_h, pal)
                 };
-                // Blit mini frame into main frame.
                 let mini_size = mini.size();
                 for my in 0..mini_size.height {
                     for mx in 0..mini_size.width {
@@ -326,15 +367,20 @@ impl App {
         start: usize,
         end: usize,
         total_targets: usize,
+        pal: &ResolvedPalette,
     ) -> RenderFrame {
-        let theme = crate::default_theme();
+        let theme = crate::theme_for_capability(self.color_capability);
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
+        frame.fill_bg(
+            Rect { x: 0, y: 0, width, height },
+            pal.background,
+        );
+
         let Some((left_id, right_id)) = self.compare_pair_ids() else {
-            frame.draw_text(
-                0,
-                0,
+            draw_text_on_bg(
+                &mut frame, 0, 0,
                 "Compare mode needs at least two loops. Pin another loop or change filters.",
-                TextRole::Muted,
+                pal.text_muted, pal.background,
             );
             return frame;
         };
@@ -344,11 +390,10 @@ impl App {
             .find(|view| view.id == left_id)
             .or_else(|| self.loops().iter().find(|view| view.id == left_id))
         else {
-            frame.draw_text(
-                0,
-                0,
+            draw_text_on_bg(
+                &mut frame, 0, 0,
                 "Compare mode unavailable: missing left loop.",
-                TextRole::Danger,
+                pal.error, pal.background,
             );
             return frame;
         };
@@ -358,22 +403,20 @@ impl App {
             .find(|view| view.id == right_id)
             .or_else(|| self.loops().iter().find(|view| view.id == right_id))
         else {
-            frame.draw_text(
-                0,
-                0,
+            draw_text_on_bg(
+                &mut frame, 0, 0,
                 "Compare mode unavailable: missing right loop.",
-                TextRole::Danger,
+                pal.error, pal.background,
             );
             return frame;
         };
 
         let divider_width = 3usize;
         if width <= divider_width + 6 || height <= 3 {
-            frame.draw_text(
-                0,
-                0,
+            draw_text_on_bg(
+                &mut frame, 0, 0,
                 "Compare mode: enlarge terminal viewport.",
-                TextRole::Muted,
+                pal.text_muted, pal.background,
             );
             return frame;
         }
@@ -402,34 +445,25 @@ impl App {
         let header = truncate(
             &format!(
                 "Compare {}:{} <> {}:{}  page={}/{} showing={}-{}/{}  anchor={}  scroll={}",
-                left_display,
-                left_view.name,
-                right_display,
-                right_view.name,
-                page + 1,
-                total_pages,
-                start + 1,
-                end,
-                total_targets,
-                anchor,
-                synced.scroll_from_bottom,
+                left_display, left_view.name,
+                right_display, right_view.name,
+                page + 1, total_pages, start + 1, end, total_targets,
+                anchor, synced.scroll_from_bottom,
             ),
             width,
         );
-        frame.draw_text(0, 0, &header, TextRole::Accent);
+        draw_text_on_bg(&mut frame, 0, 0, &header, pal.accent, pal.background);
         let subheader = truncate(
             &format!(
                 "layer:{}  toggle:C  sync:u/d ctrl+u/d  hints: same={} diff={} left={} right={}",
                 self.log_layer().label(),
-                diff_summary.equal,
-                diff_summary.different,
-                diff_summary.left_only,
-                diff_summary.right_only,
+                diff_summary.equal, diff_summary.different,
+                diff_summary.left_only, diff_summary.right_only,
             ),
             width,
         );
-        frame.draw_text(0, 1, &subheader, TextRole::Muted);
-        frame.draw_text(0, 2, &"-".repeat(width), TextRole::Muted);
+        draw_text_on_bg(&mut frame, 0, 1, &subheader, pal.text_muted, pal.background);
+        draw_text_on_bg(&mut frame, 0, 2, &"-".repeat(width), pal.border, pal.background);
 
         for row in 0..content_rows {
             let y = content_start + row;
@@ -438,21 +472,12 @@ impl App {
             let hint = diff_hint(left, right);
             let left_text = pad_right(&truncate(left.unwrap_or(""), left_width), left_width);
             let right_text = pad_right(&truncate(right.unwrap_or(""), right_width), right_width);
-            frame.draw_text(0, y, &left_text, TextRole::Primary);
-            frame.draw_text(left_width, y, " ", TextRole::Muted);
-            frame.draw_text(
-                left_width + 1,
-                y,
-                &hint.glyph().to_string(),
-                role_for_diff_hint(hint),
-            );
-            frame.draw_text(left_width + 2, y, " ", TextRole::Muted);
-            frame.draw_text(
-                left_width + divider_width,
-                y,
-                &right_text,
-                TextRole::Primary,
-            );
+            draw_text_on_bg(&mut frame, 0, y, &left_text, pal.text, pal.background);
+            draw_text_on_bg(&mut frame, left_width, y, " ", pal.text_muted, pal.background);
+            let hint_color = color_for_diff_hint(hint, pal);
+            draw_text_on_bg(&mut frame, left_width + 1, y, &hint.glyph().to_string(), hint_color, pal.background);
+            draw_text_on_bg(&mut frame, left_width + 2, y, " ", pal.text_muted, pal.background);
+            draw_text_on_bg(&mut frame, left_width + divider_width, y, &right_text, pal.text, pal.background);
         }
 
         frame
@@ -461,48 +486,39 @@ impl App {
     /// Render a single mini log pane for one loop, matching Go's `renderMiniLogPane`.
     ///
     /// Each pane is wrapped in a bordered panel with the loop name as title.
-    fn render_mini_log_pane(&self, view: &LoopView, width: usize, height: usize) -> RenderFrame {
-        let theme = crate::default_theme();
+    fn render_mini_log_pane(
+        &self,
+        view: &LoopView,
+        width: usize,
+        height: usize,
+        pal: &ResolvedPalette,
+    ) -> RenderFrame {
+        let theme = crate::theme_for_capability(self.color_capability);
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
 
-        // Border color based on loop state.
-        let border_role = match view.state.as_str() {
-            "running" => TextRole::Success,
-            "error" => TextRole::Danger,
-            "waiting" | "sleeping" => TextRole::Accent,
-            _ => TextRole::Primary,
-        };
+        let border_color = health_border_color(view, pal);
 
-        // Header: display ID + name + [PIN] — used as panel title.
         let display_id = loop_display_id(&view.id, &view.short_id);
         let mut title = format!("{} {}", display_id, view.name);
         if self.is_pinned(&view.id) {
             title.push_str(" [PIN]");
         }
 
-        let border_color = frame.color_for_role(border_role);
-        // Use ANSI256 bg for panel to match theme default
-        let panel_bg = forge_ftui_adapter::render::TermColor::Ansi256(theme.color(forge_ftui_adapter::style::StyleToken::Background));
         let inner = frame.draw_panel(
             Rect { x: 0, y: 0, width, height },
             &title,
             BorderStyle::Rounded,
             border_color,
-            panel_bg,
+            pal.panel,
         );
 
         if inner.width == 0 || inner.height == 0 {
             return frame;
         }
 
-        // Meta line: status + compact health strip.
         let status_upper = view.state.to_uppercase();
         let harness_display = display_name(&view.profile_harness, "-");
-        let health_flag = if view.last_error.trim().is_empty() {
-            "ok"
-        } else {
-            "err"
-        };
+        let health_flag = if view.last_error.trim().is_empty() { "ok" } else { "err" };
         let meta = truncate(
             &format!(
                 "{:<8} q={} runs={} health={} harness={}",
@@ -510,10 +526,9 @@ impl App {
             ),
             inner.width,
         );
-        frame.draw_text(inner.x, inner.y, &meta, TextRole::Muted);
+        draw_text_on_bg(&mut frame, inner.x, inner.y, &meta, pal.text_muted, pal.panel);
 
-        // Log block: fill remaining inner height.
-        let log_start = 1; // after meta line
+        let log_start = 1;
         let log_available = inner.height.saturating_sub(log_start).max(1);
 
         let tail = self.multi_logs().get(&view.id);
@@ -521,52 +536,44 @@ impl App {
         let tail = tail.unwrap_or(&empty_tail);
 
         let log_lines = render_log_block(
-            &tail.lines,
-            &tail.message,
-            inner.width,
-            log_available,
-            self.log_layer(),
+            &tail.lines, &tail.message, inner.width, log_available, self.log_layer(),
         );
 
         for (i, line) in log_lines.iter().enumerate() {
             if i >= log_available {
                 break;
             }
-            frame.draw_text(inner.x, inner.y + log_start + i, line, TextRole::Primary);
+            draw_text_on_bg(&mut frame, inner.x, inner.y + log_start + i, line, pal.text, pal.panel);
         }
 
         frame
     }
 
     /// Render an empty mini pane (placeholder), matching Go's `renderMiniLogEmptyPane`.
-    fn render_mini_log_empty_pane(width: usize, height: usize) -> RenderFrame {
+    fn render_mini_log_empty_pane(width: usize, height: usize, pal: &ResolvedPalette) -> RenderFrame {
         let theme = crate::default_theme();
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
 
-        let panel_bg = forge_ftui_adapter::render::TermColor::Ansi256(theme.color(forge_ftui_adapter::style::StyleToken::Background));
-        let border_color = frame.color_for_role(TextRole::Muted);
         let inner = frame.draw_panel(
             Rect { x: 0, y: 0, width, height },
             "empty",
             BorderStyle::Rounded,
-            border_color,
-            panel_bg,
+            pal.border,
+            pal.panel,
         );
 
         if inner.height >= 1 {
-            frame.draw_text(
-                inner.x,
-                inner.y,
+            draw_text_on_bg(
+                &mut frame, inner.x, inner.y,
                 &truncate("Pin loops with <space>.", inner.width),
-                TextRole::Muted,
+                pal.text_muted, pal.panel,
             );
         }
         if inner.height >= 2 {
-            frame.draw_text(
-                inner.x,
-                inner.y + 1,
+            draw_text_on_bg(
+                &mut frame, inner.x, inner.y + 1,
                 &truncate("Change layout with m.", inner.width),
-                TextRole::Muted,
+                pal.text_muted, pal.panel,
             );
         }
         frame
@@ -583,12 +590,17 @@ mod tests {
     use super::*;
     use crate::app::{App, LogTailView, LoopView, MainTab};
     use crate::layouts::layout_index_for;
+    use crate::theme::{resolve_palette, resolve_palette_colors};
     use forge_cli::logs::{render_lines_for_layer, LogRenderLayer};
     use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent};
     use std::collections::HashMap;
 
     fn key(k: Key) -> InputEvent {
         InputEvent::Key(KeyEvent::plain(k))
+    }
+
+    fn test_pal() -> ResolvedPalette {
+        resolve_palette_colors(&resolve_palette("default"))
     }
 
     fn sample_loops(n: usize) -> Vec<LoopView> {
@@ -622,8 +634,6 @@ mod tests {
         app
     }
 
-    // -- log_window_bounds --
-
     #[test]
     fn log_window_bounds_basic() {
         let (start, end, scroll) = log_window_bounds(100, 10, 0);
@@ -655,8 +665,6 @@ mod tests {
         assert_eq!(end, 1);
         assert_eq!(scroll, 4);
     }
-
-    // -- render_log_block --
 
     #[test]
     fn render_log_block_empty_shows_message() {
@@ -703,7 +711,6 @@ mod tests {
             "  at src/main.rs:10:5".to_owned(),
             "diff --git a/src/main.rs b/src/main.rs".to_owned(),
         ];
-
         let result = render_log_block(&lines, "", 80, 10, LogLayer::Errors);
         let text = result.join("\n");
         assert!(text.contains("failed to compile"));
@@ -721,19 +728,31 @@ mod tests {
             "running 3 tests".to_owned(),
             "exit code: 1".to_owned(),
         ];
-
         let expected_rendered = render_lines_for_layer(&lines, LogRenderLayer::Tools, true);
+        let anomalies = detect_rule_based_anomalies(&expected_rendered);
+        let expected_rendered = annotate_lines_with_anomaly_markers(&expected_rendered, &anomalies);
         let (start, end, _) = log_window_bounds(expected_rendered.len(), 2, 0);
         let expected: Vec<String> = expected_rendered[start..end]
             .iter()
             .map(|line| truncate(line, 30))
             .collect();
-
         let actual = render_log_block(&lines, "", 30, 2, LogLayer::Tools);
         assert_eq!(actual, expected);
     }
 
-    // -- multi_page_targets --
+    #[test]
+    fn render_log_block_prefixes_anomaly_marker() {
+        let lines = vec![
+            "Error: request timed out after 30s".to_owned(),
+            "Error: request timed out after 31s".to_owned(),
+            "Error: request timed out after 32s".to_owned(),
+        ];
+        let actual = render_log_block(&lines, "", 120, 3, LogLayer::Raw);
+        assert_eq!(actual.len(), 3);
+        assert!(actual[0].starts_with("! [ANOM:TIMEOUT,REPEATx3]"));
+        assert!(actual[1].contains("REPEATx3"));
+        assert!(actual[2].contains("REPEATx3"));
+    }
 
     #[test]
     fn multi_page_targets_basic() {
@@ -755,30 +774,20 @@ mod tests {
         assert!(ids.contains(&"loop-2".to_owned()));
     }
 
-    // -- paging keys --
-
     #[test]
     fn multi_logs_paging_keys() {
         let mut app = App::new("default", 12);
         app.set_loops(sample_loops(3));
         app.set_tab(MainTab::MultiLogs);
         app.set_layout_idx(layout_index_for(1, 1));
-
-        // Page forward.
         app.update(key(Key::Char('.')));
         assert_eq!(app.multi_page(), 1);
-
         app.update(key(Key::Char('.')));
         assert_eq!(app.multi_page(), 2);
-
-        // Page back.
         app.update(key(Key::Char(',')));
         assert_eq!(app.multi_page(), 1);
-
-        // First/last page (vim-style) for adapter-key compatibility.
         app.update(key(Key::Char('g')));
         assert_eq!(app.multi_page(), 0);
-
         app.update(key(Key::Char('G')));
         assert_eq!(app.multi_page(), 2);
     }
@@ -792,198 +801,133 @@ mod tests {
         assert!(!app.focus_right());
     }
 
-    // -- render_multi_logs_pane --
-
     #[test]
     fn render_multi_logs_pane_empty_loops() {
         let app = App::new("default", 12);
-        let frame = app.render_multi_logs_pane(80, 30);
+        let frame = app.render_multi_logs_pane(80, 30, &test_pal());
         let snapshot = frame.snapshot();
-        assert!(
-            snapshot.contains("No loops selected"),
-            "expected empty message, got:\n{snapshot}"
-        );
+        assert!(snapshot.contains("No loops selected"), "expected empty message, got:\n{snapshot}");
     }
 
     #[test]
     fn render_multi_logs_pane_has_header() {
         let app = multi_app(4);
-        let frame = app.render_multi_logs_pane(120, 40);
+        let frame = app.render_multi_logs_pane(120, 40, &test_pal());
         let header = frame.row_text(0);
-        assert!(
-            header.contains("View 4 Matrix"),
-            "expected header, got: {header}"
-        );
+        assert!(header.contains("View 4 Matrix"), "expected header, got: {header}");
         assert!(header.contains("page="), "expected page info in header");
     }
 
     #[test]
     fn render_multi_logs_pane_has_subheader() {
         let app = multi_app(4);
-        let frame = app.render_multi_logs_pane(120, 40);
+        let frame = app.render_multi_logs_pane(120, 40, &test_pal());
         let subheader = frame.row_text(1);
-        assert!(
-            subheader.contains("layer:raw"),
-            "expected subheader, got: {subheader}"
-        );
+        assert!(subheader.contains("layer:raw"), "expected subheader, got: {subheader}");
+        assert!(subheader.contains("clusters:"));
         assert!(subheader.contains("pin:<space>"));
     }
 
     #[test]
     fn render_multi_logs_pane_shows_loop_names() {
         let app = multi_app(4);
-        let frame = app.render_multi_logs_pane(120, 40);
+        let frame = app.render_multi_logs_pane(120, 40, &test_pal());
         let snapshot = frame.snapshot();
-        assert!(
-            snapshot.contains("test-loop-0"),
-            "expected loop name in grid:\n{snapshot}"
-        );
+        assert!(snapshot.contains("test-loop-0"), "expected loop name in grid:\n{snapshot}");
     }
 
     #[test]
     fn render_multi_logs_pane_with_logs() {
         let mut app = multi_app(2);
         let mut logs = HashMap::new();
-        logs.insert(
-            "loop-0".to_owned(),
-            LogTailView {
-                lines: vec!["hello from loop-0".to_owned()],
-                message: String::new(),
-            },
-        );
+        logs.insert("loop-0".to_owned(), LogTailView {
+            lines: vec!["hello from loop-0".to_owned()],
+            message: String::new(),
+        });
         app.set_multi_logs(logs);
-
-        let frame = app.render_multi_logs_pane(120, 40);
+        let frame = app.render_multi_logs_pane(120, 40, &test_pal());
         let snapshot = frame.snapshot();
-        assert!(
-            snapshot.contains("hello from loop-0"),
-            "expected log content:\n{snapshot}"
-        );
+        assert!(snapshot.contains("hello from loop-0"), "expected log content:\n{snapshot}");
     }
 
     #[test]
     fn compare_mode_toggle_renders_side_by_side_header() {
         let mut app = multi_app(2);
         let mut logs = HashMap::new();
-        logs.insert(
-            "loop-0".to_owned(),
-            LogTailView {
-                lines: vec![
-                    "2026-02-12T11:00:00Z start".to_owned(),
-                    "2026-02-12T11:00:01Z sync".to_owned(),
-                ],
-                message: String::new(),
-            },
-        );
-        logs.insert(
-            "loop-1".to_owned(),
-            LogTailView {
-                lines: vec![
-                    "2026-02-12T11:00:00Z start".to_owned(),
-                    "2026-02-12T11:00:01Z sync".to_owned(),
-                ],
-                message: String::new(),
-            },
-        );
+        logs.insert("loop-0".to_owned(), LogTailView {
+            lines: vec!["2026-02-12T11:00:00Z start".to_owned(), "2026-02-12T11:00:01Z sync".to_owned()],
+            message: String::new(),
+        });
+        logs.insert("loop-1".to_owned(), LogTailView {
+            lines: vec!["2026-02-12T11:00:00Z start".to_owned(), "2026-02-12T11:00:01Z sync".to_owned()],
+            message: String::new(),
+        });
         app.set_multi_logs(logs);
-
         app.update(key(Key::Char('C')));
         assert!(app.multi_compare_mode());
-        let frame = app.render_multi_logs_pane(120, 24);
+        let frame = app.render_multi_logs_pane(120, 24, &test_pal());
         let header = frame.row_text(0);
         let subheader = frame.row_text(1);
-        assert!(
-            header.contains("Compare"),
-            "expected compare header: {header}"
-        );
-        assert!(
-            header.contains("<>"),
-            "expected paired loops in header: {header}"
-        );
-        assert!(
-            subheader.contains("sync:u/d"),
-            "expected compare controls in subheader: {subheader}"
-        );
+        assert!(header.contains("Compare"), "expected compare header: {header}");
+        assert!(header.contains("<>"), "expected paired loops in header: {header}");
+        assert!(subheader.contains("sync:u/d"), "expected compare controls in subheader: {subheader}");
     }
 
     #[test]
     fn compare_mode_scroll_keys_update_shared_scroll() {
         let mut app = multi_app(2);
         let mut logs = HashMap::new();
-        logs.insert(
-            "loop-0".to_owned(),
-            LogTailView {
-                lines: (0..80)
-                    .map(|idx| format!("2026-02-12T11:00:{idx:02}Z left-{idx}"))
-                    .collect(),
-                message: String::new(),
-            },
-        );
-        logs.insert(
-            "loop-1".to_owned(),
-            LogTailView {
-                lines: (0..80)
-                    .map(|idx| format!("2026-02-12T11:00:{idx:02}Z right-{idx}"))
-                    .collect(),
-                message: String::new(),
-            },
-        );
+        logs.insert("loop-0".to_owned(), LogTailView {
+            lines: (0..80).map(|idx| format!("2026-02-12T11:00:{idx:02}Z left-{idx}")).collect(),
+            message: String::new(),
+        });
+        logs.insert("loop-1".to_owned(), LogTailView {
+            lines: (0..80).map(|idx| format!("2026-02-12T11:00:{idx:02}Z right-{idx}")).collect(),
+            message: String::new(),
+        });
         app.set_multi_logs(logs);
-
         app.update(key(Key::Char('C')));
         assert_eq!(app.log_scroll(), 0);
         app.update(key(Key::Char('u')));
         let after_up = app.log_scroll();
         assert!(after_up > 0, "expected compare scroll to move up");
         app.update(key(Key::Char('d')));
-        assert!(
-            app.log_scroll() < after_up,
-            "expected compare scroll to move back down"
-        );
+        assert!(app.log_scroll() < after_up, "expected compare scroll to move back down");
     }
 
     #[test]
     fn compare_mode_renders_row_level_diff_hints() {
         let mut app = multi_app(2);
         let mut logs = HashMap::new();
-        logs.insert(
-            "loop-0".to_owned(),
-            LogTailView {
-                lines: vec![
-                    "2026-02-12T11:00:00Z same".to_owned(),
-                    "2026-02-12T11:00:01Z left-change".to_owned(),
-                    "2026-02-12T11:00:02Z left-only".to_owned(),
-                ],
-                message: String::new(),
-            },
-        );
-        logs.insert(
-            "loop-1".to_owned(),
-            LogTailView {
-                lines: vec![
-                    "2026-02-12T11:00:00Z same".to_owned(),
-                    "2026-02-12T11:00:01Z right-change".to_owned(),
-                ],
-                message: String::new(),
-            },
-        );
+        logs.insert("loop-0".to_owned(), LogTailView {
+            lines: vec![
+                "2026-02-12T11:00:00Z same".to_owned(),
+                "2026-02-12T11:00:01Z left-change".to_owned(),
+                "2026-02-12T11:00:02Z left-only".to_owned(),
+            ],
+            message: String::new(),
+        });
+        logs.insert("loop-1".to_owned(), LogTailView {
+            lines: vec![
+                "2026-02-12T11:00:00Z same".to_owned(),
+                "2026-02-12T11:00:01Z right-change".to_owned(),
+            ],
+            message: String::new(),
+        });
         app.set_multi_logs(logs);
-
         app.update(key(Key::Char('C')));
-        let frame = app.render_multi_logs_pane(60, 14);
+        let frame = app.render_multi_logs_pane(60, 14, &test_pal());
         let hint_x = ((60 - 3) / 2) + 1;
         assert_eq!(frame.cell(hint_x, 3).unwrap().glyph, '=');
         assert_eq!(frame.cell(hint_x, 4).unwrap().glyph, '!');
         assert_eq!(frame.cell(hint_x, 5).unwrap().glyph, '<');
     }
 
-    // -- render_mini_log_pane --
-
     #[test]
     fn mini_pane_shows_id_name_state() {
         let app = multi_app(1);
         let view = &app.filtered()[0].clone();
-        let frame = app.render_mini_log_pane(view, 40, 10);
+        let frame = app.render_mini_log_pane(view, 40, 10, &test_pal());
         let snapshot = frame.snapshot();
         assert!(snapshot.contains("loop-0"));
         assert!(snapshot.contains("test-loop-0"));
@@ -996,40 +940,26 @@ mod tests {
     fn mini_pane_headers_stay_sticky_when_scrolling() {
         let mut app = multi_app(1);
         let mut logs = HashMap::new();
-        logs.insert(
-            "loop-0".to_owned(),
-            LogTailView {
-                lines: (0..80).map(|idx| format!("line {idx}")).collect(),
-                message: String::new(),
-            },
-        );
+        logs.insert("loop-0".to_owned(), LogTailView {
+            lines: (0..80).map(|idx| format!("line {idx}")).collect(),
+            message: String::new(),
+        });
         app.set_multi_logs(logs);
-
+        let pal = test_pal();
         let view = app.filtered()[0].clone();
-        let baseline = app.render_mini_log_pane(&view, 50, 10);
-        // Row 0: panel top border (╭─ title ─╮)
-        // Row 1: meta line (inside panel)
-        // Row 2+: log content (inside panel)
-        // Last row: panel bottom border (╰──╯)
+        let baseline = app.render_mini_log_pane(&view, 50, 10, &pal);
         let border_top = baseline.row_text(0);
         let meta = baseline.row_text(1);
         let first_body_row = baseline.row_text(2);
-
         let mut updated_logs = HashMap::new();
-        updated_logs.insert(
-            "loop-0".to_owned(),
-            LogTailView {
-                lines: (0..81).map(|idx| format!("line {idx}")).collect(),
-                message: String::new(),
-            },
-        );
+        updated_logs.insert("loop-0".to_owned(), LogTailView {
+            lines: (0..81).map(|idx| format!("line {idx}")).collect(),
+            message: String::new(),
+        });
         app.set_multi_logs(updated_logs);
-        let scrolled = app.render_mini_log_pane(&view, 50, 10);
-
-        // Panel border and meta line stay fixed
+        let scrolled = app.render_mini_log_pane(&view, 50, 10, &pal);
         assert_eq!(scrolled.row_text(0), border_top);
         assert_eq!(scrolled.row_text(1), meta);
-        // Body content changes as log updates
         assert_ne!(scrolled.row_text(2), first_body_row);
     }
 
@@ -1038,50 +968,40 @@ mod tests {
         let mut app = multi_app(1);
         app.toggle_pinned("loop-0");
         let view = &app.filtered()[0].clone();
-        let frame = app.render_mini_log_pane(view, 40, 10);
+        let frame = app.render_mini_log_pane(view, 40, 10, &test_pal());
         let snapshot = frame.snapshot();
-        assert!(
-            snapshot.contains("[PIN]"),
-            "expected [PIN] marker:\n{snapshot}"
-        );
+        assert!(snapshot.contains("[PIN]"), "expected [PIN] marker:\n{snapshot}");
     }
 
     #[test]
     fn mini_pane_has_bordered_panel() {
         let app = multi_app(1);
         let view = &app.filtered()[0].clone();
-        let frame = app.render_mini_log_pane(view, 40, 10);
-        // Panel border chars: ╭ at top-left, ╰ at bottom-left
+        let frame = app.render_mini_log_pane(view, 40, 10, &test_pal());
         let top_row = frame.row_text(0);
         let bottom_row = frame.row_text(9);
         assert!(top_row.starts_with('╭'), "expected panel top border, got: {top_row}");
         assert!(bottom_row.starts_with('╰'), "expected panel bottom border, got: {bottom_row}");
     }
 
-    // -- render_mini_log_empty_pane --
-
     #[test]
     fn empty_pane_shows_instructions() {
-        let frame = App::render_mini_log_empty_pane(40, 5);
+        let frame = App::render_mini_log_empty_pane(40, 5, &test_pal());
         let snapshot = frame.snapshot();
         assert!(snapshot.contains("empty"));
         assert!(snapshot.contains("Pin loops with <space>"));
         assert!(snapshot.contains("Change layout with m"));
     }
 
-    // -- integration: multi-logs tab renders in main frame --
-
     #[test]
     fn multi_logs_tab_renders_grid_in_main_frame() {
         let mut app = multi_app(4);
-        // Set size large enough for multi-logs.
         app.update(InputEvent::Resize(forge_ftui_adapter::input::ResizeEvent {
             width: 160,
             height: 50,
         }));
         let frame = app.render();
         let snapshot = frame.snapshot();
-        // Should contain the tab bar and multi-logs content.
         assert!(
             snapshot.contains("Multi Logs"),
             "expected Multi Logs tab active:\n{}",
@@ -1089,42 +1009,25 @@ mod tests {
         );
     }
 
-    // -- snapshot: full multi-logs pane --
-
     #[test]
     fn multi_logs_pane_snapshot_2x2() {
         let mut app = App::new("default", 12);
         app.set_loops(sample_loops(4));
         app.set_tab(MainTab::MultiLogs);
-        // Default layout is 2x2.
-
         let mut logs = HashMap::new();
         for i in 0..4 {
-            logs.insert(
-                format!("loop-{i}"),
-                LogTailView {
-                    lines: vec![format!("output from loop-{i}")],
-                    message: String::new(),
-                },
-            );
+            logs.insert(format!("loop-{i}"), LogTailView {
+                lines: vec![format!("output from loop-{i}")],
+                message: String::new(),
+            });
         }
         app.set_multi_logs(logs);
-
-        let frame = app.render_multi_logs_pane(100, 30);
+        let frame = app.render_multi_logs_pane(100, 30, &test_pal());
         let snapshot = frame.snapshot();
-
-        // Verify header.
         assert!(snapshot.contains("View 4 Matrix"));
-        // Verify all 4 loops appear.
         for i in 0..4 {
-            assert!(
-                snapshot.contains(&format!("test-loop-{i}")),
-                "expected test-loop-{i} in snapshot:\n{snapshot}"
-            );
-            assert!(
-                snapshot.contains(&format!("output from loop-{i}")),
-                "expected output from loop-{i} in snapshot:\n{snapshot}"
-            );
+            assert!(snapshot.contains(&format!("test-loop-{i}")), "expected test-loop-{i} in snapshot:\n{snapshot}");
+            assert!(snapshot.contains(&format!("output from loop-{i}")), "expected output from loop-{i} in snapshot:\n{snapshot}");
         }
     }
 }

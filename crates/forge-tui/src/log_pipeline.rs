@@ -14,6 +14,7 @@
 
 use crate::lane_model::{classify_line, LogLane};
 use crate::theme::ThemeSemanticSlot;
+use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // LogSpan — sub-line semantic token
@@ -109,6 +110,8 @@ pub enum SectionKind {
     Thinking,
     /// Error block (error messages, stack traces).
     ErrorBlock,
+    /// Stack trace frames and trace headers.
+    StackTrace,
     /// Command transcript (shell commands + output).
     CommandBlock,
     /// Diff output block.
@@ -127,6 +130,7 @@ impl SectionKind {
             Self::ToolCall => "tool",
             Self::Thinking => "thinking",
             Self::ErrorBlock => "error",
+            Self::StackTrace => "stacktrace",
             Self::CommandBlock => "command",
             Self::DiffBlock => "diff",
             Self::Event => "event",
@@ -139,7 +143,11 @@ impl SectionKind {
     pub fn is_foldable(self) -> bool {
         matches!(
             self,
-            Self::ToolCall | Self::Thinking | Self::CommandBlock | Self::DiffBlock
+            Self::ToolCall
+                | Self::Thinking
+                | Self::StackTrace
+                | Self::CommandBlock
+                | Self::DiffBlock
         )
     }
 
@@ -149,6 +157,7 @@ impl SectionKind {
         match self {
             Self::ToolCall => "\u{25b6} tool",
             Self::Thinking => "\u{25b6} thinking",
+            Self::StackTrace => "\u{25b6} trace",
             Self::CommandBlock => "\u{25b6} command",
             Self::DiffBlock => "\u{25b6} diff",
             Self::ErrorBlock => "\u{25b6} error",
@@ -830,6 +839,10 @@ fn fill_gaps(spans: &mut Vec<LogSpan>, total_len: usize) {
 /// Classify a highlighted line into a section kind for block grouping.
 #[must_use]
 fn classify_section(line: &HighlightedLine) -> SectionKind {
+    if is_stacktrace_line(&line.text) {
+        return SectionKind::StackTrace;
+    }
+
     match line.lane {
         LogLane::Tool => {
             let trimmed = line.text.trim();
@@ -857,6 +870,65 @@ fn classify_section(line: &HighlightedLine) -> SectionKind {
             }
         }
         LogLane::Unknown => SectionKind::Content,
+    }
+}
+
+fn is_stacktrace_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+
+    if lower.starts_with("traceback (most recent call last):")
+        || lower.starts_with("stack backtrace:")
+        || lower.starts_with("stack trace:")
+        || lower.starts_with("stacktrace:")
+        || lower.starts_with("caused by:")
+    {
+        return true;
+    }
+
+    if lower.starts_with("file \"") && lower.contains(", line ") {
+        return true;
+    }
+
+    if lower.starts_with("at ")
+        && (lower.contains("::")
+            || lower.contains(".rs:")
+            || lower.contains(".go:")
+            || lower.contains(".py:")
+            || lower.contains(".js:")
+            || lower.contains(".ts:")
+            || lower.contains(".java:")
+            || lower.contains(".kt:")
+            || lower.contains(".swift:")
+            || lower.contains('('))
+    {
+        return true;
+    }
+
+    parse_numbered_frame_prefix(&lower).is_some()
+}
+
+fn parse_numbered_frame_prefix(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+    let digit_start = idx;
+    while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+        idx += 1;
+    }
+    if idx == digit_start || idx >= bytes.len() || bytes[idx] != b':' {
+        return None;
+    }
+    idx += 1;
+    if idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        Some(idx + 1)
+    } else {
+        Some(idx)
     }
 }
 
@@ -932,6 +1004,294 @@ fn update_fold_summary(
         .map(|l| l.text.as_str())
         .unwrap_or("");
     block.fold_summary = make_fold_summary(block.kind, first_text, block.line_count);
+}
+
+// ---------------------------------------------------------------------------
+// Rule-based anomaly detection
+// ---------------------------------------------------------------------------
+
+/// Detected anomaly kind for a log line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LogAnomalyKind {
+    /// Panic/fatal crash signatures.
+    PanicLike,
+    /// Resource exhaustion signatures (OOM/disk full/memory allocation).
+    ResourceExhaustion,
+    /// Timeout/network failure signatures.
+    TimeoutLike,
+    /// Explicit non-zero exit code signatures.
+    NonZeroExitCode,
+    /// A repeated error-like signature in the current window.
+    RepeatedSignature,
+}
+
+impl LogAnomalyKind {
+    #[must_use]
+    fn marker_label(self) -> &'static str {
+        match self {
+            Self::PanicLike => "PANIC",
+            Self::ResourceExhaustion => "OOM",
+            Self::TimeoutLike => "TIMEOUT",
+            Self::NonZeroExitCode => "EXIT",
+            Self::RepeatedSignature => "REPEAT",
+        }
+    }
+}
+
+/// A single anomaly match attached to one line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogAnomaly {
+    /// Zero-based index into the line stream.
+    pub line_index: usize,
+    /// Matched rule kind.
+    pub kind: LogAnomalyKind,
+    /// Normalized signature used for grouping similar lines.
+    pub signature: String,
+    /// Number of times `signature` appeared in this stream.
+    pub repeat_count: usize,
+}
+
+/// Detect anomalies from a stream of rendered/raw lines using simple rules.
+#[must_use]
+pub fn detect_rule_based_anomalies(lines: &[String]) -> Vec<LogAnomaly> {
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    let mut signature_counts: HashMap<String, usize> = HashMap::new();
+    let mut signatures_by_line: Vec<Option<String>> = Vec::with_capacity(lines.len());
+    for line in lines {
+        let signature = anomaly_signature(line);
+        if let Some(sig) = &signature {
+            *signature_counts.entry(sig.clone()).or_insert(0) += 1;
+        }
+        signatures_by_line.push(signature);
+    }
+
+    let mut anomalies = Vec::new();
+    for (line_index, line) in lines.iter().enumerate() {
+        let lower = line.trim().to_ascii_lowercase();
+        if lower.is_empty() {
+            continue;
+        }
+
+        if is_panic_like(&lower) {
+            anomalies.push(LogAnomaly {
+                line_index,
+                kind: LogAnomalyKind::PanicLike,
+                signature: anomaly_signature(line).unwrap_or_else(|| lower.clone()),
+                repeat_count: 1,
+            });
+        }
+
+        if is_resource_exhaustion(&lower) {
+            anomalies.push(LogAnomaly {
+                line_index,
+                kind: LogAnomalyKind::ResourceExhaustion,
+                signature: anomaly_signature(line).unwrap_or_else(|| lower.clone()),
+                repeat_count: 1,
+            });
+        }
+
+        if is_timeout_like(&lower) {
+            anomalies.push(LogAnomaly {
+                line_index,
+                kind: LogAnomalyKind::TimeoutLike,
+                signature: anomaly_signature(line).unwrap_or_else(|| lower.clone()),
+                repeat_count: 1,
+            });
+        }
+
+        if has_non_zero_exit_code(&lower) {
+            anomalies.push(LogAnomaly {
+                line_index,
+                kind: LogAnomalyKind::NonZeroExitCode,
+                signature: anomaly_signature(line).unwrap_or_else(|| lower.clone()),
+                repeat_count: 1,
+            });
+        }
+
+        if let Some(signature) = signatures_by_line.get(line_index).and_then(Option::as_ref) {
+            let repeat_count = signature_counts.get(signature).copied().unwrap_or(0);
+            if repeat_count >= 3 {
+                anomalies.push(LogAnomaly {
+                    line_index,
+                    kind: LogAnomalyKind::RepeatedSignature,
+                    signature: signature.clone(),
+                    repeat_count,
+                });
+            }
+        }
+    }
+
+    anomalies
+}
+
+/// Prefix detected anomalies into log lines so they stand out in-stream.
+#[must_use]
+pub fn annotate_lines_with_anomaly_markers(
+    lines: &[String],
+    anomalies: &[LogAnomaly],
+) -> Vec<String> {
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    if anomalies.is_empty() {
+        return lines.to_vec();
+    }
+
+    let mut labels_by_line: HashMap<usize, Vec<String>> = HashMap::new();
+    for anomaly in anomalies {
+        let label = if anomaly.kind == LogAnomalyKind::RepeatedSignature {
+            format!(
+                "{}x{}",
+                anomaly.kind.marker_label(),
+                anomaly.repeat_count.max(2)
+            )
+        } else {
+            anomaly.kind.marker_label().to_owned()
+        };
+        let entry = labels_by_line.entry(anomaly.line_index).or_default();
+        if !entry.iter().any(|existing| existing == &label) {
+            entry.push(label);
+        }
+    }
+
+    lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            let Some(labels) = labels_by_line.get(&index) else {
+                return line.clone();
+            };
+            if line.starts_with("! [ANOM:") {
+                return line.clone();
+            }
+            format!("! [ANOM:{}] {line}", labels.join(","))
+        })
+        .collect()
+}
+
+fn anomaly_signature(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    let lane = classify_line(trimmed);
+    if lane != LogLane::Stderr && !looks_error_like(&lower) {
+        return None;
+    }
+
+    let mut normalized = String::with_capacity(lower.len().min(160));
+    let mut previous_space = false;
+    for ch in lower.chars() {
+        let mapped = if ch.is_ascii_digit() { '#' } else { ch };
+        if mapped.is_whitespace() {
+            if previous_space {
+                continue;
+            }
+            previous_space = true;
+            normalized.push(' ');
+        } else {
+            previous_space = false;
+            normalized.push(mapped);
+        }
+        if normalized.len() >= 160 {
+            break;
+        }
+    }
+
+    let normalized = normalized.trim();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_owned())
+    }
+}
+
+fn looks_error_like(lower: &str) -> bool {
+    lower.contains("error")
+        || lower.contains("failed")
+        || lower.contains("panic")
+        || lower.contains("timeout")
+        || lower.contains("timed out")
+        || lower.contains("exception")
+        || lower.contains("exit code")
+        || lower.contains("exit status")
+        || lower.contains("refused")
+        || lower.contains("denied")
+}
+
+fn is_panic_like(lower: &str) -> bool {
+    lower.contains("panic")
+        || lower.contains("fatal")
+        || lower.contains("segmentation fault")
+        || lower.contains("assertion failed")
+}
+
+fn is_resource_exhaustion(lower: &str) -> bool {
+    lower.contains("out of memory")
+        || contains_token(lower, "oom")
+        || lower.contains("cannot allocate memory")
+        || lower.contains("no space left on device")
+        || lower.contains("killed process")
+}
+
+fn contains_token(haystack: &str, needle: &str) -> bool {
+    haystack
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .any(|token| token == needle)
+}
+
+fn is_timeout_like(lower: &str) -> bool {
+    lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("deadline exceeded")
+        || lower.contains("connection reset")
+        || lower.contains("connection refused")
+}
+
+fn has_non_zero_exit_code(lower: &str) -> bool {
+    parse_code_after_marker(lower, "exit code")
+        .or_else(|| parse_code_after_marker(lower, "exit status"))
+        .map(|code| code != 0)
+        .unwrap_or(false)
+}
+
+fn parse_code_after_marker(lower: &str, marker: &str) -> Option<i32> {
+    let marker_index = lower.find(marker)?;
+    let tail = &lower[marker_index + marker.len()..];
+    let mut number = String::new();
+    let mut started = false;
+
+    for ch in tail.chars() {
+        if !started {
+            if ch == '-' {
+                number.push(ch);
+                started = true;
+                continue;
+            }
+            if ch.is_ascii_digit() {
+                number.push(ch);
+                started = true;
+                continue;
+            }
+            continue;
+        }
+
+        if ch.is_ascii_digit() {
+            number.push(ch);
+        } else {
+            break;
+        }
+    }
+
+    if number.is_empty() || number == "-" {
+        return None;
+    }
+    number.parse::<i32>().ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -1144,6 +1504,7 @@ mod tests {
     fn section_foldable() {
         assert!(SectionKind::ToolCall.is_foldable());
         assert!(SectionKind::Thinking.is_foldable());
+        assert!(SectionKind::StackTrace.is_foldable());
         assert!(SectionKind::CommandBlock.is_foldable());
         assert!(SectionKind::DiffBlock.is_foldable());
         assert!(!SectionKind::Content.is_foldable());
@@ -1154,6 +1515,7 @@ mod tests {
     fn section_labels_are_stable() {
         assert_eq!(SectionKind::ToolCall.label(), "tool");
         assert_eq!(SectionKind::ErrorBlock.label(), "error");
+        assert_eq!(SectionKind::StackTrace.label(), "stacktrace");
         assert_eq!(SectionKind::Content.label(), "content");
     }
 
@@ -1400,5 +1762,113 @@ mod tests {
             spans: vec![],
         };
         assert_eq!(classify_section(&line), SectionKind::DiffBlock);
+    }
+
+    #[test]
+    fn classify_section_stacktrace_rust_frame() {
+        let line = HighlightedLine {
+            text: "at forge::runner::execute (src/runner.rs:41)".to_owned(),
+            lane: LogLane::Stderr,
+            index: 0,
+            spans: vec![],
+        };
+        assert_eq!(classify_section(&line), SectionKind::StackTrace);
+    }
+
+    #[test]
+    fn classify_section_stacktrace_python_frame() {
+        let line = HighlightedLine {
+            text: "  File \"/srv/app/main.py\", line 42, in run".to_owned(),
+            lane: LogLane::Stdout,
+            index: 0,
+            spans: vec![],
+        };
+        assert_eq!(classify_section(&line), SectionKind::StackTrace);
+    }
+
+    #[test]
+    fn pipeline_fold_all_folds_stacktrace_blocks() {
+        let lines = vec![
+            "error: task failed".to_owned(),
+            "stack backtrace:".to_owned(),
+            "   0: std::panicking::begin_panic".to_owned(),
+            "   1: forge::runner::execute at src/runner.rs:41".to_owned(),
+            "help: rerun with RUST_BACKTRACE=1".to_owned(),
+        ];
+
+        let mut pipeline = LogPipelineV2::from_raw_lines(&lines);
+        assert_eq!(pipeline.blocks().len(), 3);
+        assert_eq!(pipeline.blocks()[1].kind, SectionKind::StackTrace);
+        pipeline.fold_all();
+        assert!(pipeline.blocks()[1].folded);
+        assert_eq!(pipeline.visible_line_count(), 3);
+    }
+
+    // -- anomaly detection tests --
+
+    #[test]
+    fn detect_rule_based_anomalies_flags_repeat_and_signatures() {
+        let lines = vec![
+            "info: boot complete".to_owned(),
+            "Error: request timed out after 30s".to_owned(),
+            "Error: request timed out after 31s".to_owned(),
+            "Error: request timed out after 32s".to_owned(),
+            "panic: unreachable state".to_owned(),
+            "exit code: 2".to_owned(),
+            "fatal: out of memory".to_owned(),
+        ];
+
+        let anomalies = detect_rule_based_anomalies(&lines);
+        assert!(anomalies
+            .iter()
+            .any(|a| a.kind == LogAnomalyKind::TimeoutLike && a.line_index == 1));
+        assert!(anomalies
+            .iter()
+            .any(|a| a.kind == LogAnomalyKind::RepeatedSignature && a.repeat_count == 3));
+        assert!(anomalies
+            .iter()
+            .any(|a| a.kind == LogAnomalyKind::PanicLike && a.line_index == 4));
+        assert!(anomalies
+            .iter()
+            .any(|a| a.kind == LogAnomalyKind::NonZeroExitCode && a.line_index == 5));
+        assert!(anomalies
+            .iter()
+            .any(|a| a.kind == LogAnomalyKind::ResourceExhaustion && a.line_index == 6));
+    }
+
+    #[test]
+    fn detect_rule_based_anomalies_ignores_zero_exit_code() {
+        let lines = vec!["exit code: 0".to_owned(), "exit status=0".to_owned()];
+        let anomalies = detect_rule_based_anomalies(&lines);
+        assert!(anomalies
+            .iter()
+            .all(|a| a.kind != LogAnomalyKind::NonZeroExitCode));
+    }
+
+    #[test]
+    fn detect_rule_based_anomalies_does_not_flag_boom_as_oom() {
+        let lines = vec!["panic: boom".to_owned()];
+        let anomalies = detect_rule_based_anomalies(&lines);
+        assert!(anomalies.iter().any(|a| a.kind == LogAnomalyKind::PanicLike));
+        assert!(!anomalies
+            .iter()
+            .any(|a| a.kind == LogAnomalyKind::ResourceExhaustion));
+    }
+
+    #[test]
+    fn annotate_lines_with_anomaly_markers_prefixes_target_lines() {
+        let lines = vec![
+            "ok".to_owned(),
+            "panic: boom".to_owned(),
+            "Error: request timed out".to_owned(),
+            "Error: request timed out".to_owned(),
+            "Error: request timed out".to_owned(),
+        ];
+        let anomalies = detect_rule_based_anomalies(&lines);
+        let annotated = annotate_lines_with_anomaly_markers(&lines, &anomalies);
+        assert_eq!(annotated[0], "ok");
+        assert!(annotated[1].starts_with("! [ANOM:PANIC]"));
+        assert!(annotated[2].contains("TIMEOUT"));
+        assert!(annotated[2].contains("REPEATx3"));
     }
 }
