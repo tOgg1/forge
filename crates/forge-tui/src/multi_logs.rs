@@ -16,19 +16,23 @@ use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 // ---------------------------------------------------------------------------
 
 fn truncate(s: &str, width: usize) -> String {
-    if s.len() <= width {
+    if width == 0 {
+        return String::new();
+    }
+    if s.chars().count() <= width {
         s.to_owned()
     } else {
-        s[..width].to_owned()
+        s.chars().take(width).collect()
     }
 }
 
 fn pad_right(s: &str, width: usize) -> String {
-    if s.len() >= width {
-        s[..width].to_owned()
-    } else {
-        format!("{s:<width$}")
+    let mut value = truncate(s, width);
+    let pad = width.saturating_sub(value.chars().count());
+    if pad > 0 {
+        value.push_str(&" ".repeat(pad));
     }
+    value
 }
 
 fn display_name(value: &str, fallback: &str) -> String {
@@ -475,13 +479,18 @@ impl App {
         let header_text = pad_right(&truncate(&header_text, width), width);
         frame.draw_text(0, 0, &header_text, header_role);
 
-        // Meta line: STATUS harness=X runs=N.
+        // Meta line: status + compact health strip.
         let status_upper = view.state.to_uppercase();
         let harness_display = display_name(&view.profile_harness, "-");
+        let health_flag = if view.last_error.trim().is_empty() {
+            "ok"
+        } else {
+            "err"
+        };
         let meta = truncate(
             &format!(
-                "{:<8} harness={} runs={}",
-                status_upper, harness_display, view.runs
+                "{:<8} q={} runs={} health={} harness={}",
+                status_upper, view.queue_depth, view.runs, health_flag, harness_display
             ),
             width,
         );
@@ -574,6 +583,12 @@ mod tests {
                 },
                 repo_path: format!("/repo/{i}"),
                 runs: i * 2,
+                queue_depth: i * 3,
+                last_error: if i % 3 == 2 {
+                    "panic: retry budget exhausted".to_owned()
+                } else {
+                    String::new()
+                },
                 profile_harness: "claude-code".to_owned(),
                 ..Default::default()
             })
@@ -649,6 +664,14 @@ mod tests {
         let lines = vec!["a".repeat(100)];
         let result = render_log_block(&lines, "", 20, 5, LogLayer::Raw);
         assert_eq!(result[0].len(), 20);
+    }
+
+    #[test]
+    fn render_log_block_truncates_unicode_without_panicking() {
+        let lines = vec!["────────────────────────────────────────".to_owned()];
+        let result = render_log_block(&lines, "", 59, 5, LogLayer::Raw);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].chars().count() <= 59);
     }
 
     #[test]
@@ -945,6 +968,45 @@ mod tests {
         assert!(snapshot.contains("loop-0"));
         assert!(snapshot.contains("test-loop-0"));
         assert!(snapshot.contains("RUNNING"));
+        assert!(snapshot.contains("q=0"));
+        assert!(snapshot.contains("health=ok"));
+    }
+
+    #[test]
+    fn mini_pane_headers_stay_sticky_when_scrolling() {
+        let mut app = multi_app(1);
+        let mut logs = HashMap::new();
+        logs.insert(
+            "loop-0".to_owned(),
+            LogTailView {
+                lines: (0..80).map(|idx| format!("line {idx}")).collect(),
+                message: String::new(),
+            },
+        );
+        app.set_multi_logs(logs);
+
+        let view = app.filtered()[0].clone();
+        let baseline = app.render_mini_log_pane(&view, 50, 10);
+        let header = baseline.row_text(0);
+        let health = baseline.row_text(1);
+        let separator = baseline.row_text(2);
+        let first_body_row = baseline.row_text(3);
+
+        let mut updated_logs = HashMap::new();
+        updated_logs.insert(
+            "loop-0".to_owned(),
+            LogTailView {
+                lines: (0..81).map(|idx| format!("line {idx}")).collect(),
+                message: String::new(),
+            },
+        );
+        app.set_multi_logs(updated_logs);
+        let scrolled = app.render_mini_log_pane(&view, 50, 10);
+
+        assert_eq!(scrolled.row_text(0), header);
+        assert_eq!(scrolled.row_text(1), health);
+        assert_eq!(scrolled.row_text(2), separator);
+        assert_ne!(scrolled.row_text(3), first_body_row);
     }
 
     #[test]
