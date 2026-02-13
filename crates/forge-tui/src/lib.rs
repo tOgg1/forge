@@ -60,6 +60,7 @@ pub mod navigation_graph;
 pub mod overview_tab;
 pub mod panel_error_boundary;
 pub mod performance_gates;
+pub mod picture_in_picture;
 pub mod polling_pipeline;
 pub mod postmortem_draft;
 pub mod predictive_queue_eta;
