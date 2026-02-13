@@ -6,7 +6,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use forge_cli::queue::{resolve_loop_ref as resolve_cli_loop_ref, LoopRecord};
 use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent};
 use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 use forge_ftui_adapter::style::ThemeSpec;
@@ -14,12 +13,10 @@ use forge_ftui_adapter::style::ThemeSpec;
 use crate::command_palette::{
     CommandPalette, PaletteActionId, PaletteContext, DEFAULT_SEARCH_BUDGET,
 };
-use crate::filter::loop_display_id;
 use crate::keymap::{KeyChord, KeyCommand, KeyScope, Keymap, ModeScope};
 use crate::layouts::{
     fit_pane_layout, layout_index_for, normalize_layout_index, PaneLayout, PANE_LAYOUTS,
 };
-use crate::navigation_graph::{default_focus, focus_target, FocusMove, PaneId, TuiView};
 use crate::search_overlay::SearchOverlay;
 use crate::theme::{
     cycle_accessibility_preset, cycle_palette, resolve_palette_for_capability, Palette,
@@ -85,16 +82,6 @@ impl MainTab {
             Self::MultiLogs => "multi",
             Self::Inbox => "inbox",
         }
-    }
-}
-
-fn navigation_view_for_tab(tab: MainTab) -> TuiView {
-    match tab {
-        MainTab::Overview => TuiView::Overview,
-        MainTab::Logs => TuiView::Logs,
-        MainTab::Runs => TuiView::Tasks,
-        MainTab::MultiLogs => TuiView::Fleet,
-        MainTab::Inbox => TuiView::Inbox,
     }
 }
 
@@ -679,7 +666,6 @@ pub struct App {
     prev_log_line_count: usize,
 
     // -- focus/layout --
-    active_pane: PaneId,
     focus_right: bool,
     density_mode: DensityMode,
     focus_mode: FocusMode,
@@ -771,7 +757,6 @@ impl App {
             follow_mode: true,
             prev_log_line_count: 0,
 
-            active_pane: default_focus(navigation_view_for_tab(MainTab::Overview)),
             focus_right: false,
             density_mode: DensityMode::Comfortable,
             focus_mode: FocusMode::Standard,
@@ -892,11 +877,6 @@ impl App {
     #[must_use]
     pub fn follow_mode(&self) -> bool {
         self.follow_mode
-    }
-
-    #[must_use]
-    pub fn active_pane(&self) -> PaneId {
-        self.active_pane
     }
 
     #[must_use]
@@ -1370,14 +1350,22 @@ impl App {
             .filter(|state| !state.is_empty())
     }
 
-    fn build_handoff_snapshot_for_thread(
-        &self,
-        thread: &InboxThreadView,
-        claim_conflicts: &[ClaimConflictView],
-    ) -> Option<HandoffSnapshotView> {
-        let latest_index = thread.message_indices.last().copied()?;
-        let latest_message = self.inbox_messages.get(latest_index)?;
+    fn generate_handoff_snapshot(&mut self) {
+        let threads = self.inbox_threads();
+        let Some(thread) = threads.get(self.inbox_selected_thread) else {
+            self.set_status(StatusKind::Info, "Inbox is empty");
+            return;
+        };
+        let Some(latest_index) = thread.message_indices.last().copied() else {
+            self.set_status(StatusKind::Info, "Inbox is empty");
+            return;
+        };
+        let Some(latest_message) = self.inbox_messages.get(latest_index) else {
+            self.set_status(StatusKind::Info, "Inbox is empty");
+            return;
+        };
 
+        let claim_conflicts = self.claim_conflicts();
         let task_id = self
             .extract_task_id_from_thread(thread)
             .or_else(|| {
@@ -1443,32 +1431,15 @@ impl App {
             risks.join("; ")
         };
 
-        Some(HandoffSnapshotView {
+        self.handoff_snapshot = Some(HandoffSnapshotView {
             thread_key: thread.thread_key.clone(),
-            task_id,
-            loop_id,
+            task_id: task_id.clone(),
+            loop_id: loop_id.clone(),
             status,
             context,
             links,
             pending_risks,
-        })
-    }
-
-    fn generate_handoff_snapshot(&mut self) {
-        let threads = self.inbox_threads();
-        let Some(thread) = threads.get(self.inbox_selected_thread) else {
-            self.set_status(StatusKind::Info, "Inbox is empty");
-            return;
-        };
-        let claim_conflicts = self.claim_conflicts();
-        let Some(snapshot) = self.build_handoff_snapshot_for_thread(thread, &claim_conflicts)
-        else {
-            self.set_status(StatusKind::Info, "Inbox is empty");
-            return;
-        };
-        let task_id = snapshot.task_id.clone();
-        let loop_id = snapshot.loop_id.clone();
-        self.handoff_snapshot = Some(snapshot);
+        });
         self.set_status(
             StatusKind::Ok,
             &format!("Handoff snapshot ready: task {task_id}, loop {loop_id}"),
@@ -1535,11 +1506,6 @@ impl App {
         } else if self.focus_right {
             self.focus_right = false;
         }
-        if self.focus_right {
-            self.active_pane = PaneId::Detail;
-        } else {
-            self.active_pane = default_focus(navigation_view_for_tab(self.tab));
-        }
     }
 
     pub fn cycle_tab(&mut self, delta: i32) {
@@ -1556,23 +1522,6 @@ impl App {
             idx += order.len() as i32;
         }
         self.set_tab(order[(idx as usize) % order.len()]);
-    }
-
-    pub fn move_focus(&mut self, movement: FocusMove) {
-        let view = navigation_view_for_tab(self.tab);
-        let previous = self.active_pane;
-        self.active_pane = focus_target(view, self.active_pane, movement);
-        self.focus_right = matches!(self.active_pane, PaneId::Aux | PaneId::Detail);
-        if self.active_pane != previous {
-            self.set_status(
-                StatusKind::Info,
-                &format!(
-                    "Focus pane: {} ({})",
-                    self.active_pane.slug(),
-                    movement.slug()
-                ),
-            );
-        }
     }
 
     // -- theme ---------------------------------------------------------------
@@ -1616,11 +1565,6 @@ impl App {
     #[allow(dead_code)]
     fn toggle_zen_mode(&mut self) {
         self.focus_right = !self.focus_right;
-        self.active_pane = if self.focus_right {
-            PaneId::Detail
-        } else {
-            default_focus(navigation_view_for_tab(self.tab))
-        };
         if self.tab == MainTab::MultiLogs {
             self.clamp_multi_page();
         }
@@ -1643,11 +1587,6 @@ impl App {
         } else if self.tab != MainTab::MultiLogs {
             self.focus_right = false;
         }
-        self.active_pane = if self.focus_right {
-            PaneId::Detail
-        } else {
-            default_focus(navigation_view_for_tab(self.tab))
-        };
         if self.tab == MainTab::MultiLogs {
             self.clamp_multi_page();
         }
@@ -1720,14 +1659,10 @@ impl App {
                 continue;
             }
             if !query.is_empty() {
-                let display_id_lower = loop_display_id(&lv.id, &lv.short_id).to_ascii_lowercase();
                 let id_lower = lv.id.to_ascii_lowercase();
-                let short_id_lower = lv.short_id.to_ascii_lowercase();
                 let name_lower = lv.name.to_ascii_lowercase();
                 let repo_lower = lv.repo_path.to_ascii_lowercase();
-                if !display_id_lower.contains(&query)
-                    && !id_lower.contains(&query)
-                    && !short_id_lower.contains(&query)
+                if !id_lower.contains(&query)
                     && !name_lower.contains(&query)
                     && !repo_lower.contains(&query)
                 {
@@ -2293,22 +2228,6 @@ impl App {
                 self.mode = UiMode::Filter;
                 self.filter_focus = FilterFocus::Text;
                 Command::None
-            }
-            Key::Left => {
-                self.move_focus(FocusMove::Left);
-                Command::Fetch
-            }
-            Key::Right => {
-                self.move_focus(FocusMove::Right);
-                Command::Fetch
-            }
-            Key::Tab => {
-                if key.modifiers.shift {
-                    self.move_focus(FocusMove::Prev);
-                } else {
-                    self.move_focus(FocusMove::Next);
-                }
-                Command::Fetch
             }
             Key::Char('j') | Key::Down => {
                 if self.tab == MainTab::Inbox {
@@ -3077,36 +2996,20 @@ impl App {
         if loop_id.is_empty() {
             return;
         }
-        let resolved_id = self
-            .resolve_loop_reference(loop_id)
-            .unwrap_or_else(|_| loop_id.to_owned());
         for (idx, lv) in self.filtered.iter().enumerate() {
-            if lv.id == resolved_id {
+            if lv.id == loop_id {
                 self.selected_idx = idx;
-                self.selected_id = resolved_id.clone();
+                self.selected_id = loop_id.to_owned();
                 return;
             }
         }
         // Fallback: try in full loop list
         for lv in &self.loops {
-            if lv.id == resolved_id {
-                self.selected_id = resolved_id.clone();
+            if lv.id == loop_id {
+                self.selected_id = loop_id.to_owned();
                 return;
             }
         }
-    }
-
-    fn resolve_loop_reference(&self, loop_ref: &str) -> Result<String, String> {
-        let loop_records: Vec<LoopRecord> = self
-            .loops
-            .iter()
-            .map(|entry| LoopRecord {
-                id: entry.id.clone(),
-                short_id: entry.short_id.clone(),
-                name: entry.name.clone(),
-            })
-            .collect();
-        resolve_cli_loop_ref(&loop_records, loop_ref).map(|record| record.id)
     }
 
     fn run_action(&mut self, action: ActionType, loop_id: &str) -> Command {
@@ -3303,8 +3206,6 @@ impl App {
                     blit_frame(&mut frame, &view_frame, 0, content_start);
                 } else if self.mode == UiMode::Main && self.tab == MainTab::Overview {
                     let lines = crate::overview_tab::overview_pane_lines(
-                        &self.filtered,
-                        &self.selected_id,
                         self.selected_view(),
                         &self.run_history,
                         self.selected_run,
@@ -3350,7 +3251,7 @@ impl App {
             let role = match self.status_kind {
                 StatusKind::Ok => TextRole::Success,
                 StatusKind::Err => TextRole::Danger,
-                StatusKind::Info => TextRole::Muted,
+                StatusKind::Info => TextRole::Info,
             };
             let status_text = self.status_display_text();
             let truncated = if status_text.len() > width {
@@ -3672,97 +3573,20 @@ impl App {
                     }
 
                     let mut row = 3usize;
-                    if row < timeline_start {
-                        frame.draw_text(detail_x, row, "operator panel", TextRole::Accent);
-                        row += 1;
-                    }
-
-                    if let Some(latest_index) = selected_thread.message_indices.last() {
-                        if let Some(message) = self.inbox_messages.get(*latest_index) {
-                            let reply_target = message.from.trim();
-                            let reply_target = if reply_target.is_empty() {
-                                "unknown"
-                            } else {
-                                reply_target
-                            };
-                            if row < timeline_start {
-                                let line = format!(
-                                    "reply target:{}  ack-pending:{} (r/a)",
-                                    reply_target, selected_thread.pending_ack_count
-                                );
-                                frame.draw_text(
-                                    detail_x,
-                                    row,
-                                    &trim_to_width(&line, detail_width),
-                                    TextRole::Primary,
-                                );
-                                row += 1;
-                            }
-                        }
-                    }
-
-                    if let Some(conflict) = claim_conflicts.get(self.selected_claim_conflict) {
-                        if row < timeline_start {
-                            let line = format!(
-                                "conflict task:{}  {} vs {}",
-                                conflict.task_id, conflict.latest_by, conflict.previous_by
-                            );
-                            frame.draw_text(
-                                detail_x,
-                                row,
-                                &trim_to_width(&line, detail_width),
-                                TextRole::Danger,
-                            );
-                            row += 1;
-                        }
-                        if row < timeline_start {
-                            let line = format!(
-                                "resolution (O): takeover claim: {} by <agent>",
-                                conflict.task_id
-                            );
-                            frame.draw_text(
-                                detail_x,
-                                row,
-                                &trim_to_width(&line, detail_width),
-                                TextRole::Muted,
-                            );
-                            row += 1;
-                        }
-                    } else if row < timeline_start {
-                        frame.draw_text(
-                            detail_x,
-                            row,
-                            "no claim conflicts detected",
-                            TextRole::Muted,
-                        );
-                        row += 1;
-                    }
-
-                    let saved_snapshot = self
+                    if let Some(snapshot) = self
                         .handoff_snapshot
                         .as_ref()
                         .filter(|snapshot| snapshot.thread_key == selected_thread.thread_key)
-                        .cloned();
-                    let snapshot_preview = saved_snapshot.clone().or_else(|| {
-                        self.build_handoff_snapshot_for_thread(selected_thread, &claim_conflicts)
-                    });
-
-                    if row < timeline_start {
-                        let heading = if saved_snapshot.is_some() {
-                            "handoff package (saved)"
-                        } else {
-                            "handoff package preview (press h to save)"
-                        };
-                        frame.draw_text(
-                            detail_x,
-                            row,
-                            &trim_to_width(heading, detail_width),
-                            TextRole::Accent,
-                        );
-                        row += 1;
-                    }
-
-                    if let Some(snapshot) = snapshot_preview {
+                    {
+                        if row < timeline_start {
+                            frame.draw_text(
+                                detail_x,
+                                row,
+                                &trim_to_width("handoff snapshot (h regenerate)", detail_width),
+                                TextRole::Accent,
+                            );
+                            row += 1;
+                        }
                         for line in snapshot.lines() {
                             if row >= timeline_start {
                                 break;
@@ -3775,21 +3599,16 @@ impl App {
                             );
                             row += 1;
                         }
-                    } else if row < timeline_start {
-                        frame.draw_text(
-                            detail_x,
-                            row,
-                            "preview unavailable: no messages",
-                            TextRole::Muted,
-                        );
-                        row += 1;
+                        if row < timeline_start {
+                            frame.draw_text(
+                                detail_x,
+                                row,
+                                "recent thread messages",
+                                TextRole::Muted,
+                            );
+                            row += 1;
+                        }
                     }
-
-                    if row < timeline_start {
-                        frame.draw_text(detail_x, row, "recent thread messages", TextRole::Muted);
-                        row += 1;
-                    }
-
                     for idx in selected_thread.message_indices.iter().rev() {
                         if row >= timeline_start {
                             break;
@@ -4214,17 +4033,6 @@ mod tests {
         })
     }
 
-    fn shift_tab_key() -> InputEvent {
-        InputEvent::Key(KeyEvent {
-            key: Key::Tab,
-            modifiers: Modifiers {
-                shift: true,
-                ctrl: false,
-                alt: false,
-            },
-        })
-    }
-
     fn sample_loops(n: usize) -> Vec<LoopView> {
         (0..n)
             .map(|i| LoopView {
@@ -4391,37 +4199,6 @@ mod tests {
     }
 
     #[test]
-    fn focus_pane_transitions_are_deterministic() {
-        let mut app = App::new("default", 12);
-        app.set_tab(MainTab::Logs);
-        assert_eq!(app.active_pane(), PaneId::Main);
-
-        app.update(key(Key::Right));
-        assert_eq!(app.active_pane(), PaneId::Detail);
-        assert!(app.status_text().contains("Focus pane: detail"));
-
-        app.update(key(Key::Left));
-        assert_eq!(app.active_pane(), PaneId::Main);
-
-        app.update(key(Key::Tab));
-        assert_eq!(app.active_pane(), PaneId::Detail);
-
-        app.update(shift_tab_key());
-        assert_eq!(app.active_pane(), PaneId::Main);
-    }
-
-    #[test]
-    fn tab_switch_resets_focus_pane() {
-        let mut app = App::new("default", 12);
-        app.set_tab(MainTab::Logs);
-        app.update(key(Key::Right));
-        assert_eq!(app.active_pane(), PaneId::Detail);
-
-        app.set_tab(MainTab::Overview);
-        assert_eq!(app.active_pane(), PaneId::Main);
-    }
-
-    #[test]
     fn multi_logs_tab_sets_focus_right() {
         let mut app = App::new("default", 12);
         assert!(!app.focus_right());
@@ -4490,8 +4267,6 @@ mod tests {
         assert!(snapshot.contains("thread:thread-b"));
         assert!(snapshot.contains("claim timeline (latest)"));
         assert!(snapshot.contains("! 2026-02-12T08:12:00Z forge-jws <- agent-b"));
-        assert!(snapshot.contains("operator panel"));
-        assert!(snapshot.contains("handoff package preview (press h to save)"));
     }
 
     #[test]
@@ -4517,7 +4292,7 @@ mod tests {
         app.update(key(Key::Char('h')));
         assert!(app.status_text().contains("Handoff snapshot ready"));
         let snapshot = app.render().snapshot();
-        assert!(snapshot.contains("handoff package (saved)"));
+        assert!(snapshot.contains("handoff snapshot"));
         assert!(snapshot.contains("task=forge-jws loop=loop-2"));
         assert!(snapshot.contains("status: loop=running"));
         assert!(snapshot.contains("context: thread=thread-handoff"));
@@ -4730,54 +4505,6 @@ mod tests {
         assert!(app.selected_view().is_none());
     }
 
-    #[test]
-    fn select_loop_by_id_resolves_unique_short_id_prefix() {
-        let mut app = App::new("default", 12);
-        app.set_loops(vec![
-            LoopView {
-                id: "loop-alpha".to_owned(),
-                short_id: "abc11111".to_owned(),
-                name: "alpha".to_owned(),
-                ..Default::default()
-            },
-            LoopView {
-                id: "loop-beta".to_owned(),
-                short_id: "abd22222".to_owned(),
-                name: "beta".to_owned(),
-                ..Default::default()
-            },
-        ]);
-        app.select_loop_by_id("abc");
-        assert_eq!(app.selected_id(), "loop-alpha");
-    }
-
-    #[test]
-    fn resolve_loop_reference_matches_ambiguous_error_shape() {
-        let mut app = App::new("default", 12);
-        app.set_loops(vec![
-            LoopView {
-                id: "loop-alpha".to_owned(),
-                short_id: "ab0".to_owned(),
-                name: "alpha".to_owned(),
-                ..Default::default()
-            },
-            LoopView {
-                id: "loop-beta".to_owned(),
-                short_id: "ab1".to_owned(),
-                name: "beta".to_owned(),
-                ..Default::default()
-            },
-        ]);
-        let err = match app.resolve_loop_reference("ab") {
-            Ok(value) => panic!("prefix should be ambiguous, got {value}"),
-            Err(err) => err,
-        };
-        assert_eq!(
-            err,
-            "loop 'ab' is ambiguous; matches: alpha (ab0), beta (ab1) (use a longer prefix or full ID)"
-        );
-    }
-
     // -- pinning --
 
     #[test]
@@ -4823,31 +4550,6 @@ mod tests {
         }
         assert_eq!(app.filtered().len(), 1);
         assert_eq!(app.filtered()[0].id, "loop-1");
-    }
-
-    #[test]
-    fn filter_text_matches_short_display_id() {
-        let mut app = App::new("default", 12);
-        app.set_loops(vec![
-            LoopView {
-                id: "loop-alpha".to_owned(),
-                short_id: "alpha01".to_owned(),
-                name: "operator-alpha".to_owned(),
-                ..Default::default()
-            },
-            LoopView {
-                id: "loop-beta".to_owned(),
-                short_id: "beta02".to_owned(),
-                name: "operator-beta".to_owned(),
-                ..Default::default()
-            },
-        ]);
-        app.update(key(Key::Char('/')));
-        for ch in "alpha0".chars() {
-            app.update(key(Key::Char(ch)));
-        }
-        assert_eq!(app.filtered().len(), 1);
-        assert_eq!(app.filtered()[0].id, "loop-alpha");
     }
 
     #[test]
