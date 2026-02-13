@@ -21,6 +21,7 @@ use forge_tui::app::{
 use forge_tui::theme::detect_terminal_color_capability;
 
 const REFRESH_INTERVAL: Duration = Duration::from_millis(900);
+const FOLLOW_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
 const LIVE_LOG_LINE_LIMIT: usize = 1200;
 const MULTI_LOG_LINE_LIMIT: usize = 48;
 const MULTI_LOG_LOOP_LIMIT: usize = 12;
@@ -57,7 +58,12 @@ pub fn run() -> Result<(), String> {
         if now >= next_refresh {
             let refreshed = dispatch_command(Command::Fetch, &mut app, &mut backend)?;
             dirty |= refreshed;
-            next_refresh = Instant::now() + REFRESH_INTERVAL;
+            let interval = if app.follow_mode() {
+                FOLLOW_REFRESH_INTERVAL
+            } else {
+                REFRESH_INTERVAL
+            };
+            next_refresh = Instant::now() + interval;
             continue;
         }
 

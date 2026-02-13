@@ -180,6 +180,7 @@ pub enum KeyCommand {
     SearchExecute,
     SearchNextMatch,
     SearchPrevMatch,
+    ToggleFollow,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -448,6 +449,25 @@ impl Keymap {
                 KeyChord::plain(Tok::Char('.')),
                 Cmd::MultiPageNext,
                 "page next",
+            ),
+            // -- Follow mode --
+            bind(
+                Scope::View(MainTab::Logs),
+                KeyChord::plain(Tok::Char('F')),
+                Cmd::ToggleFollow,
+                "toggle follow",
+            ),
+            bind(
+                Scope::View(MainTab::Runs),
+                KeyChord::plain(Tok::Char('F')),
+                Cmd::ToggleFollow,
+                "toggle follow",
+            ),
+            bind(
+                Scope::Mode(ModeScope::ExpandedLogs),
+                KeyChord::plain(Tok::Char('F')),
+                Cmd::ToggleFollow,
+                "toggle follow",
             ),
             bind(
                 Scope::Mode(ModeScope::Palette),
