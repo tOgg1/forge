@@ -14,6 +14,186 @@ pub const FRANKENTUI_PIN: &str = "23429fac0e739635c7b8e0b995bde09401ff6ea0";
 #[cfg(feature = "frankentui-upstream")]
 pub use ftui as upstream_ftui;
 
+/// Upstream FrankenTUI bridge helpers used by rewrite runtime/view code.
+#[cfg(feature = "frankentui-upstream")]
+pub mod upstream_bridge {
+    use super::render::{CellStyle, TermColor};
+    use super::style::{StyleToken, ThemeSpec};
+    use super::upstream_ftui as ftui;
+
+    /// Convert adapter terminal color into upstream ftui color.
+    #[must_use]
+    pub fn term_color_to_ftui_color(color: TermColor) -> ftui::Color {
+        match color {
+            TermColor::Ansi256(idx) => ftui::Color::Ansi256(idx),
+            TermColor::Rgb(r, g, b) => ftui::Color::rgb(r, g, b),
+        }
+    }
+
+    /// Convert adapter terminal color into ftui PackedRgba for style pipelines.
+    #[must_use]
+    pub fn term_color_to_packed_rgba(color: TermColor) -> ftui::render::cell::PackedRgba {
+        match term_color_to_ftui_color(color) {
+            ftui::Color::Rgb(rgb) => ftui::render::cell::PackedRgba::rgb(rgb.r, rgb.g, rgb.b),
+            ftui::Color::Ansi256(idx) => {
+                let rgb = ftui::Color::Ansi256(idx).to_rgb();
+                ftui::render::cell::PackedRgba::rgb(rgb.r, rgb.g, rgb.b)
+            }
+            ftui::Color::Ansi16(ansi16) => {
+                let rgb = ftui::Color::Ansi16(ansi16).to_rgb();
+                ftui::render::cell::PackedRgba::rgb(rgb.r, rgb.g, rgb.b)
+            }
+            ftui::Color::Mono(mono) => {
+                let rgb = ftui::Color::Mono(mono).to_rgb();
+                ftui::render::cell::PackedRgba::rgb(rgb.r, rgb.g, rgb.b)
+            }
+        }
+    }
+
+    /// Convert adapter cell style into upstream ftui style.
+    #[must_use]
+    pub fn cell_style_to_ftui_style(style: CellStyle) -> ftui::Style {
+        let mut attrs = ftui::StyleFlags::NONE;
+        if style.bold {
+            attrs.insert(ftui::StyleFlags::BOLD);
+        }
+        if style.dim {
+            attrs.insert(ftui::StyleFlags::DIM);
+        }
+        if style.underline {
+            attrs.insert(ftui::StyleFlags::UNDERLINE);
+        }
+
+        let mut out = ftui::Style::new()
+            .fg(term_color_to_packed_rgba(style.fg))
+            .bg(term_color_to_packed_rgba(style.bg));
+
+        if !attrs.is_empty() {
+            out = out.attrs(attrs);
+        }
+
+        out
+    }
+
+    /// Build an upstream style for one semantic theme token.
+    #[must_use]
+    pub fn token_style(theme: ThemeSpec, token: StyleToken) -> ftui::Style {
+        let fg = term_color_to_packed_rgba(TermColor::Ansi256(theme.color(token)));
+        let bg = term_color_to_packed_rgba(TermColor::Ansi256(theme.color(StyleToken::Background)));
+        let mut attrs = ftui::StyleFlags::NONE;
+
+        match token {
+            StyleToken::Accent if theme.typography.accent_bold => {
+                attrs.insert(ftui::StyleFlags::BOLD)
+            }
+            StyleToken::Success if theme.typography.success_bold => {
+                attrs.insert(ftui::StyleFlags::BOLD)
+            }
+            StyleToken::Danger if theme.typography.danger_bold => {
+                attrs.insert(ftui::StyleFlags::BOLD)
+            }
+            StyleToken::Warning if theme.typography.warning_bold => {
+                attrs.insert(ftui::StyleFlags::BOLD)
+            }
+            StyleToken::Muted if theme.typography.muted_dim => attrs.insert(ftui::StyleFlags::DIM),
+            StyleToken::Focus if theme.typography.focus_underline => {
+                attrs.insert(ftui::StyleFlags::UNDERLINE)
+            }
+            _ => {}
+        }
+
+        let mut style = ftui::Style::new().fg(fg).bg(bg);
+        if !attrs.is_empty() {
+            style = style.attrs(attrs);
+        }
+        style
+    }
+}
+
+/// Re-export supporting upstream widgets used by the rewrite path.
+#[cfg(feature = "frankentui-upstream")]
+pub mod upstream_widgets {
+    use super::upstream_ftui as ftui;
+
+    pub use ftui::widgets::list::{List, ListItem, ListState};
+    pub use ftui::widgets::log_viewer::{LogViewer, LogViewerState, LogWrapMode};
+    pub use ftui::widgets::modal::{
+        Modal, ModalConfig, ModalPosition, ModalSizeConstraints, ModalState,
+    };
+    pub use ftui::widgets::notification_queue::{NotificationQueue, QueueConfig};
+    pub use ftui::widgets::Panel;
+
+    /// Build a `LogViewer` with explicit capacity.
+    #[must_use]
+    pub fn log_viewer(max_lines: usize) -> LogViewer {
+        LogViewer::new(max_lines)
+    }
+
+    /// Build a `ListState`.
+    #[must_use]
+    pub fn list_state() -> ListState {
+        ListState::default()
+    }
+
+    /// Build a `LogViewerState`.
+    #[must_use]
+    pub fn log_viewer_state() -> LogViewerState {
+        LogViewerState::default()
+    }
+
+    /// Build a `NotificationQueue` using provided config.
+    #[must_use]
+    pub fn notification_queue(config: QueueConfig) -> NotificationQueue {
+        NotificationQueue::new(config)
+    }
+
+    /// Build a default `ModalState` in open state.
+    #[must_use]
+    pub fn modal_state() -> ModalState {
+        ModalState::default()
+    }
+}
+
+/// Minimum primitive surface used by the immediate rewrite scope.
+#[cfg(feature = "frankentui-upstream")]
+pub mod upstream_primitives {
+    use super::upstream_ftui as ftui;
+
+    pub use ftui::layout::{Constraint, Direction, Flex};
+    pub use ftui::widgets::table::{Row as TableRow, Table, TableState};
+    pub use ftui::widgets::{Badge, StatusItem, StatusLine};
+
+    /// Build a default table state.
+    #[must_use]
+    pub fn table_state() -> TableState {
+        TableState::default()
+    }
+
+    /// Build an empty status line.
+    #[must_use]
+    pub fn status_line<'a>() -> StatusLine<'a> {
+        StatusLine::new()
+    }
+
+    /// Build a simple badge with one label.
+    #[must_use]
+    pub fn badge<'a>(label: &'a str) -> Badge<'a> {
+        Badge::new(label)
+    }
+
+    /// Build a horizontal flex layout from constraints.
+    #[must_use]
+    pub fn horizontal_flex(constraints: impl IntoIterator<Item = Constraint>) -> Flex {
+        Flex::horizontal().constraints(constraints)
+    }
+
+    /// Build a vertical flex layout from constraints.
+    #[must_use]
+    pub fn vertical_flex(constraints: impl IntoIterator<Item = Constraint>) -> Flex {
+        Flex::vertical().constraints(constraints)
+    }
+}
+
 /// Style and theme primitives consumed by Forge TUI crates.
 pub mod style {
     /// Logical theme choices supported by the adapter.
@@ -655,13 +835,7 @@ pub mod render {
         }
 
         /// Draw a horizontal rule across a row within a region.
-        pub fn draw_horizontal_rule(
-            &mut self,
-            x: usize,
-            y: usize,
-            width: usize,
-            role: TextRole,
-        ) {
+        pub fn draw_horizontal_rule(&mut self, x: usize, y: usize, width: usize, role: TextRole) {
             let fg = self.color_for_role(role);
             let bg = TermColor::Ansi256(self.theme.color(StyleToken::Background));
             let style = CellStyle {
@@ -679,8 +853,7 @@ pub mod render {
                     col,
                     y,
                     FrameCell {
-                        glyph: '─',
-                        style,
+                        glyph: '─', style
                     },
                 );
             }
@@ -1600,5 +1773,134 @@ mod tests {
             snapshot,
             "from:From:18:Left\nsubject:Subject:32:Left\nage:Age:8:Right\nstatus:Status:10:Center"
         );
+    }
+}
+
+#[cfg(all(test, feature = "frankentui-upstream"))]
+mod upstream_bridge_tests {
+    #![allow(clippy::expect_used)]
+
+    use super::render::{CellStyle, TermColor};
+    use super::style::{StyleToken, ThemeKind, ThemeSpec};
+    use super::upstream_bridge::{
+        cell_style_to_ftui_style, term_color_to_ftui_color, term_color_to_packed_rgba, token_style,
+    };
+    use super::upstream_ftui as ftui;
+
+    #[test]
+    fn term_color_conversion_preserves_variants() {
+        assert_eq!(
+            term_color_to_ftui_color(TermColor::Ansi256(203)),
+            ftui::Color::Ansi256(203)
+        );
+        assert_eq!(
+            term_color_to_ftui_color(TermColor::Rgb(10, 20, 30)),
+            ftui::Color::rgb(10, 20, 30)
+        );
+    }
+
+    #[test]
+    fn term_color_to_packed_rgba_handles_ansi_and_rgb() {
+        let ansi_rgb = ftui::Color::Ansi256(196).to_rgb();
+        assert_eq!(
+            term_color_to_packed_rgba(TermColor::Ansi256(196)),
+            ftui::render::cell::PackedRgba::rgb(ansi_rgb.r, ansi_rgb.g, ansi_rgb.b)
+        );
+        assert_eq!(
+            term_color_to_packed_rgba(TermColor::Rgb(1, 2, 3)),
+            ftui::render::cell::PackedRgba::rgb(1, 2, 3)
+        );
+    }
+
+    #[test]
+    fn cell_style_conversion_maps_colors_and_attrs() {
+        let style = CellStyle {
+            fg: TermColor::Ansi256(51),
+            bg: TermColor::Rgb(1, 2, 3),
+            bold: true,
+            dim: true,
+            underline: true,
+        };
+        let converted = cell_style_to_ftui_style(style);
+
+        let fg_rgb = ftui::Color::Ansi256(51).to_rgb();
+        assert_eq!(
+            converted.fg,
+            Some(ftui::render::cell::PackedRgba::rgb(
+                fg_rgb.r, fg_rgb.g, fg_rgb.b
+            ))
+        );
+        assert_eq!(
+            converted.bg,
+            Some(ftui::render::cell::PackedRgba::rgb(1, 2, 3))
+        );
+        assert!(converted.has_attr(ftui::StyleFlags::BOLD));
+        assert!(converted.has_attr(ftui::StyleFlags::DIM));
+        assert!(converted.has_attr(ftui::StyleFlags::UNDERLINE));
+    }
+
+    #[test]
+    fn token_style_applies_typography_policy() {
+        let theme = ThemeSpec::for_kind(ThemeKind::Dark);
+
+        let accent = token_style(theme, StyleToken::Accent);
+        assert!(accent.has_attr(ftui::StyleFlags::BOLD));
+
+        let muted = token_style(theme, StyleToken::Muted);
+        assert!(muted.has_attr(ftui::StyleFlags::DIM));
+
+        let focus = token_style(theme, StyleToken::Focus);
+        assert!(focus.has_attr(ftui::StyleFlags::UNDERLINE));
+    }
+}
+
+#[cfg(all(test, feature = "frankentui-upstream"))]
+mod upstream_widgets_tests {
+    use super::upstream_widgets::{
+        list_state, log_viewer, log_viewer_state, modal_state, notification_queue, QueueConfig,
+    };
+
+    #[test]
+    fn widget_constructor_helpers_build_expected_defaults() {
+        let mut viewer = log_viewer(3);
+        viewer.push("a");
+        viewer.push("b");
+        viewer.push("c");
+        viewer.push("d");
+        assert_eq!(viewer.line_count(), 3);
+
+        let list = list_state();
+        assert_eq!(list.selected(), None);
+
+        let log_state = log_viewer_state();
+        assert_eq!(log_state.last_visible_lines, 0);
+
+        let queue = notification_queue(QueueConfig::default().max_visible(2));
+        assert_eq!(queue.visible_count(), 0);
+
+        let modal = modal_state();
+        assert!(modal.is_open());
+    }
+}
+
+#[cfg(all(test, feature = "frankentui-upstream"))]
+mod upstream_primitives_tests {
+    use super::upstream_primitives::{
+        badge, horizontal_flex, status_line, table_state, vertical_flex, Constraint,
+    };
+
+    #[test]
+    fn primitive_constructor_helpers_build_expected_shapes() {
+        let table = table_state();
+        assert_eq!(table.selected, None);
+
+        let _status = status_line().left(super::upstream_ftui::widgets::StatusItem::text("ok"));
+        let _badge = badge("running");
+
+        let horizontal = horizontal_flex([Constraint::Fixed(10), Constraint::Fill]);
+        assert_eq!(horizontal.constraint_count(), 2);
+
+        let vertical = vertical_flex([Constraint::Fixed(1), Constraint::Fixed(2)]);
+        assert_eq!(vertical.constraint_count(), 2);
     }
 }
