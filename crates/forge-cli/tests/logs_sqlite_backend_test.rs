@@ -31,7 +31,7 @@ fn logs_dispatch_reads_filesystem_logs_via_sqlite_loop_lookup() {
     )
     .unwrap_or_else(|e| panic!("write log {}: {e}", log_path));
 
-    let (code, stdout, stderr) = run(&["logs", "oracle-loop", "--lines", "1"]);
+    let (code, stdout, stderr) = run(&["logs", "oracle-loop", "--lines", "1", "--no-color"]);
     assert_eq!(code, 0, "stderr: {stderr}");
     assert!(stderr.is_empty());
     assert_eq!(stdout, "==> oracle-loop <==\n[2026-01-01T00:00:01Z] two\n");
@@ -63,7 +63,13 @@ fn logs_dispatch_supports_since_and_follow_flags_on_sqlite_backend() {
     )
     .unwrap_or_else(|e| panic!("write log {}: {e}", log_path));
 
-    let (code, stdout, stderr) = run(&["logs", "oracle-loop", "--since", "2026-01-01T00:00:01Z"]);
+    let (code, stdout, stderr) = run(&[
+        "logs",
+        "oracle-loop",
+        "--since",
+        "2026-01-01T00:00:01Z",
+        "--no-color",
+    ]);
     assert_eq!(code, 0, "stderr: {stderr}");
     assert!(stderr.is_empty());
     assert_eq!(
@@ -72,7 +78,14 @@ fn logs_dispatch_supports_since_and_follow_flags_on_sqlite_backend() {
     );
 
     std::env::set_var("FORGE_LOGS_FOLLOW_ONCE", "1");
-    let (code, stdout, stderr) = run(&["logs", "oracle-loop", "--follow", "--lines", "1"]);
+    let (code, stdout, stderr) = run(&[
+        "logs",
+        "oracle-loop",
+        "--follow",
+        "--lines",
+        "1",
+        "--no-color",
+    ]);
     std::env::remove_var("FORGE_LOGS_FOLLOW_ONCE");
     assert_eq!(code, 0, "stderr: {stderr}");
     assert!(stderr.is_empty());

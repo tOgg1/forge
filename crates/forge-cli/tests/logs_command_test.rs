@@ -5,7 +5,10 @@ use forge_cli::logs::{
 #[test]
 fn logs_single_tail_matches_golden() {
     let mut backend = seeded();
-    let out = run(&["logs", "alpha", "--lines", "2"], &mut backend);
+    let out = run(
+        &["logs", "alpha", "--lines", "2", "--no-color"],
+        &mut backend,
+    );
     assert_success(&out);
     assert_eq!(out.stdout, include_str!("golden/logs/single_tail.txt"));
 }
@@ -13,7 +16,10 @@ fn logs_single_tail_matches_golden() {
 #[test]
 fn logs_all_repo_matches_golden() {
     let mut backend = seeded();
-    let out = run(&["logs", "--all", "--lines", "1"], &mut backend);
+    let out = run(
+        &["logs", "--all", "--lines", "1", "--no-color"],
+        &mut backend,
+    );
     assert_success(&out);
     assert_eq!(out.stdout, include_str!("golden/logs/all_repo.txt"));
 }
@@ -22,7 +28,13 @@ fn logs_all_repo_matches_golden() {
 fn logs_since_filter_matches_golden() {
     let mut backend = seeded();
     let out = run(
-        &["logs", "alpha", "--since", "2026-01-01T00:00:01Z"],
+        &[
+            "logs",
+            "alpha",
+            "--since",
+            "2026-01-01T00:00:01Z",
+            "--no-color",
+        ],
         &mut backend,
     );
     assert_success(&out);
@@ -52,7 +64,10 @@ fn logs_oracle_flow_matches_fixture() {
     let mut backend = seeded();
     let mut steps = Vec::new();
 
-    let by_name = run(&["logs", "alpha", "--lines", "2"], &mut backend);
+    let by_name = run(
+        &["logs", "alpha", "--lines", "2", "--no-color"],
+        &mut backend,
+    );
     steps.push(OracleStep {
         name: "logs by name".to_string(),
         stdout: by_name.stdout,
@@ -60,7 +75,10 @@ fn logs_oracle_flow_matches_fixture() {
         exit_code: by_name.exit_code,
     });
 
-    let all_repo = run(&["logs", "--all", "--lines", "1"], &mut backend);
+    let all_repo = run(
+        &["logs", "--all", "--lines", "1", "--no-color"],
+        &mut backend,
+    );
     steps.push(OracleStep {
         name: "logs all".to_string(),
         stdout: all_repo.stdout,
@@ -69,7 +87,13 @@ fn logs_oracle_flow_matches_fixture() {
     });
 
     let since = run(
-        &["logs", "alpha", "--since", "2026-01-01T00:00:01Z"],
+        &[
+            "logs",
+            "alpha",
+            "--since",
+            "2026-01-01T00:00:01Z",
+            "--no-color",
+        ],
         &mut backend,
     );
     steps.push(OracleStep {
@@ -87,7 +111,7 @@ fn logs_oracle_flow_matches_fixture() {
         exit_code: missing.exit_code,
     });
 
-    let unknown = run(&["logs", "alpha", "--bogus"], &mut backend);
+    let unknown = run(&["logs", "alpha", "--bogus", "--no-color"], &mut backend);
     steps.push(OracleStep {
         name: "logs unknown flag".to_string(),
         stdout: unknown.stdout,
