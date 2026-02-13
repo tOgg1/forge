@@ -45,7 +45,7 @@ fn ps_empty_json_matches_golden() {
 #[test]
 fn ps_single_text_matches_golden() {
     let backend = InMemoryPsBackend::with_loops(vec![sample_loop()]);
-    let out = run(&["ps"], &backend);
+    let out = run(&["ps", "--no-color"], &backend);
     assert_success(&out);
     assert_eq!(out.stdout, include_str!("golden/ps/single_text.txt"));
 }
