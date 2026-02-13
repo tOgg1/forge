@@ -1,11 +1,8 @@
 use std::collections::HashMap;
-use std::io::{IsTerminal, Write};
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::{Duration, Instant};
 
 use forge_tui::app::{App, LoopView};
-use forge_tui::polling_pipeline::{PollScheduler, PollingConfig, PollingQueue};
 use forge_tui::theme::detect_terminal_color_capability;
 
 #[derive(Debug, Clone, Default)]
@@ -21,55 +18,17 @@ struct LiveLoopSnapshot {
     log_paths: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RenderDiffPlan {
-    changed_rows: Vec<usize>,
-    clear_start_row: Option<usize>,
-    clear_end_row: usize,
-}
-
-impl RenderDiffPlan {
-    fn is_noop(&self) -> bool {
-        self.changed_rows.is_empty() && self.clear_start_row.is_none()
-    }
-}
-
-#[derive(Debug, Default)]
-struct IncrementalRenderEngine {
-    previous_lines: Vec<String>,
-}
-
-impl IncrementalRenderEngine {
-    fn repaint<W: Write>(&mut self, mut out: W, next_lines: &[String]) -> std::io::Result<()> {
-        let plan = plan_render_diff(&self.previous_lines, next_lines);
-        if plan.is_noop() {
-            return Ok(());
-        }
-
-        for row in plan.changed_rows {
-            let line = next_lines.get(row - 1).map_or("", String::as_str);
-            write!(out, "\x1b[{row};1H\x1b[2K{line}")?;
-        }
-
-        if let Some(start_row) = plan.clear_start_row {
-            for row in start_row..=plan.clear_end_row {
-                write!(out, "\x1b[{row};1H\x1b[2K")?;
-            }
-        }
-
-        write!(out, "\x1b[{};1H", next_lines.len().saturating_add(1))?;
-        out.flush()?;
-        self.previous_lines = next_lines.to_vec();
-        Ok(())
-    }
-}
-
 fn main() {
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     if interactive {
         run_interactive();
-    } else {
+    } else if ci_non_tty_snapshot_mode_enabled() {
         print!("{}", render_snapshot_text());
+    } else {
+        eprintln!(
+            "error: non-interactive snapshot mode is CI-only; set CI=1 or run in a TTY for FrankenTUI runtime"
+        );
+        std::process::exit(2);
     }
 }
 
@@ -81,20 +40,9 @@ fn run_interactive() {
         std::process::exit(2);
     }
 
-    let result = run_frankentui_bootstrap();
-
-    if let Err(err) = result {
-        if dev_snapshot_fallback_enabled() {
-            eprintln!(
-                "warning: failed to run interactive runtime ({err}); using snapshot renderer because FORGE_TUI_DEV_SNAPSHOT_FALLBACK is enabled"
-            );
-            run_interactive_snapshot();
-        } else {
-            eprintln!(
-                "error: failed to run interactive runtime ({err}); set FORGE_TUI_DEV_SNAPSHOT_FALLBACK=1 for explicit dev fallback"
-            );
-            std::process::exit(1);
-        }
+    if let Err(err) = run_frankentui_bootstrap() {
+        eprintln!("error: failed to run interactive runtime ({err})");
+        std::process::exit(1);
     }
 }
 
@@ -110,80 +58,6 @@ fn run_frankentui_bootstrap() -> Result<(), String> {
             "frankentui bootstrap requested via FORGE_TUI_RUNTIME but build is missing feature `frankentui-bootstrap`"
                 .to_owned(),
         )
-    }
-}
-
-fn run_interactive_snapshot() {
-    let mut renderer = IncrementalRenderEngine::default();
-    let db_path = resolve_database_path();
-    let mut scheduler = PollScheduler::new(PollingConfig::default(), &polling_pipeline_key());
-    let mut queue = PollingQueue::new(scheduler.config().max_pending_snapshots);
-    let mut next_poll_deadline = Instant::now();
-
-    print!("\x1b[2J");
-    let _ = std::io::stdout().flush();
-
-    loop {
-        let mut now = Instant::now();
-        while now >= next_poll_deadline {
-            let lines = render_snapshot_lines_for_path(&db_path);
-            let _ = queue.push(lines);
-            next_poll_deadline += scheduler.next_interval(queue.len());
-            now = Instant::now();
-        }
-
-        if let Some(mut lines) = queue.drain_latest() {
-            lines.push(String::new());
-            lines.push(render_poll_status_line(&scheduler, &queue));
-            let _ = renderer.repaint(std::io::stdout(), &lines);
-        }
-
-        let sleep_for = next_poll_deadline.saturating_duration_since(Instant::now());
-        if sleep_for.is_zero() {
-            thread::yield_now();
-        } else {
-            thread::sleep(sleep_for.min(Duration::from_millis(250)));
-        }
-    }
-}
-
-fn polling_pipeline_key() -> String {
-    let host = std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("HOST"))
-        .unwrap_or_else(|_| "forge-tui".to_owned());
-    format!("{host}:{}", std::process::id())
-}
-
-fn render_poll_status_line(scheduler: &PollScheduler, queue: &PollingQueue<Vec<String>>) -> String {
-    let config = scheduler.config();
-    format!(
-        "refresh: {}ms + jitter<= {}ms  queue:max={} dropped={}  exit: Ctrl+C",
-        config.base_interval_ms,
-        config.max_jitter_ms,
-        queue.max_depth_seen(),
-        queue.dropped_total()
-    )
-}
-
-fn plan_render_diff(previous: &[String], next: &[String]) -> RenderDiffPlan {
-    let shared = previous.len().min(next.len());
-    let mut changed_rows = Vec::new();
-
-    for idx in 0..shared {
-        if previous[idx] != next[idx] {
-            changed_rows.push(idx + 1);
-        }
-    }
-    if next.len() > shared {
-        changed_rows.extend((shared + 1)..=next.len());
-    }
-
-    let clear_start_row = (next.len() < previous.len()).then_some(next.len() + 1);
-
-    RenderDiffPlan {
-        changed_rows,
-        clear_start_row,
-        clear_end_row: previous.len(),
     }
 }
 
@@ -424,20 +298,24 @@ fn non_empty_env_path(key: &str) -> Option<PathBuf> {
     })
 }
 
-fn dev_snapshot_fallback_enabled() -> bool {
-    std::env::var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK")
-        .map(|raw| {
-            let normalized = raw.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-        })
-        .unwrap_or(false)
-}
-
 fn runtime_legacy_requested() -> bool {
     std::env::var("FORGE_TUI_RUNTIME")
         .map(|raw| {
             let normalized = raw.trim().to_ascii_lowercase();
             matches!(normalized.as_str(), "legacy" | "old")
+        })
+        .unwrap_or(false)
+}
+
+fn ci_non_tty_snapshot_mode_enabled() -> bool {
+    env_truthy("CI")
+}
+
+fn env_truthy(key: &str) -> bool {
+    std::env::var(key)
+        .map(|raw| {
+            let normalized = raw.trim().to_ascii_lowercase();
+            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
         })
         .unwrap_or(false)
 }
@@ -472,8 +350,8 @@ mod tests {
     use forge_db::profile_repository::{Profile, ProfileRepository};
 
     use super::{
-        dev_snapshot_fallback_enabled, load_live_loop_snapshot, plan_render_diff,
-        resolve_database_path, runtime_legacy_requested, IncrementalRenderEngine,
+        ci_non_tty_snapshot_mode_enabled, load_live_loop_snapshot, resolve_database_path,
+        runtime_legacy_requested,
     };
 
     #[test]
@@ -582,25 +460,33 @@ mod tests {
     }
 
     #[test]
-    fn dev_snapshot_fallback_env_parser_matches_expected_values() {
+    fn ci_non_tty_snapshot_mode_is_disabled_without_ci() {
         let _guard = env_lock();
-        let _reset = EnvGuard::unset("FORGE_TUI_DEV_SNAPSHOT_FALLBACK");
-        assert!(!dev_snapshot_fallback_enabled());
+        let _reset = EnvGuard::unset("CI");
+        assert!(!ci_non_tty_snapshot_mode_enabled());
+    }
 
-        std::env::set_var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK", "1");
-        assert!(dev_snapshot_fallback_enabled());
+    #[test]
+    fn ci_non_tty_snapshot_mode_accepts_truthy_ci_values() {
+        let _guard = env_lock();
+        let _set = EnvGuard::set("CI", "1");
+        assert!(ci_non_tty_snapshot_mode_enabled());
 
-        std::env::set_var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK", "true");
-        assert!(dev_snapshot_fallback_enabled());
+        std::env::set_var("CI", "true");
+        assert!(ci_non_tty_snapshot_mode_enabled());
 
-        std::env::set_var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK", "YES");
-        assert!(dev_snapshot_fallback_enabled());
+        std::env::set_var("CI", "YES");
+        assert!(ci_non_tty_snapshot_mode_enabled());
+    }
 
-        std::env::set_var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK", "0");
-        assert!(!dev_snapshot_fallback_enabled());
+    #[test]
+    fn ci_non_tty_snapshot_mode_rejects_falsey_ci_values() {
+        let _guard = env_lock();
+        let _set = EnvGuard::set("CI", "0");
+        assert!(!ci_non_tty_snapshot_mode_enabled());
 
-        std::env::set_var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK", "no");
-        assert!(!dev_snapshot_fallback_enabled());
+        std::env::set_var("CI", "no");
+        assert!(!ci_non_tty_snapshot_mode_enabled());
     }
 
     #[test]
@@ -627,63 +513,6 @@ mod tests {
     }
 
     #[test]
-    fn render_diff_plan_marks_changed_and_appended_rows() {
-        let plan = plan_render_diff(
-            &lines(["header", "stable", "tail-old"]),
-            &lines(["header", "changed", "tail-old", "new-row"]),
-        );
-        assert_eq!(plan.changed_rows, vec![2, 4]);
-        assert_eq!(plan.clear_start_row, None);
-        assert_eq!(plan.clear_end_row, 3);
-    }
-
-    #[test]
-    fn render_diff_plan_marks_clear_range_when_next_is_shorter() {
-        let plan = plan_render_diff(
-            &lines(["alpha", "beta", "gamma"]),
-            &lines(["alpha", "beta"]),
-        );
-        assert!(plan.changed_rows.is_empty());
-        assert_eq!(plan.clear_start_row, Some(3));
-        assert_eq!(plan.clear_end_row, 3);
-    }
-
-    #[test]
-    fn incremental_repaint_noop_for_identical_frames() {
-        let mut engine = IncrementalRenderEngine::default();
-        let frame = lines(["row-1", "row-2"]);
-
-        let mut first = Vec::new();
-        engine.repaint(&mut first, &frame).expect("first repaint");
-        assert!(!first.is_empty());
-
-        let mut second = Vec::new();
-        engine.repaint(&mut second, &frame).expect("second repaint");
-        assert!(second.is_empty());
-    }
-
-    #[test]
-    fn incremental_repaint_updates_changed_rows_and_clears_removed_tail() {
-        let mut engine = IncrementalRenderEngine::default();
-
-        let mut seed = Vec::new();
-        engine
-            .repaint(&mut seed, &lines(["alpha", "beta", "gamma"]))
-            .expect("seed repaint");
-
-        let mut out = Vec::new();
-        engine
-            .repaint(&mut out, &lines(["alpha", "BETA"]))
-            .expect("incremental repaint");
-
-        let ansi = String::from_utf8(out).expect("valid utf8");
-        assert!(!ansi.contains("\x1b[1;1H\x1b[2Kalpha"));
-        assert!(ansi.contains("\x1b[2;1H\x1b[2KBETA"));
-        assert!(ansi.contains("\x1b[3;1H\x1b[2K"));
-        assert!(ansi.ends_with("\x1b[3;1H"));
-    }
-
-    #[test]
     fn resolve_database_path_uses_global_data_dir_alias_when_db_env_is_unset() {
         let _lock = env_lock();
         let _g_db = EnvGuard::unset("FORGE_DATABASE_PATH");
@@ -694,10 +523,6 @@ mod tests {
             resolve_database_path(),
             PathBuf::from("/tmp/forge-tui-global/forge.db")
         );
-    }
-
-    fn lines<const N: usize>(rows: [&str; N]) -> Vec<String> {
-        rows.into_iter().map(str::to_owned).collect()
     }
 
     fn temp_db_path(tag: &str) -> PathBuf {
