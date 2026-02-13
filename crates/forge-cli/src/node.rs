@@ -772,6 +772,22 @@ mod tests {
     }
 
     #[test]
+    fn help_includes_registry_subcommands() {
+        let mut backend = InMemoryNodeBackend::with_status(mesh_status());
+        let out = run_for_test(&["node", "help"], &mut backend);
+        assert_eq!(out.exit_code, 0, "stderr={}", out.stderr);
+        assert!(out
+            .stdout
+            .contains("forge node registry ls <node-id> [agents|prompts]"));
+        assert!(out
+            .stdout
+            .contains("forge node registry show <node-id> <agent|prompt> <name>"));
+        assert!(out
+            .stdout
+            .contains("forge node registry update <node-id> <agent|prompt> <name> [flags]"));
+    }
+
+    #[test]
     fn route_exec_forwards_to_master_for_non_master_target() {
         let mut backend = InMemoryNodeBackend::with_status(mesh_status());
 
