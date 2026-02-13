@@ -37,6 +37,7 @@ pub mod fleet_selection;
 #[cfg(feature = "frankentui-bootstrap")]
 pub mod frankentui_bootstrap;
 pub mod global_search_index;
+pub mod health_heatmap_timeline;
 pub mod help_overlay;
 pub mod hero_widgets;
 pub mod incident_replay;
@@ -59,6 +60,7 @@ pub mod performance_gates;
 pub mod polling_pipeline;
 pub mod postmortem_draft;
 pub mod predictive_queue_eta;
+pub mod quick_peek_popups;
 pub mod readiness_board;
 pub mod resilience_matrix;
 pub mod run_output_diff;
