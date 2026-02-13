@@ -3,9 +3,12 @@
 //! Mirrors the Go `internal/looptui` overview pane content: loop metadata
 //! lines + a small run-status snapshot.
 
-use forge_ftui_adapter::render::TextRole;
+use forge_ftui_adapter::render::{Rect, RenderFrame, TermColor, TextRole};
+use forge_ftui_adapter::widgets::BorderStyle;
 
 use crate::app::{LoopView, RunView};
+use crate::hero_widgets::{build_fleet_snapshot, FleetSnapshot};
+use crate::theme::ResolvedPalette;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OverviewLine {
@@ -278,6 +281,320 @@ pub fn overview_pane_lines(
     );
 
     trim_to_height(&out, height.max(1))
+}
+
+// ---------------------------------------------------------------------------
+// Paneled overview rendering — uses draw_panel for visual hierarchy
+// ---------------------------------------------------------------------------
+
+/// Render the overview tab content with bordered panels into a `RenderFrame`.
+///
+/// Layout:
+/// ```text
+/// ╭─ Fleet ────────────────────────────────────────────────────╮
+/// │ ● 2 run  ○ 0 sleep  ■ 1 stop  ✗ 1 err │ queue:15 │ 50% ok│
+/// ╰────────────────────────────────────────────────────────────╯
+/// ╭─ Loop: operator-loop-2 ────────────────────────────────────╮
+/// │ key-value fields ...                                       │
+/// ╰────────────────────────────────────────────────────────────╯
+/// ╭─ Run Snapshot ─────────────────────────────────────────────╮
+/// │ total=N success=N error=N ...                              │
+/// ╰────────────────────────────────────────────────────────────╯
+/// ```
+pub fn render_overview_paneled(
+    frame: &mut RenderFrame,
+    loops: &[LoopView],
+    selected_loop: Option<&LoopView>,
+    run_history: &[RunView],
+    selected_run: usize,
+    pal: &ResolvedPalette,
+    area: Rect,
+    _focus_right: bool,
+) {
+    if area.width < 4 || area.height < 4 {
+        return;
+    }
+
+    // Fill entire content area background
+    frame.fill_bg(area, pal.background);
+
+    let snap = build_fleet_snapshot(loops, run_history);
+
+    // -- Fleet hero panel (4 rows: border + 2 content + border) --
+    let hero_h = 4usize.min(area.height);
+    let (hero_rect, rest) = area.split_vertical(hero_h);
+    render_fleet_hero(frame, hero_rect, &snap, pal);
+
+    // Guard: no space left
+    if rest.height < 4 {
+        return;
+    }
+
+    let Some(loop_view) = selected_loop else {
+        // No selection — show guidance in a panel
+        let guidance_h = 5usize.min(rest.height);
+        let (guide_rect, _) = rest.split_vertical(guidance_h);
+        let inner = frame.draw_panel(
+            guide_rect,
+            "Getting Started",
+            BorderStyle::Rounded,
+            pal.border,
+            pal.panel,
+        );
+        draw_text_on_bg(frame, inner.x, inner.y, "No loop selected.", pal.text, pal.panel);
+        if inner.height > 1 {
+            draw_text_on_bg(
+                frame,
+                inner.x,
+                inner.y + 1,
+                "Use j/k or arrow keys to choose a loop.",
+                pal.text_muted,
+                pal.panel,
+            );
+        }
+        if inner.height > 2 {
+            draw_text_on_bg(
+                frame,
+                inner.x,
+                inner.y + 2,
+                "Start one: forge up --count 1",
+                pal.text_muted,
+                pal.panel,
+            );
+        }
+        return;
+    };
+
+    // -- Loop detail panel --
+    let detail_fields = build_detail_fields(loop_view, pal);
+    let detail_h = (detail_fields.len() + 2).min(rest.height); // +2 for borders
+    let (detail_rect, rest2) = rest.split_vertical(detail_h);
+    let detail_title = format!("Loop: {}", display_name(&loop_view.name, &loop_display_id(loop_view)));
+    let detail_inner = frame.draw_panel(
+        detail_rect,
+        &detail_title,
+        BorderStyle::Rounded,
+        pal.accent,
+        pal.panel,
+    );
+    for (i, (text, color)) in detail_fields.iter().enumerate() {
+        if i >= detail_inner.height {
+            break;
+        }
+        let trunc = truncate_line(text, detail_inner.width);
+        draw_text_on_bg(frame, detail_inner.x, detail_inner.y + i, &trunc, *color, pal.panel);
+    }
+
+    // -- Run snapshot panel --
+    if rest2.height >= 4 {
+        let counts = count_runs(run_history);
+        let snap_h = 4usize.min(rest2.height);
+        let (snap_rect, rest3) = rest2.split_vertical(snap_h);
+        let snap_inner = frame.draw_panel(
+            snap_rect,
+            "Run Snapshot",
+            BorderStyle::Rounded,
+            pal.border,
+            pal.panel,
+        );
+        let summary = format!(
+            "total={}  success={}  error={}  killed={}  running={}",
+            run_history.len(),
+            counts.success,
+            counts.error,
+            counts.killed,
+            counts.running,
+        );
+        draw_text_on_bg(
+            frame,
+            snap_inner.x,
+            snap_inner.y,
+            &truncate_line(&summary, snap_inner.width),
+            pal.text,
+            pal.panel,
+        );
+        if !run_history.is_empty() && snap_inner.height > 1 {
+            let idx = selected_run.min(run_history.len().saturating_sub(1));
+            let run = &run_history[idx];
+            let latest = format!(
+                "latest={}  status={}  exit={}  duration={}",
+                short_run_id(&run.id),
+                run.status.trim().to_ascii_uppercase(),
+                run_exit_code(run),
+                format_run_duration(run),
+            );
+            draw_text_on_bg(
+                frame,
+                snap_inner.x,
+                snap_inner.y + 1,
+                &truncate_line(&latest, snap_inner.width),
+                pal.text_muted,
+                pal.panel,
+            );
+        }
+
+        // -- Workflow hint --
+        if rest3.height >= 1 {
+            draw_text_on_bg(
+                frame,
+                rest3.x + 1,
+                rest3.y,
+                "Workflow: 2=Logs (deep scroll) | 3=Runs | 4=Multi Logs",
+                pal.text_muted,
+                pal.background,
+            );
+        }
+    }
+}
+
+fn render_fleet_hero(
+    frame: &mut RenderFrame,
+    rect: Rect,
+    snap: &FleetSnapshot,
+    pal: &ResolvedPalette,
+) {
+    let inner = frame.draw_panel(rect, "Fleet", BorderStyle::Rounded, pal.border, pal.panel);
+    if inner.width < 4 || inner.height < 1 {
+        return;
+    }
+
+    // Row 0: Fleet status line with colored segments
+    let mut col = inner.x;
+    let y = inner.y;
+    let max_col = inner.x + inner.width;
+
+    let segments: Vec<(&str, usize, TermColor)> = vec![
+        ("\u{25CF}", snap.running_loops, pal.success),     // ● running
+        ("\u{25CB}", snap.sleeping_loops, pal.text_muted), // ○ sleeping
+        ("\u{25A0}", snap.stopped_loops, pal.warning),     // ■ stopped
+        ("\u{2716}", snap.error_loops, pal.error),         // ✗ error
+    ];
+
+    for (icon, count, color) in &segments {
+        let chunk = format!("{icon}{count}  ");
+        if col + chunk.len() > max_col {
+            break;
+        }
+        frame.draw_styled_text(col, y, &chunk, *color, pal.panel, false);
+        col += chunk.len();
+    }
+
+    // Queue depth
+    let queue = format!(" q:{}", snap.total_queue_depth);
+    if col + queue.len() + 2 <= max_col {
+        frame.draw_styled_text(col, y, "\u{2502}", pal.border, pal.panel, false);
+        col += 1;
+        frame.draw_styled_text(col, y, &queue, pal.info, pal.panel, false);
+        col += queue.len();
+    }
+
+    // Success rate text
+    let success_ratio = if snap.total_runs > 0 {
+        snap.success_runs as f64 / snap.total_runs as f64
+    } else {
+        0.0
+    };
+    let pct = (success_ratio * 100.0) as u32;
+    let ok_text = format!(" {pct}% ok");
+    let ok_color = if pct >= 80 {
+        pal.success
+    } else if pct >= 50 {
+        pal.warning
+    } else {
+        pal.error
+    };
+    if col + ok_text.len() + 2 <= max_col {
+        frame.draw_styled_text(col, y, "\u{2502}", pal.border, pal.panel, false);
+        col += 1;
+        frame.draw_styled_text(col, y, &ok_text, ok_color, pal.panel, false);
+    }
+
+    // Row 1: Gauge bar for success rate (uses adapter draw_gauge)
+    if inner.height >= 2 {
+        let gauge_y = inner.y + 1;
+        let gauge_width = inner.width.min(30);
+        frame.draw_gauge(
+            inner.x,
+            gauge_y,
+            gauge_width,
+            success_ratio,
+            ok_color,
+            pal.border,
+            pal.panel,
+        );
+        // Label after gauge
+        let label_x = inner.x + gauge_width + 1;
+        if label_x < max_col {
+            let label = format!("{}/{} runs ok", snap.success_runs, snap.total_runs);
+            frame.draw_styled_text(label_x, gauge_y, &label, pal.text_muted, pal.panel, false);
+        }
+    }
+}
+
+/// Build structured detail fields for a loop.
+fn build_detail_fields(lv: &LoopView, pal: &ResolvedPalette) -> Vec<(String, TermColor)> {
+    let status_upper = lv.state.trim().to_ascii_uppercase();
+    let status_color = match lv.state.trim().to_ascii_lowercase().as_str() {
+        "running" => pal.success,
+        "error" => pal.error,
+        "stopped" => pal.warning,
+        _ => pal.text_muted,
+    };
+
+    let mut fields = Vec::with_capacity(14);
+    fields.push((format!("ID: {}", loop_display_id(lv)), pal.text));
+    fields.push((format!("Status: {status_upper}"), status_color));
+    fields.push((format!("Runs: {}", lv.runs), pal.text));
+    fields.push((format!("Dir: {}", lv.repo_path), pal.text_muted));
+    fields.push((
+        format!("Pool: {}", display_name(&lv.pool_name, &lv.pool_id)),
+        pal.text,
+    ));
+    fields.push((
+        format!("Profile: {}", display_name(&lv.profile_name, &lv.profile_id)),
+        pal.text,
+    ));
+    fields.push((
+        format!(
+            "Harness/Auth: {} / {}",
+            display_name(&lv.profile_harness, "-"),
+            display_name(&lv.profile_auth, "-"),
+        ),
+        pal.text_muted,
+    ));
+    fields.push((
+        format!("Last Run: {}", format_time(lv.last_run_at.as_deref())),
+        pal.text_muted,
+    ));
+    fields.push((format!("Queue Depth: {}", lv.queue_depth), pal.text));
+    fields.push((
+        format!("Interval: {}", format_duration_seconds(lv.interval_seconds)),
+        pal.text,
+    ));
+    fields.push((
+        format!("Max Runtime: {}", format_duration_seconds(lv.max_runtime_seconds)),
+        pal.text,
+    ));
+    fields.push((
+        format!("Max Iterations: {}", format_iterations(lv.max_iterations)),
+        pal.text,
+    ));
+    if !lv.last_error.trim().is_empty() {
+        fields.push((format!("Last Error: {}", lv.last_error), pal.error));
+    }
+    fields
+}
+
+/// Helper: draw text with explicit fg on a specified bg color.
+fn draw_text_on_bg(
+    frame: &mut RenderFrame,
+    x: usize,
+    y: usize,
+    text: &str,
+    fg: TermColor,
+    bg: TermColor,
+) {
+    frame.draw_styled_text(x, y, text, fg, bg, false);
 }
 
 #[cfg(test)]

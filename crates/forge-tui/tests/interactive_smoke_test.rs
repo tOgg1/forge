@@ -8,9 +8,8 @@ use std::collections::HashMap;
 
 use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent, Modifiers, ResizeEvent};
 use forge_tui::app::{
-    ActionKind, ActionType, App, ClaimEventView, Command, DensityMode, FilterFocus, FocusMode,
-    InboxFilter, InboxMessageView, LogLayer, LogSource, LogTailView, LoopView, MainTab, RunView,
-    StatusKind, UiMode,
+    ActionKind, App, ClaimEventView, Command, DensityMode, FilterFocus, FocusMode, InboxFilter,
+    InboxMessageView, LogTailView, LoopView, MainTab, RunView, UiMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -523,10 +522,7 @@ fn resume_action_without_confirm() {
     let mut app = fixture_app();
 
     let cmd = app.update(key('r'));
-    assert!(matches!(
-        cmd,
-        Command::RunAction(ActionKind::Resume { .. })
-    ));
+    assert!(matches!(cmd, Command::RunAction(ActionKind::Resume { .. })));
     // Resume does not go through confirm mode
     assert_eq!(app.mode(), UiMode::Main);
 }
@@ -571,7 +567,7 @@ fn multi_logs_layout_cycling_and_pagination() {
     app.update(key('4'));
     assert_eq!(app.tab(), MainTab::MultiLogs);
 
-    let initial_page = app.multi_page();
+    let _initial_page = app.multi_page();
 
     // Cycle layout
     app.update(key('m'));
@@ -598,11 +594,11 @@ fn multi_logs_layout_cycling_and_pagination() {
 #[test]
 fn pin_and_clear_workflow() {
     let mut app = fixture_app();
-    let initial_pins = app.pinned_count();
+    let _initial_pins = app.pinned_count();
 
     // Toggle pin on current selection (Space)
     app.update(key(' '));
-    let after_toggle = app.pinned_count();
+    let _after_toggle = app.pinned_count();
 
     // Clear all pins
     app.update(key('c'));
@@ -779,7 +775,7 @@ fn render_after_full_navigation_sequence() {
     for tab_key in ['1', '2', '3', '4', '5'] {
         app.update(key(tab_key));
         let frame = app.render();
-        assert!(frame.snapshot().len() > 0);
+        assert!(!frame.snapshot().is_empty());
     }
 
     // Navigate in each mode and render
@@ -838,8 +834,6 @@ fn render_multi_logs_after_layout_cycle() {
 fn focus_pane_cycling_with_tab() {
     let mut app = fixture_app();
 
-    let initial_pane = app.active_pane();
-
     app.update(key_tab());
     // Focus should potentially move (depends on view graph)
 
@@ -883,10 +877,7 @@ fn expanded_logs_resume_action() {
     assert_eq!(app.mode(), UiMode::ExpandedLogs);
 
     let cmd = app.update(key('r'));
-    assert!(matches!(
-        cmd,
-        Command::RunAction(ActionKind::Resume { .. })
-    ));
+    assert!(matches!(cmd, Command::RunAction(ActionKind::Resume { .. })));
     assert_eq!(app.mode(), UiMode::Main);
 }
 

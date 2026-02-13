@@ -34,6 +34,9 @@ pub mod style {
         Accent,
         Success,
         Danger,
+        Warning,
+        Info,
+        Focus,
     }
 
     /// Adapter palette uses terminal 256-color indexes for portability.
@@ -46,6 +49,20 @@ pub mod style {
         pub accent: u8,
         pub success: u8,
         pub danger: u8,
+        pub warning: u8,
+        pub info: u8,
+        pub focus: u8,
+    }
+
+    /// Typography emphasis policy per theme.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct TypographySpec {
+        pub accent_bold: bool,
+        pub success_bold: bool,
+        pub danger_bold: bool,
+        pub warning_bold: bool,
+        pub muted_dim: bool,
+        pub focus_underline: bool,
     }
 
     /// Theme specification exposed to target TUI crates.
@@ -53,6 +70,7 @@ pub mod style {
     pub struct ThemeSpec {
         pub kind: ThemeKind,
         pub palette: Palette,
+        pub typography: TypographySpec,
     }
 
     impl ThemeSpec {
@@ -67,6 +85,9 @@ pub mod style {
                 StyleToken::Accent => self.palette.accent,
                 StyleToken::Success => self.palette.success,
                 StyleToken::Danger => self.palette.danger,
+                StyleToken::Warning => self.palette.warning,
+                StyleToken::Info => self.palette.info,
+                StyleToken::Focus => self.palette.focus,
             }
         }
     }
@@ -87,9 +108,12 @@ pub mod style {
                     surface: 235,
                     foreground: 252,
                     muted: 244,
-                    accent: 39,
+                    accent: 45,
                     success: 41,
-                    danger: 196,
+                    danger: 197,
+                    warning: 220,
+                    info: 117,
+                    focus: 81,
                 },
                 ThemeKind::Light => Palette {
                     background: 255,
@@ -99,6 +123,9 @@ pub mod style {
                     accent: 25,
                     success: 28,
                     danger: 160,
+                    warning: 172,
+                    info: 31,
+                    focus: 21,
                 },
                 ThemeKind::HighContrast => Palette {
                     background: 16,
@@ -108,9 +135,42 @@ pub mod style {
                     accent: 51,
                     success: 118,
                     danger: 203,
+                    warning: 226,
+                    info: 159,
+                    focus: 229,
                 },
             };
-            Self { kind, palette }
+            let typography = match kind {
+                ThemeKind::Dark => TypographySpec {
+                    accent_bold: true,
+                    success_bold: false,
+                    danger_bold: true,
+                    warning_bold: true,
+                    muted_dim: true,
+                    focus_underline: true,
+                },
+                ThemeKind::Light => TypographySpec {
+                    accent_bold: true,
+                    success_bold: false,
+                    danger_bold: true,
+                    warning_bold: true,
+                    muted_dim: false,
+                    focus_underline: true,
+                },
+                ThemeKind::HighContrast => TypographySpec {
+                    accent_bold: true,
+                    success_bold: true,
+                    danger_bold: true,
+                    warning_bold: true,
+                    muted_dim: false,
+                    focus_underline: true,
+                },
+            };
+            Self {
+                kind,
+                palette,
+                typography,
+            }
         }
     }
 }
@@ -118,6 +178,56 @@ pub mod style {
 /// Render and frame primitives consumed by Forge TUI crates.
 pub mod render {
     use super::style::{StyleToken, ThemeSpec};
+    use super::widgets::BorderStyle;
+
+    /// Terminal color: ANSI256 index or 24-bit RGB.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum TermColor {
+        Ansi256(u8),
+        Rgb(u8, u8, u8),
+    }
+
+    impl TermColor {
+        /// Convert to ANSI256 index (lossy for RGB).
+        #[must_use]
+        pub fn as_ansi256(self) -> u8 {
+            match self {
+                Self::Ansi256(idx) => idx,
+                Self::Rgb(r, g, b) => rgb_to_ansi256(r, g, b),
+            }
+        }
+    }
+
+    fn rgb_to_ansi256(r: u8, g: u8, b: u8) -> u8 {
+        // Greyscale ramp check
+        if r == g && g == b {
+            if r < 8 {
+                return 16;
+            }
+            if r > 248 {
+                return 231;
+            }
+            return (((r as u16 - 8) * 24 / 247) as u8) + 232;
+        }
+        let ri = closest_ansi_component(r);
+        let gi = closest_ansi_component(g);
+        let bi = closest_ansi_component(b);
+        16 + 36 * ri + 6 * gi + bi
+    }
+
+    fn closest_ansi_component(value: u8) -> u8 {
+        const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+        let mut best = 0u8;
+        let mut best_dist = u8::abs_diff(value, LEVELS[0]);
+        for (i, level) in LEVELS.iter().enumerate().skip(1) {
+            let dist = u8::abs_diff(value, *level);
+            if dist < best_dist {
+                best_dist = dist;
+                best = i as u8;
+            }
+        }
+        best
+    }
 
     /// Frame dimensions in terminal cells.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,12 +236,86 @@ pub mod render {
         pub height: usize,
     }
 
-    /// Cell style represented as terminal color indexes and text attributes.
+    /// A rectangular region within a frame.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Rect {
+        pub x: usize,
+        pub y: usize,
+        pub width: usize,
+        pub height: usize,
+    }
+
+    impl Rect {
+        /// Inner region after removing border (1 cell each side).
+        #[must_use]
+        pub fn inner(self) -> Self {
+            if self.width < 2 || self.height < 2 {
+                return Self {
+                    x: self.x,
+                    y: self.y,
+                    width: 0,
+                    height: 0,
+                };
+            }
+            Self {
+                x: self.x + 1,
+                y: self.y + 1,
+                width: self.width - 2,
+                height: self.height - 2,
+            }
+        }
+
+        /// Split into left (width=`left_width`) and right.
+        #[must_use]
+        pub fn split_horizontal(self, left_width: usize) -> (Self, Self) {
+            let left_w = left_width.min(self.width);
+            let right_w = self.width.saturating_sub(left_w);
+            (
+                Self {
+                    x: self.x,
+                    y: self.y,
+                    width: left_w,
+                    height: self.height,
+                },
+                Self {
+                    x: self.x + left_w,
+                    y: self.y,
+                    width: right_w,
+                    height: self.height,
+                },
+            )
+        }
+
+        /// Split into top (height=`top_height`) and bottom.
+        #[must_use]
+        pub fn split_vertical(self, top_height: usize) -> (Self, Self) {
+            let top_h = top_height.min(self.height);
+            let bot_h = self.height.saturating_sub(top_h);
+            (
+                Self {
+                    x: self.x,
+                    y: self.y,
+                    width: self.width,
+                    height: top_h,
+                },
+                Self {
+                    x: self.x,
+                    y: self.y + top_h,
+                    width: self.width,
+                    height: bot_h,
+                },
+            )
+        }
+    }
+
+    /// Cell style represented as terminal colors and text attributes.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct CellStyle {
-        pub fg: u8,
-        pub bg: u8,
+        pub fg: TermColor,
+        pub bg: TermColor,
         pub bold: bool,
+        pub dim: bool,
+        pub underline: bool,
     }
 
     /// A single frame cell.
@@ -149,6 +333,48 @@ pub mod render {
         Accent,
         Success,
         Danger,
+        Warning,
+        Info,
+        Focus,
+    }
+
+    /// Box-drawing character sets.
+    struct BorderChars {
+        top_left: char,
+        top_right: char,
+        bottom_left: char,
+        bottom_right: char,
+        horizontal: char,
+        vertical: char,
+    }
+
+    fn border_chars(style: BorderStyle) -> BorderChars {
+        match style {
+            BorderStyle::Rounded => BorderChars {
+                top_left: '╭',
+                top_right: '╮',
+                bottom_left: '╰',
+                bottom_right: '╯',
+                horizontal: '─',
+                vertical: '│',
+            },
+            BorderStyle::Plain => BorderChars {
+                top_left: '┌',
+                top_right: '┐',
+                bottom_left: '└',
+                bottom_right: '┘',
+                horizontal: '─',
+                vertical: '│',
+            },
+            BorderStyle::Heavy => BorderChars {
+                top_left: '┏',
+                top_right: '┓',
+                bottom_left: '┗',
+                bottom_right: '┛',
+                horizontal: '━',
+                vertical: '┃',
+            },
+        }
     }
 
     /// Stable frame abstraction shielding app crates from FrankenTUI internals.
@@ -166,9 +392,11 @@ pub mod render {
             let default_cell = FrameCell {
                 glyph: ' ',
                 style: CellStyle {
-                    fg: theme.color(StyleToken::Foreground),
-                    bg: theme.color(StyleToken::Background),
+                    fg: TermColor::Ansi256(theme.color(StyleToken::Foreground)),
+                    bg: TermColor::Ansi256(theme.color(StyleToken::Background)),
                     bold: false,
+                    dim: false,
+                    underline: false,
                 },
             };
             Self {
@@ -176,6 +404,12 @@ pub mod render {
                 cells: vec![default_cell; size.width.saturating_mul(size.height)],
                 theme,
             }
+        }
+
+        /// Returns the theme spec for this frame.
+        #[must_use]
+        pub fn theme(&self) -> ThemeSpec {
+            self.theme
         }
 
         #[must_use]
@@ -206,8 +440,8 @@ pub mod render {
                 return;
             }
             let fg = self.color_for_role(role);
-            let bg = self.theme.color(StyleToken::Background);
-            let bold = matches!(role, TextRole::Accent);
+            let bg = TermColor::Ansi256(self.theme.color(StyleToken::Background));
+            let (bold, dim, underline) = self.style_for_role(role);
             for (offset, glyph) in text.chars().enumerate() {
                 let col = x + offset;
                 if col >= self.size.width {
@@ -215,7 +449,405 @@ pub mod render {
                 }
                 self.cells[y * self.size.width + col] = FrameCell {
                     glyph,
-                    style: CellStyle { fg, bg, bold },
+                    style: CellStyle {
+                        fg,
+                        bg,
+                        bold,
+                        dim,
+                        underline,
+                    },
+                };
+            }
+        }
+
+        /// Draw text with explicit foreground/background colors.
+        pub fn draw_styled_text(
+            &mut self,
+            x: usize,
+            y: usize,
+            text: &str,
+            fg: TermColor,
+            bg: TermColor,
+            bold: bool,
+        ) {
+            if y >= self.size.height || x >= self.size.width {
+                return;
+            }
+            let style = CellStyle {
+                fg,
+                bg,
+                bold,
+                dim: false,
+                underline: false,
+            };
+            for (offset, glyph) in text.chars().enumerate() {
+                let col = x + offset;
+                if col >= self.size.width {
+                    break;
+                }
+                self.cells[y * self.size.width + col] = FrameCell { glyph, style };
+            }
+        }
+
+        /// Draw a bordered panel with a title into a rectangular region.
+        ///
+        /// Returns the inner `Rect` (content area inside the border) for subsequent drawing.
+        pub fn draw_panel(
+            &mut self,
+            rect: Rect,
+            title: &str,
+            border: BorderStyle,
+            border_color: TermColor,
+            bg: TermColor,
+        ) -> Rect {
+            if rect.width < 2 || rect.height < 2 {
+                return Rect {
+                    x: rect.x,
+                    y: rect.y,
+                    width: 0,
+                    height: 0,
+                };
+            }
+
+            let chars = border_chars(border);
+            let border_style = CellStyle {
+                fg: border_color,
+                bg,
+                bold: false,
+                dim: false,
+                underline: false,
+            };
+            let fill_style = CellStyle {
+                fg: TermColor::Ansi256(self.theme.color(StyleToken::Foreground)),
+                bg,
+                bold: false,
+                dim: false,
+                underline: false,
+            };
+
+            // Fill background
+            for row in rect.y..rect.y + rect.height {
+                for col in rect.x..rect.x + rect.width {
+                    self.set_cell(
+                        col,
+                        row,
+                        FrameCell {
+                            glyph: ' ',
+                            style: fill_style,
+                        },
+                    );
+                }
+            }
+
+            // Top border: ╭─ Title ─╮
+            self.set_cell(
+                rect.x,
+                rect.y,
+                FrameCell {
+                    glyph: chars.top_left,
+                    style: border_style,
+                },
+            );
+            // Title in top border
+            let title_start = rect.x + 2;
+            let title_max = rect.width.saturating_sub(4);
+            let title_text: String = if !title.is_empty() {
+                let truncated: String = title.chars().take(title_max).collect();
+                format!(" {} ", truncated)
+            } else {
+                String::new()
+            };
+            let title_len = title_text.chars().count();
+            // Fill horizontal bar
+            for col in (rect.x + 1)..(rect.x + rect.width - 1) {
+                self.set_cell(
+                    col,
+                    rect.y,
+                    FrameCell {
+                        glyph: chars.horizontal,
+                        style: border_style,
+                    },
+                );
+            }
+            // Overlay title
+            let title_style = CellStyle {
+                fg: border_color,
+                bg,
+                bold: true,
+                dim: false,
+                underline: false,
+            };
+            for (i, ch) in title_text.chars().enumerate() {
+                let col = title_start + i;
+                if col >= rect.x + rect.width - 1 {
+                    break;
+                }
+                self.set_cell(
+                    col,
+                    rect.y,
+                    FrameCell {
+                        glyph: ch,
+                        style: title_style,
+                    },
+                );
+            }
+            self.set_cell(
+                rect.x + rect.width - 1,
+                rect.y,
+                FrameCell {
+                    glyph: chars.top_right,
+                    style: border_style,
+                },
+            );
+
+            // Side borders
+            for row in (rect.y + 1)..(rect.y + rect.height - 1) {
+                self.set_cell(
+                    rect.x,
+                    row,
+                    FrameCell {
+                        glyph: chars.vertical,
+                        style: border_style,
+                    },
+                );
+                self.set_cell(
+                    rect.x + rect.width - 1,
+                    row,
+                    FrameCell {
+                        glyph: chars.vertical,
+                        style: border_style,
+                    },
+                );
+            }
+
+            // Bottom border: ╰───╯
+            let bottom_y = rect.y + rect.height - 1;
+            self.set_cell(
+                rect.x,
+                bottom_y,
+                FrameCell {
+                    glyph: chars.bottom_left,
+                    style: border_style,
+                },
+            );
+            for col in (rect.x + 1)..(rect.x + rect.width - 1) {
+                self.set_cell(
+                    col,
+                    bottom_y,
+                    FrameCell {
+                        glyph: chars.horizontal,
+                        style: border_style,
+                    },
+                );
+            }
+            self.set_cell(
+                rect.x + rect.width - 1,
+                bottom_y,
+                FrameCell {
+                    glyph: chars.bottom_right,
+                    style: border_style,
+                },
+            );
+
+            // Return inner rect
+            let _ = title_len; // used above
+            rect.inner()
+        }
+
+        /// Draw a horizontal rule across a row within a region.
+        pub fn draw_horizontal_rule(
+            &mut self,
+            x: usize,
+            y: usize,
+            width: usize,
+            role: TextRole,
+        ) {
+            let fg = self.color_for_role(role);
+            let bg = TermColor::Ansi256(self.theme.color(StyleToken::Background));
+            let style = CellStyle {
+                fg,
+                bg,
+                bold: false,
+                dim: false,
+                underline: false,
+            };
+            for col in x..x + width {
+                if col >= self.size.width || y >= self.size.height {
+                    break;
+                }
+                self.set_cell(
+                    col,
+                    y,
+                    FrameCell {
+                        glyph: '─',
+                        style,
+                    },
+                );
+            }
+        }
+
+        /// Draw a gauge/progress bar at (x, y) with given width.
+        /// `ratio` is 0.0..=1.0. Uses block characters for sub-cell precision.
+        pub fn draw_gauge(
+            &mut self,
+            x: usize,
+            y: usize,
+            width: usize,
+            ratio: f64,
+            filled_color: TermColor,
+            empty_color: TermColor,
+            bg: TermColor,
+        ) {
+            if width == 0 || y >= self.size.height {
+                return;
+            }
+            let clamped = ratio.clamp(0.0, 1.0);
+            let filled_exact = clamped * width as f64;
+            let full_blocks = filled_exact as usize;
+            let remainder = filled_exact - full_blocks as f64;
+
+            let filled_style = CellStyle {
+                fg: filled_color,
+                bg,
+                bold: false,
+                dim: false,
+                underline: false,
+            };
+            let empty_style = CellStyle {
+                fg: empty_color,
+                bg,
+                bold: false,
+                dim: false,
+                underline: false,
+            };
+
+            for i in 0..width {
+                let col = x + i;
+                if col >= self.size.width {
+                    break;
+                }
+                let (glyph, style) = if i < full_blocks {
+                    ('\u{2588}', filled_style) // █
+                } else if i == full_blocks {
+                    let frac = (remainder * 8.0) as usize;
+                    let ch = match frac {
+                        0 => '\u{2591}', // ░
+                        1 => '\u{2581}', // ▁
+                        2 => '\u{2582}', // ▂
+                        3 => '\u{2583}', // ▃
+                        4 => '\u{2584}', // ▄
+                        5 => '\u{2585}', // ▅
+                        6 => '\u{2586}', // ▆
+                        _ => '\u{2587}', // ▇
+                    };
+                    (ch, filled_style)
+                } else {
+                    ('\u{2591}', empty_style) // ░
+                };
+                self.set_cell(col, y, FrameCell { glyph, style });
+            }
+        }
+
+        /// Draw a sparkline using the given data points.
+        /// Data is normalized to fit in 1 row using block characters ▁▂▃▄▅▆▇█.
+        pub fn draw_sparkline(
+            &mut self,
+            x: usize,
+            y: usize,
+            width: usize,
+            data: &[f64],
+            color: TermColor,
+            bg: TermColor,
+        ) {
+            if width == 0 || y >= self.size.height || data.is_empty() {
+                return;
+            }
+            let max_val = data.iter().cloned().fold(0.0f64, f64::max);
+            let style = CellStyle {
+                fg: color,
+                bg,
+                bold: false,
+                dim: false,
+                underline: false,
+            };
+            let blocks = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+            for i in 0..width {
+                let col = x + i;
+                if col >= self.size.width {
+                    break;
+                }
+                let data_idx = if data.len() <= width {
+                    if i < data.len() {
+                        i
+                    } else {
+                        continue;
+                    }
+                } else {
+                    (i * data.len()) / width
+                };
+                let val = data.get(data_idx).copied().unwrap_or(0.0);
+                let normalized = if max_val > 0.0 {
+                    (val / max_val).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let idx = (normalized * 8.0) as usize;
+                let glyph = blocks[idx.min(8)];
+                self.set_cell(col, y, FrameCell { glyph, style });
+            }
+        }
+
+        /// Fill a rectangular region with a background color.
+        pub fn fill_bg(&mut self, rect: Rect, bg: TermColor) {
+            let fg = TermColor::Ansi256(self.theme.color(StyleToken::Foreground));
+            let style = CellStyle {
+                fg,
+                bg,
+                bold: false,
+                dim: false,
+                underline: false,
+            };
+            for row in rect.y..rect.y + rect.height {
+                for col in rect.x..rect.x + rect.width {
+                    if col < self.size.width && row < self.size.height {
+                        self.set_cell(col, row, FrameCell { glyph: ' ', style });
+                    }
+                }
+            }
+        }
+
+        /// Draw text within a rect, clipped to rect bounds.
+        pub fn draw_text_in_rect(
+            &mut self,
+            rect: Rect,
+            x_offset: usize,
+            y_offset: usize,
+            text: &str,
+            role: TextRole,
+        ) {
+            let abs_x = rect.x + x_offset;
+            let abs_y = rect.y + y_offset;
+            if abs_y >= rect.y + rect.height {
+                return;
+            }
+            let max_chars = (rect.x + rect.width).saturating_sub(abs_x);
+            let fg = self.color_for_role(role);
+            let bg = TermColor::Ansi256(self.theme.color(StyleToken::Background));
+            let (bold, dim, underline) = self.style_for_role(role);
+            for (offset, glyph) in text.chars().take(max_chars).enumerate() {
+                let col = abs_x + offset;
+                if col >= self.size.width || abs_y >= self.size.height {
+                    break;
+                }
+                self.cells[abs_y * self.size.width + col] = FrameCell {
+                    glyph,
+                    style: CellStyle {
+                        fg,
+                        bg,
+                        bold,
+                        dim,
+                        underline,
+                    },
                 };
             }
         }
@@ -242,13 +874,32 @@ pub mod render {
                 .join("\n")
         }
 
-        fn color_for_role(&self, role: TextRole) -> u8 {
-            match role {
+        /// Returns the `TermColor` for a semantic role.
+        #[must_use]
+        pub fn color_for_role(&self, role: TextRole) -> TermColor {
+            TermColor::Ansi256(match role {
                 TextRole::Primary => self.theme.color(StyleToken::Foreground),
                 TextRole::Muted => self.theme.color(StyleToken::Muted),
                 TextRole::Accent => self.theme.color(StyleToken::Accent),
                 TextRole::Success => self.theme.color(StyleToken::Success),
                 TextRole::Danger => self.theme.color(StyleToken::Danger),
+                TextRole::Warning => self.theme.color(StyleToken::Warning),
+                TextRole::Info => self.theme.color(StyleToken::Info),
+                TextRole::Focus => self.theme.color(StyleToken::Focus),
+            })
+        }
+
+        fn style_for_role(&self, role: TextRole) -> (bool, bool, bool) {
+            let typography = self.theme.typography;
+            match role {
+                TextRole::Primary => (false, false, false),
+                TextRole::Muted => (false, typography.muted_dim, false),
+                TextRole::Accent => (typography.accent_bold, false, false),
+                TextRole::Success => (typography.success_bold, false, false),
+                TextRole::Danger => (typography.danger_bold, false, false),
+                TextRole::Warning => (typography.warning_bold, false, false),
+                TextRole::Info => (false, false, false),
+                TextRole::Focus => (true, false, typography.focus_underline),
             }
         }
     }
@@ -669,14 +1320,14 @@ mod tests {
     fn default_theme_is_dark() {
         let theme = ThemeSpec::default();
         assert_eq!(theme.kind, ThemeKind::Dark);
-        assert_eq!(theme.color(StyleToken::Accent), 39);
+        assert_eq!(theme.color(StyleToken::Accent), 45);
     }
 
     #[test]
     fn high_contrast_theme_snapshot() {
         let theme = ThemeSpec::for_kind(ThemeKind::HighContrast);
         let snapshot = format!(
-            "kind={:?} bg={} surface={} fg={} muted={} accent={} success={} danger={}",
+            "kind={:?} bg={} surface={} fg={} muted={} accent={} success={} danger={} warning={} info={} focus={}",
             theme.kind,
             theme.color(StyleToken::Background),
             theme.color(StyleToken::Surface),
@@ -685,10 +1336,13 @@ mod tests {
             theme.color(StyleToken::Accent),
             theme.color(StyleToken::Success),
             theme.color(StyleToken::Danger),
+            theme.color(StyleToken::Warning),
+            theme.color(StyleToken::Info),
+            theme.color(StyleToken::Focus),
         );
         assert_eq!(
             snapshot,
-            "kind=HighContrast bg=16 surface=232 fg=231 muted=250 accent=51 success=118 danger=203"
+            "kind=HighContrast bg=16 surface=232 fg=231 muted=250 accent=51 success=118 danger=203 warning=226 info=159 focus=229"
         );
     }
 
@@ -708,6 +1362,7 @@ mod tests {
 
     #[test]
     fn render_frame_uses_role_color_tokens() {
+        use super::render::TermColor;
         let theme = ThemeSpec::for_kind(ThemeKind::Dark);
         let mut frame = RenderFrame::new(
             FrameSize {
@@ -716,9 +1371,25 @@ mod tests {
             },
             theme,
         );
-        frame.draw_text(1, 0, "!", TextRole::Danger);
+        frame.draw_text(1, 0, "!", TextRole::Focus);
         let fg = frame.cell(1, 0).map(|cell| cell.style.fg);
-        assert_eq!(fg, Some(theme.color(StyleToken::Danger)));
+        let underline = frame.cell(1, 0).map(|cell| cell.style.underline);
+        assert_eq!(fg, Some(TermColor::Ansi256(theme.color(StyleToken::Focus))));
+        assert_eq!(underline, Some(true));
+    }
+
+    #[test]
+    fn muted_role_uses_dim_when_typography_enables_it() {
+        let theme = ThemeSpec::for_kind(ThemeKind::Dark);
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 5,
+                height: 1,
+            },
+            theme,
+        );
+        frame.draw_text(0, 0, "muted", TextRole::Muted);
+        assert_eq!(frame.cell(0, 0).map(|cell| cell.style.dim), Some(true));
     }
 
     #[test]

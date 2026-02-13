@@ -30,6 +30,7 @@ pub mod filter;
 pub mod fleet_selection;
 pub mod global_search_index;
 pub mod help_overlay;
+pub mod hero_widgets;
 pub mod incident_replay;
 pub mod keyboard_macro;
 pub mod keymap;
@@ -148,7 +149,7 @@ mod tests {
     fn uses_adapter_theme_abstraction() {
         let theme = default_theme();
         assert_eq!(theme.kind, ThemeKind::Dark);
-        assert_eq!(theme.color(StyleToken::Accent), 39);
+        assert_eq!(theme.color(StyleToken::Accent), 45);
     }
 
     #[test]

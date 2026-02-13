@@ -531,17 +531,33 @@ fn render_frame<W: Write>(out: &mut W, frame: &RenderFrame) -> io::Result<()> {
     out.flush()
 }
 
+fn term_color_to_crossterm(tc: forge_ftui_adapter::render::TermColor) -> Color {
+    match tc {
+        forge_ftui_adapter::render::TermColor::Ansi256(idx) => Color::AnsiValue(idx),
+        forge_ftui_adapter::render::TermColor::Rgb(r, g, b) => Color::Rgb { r, g, b },
+    }
+}
+
 fn queue_style<W: Write>(out: &mut W, style: CellStyle) -> io::Result<()> {
     queue!(
         out,
-        SetForegroundColor(Color::AnsiValue(style.fg)),
-        SetBackgroundColor(Color::AnsiValue(style.bg)),
+        SetAttribute(Attribute::Reset),
+        SetForegroundColor(term_color_to_crossterm(style.fg)),
+        SetBackgroundColor(term_color_to_crossterm(style.bg)),
     )?;
     if style.bold {
-        queue!(out, SetAttribute(Attribute::Bold))
+        queue!(out, SetAttribute(Attribute::Bold))?;
+    } else if style.dim {
+        queue!(out, SetAttribute(Attribute::Dim))?;
     } else {
-        queue!(out, SetAttribute(Attribute::NormalIntensity))
+        queue!(out, SetAttribute(Attribute::NormalIntensity))?;
     }
+    if style.underline {
+        queue!(out, SetAttribute(Attribute::Underlined))?;
+    } else {
+        queue!(out, SetAttribute(Attribute::NoUnderline))?;
+    }
+    Ok(())
 }
 
 fn to_u16(value: usize) -> u16 {

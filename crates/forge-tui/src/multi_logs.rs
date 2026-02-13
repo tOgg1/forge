@@ -9,7 +9,8 @@ use crate::filter::loop_display_id;
 use crate::layouts::{fit_pane_layout, layout_cell_size};
 use crate::log_compare::{diff_hint, summarize_diff_hints, synchronized_windows, DiffHint};
 use forge_cli::logs::{render_lines_for_layer, LogRenderLayer};
-use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
+use forge_ftui_adapter::render::{FrameSize, Rect, RenderFrame, TextRole};
+use forge_ftui_adapter::widgets::BorderStyle;
 
 // ---------------------------------------------------------------------------
 // Helper: truncate to width
@@ -458,26 +459,41 @@ impl App {
     }
 
     /// Render a single mini log pane for one loop, matching Go's `renderMiniLogPane`.
+    ///
+    /// Each pane is wrapped in a bordered panel with the loop name as title.
     fn render_mini_log_pane(&self, view: &LoopView, width: usize, height: usize) -> RenderFrame {
         let theme = crate::default_theme();
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
 
-        // Border color based on loop state — reflected in header role.
-        let header_role = match view.state.as_str() {
+        // Border color based on loop state.
+        let border_role = match view.state.as_str() {
             "running" => TextRole::Success,
             "error" => TextRole::Danger,
             "waiting" | "sleeping" => TextRole::Accent,
             _ => TextRole::Primary,
         };
 
-        // Header: display ID + name + [PIN].
+        // Header: display ID + name + [PIN] — used as panel title.
         let display_id = loop_display_id(&view.id, &view.short_id);
-        let mut header_text = format!("{} {}", display_id, view.name);
+        let mut title = format!("{} {}", display_id, view.name);
         if self.is_pinned(&view.id) {
-            header_text.push_str(" [PIN]");
+            title.push_str(" [PIN]");
         }
-        let header_text = pad_right(&truncate(&header_text, width), width);
-        frame.draw_text(0, 0, &header_text, header_role);
+
+        let border_color = frame.color_for_role(border_role);
+        // Use ANSI256 bg for panel to match theme default
+        let panel_bg = forge_ftui_adapter::render::TermColor::Ansi256(theme.color(forge_ftui_adapter::style::StyleToken::Background));
+        let inner = frame.draw_panel(
+            Rect { x: 0, y: 0, width, height },
+            &title,
+            BorderStyle::Rounded,
+            border_color,
+            panel_bg,
+        );
+
+        if inner.width == 0 || inner.height == 0 {
+            return frame;
+        }
 
         // Meta line: status + compact health strip.
         let status_upper = view.state.to_uppercase();
@@ -492,17 +508,13 @@ impl App {
                 "{:<8} q={} runs={} health={} harness={}",
                 status_upper, view.queue_depth, view.runs, health_flag, harness_display
             ),
-            width,
+            inner.width,
         );
-        frame.draw_text(0, 1, &meta, TextRole::Muted);
+        frame.draw_text(inner.x, inner.y, &meta, TextRole::Muted);
 
-        // Separator line.
-        let sep: String = "-".repeat(width);
-        frame.draw_text(0, 2, &sep, TextRole::Muted);
-
-        // Log block: fill remaining height.
-        let log_start = 3;
-        let log_available = height.saturating_sub(log_start).max(1);
+        // Log block: fill remaining inner height.
+        let log_start = 1; // after meta line
+        let log_available = inner.height.saturating_sub(log_start).max(1);
 
         let tail = self.multi_logs().get(&view.id);
         let empty_tail = LogTailView::default();
@@ -511,7 +523,7 @@ impl App {
         let log_lines = render_log_block(
             &tail.lines,
             &tail.message,
-            width,
+            inner.width,
             log_available,
             self.log_layer(),
         );
@@ -520,7 +532,7 @@ impl App {
             if i >= log_available {
                 break;
             }
-            frame.draw_text(0, log_start + i, line, TextRole::Primary);
+            frame.draw_text(inner.x, inner.y + log_start + i, line, TextRole::Primary);
         }
 
         frame
@@ -531,21 +543,29 @@ impl App {
         let theme = crate::default_theme();
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
 
-        let header = pad_right("empty", width);
-        frame.draw_text(0, 0, &header, TextRole::Muted);
-        if height > 1 {
+        let panel_bg = forge_ftui_adapter::render::TermColor::Ansi256(theme.color(forge_ftui_adapter::style::StyleToken::Background));
+        let border_color = frame.color_for_role(TextRole::Muted);
+        let inner = frame.draw_panel(
+            Rect { x: 0, y: 0, width, height },
+            "empty",
+            BorderStyle::Rounded,
+            border_color,
+            panel_bg,
+        );
+
+        if inner.height >= 1 {
             frame.draw_text(
-                0,
-                1,
-                &truncate("Pin loops with <space>.", width),
+                inner.x,
+                inner.y,
+                &truncate("Pin loops with <space>.", inner.width),
                 TextRole::Muted,
             );
         }
-        if height > 2 {
+        if inner.height >= 2 {
             frame.draw_text(
-                0,
-                2,
-                &truncate("Change layout with m.", width),
+                inner.x,
+                inner.y + 1,
+                &truncate("Change layout with m.", inner.width),
                 TextRole::Muted,
             );
         }
@@ -987,10 +1007,13 @@ mod tests {
 
         let view = app.filtered()[0].clone();
         let baseline = app.render_mini_log_pane(&view, 50, 10);
-        let header = baseline.row_text(0);
-        let health = baseline.row_text(1);
-        let separator = baseline.row_text(2);
-        let first_body_row = baseline.row_text(3);
+        // Row 0: panel top border (╭─ title ─╮)
+        // Row 1: meta line (inside panel)
+        // Row 2+: log content (inside panel)
+        // Last row: panel bottom border (╰──╯)
+        let border_top = baseline.row_text(0);
+        let meta = baseline.row_text(1);
+        let first_body_row = baseline.row_text(2);
 
         let mut updated_logs = HashMap::new();
         updated_logs.insert(
@@ -1003,10 +1026,11 @@ mod tests {
         app.set_multi_logs(updated_logs);
         let scrolled = app.render_mini_log_pane(&view, 50, 10);
 
-        assert_eq!(scrolled.row_text(0), header);
-        assert_eq!(scrolled.row_text(1), health);
-        assert_eq!(scrolled.row_text(2), separator);
-        assert_ne!(scrolled.row_text(3), first_body_row);
+        // Panel border and meta line stay fixed
+        assert_eq!(scrolled.row_text(0), border_top);
+        assert_eq!(scrolled.row_text(1), meta);
+        // Body content changes as log updates
+        assert_ne!(scrolled.row_text(2), first_body_row);
     }
 
     #[test]
@@ -1023,12 +1047,15 @@ mod tests {
     }
 
     #[test]
-    fn mini_pane_shows_separator() {
+    fn mini_pane_has_bordered_panel() {
         let app = multi_app(1);
         let view = &app.filtered()[0].clone();
         let frame = app.render_mini_log_pane(view, 40, 10);
-        let row2 = frame.row_text(2);
-        assert!(row2.contains("---"), "expected separator line, got: {row2}");
+        // Panel border chars: ╭ at top-left, ╰ at bottom-left
+        let top_row = frame.row_text(0);
+        let bottom_row = frame.row_text(9);
+        assert!(top_row.starts_with('╭'), "expected panel top border, got: {top_row}");
+        assert!(bottom_row.starts_with('╰'), "expected panel bottom border, got: {bottom_row}");
     }
 
     // -- render_mini_log_empty_pane --

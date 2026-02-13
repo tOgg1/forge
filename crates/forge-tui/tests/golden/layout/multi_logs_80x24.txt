@@ -2,23 +2,23 @@
  1:Overview    2:Logs    3:Runs   [4:Multi Logs]   5:Inbox                      
 View 4 Matrix  requested=2x2 effective=2x2  page=1/3  showing=1-2/6             
 layer:raw  pin:<space> clear:c  compare:C  layout:m  page:,/. g/G  order:pinned 
-l00 operator-loop-0 [PIN]               l02 operator-loop-2 [PIN]               
-ERROR    q=0 runs=20 health=err harness RUNNING  q=4 runs=22 health=ok harness= 
---------------------------------------- --------------------------------------- 
-loop-0: status check ok                 loop-2: status check ok                 
-loop-0: queue=0                         loop-2: queue=4                         
-loop-0: deploying worker shard          loop-2: deploying worker shard          
+╭─ l00 operator-loop-0 [PIN] ─────────╮ ╭─ l02 operator-loop-2 [PIN] ─────────╮ 
+│ERROR    q=0 runs=20 health=err harne│ │RUNNING  q=4 runs=22 health=ok harnes│ 
+│loop-0: status check ok              │ │loop-2: status check ok              │ 
+│loop-0: queue=0                      │ │loop-2: queue=4                      │ 
+│loop-0: deploying worker shard       │ │loop-2: deploying worker shard       │ 
+│                                     │ │                                     │ 
+│                                     │ │                                     │ 
+│                                     │ │                                     │ 
+╰─────────────────────────────────────╯ ╰─────────────────────────────────────╯ 
                                                                                 
-                                                                                
-                                                                                
-                                                                                
-empty                                   empty                                   
-Pin loops with <space>.                 Pin loops with <space>.                 
-Change layout with m.                   Change layout with m.                   
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
+╭─ empty ─────────────────────────────╮ ╭─ empty ─────────────────────────────╮ 
+│Pin loops with <space>.              │ │Pin loops with <space>.              │ 
+│Change layout with m.                │ │Change layout with m.                │ 
+│                                     │ │                                     │ 
+│                                     │ │                                     │ 
+│                                     │ │                                     │ 
+│                                     │ │                                     │ 
+│                                     │ │                                     │ 
+╰─────────────────────────────────────╯ ╰─────────────────────────────────────╯ 
 ? help  q quit  ctrl+p palette  ctrl+f search  / filter  1-5 tabs  j/k sel  t/T 

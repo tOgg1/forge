@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use forge_ftui_adapter::render::TermColor;
 use serde_json::{Map, Value};
 
 pub const THEME_PACK_SCHEMA_VERSION: u32 = 1;
@@ -349,6 +350,53 @@ pub fn resolve_palette_for_capability(name: &str, capability: TerminalColorCapab
         TerminalColorCapability::Ansi256 | TerminalColorCapability::TrueColor => {
             resolve_palette(name)
         }
+    }
+}
+
+/// Convert a hex color string like `"#0B0F14"` to a `TermColor::Rgb`.
+#[must_use]
+pub fn hex_to_term_color(hex: &str) -> Option<TermColor> {
+    let (r, g, b) = parse_hex_color(hex)?;
+    Some(TermColor::Rgb(r, g, b))
+}
+
+/// Palette fields resolved to `TermColor` values for direct use in rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedPalette {
+    pub background: TermColor,
+    pub panel: TermColor,
+    pub panel_alt: TermColor,
+    pub text: TermColor,
+    pub text_muted: TermColor,
+    pub border: TermColor,
+    pub accent: TermColor,
+    pub focus: TermColor,
+    pub success: TermColor,
+    pub warning: TermColor,
+    pub error: TermColor,
+    pub info: TermColor,
+}
+
+/// Resolve a palette's hex strings to `TermColor::Rgb` values.
+///
+/// Falls back to `TermColor::Ansi256(0)` if any hex string is invalid (shouldn't
+/// happen for the curated palettes).
+#[must_use]
+pub fn resolve_palette_colors(palette: &Palette) -> ResolvedPalette {
+    let fallback = TermColor::Ansi256(0);
+    ResolvedPalette {
+        background: hex_to_term_color(palette.background).unwrap_or(fallback),
+        panel: hex_to_term_color(palette.panel).unwrap_or(fallback),
+        panel_alt: hex_to_term_color(palette.panel_alt).unwrap_or(fallback),
+        text: hex_to_term_color(palette.text).unwrap_or(fallback),
+        text_muted: hex_to_term_color(palette.text_muted).unwrap_or(fallback),
+        border: hex_to_term_color(palette.border).unwrap_or(fallback),
+        accent: hex_to_term_color(palette.accent).unwrap_or(fallback),
+        focus: hex_to_term_color(palette.focus).unwrap_or(fallback),
+        success: hex_to_term_color(palette.success).unwrap_or(fallback),
+        warning: hex_to_term_color(palette.warning).unwrap_or(fallback),
+        error: hex_to_term_color(palette.error).unwrap_or(fallback),
+        info: hex_to_term_color(palette.info).unwrap_or(fallback),
     }
 }
 
