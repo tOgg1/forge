@@ -2,13 +2,55 @@
 //!
 //! Ports Go `internal/looptui/looptui.go` renderRunsPane + runs.go helpers.
 
-use forge_ftui_adapter::render::{FrameSize, Rect, RenderFrame, TermColor, TextRole};
+use forge_ftui_adapter::render::{
+    CellStyle, FrameSize, Rect, RenderFrame, StyledSpan, TermColor, TextRole,
+};
 use forge_ftui_adapter::style::ThemeSpec;
 use forge_ftui_adapter::widgets::BorderStyle;
 
 use crate::theme::ResolvedPalette;
 
 use crate::logs_tab::log_window_bounds;
+
+// ---------------------------------------------------------------------------
+// Column layout helper for tabular run list
+// ---------------------------------------------------------------------------
+
+/// Fixed column widths for the run table.
+struct ColumnLayout {
+    id_w: usize,
+    status_w: usize,
+    exit_w: usize,
+    duration_w: usize,
+    profile_w: usize,
+}
+
+/// Pointer/selector column width (▸ + space).
+const POINTER_W: usize = 2;
+
+impl ColumnLayout {
+    /// Compute column widths for the given inner width.
+    fn for_width(width: usize) -> Self {
+        // Fixed widths: pointer(2) + id(10) + status(7) + exit(10) + duration(10) + gaps(5) = 44
+        let id_w = 10;
+        let status_w = 7;
+        let exit_w = 10;
+        let duration_w = 10;
+        let fixed = POINTER_W + id_w + status_w + exit_w + duration_w + 5; // 5 spaces between cols
+        let profile_w = if width > fixed {
+            width - fixed
+        } else {
+            4 // minimum
+        };
+        Self {
+            id_w,
+            status_w,
+            exit_w,
+            duration_w,
+            profile_w,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Extended RunView – enriched beyond app::RunView for rendering
@@ -269,125 +311,303 @@ pub fn render_runs_pane(state: &RunsTabState, size: FrameSize, theme: ThemeSpec)
     frame
 }
 
-/// Render the runs tab with bordered panels into a pre-existing frame region.
+/// Render the runs tab with bordered panels and columnar table layout.
 ///
 /// Layout:
 /// ```text
-/// ╭─ Run Timeline ──────────────────────────────────────────────╮
-/// │ > |- run-0172  [ERR ] [exit:1] [4m12s] prod-sre             │
-/// │   |- run-0171  [OK  ] [exit:0] [3m09s] prod-sre             │
-/// │   `- run-0170  [STOP] [exit:137] [45s] prod-sre             │
-/// ╰─────────────────────────────────────────────────────────────╯
-/// ╭─ Selected: run-0172 ────────────────────────────────────────╮
-/// │ output lines ...                                             │
-/// ╰─────────────────────────────────────────────────────────────╯
+/// ╭─ Run Timeline  loop:abc  layer:raw ─────────────────────╮
+/// │  ID        Status  Exit     Duration  Profile            │ ← header (muted)
+/// │ ▸ abcdefgh [RUN ] [live]   [running] prod-sre           │ ← selected
+/// │   abcdefgh [OK  ] [exit:0] [3m09s]   prod-sre           │
+/// │   abcdefgh [STOP] [exit:137] [45s]   prod-sre           │
+/// ╰─────────────────────────────────────────────────────────╯
+/// ╭─ Output: abcdefgh [RUN ] ───────────────────────────────╮
+/// │ output line 1                                            │
+/// │ output line 2                                            │
+/// │                                  lines 1-8/50  scroll=0  │
+/// ╰─────────────────────────────────────────────────────────╯
 /// ```
 #[must_use]
-pub fn render_runs_paneled(state: &RunsTabState, size: FrameSize, theme: ThemeSpec, pal: &ResolvedPalette, focus_bottom: bool) -> RenderFrame {
+pub fn render_runs_paneled(
+    state: &RunsTabState,
+    size: FrameSize,
+    theme: ThemeSpec,
+    pal: &ResolvedPalette,
+    focus_bottom: bool,
+) -> RenderFrame {
     let width = size.width.max(1);
     let height = size.height.max(1);
     let mut frame = RenderFrame::new(size, theme);
 
     // Fill background
-    frame.fill_bg(Rect { x: 0, y: 0, width, height }, pal.background);
+    frame.fill_bg(
+        Rect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        },
+        pal.background,
+    );
+
+    let muted_style = CellStyle {
+        fg: pal.text_muted,
+        bg: pal.panel,
+        bold: false,
+        dim: false,
+        underline: false,
+    };
 
     if state.runs.is_empty() {
         // Empty state panel
         let panel_h = 5usize.min(height);
         let inner = frame.draw_panel(
-            Rect { x: 0, y: 0, width, height: panel_h },
+            Rect {
+                x: 0,
+                y: 0,
+                width,
+                height: panel_h,
+            },
             &format!("Run Timeline  loop:{}", state.loop_display_id),
             BorderStyle::Rounded,
             pal.border,
             pal.panel,
         );
         if inner.height >= 1 {
-            frame.draw_styled_text(inner.x, inner.y, "No runs captured yet for this loop.", pal.text_muted, pal.panel, false);
+            frame.draw_spans_in_rect(
+                inner,
+                0,
+                0,
+                &[StyledSpan::cell(
+                    "No runs captured yet for this loop.",
+                    muted_style,
+                )],
+            );
         }
         if inner.height >= 2 {
-            frame.draw_styled_text(
-                inner.x,
-                inner.y + 1,
-                "Wait for next execution or jump to Logs for live stream.",
-                pal.text_muted,
-                pal.panel,
-                false,
+            frame.draw_spans_in_rect(
+                inner,
+                0,
+                1,
+                &[StyledSpan::cell(
+                    "Wait for next execution or jump to Logs for live stream.",
+                    muted_style,
+                )],
             );
         }
         return frame;
     }
 
-    // -- Run timeline panel --
+    // -- Compute layout splits ------------------------------------------------
     let selected_idx = state.selected_run.min(state.runs.len().saturating_sub(1));
     let min_output_rows = 6usize;
-    let mut list_height = height.saturating_sub(min_output_rows + 2); // 2 for panel borders
-    list_height = list_height.clamp(4, height.saturating_sub(4));
-    let timeline_panel_h = (list_height + 2).min(height); // +2 for borders
-    let (timeline_rect, rest) = Rect { x: 0, y: 0, width, height }.split_vertical(timeline_panel_h);
+    // inner rows = header(1) + data rows; reserve space for output panel + borders
+    let mut list_inner = height.saturating_sub(min_output_rows + 2 + 2);
+    list_inner = list_inner.clamp(3, height.saturating_sub(4));
+    let timeline_panel_h = (list_inner + 2).min(height); // +2 for borders
+    let (timeline_rect, rest) = Rect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    }
+    .split_vertical(timeline_panel_h);
 
-    let timeline_title = format!("Run Timeline  loop:{}  layer:{}", state.loop_display_id, state.layer_label);
-    let tl_border = if !focus_bottom { pal.accent } else { pal.border };
-    let inner = frame.draw_panel(timeline_rect, &timeline_title, BorderStyle::Rounded, tl_border, pal.panel);
+    // -- Timeline panel -------------------------------------------------------
+    let timeline_title = format!(
+        "Run Timeline  loop:{}  layer:{}",
+        state.loop_display_id, state.layer_label
+    );
+    let tl_border = if !focus_bottom {
+        pal.accent
+    } else {
+        pal.border
+    };
+    let inner = frame.draw_panel(
+        timeline_rect,
+        &timeline_title,
+        BorderStyle::Rounded,
+        tl_border,
+        pal.panel,
+    );
 
-    let (start_idx, end_idx) = list_window(state.runs.len(), selected_idx, inner.height);
-    let mut row = 0;
+    let cols = ColumnLayout::for_width(inner.width);
+
+    // -- Header row -----------------------------------------------------------
+    let header_row: usize = if inner.height >= 1 {
+        let hdr = format!(
+            "{:ptr_w$}{:<id_w$} {:<sw$} {:<ew$} {:<dw$} {:<pw$}",
+            "",
+            "ID",
+            "Status",
+            "Exit",
+            "Duration",
+            "Profile",
+            ptr_w = POINTER_W,
+            id_w = cols.id_w,
+            sw = cols.status_w,
+            ew = cols.exit_w,
+            dw = cols.duration_w,
+            pw = cols.profile_w,
+        );
+        frame.draw_spans_in_rect(
+            inner,
+            0,
+            0,
+            &[StyledSpan::cell(
+                &truncate_line(&hdr, inner.width),
+                muted_style,
+            )],
+        );
+        1
+    } else {
+        0
+    };
+
+    // -- Data rows ------------------------------------------------------------
+    let data_rows = inner.height.saturating_sub(header_row);
+    let (start_idx, end_idx) = list_window(state.runs.len(), selected_idx, data_rows);
+    let mut row = header_row;
     for i in start_idx..end_idx {
         if row >= inner.height {
             break;
         }
         let run = &state.runs[i];
         let selected = i == selected_idx;
-        let pointer = if selected { "\u{25B8}" } else { " " }; // ▸ or space
-        let lane = timeline_lane(i, state.runs.len());
-        let status = status_badge(&run.status);
-        let exit = exit_badge(run.exit_code, &run.status);
-        let duration = duration_chip(&run.duration_display);
+
+        let pointer = if selected { "\u{25B8} " } else { "  " };
+        let id_col = format!("{:<w$}", short_run_id(&run.id), w = cols.id_w);
+        let status_col = format!("{:<w$}", status_badge(&run.status), w = cols.status_w);
+        let exit_str = exit_badge(run.exit_code, &run.status);
+        let exit_col = format!("{:<w$}", exit_str, w = cols.exit_w);
+        let dur_str = duration_chip(&run.duration_display);
+        let dur_col = format!("{:<w$}", dur_str, w = cols.duration_w);
         let identity = display_name(&run.profile_name, &run.profile_id);
-        let line = format!(
-            "{pointer}{lane} {} {status} {exit} {duration} {identity}",
-            short_run_id(&run.id),
-        );
-        let fg = if selected {
-            pal.accent
+        let profile_col = truncate_line(identity, cols.profile_w);
+
+        let line = format!("{pointer}{id_col} {status_col} {exit_col} {dur_col} {profile_col}");
+
+        if selected {
+            // Fill row background with panel_alt for selection band
+            let row_rect = Rect {
+                x: inner.x,
+                y: inner.y + row,
+                width: inner.width,
+                height: 1,
+            };
+            frame.fill_bg(row_rect, pal.panel_alt);
+
+            let cell_style = CellStyle {
+                fg: pal.accent,
+                bg: pal.panel_alt,
+                bold: true,
+                dim: false,
+                underline: false,
+            };
+            frame.draw_spans_in_rect(
+                inner,
+                0,
+                row,
+                &[StyledSpan::cell(
+                    &truncate_line(&line, inner.width),
+                    cell_style,
+                )],
+            );
         } else {
-            status_color(&run.status, pal)
-        };
-        let trunc = truncate_line(&line, inner.width);
-        frame.draw_styled_text(inner.x, inner.y + row, &trunc, fg, pal.panel, selected);
+            let fg = status_color(&run.status, pal);
+            frame.draw_spans_in_rect(
+                inner,
+                0,
+                row,
+                &[StyledSpan::cell(
+                    &truncate_line(&line, inner.width),
+                    CellStyle {
+                        fg,
+                        bg: pal.panel,
+                        bold: false,
+                        dim: false,
+                        underline: false,
+                    },
+                )],
+            );
+        }
         row += 1;
     }
 
-    // -- Selected run output panel --
+    // -- Output panel ---------------------------------------------------------
     if rest.height >= 4 {
-        let (title, output_lines, empty_msg) = selected_run_display(state);
-        let out_border = if focus_bottom { pal.accent } else { pal.border };
-        let output_inner = frame.draw_panel(rest, &truncate_line(&title, rest.width.saturating_sub(4)), BorderStyle::Rounded, out_border, pal.panel);
+        let sel_run = &state.runs[selected_idx];
+        let output_title = format!(
+            "Output: {} {}",
+            short_run_id(&sel_run.id),
+            status_badge(&sel_run.status),
+        );
+        let output_lines = &sel_run.output_lines;
 
-        let available = output_inner.height;
-        let total = output_lines.len();
-        let (start, end, _clamped) = crate::logs_tab::log_window_bounds(total as i32, available as i32, state.log_scroll as i32);
-        let start = start.max(0) as usize;
-        let end = end.max(0) as usize;
+        let out_border = if focus_bottom { pal.accent } else { pal.border };
+        let output_inner = frame.draw_panel(
+            rest,
+            &truncate_line(&output_title, rest.width.saturating_sub(4)),
+            BorderStyle::Rounded,
+            out_border,
+            pal.panel,
+        );
+
+        // Reserve bottom row for scroll indicator when there are lines
+        let has_lines = !output_lines.is_empty();
+        let content_rows = if has_lines {
+            output_inner.height.saturating_sub(1)
+        } else {
+            output_inner.height
+        };
+        let total = output_lines.len() as i32;
+        let (start, end, clamped) =
+            log_window_bounds(total, content_rows as i32, state.log_scroll as i32);
+        let start_u = start.max(0) as usize;
+        let end_u = end.max(0) as usize;
 
         if output_lines.is_empty() {
-            if available >= 1 {
-                frame.draw_styled_text(output_inner.x, output_inner.y, &truncate_line(&empty_msg, output_inner.width), pal.text_muted, pal.panel, false);
+            if content_rows >= 1 {
+                frame.draw_spans_in_rect(
+                    output_inner,
+                    0,
+                    0,
+                    &[StyledSpan::cell("Run output is empty.", muted_style)],
+                );
             }
         } else {
-            let mut row = 0;
-            for i in start..end {
-                if row >= available || i >= output_lines.len() {
+            for (orow, i) in (start_u..end_u).enumerate() {
+                if orow >= content_rows || i >= output_lines.len() {
                     break;
                 }
-                frame.draw_styled_text(
-                    output_inner.x,
-                    output_inner.y + row,
-                    &truncate_line(&output_lines[i], output_inner.width),
-                    pal.text,
-                    pal.panel,
-                    false,
+                frame.draw_spans_in_rect(
+                    output_inner,
+                    0,
+                    orow,
+                    &[StyledSpan::cell(
+                        &truncate_line(&output_lines[i], output_inner.width),
+                        CellStyle {
+                            fg: pal.text,
+                            bg: pal.panel,
+                            bold: false,
+                            dim: false,
+                            underline: false,
+                        },
+                    )],
                 );
-                row += 1;
+            }
+
+            // Scroll indicator at bottom of output panel
+            if output_inner.height >= 1 {
+                let indicator = format_line_window(start, end, total, clamped);
+                let indicator_len = indicator.chars().count();
+                let x_off = output_inner.width.saturating_sub(indicator_len);
+                frame.draw_spans_in_rect(
+                    output_inner,
+                    x_off,
+                    output_inner.height.saturating_sub(1),
+                    &[StyledSpan::cell(&indicator, muted_style)],
+                );
             }
         }
     }
@@ -794,5 +1014,172 @@ mod tests {
         assert!(snap.contains("run-aaaa [OK  ]"), "snap:\n{snap}");
         assert!(snap.contains("[exit:0]"), "snap:\n{snap}");
         assert!(snap.contains("[5m30s]"), "snap:\n{snap}");
+    }
+
+    // -- paneled render tests (new columnar table layout) --
+
+    fn test_palette() -> ResolvedPalette {
+        use crate::theme::{resolve_palette_colors, DEFAULT_PALETTE};
+        resolve_palette_colors(&DEFAULT_PALETTE)
+    }
+
+    #[test]
+    fn paneled_empty_runs_shows_panel_and_guidance() {
+        let state = RunsTabState {
+            loop_display_id: "loop-abc".to_owned(),
+            layer_label: "raw".to_owned(),
+            ..Default::default()
+        };
+        let pal = test_palette();
+        let frame = render_runs_paneled(
+            &state,
+            FrameSize {
+                width: 80,
+                height: 20,
+            },
+            test_theme(),
+            &pal,
+            false,
+        );
+        let snap = frame.snapshot();
+        assert!(
+            snap.contains("Run Timeline  loop:loop-abc"),
+            "snap:\n{snap}"
+        );
+        assert!(
+            snap.contains("No runs captured yet for this loop."),
+            "snap:\n{snap}"
+        );
+    }
+
+    #[test]
+    fn paneled_shows_column_header() {
+        let state = RunsTabState {
+            runs: sample_runs(2),
+            selected_run: 0,
+            layer_label: "raw".to_owned(),
+            loop_display_id: "my-loop".to_owned(),
+            log_scroll: 0,
+        };
+        let pal = test_palette();
+        let frame = render_runs_paneled(
+            &state,
+            FrameSize {
+                width: 80,
+                height: 20,
+            },
+            test_theme(),
+            &pal,
+            false,
+        );
+        let snap = frame.snapshot();
+        assert!(
+            snap.contains("ID"),
+            "header should contain ID column\nsnap:\n{snap}"
+        );
+        assert!(
+            snap.contains("Status"),
+            "header should contain Status column\nsnap:\n{snap}"
+        );
+        assert!(
+            snap.contains("Duration"),
+            "header should contain Duration column\nsnap:\n{snap}"
+        );
+        assert!(
+            snap.contains("Profile"),
+            "header should contain Profile column\nsnap:\n{snap}"
+        );
+    }
+
+    #[test]
+    fn paneled_selection_drives_output() {
+        let state0 = RunsTabState {
+            runs: sample_runs(3),
+            selected_run: 0,
+            layer_label: "raw".to_owned(),
+            loop_display_id: "lp".to_owned(),
+            log_scroll: 0,
+        };
+        let state2 = RunsTabState {
+            selected_run: 2,
+            ..state0.clone()
+        };
+        let pal = test_palette();
+        let size = FrameSize {
+            width: 80,
+            height: 25,
+        };
+        let snap0 = render_runs_paneled(&state0, size, test_theme(), &pal, false).snapshot();
+        let snap2 = render_runs_paneled(&state2, size, test_theme(), &pal, false).snapshot();
+
+        // Run 0 output should appear when selected_run=0
+        assert!(
+            snap0.contains("line1 from run 0"),
+            "snap0 should show run 0 output\nsnap:\n{snap0}"
+        );
+        // Run 2 output should appear when selected_run=2
+        assert!(
+            snap2.contains("line1 from run 2"),
+            "snap2 should show run 2 output\nsnap:\n{snap2}"
+        );
+        // Run 0 output should NOT appear when selected_run=2
+        assert!(
+            !snap2.contains("line1 from run 0"),
+            "snap2 should not show run 0 output\nsnap:\n{snap2}"
+        );
+    }
+
+    #[test]
+    fn paneled_scroll_offset_respected() {
+        let mut runs = sample_runs(1);
+        runs[0].output_lines = (0..50).map(|i| format!("output line {i}")).collect();
+        let state = RunsTabState {
+            runs,
+            selected_run: 0,
+            layer_label: "raw".to_owned(),
+            loop_display_id: "lp".to_owned(),
+            log_scroll: 10,
+        };
+        let pal = test_palette();
+        let frame = render_runs_paneled(
+            &state,
+            FrameSize {
+                width: 80,
+                height: 25,
+            },
+            test_theme(),
+            &pal,
+            false,
+        );
+        let snap = frame.snapshot();
+        assert!(
+            snap.contains("scroll=10"),
+            "scroll indicator should show scroll=10\nsnap:\n{snap}"
+        );
+    }
+
+    #[test]
+    fn paneled_narrow_width_no_panic() {
+        let state = RunsTabState {
+            runs: sample_runs(3),
+            selected_run: 1,
+            layer_label: "raw".to_owned(),
+            loop_display_id: "loop-narrow".to_owned(),
+            log_scroll: 0,
+        };
+        let pal = test_palette();
+        // 30-wide render should not panic
+        let frame = render_runs_paneled(
+            &state,
+            FrameSize {
+                width: 30,
+                height: 15,
+            },
+            test_theme(),
+            &pal,
+            false,
+        );
+        let snap = frame.snapshot();
+        assert!(!snap.is_empty());
     }
 }
