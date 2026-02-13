@@ -1,0 +1,116 @@
+Pi Coding Agent v2.1.0
+Configuration loaded from /home/user/.pi/agent/config.toml
+[2026-01-10T20:10:00Z] status: starting
+[2026-01-10T20:10:01Z] profile: pi-default
+[2026-01-10T20:10:01Z] harness: pi
+[2026-01-10T20:10:02Z] model: claude-opus-4-6 via anthropic
+[2026-01-10T20:10:02Z] status: ready
+[2026-01-10T20:10:05Z] task: Implement retry logic for API client
+[2026-01-10T20:10:06Z] status: running
+
+tool: read /repo/src/api/client.rs
+tool: read /repo/src/api/retry.rs
+
+Here's the implementation plan:
+
+1. Add exponential backoff with jitter
+2. Configure max retries per endpoint
+3. Handle transient HTTP errors (429, 502, 503, 504)
+
+```rust
+pub struct RetryPolicy {
+    pub max_retries: u32,
+    pub base_delay: Duration,
+    pub max_delay: Duration,
+}
+
+impl RetryPolicy {
+    pub fn should_retry(&self, status: u16, attempt: u32) -> bool {
+        attempt < self.max_retries && matches!(status, 429 | 502 | 503 | 504)
+    }
+
+    pub fn delay_for(&self, attempt: u32) -> Duration {
+        let base = self.base_delay.as_millis() as u64;
+        let max = self.max_delay.as_millis() as u64;
+        let delay = (base * 2u64.pow(attempt)).min(max);
+        Duration::from_millis(delay)
+    }
+}
+```
+
+```diff
+--- a/src/api/client.rs
++++ b/src/api/client.rs
+@@ -22,6 +22,8 @@
+ pub struct ApiClient {
+     base_url: String,
+     http: reqwest::Client,
++    retry_policy: RetryPolicy,
++    request_timeout: Duration,
+ }
+
+ impl ApiClient {
+@@ -35,7 +37,22 @@
+-    pub async fn get(&self, path: &str) -> Result<Response, ApiError> {
+-        let resp = self.http.get(&format!("{}{}", self.base_url, path)).send().await?;
+-        Ok(resp)
++    pub async fn get(&self, path: &str) -> Result<Response, ApiError> {
++        let url = format!("{}{}", self.base_url, path);
++        for attempt in 0..=self.retry_policy.max_retries {
++            match self.http.get(&url).timeout(self.request_timeout).send().await {
++                Ok(resp) if !self.retry_policy.should_retry(resp.status().as_u16(), attempt) => {
++                    return Ok(resp);
++                }
++                Ok(_) => {
++                    tokio::time::sleep(self.retry_policy.delay_for(attempt)).await;
++                }
++                Err(e) if attempt == self.retry_policy.max_retries => {
++                    return Err(ApiError::Request(e));
++                }
++                Err(_) => {
++                    tokio::time::sleep(self.retry_policy.delay_for(attempt)).await;
++                }
++            }
++        }
++        Err(ApiError::MaxRetriesExceeded)
+     }
+```
+
+[2026-01-10T20:11:00Z] tool-output: applied patch to src/api/client.rs
+[2026-01-10T20:11:02Z] tool-output: applied patch to src/api/retry.rs
+
+tool: run command `cargo test -p api-client`
+$ cargo test -p api-client
+running 6 tests
+test api::retry::tests::backoff_respects_max_delay ... ok
+test api::retry::tests::should_retry_transient_codes ... ok
+test api::retry::tests::should_not_retry_4xx ... ok
+test api::client::tests::get_retries_on_503 ... ok
+test api::client::tests::get_fails_after_max_retries ... ok
+test api::client::tests::get_succeeds_on_first_try ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+
+[2026-01-10T20:11:30Z] status: success
+[2026-01-10T20:11:30Z] exit_code: 0
+[2026-01-10T20:11:30Z] summary: implemented retry logic with exponential backoff
+
+[2026-01-10T20:12:00Z] task: Fix configuration loading error
+[2026-01-10T20:12:01Z] status: running
+
+No models available.
+
+Set an API key environment variable:
+  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.
+
+Or create /home/user/.pi/agent/models.json
+[2026-01-10T20:13:44Z] status: error
+exit_code: 1
+profile: pi
+harness: pi
+tool-output: none
+recovery: configure models then retry
+error: ModelConfigError: no provider credentials found
+  at load_config (/home/user/.pi/agent/src/config.rs:89)
+  at main (/home/user/.pi/agent/src/main.rs:23)
+  caused by: environment variable ANTHROPIC_API_KEY not set

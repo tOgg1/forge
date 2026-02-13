@@ -1,0 +1,360 @@
+{
+  "version": "1.0.0",
+  "description": "Token taxonomy for log highlighting. Defines all known token classes, their semantic meaning, and line-matching patterns. Used by the baseline scanner to verify corpus coverage.",
+  "token_classes": {
+    "meta.timestamp": {
+      "description": "RFC3339 timestamps in square brackets, e.g. [2026-01-01T00:00:00Z]",
+      "pattern": "^\\[\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z\\]",
+      "precedence": 10,
+      "theme_slot": "ui.text-muted"
+    },
+    "meta.status": {
+      "description": "Status indicators: status: idle/running/error/success/ready/starting/sleeping",
+      "pattern": "status:\\s*(idle|running|error|success|ready|starting|sleeping)",
+      "precedence": 20,
+      "theme_slot": "status.info"
+    },
+    "meta.status.success": {
+      "description": "Successful completion status lines",
+      "pattern": "(status:\\s*success|run complete|exit_code:\\s*0)",
+      "precedence": 25,
+      "theme_slot": "status.success"
+    },
+    "meta.status.error": {
+      "description": "Error status lines",
+      "pattern": "(status:\\s*error|exit_code:\\s*[^0])",
+      "precedence": 25,
+      "theme_slot": "status.error"
+    },
+    "meta.key_value": {
+      "description": "Key-value metadata: profile:, harness:, model:, exit_code:, recovery:, tool-output:",
+      "pattern": "^(profile|harness|model|exit_code|recovery|tool-output|summary):\\s",
+      "precedence": 15,
+      "theme_slot": "ui.text-muted"
+    },
+    "harness.header": {
+      "description": "Harness identification headers: version strings, product names",
+      "pattern": "^(OpenAI Codex v|Pi Coding Agent v|OpenCode v)",
+      "precedence": 5,
+      "theme_slot": "ui.accent"
+    },
+    "harness.separator": {
+      "description": "Visual separators: dashes, box-drawing chars",
+      "pattern": "^(--------+|[╭╰][─]+[╮╯])",
+      "precedence": 5,
+      "theme_slot": "ui.border"
+    },
+    "harness.box_content": {
+      "description": "Content inside box-drawing frames (│ ... │)",
+      "pattern": "^│.*│$",
+      "precedence": 6,
+      "theme_slot": "ui.surface"
+    },
+    "harness.config_field": {
+      "description": "Codex config fields: workdir, model, provider, approval, sandbox, session id, reasoning effort",
+      "pattern": "^(workdir|model|provider|approval|sandbox|reasoning effort|session id):\\s",
+      "precedence": 10,
+      "theme_slot": "token.keyword"
+    },
+    "harness.mcp": {
+      "description": "MCP server startup/status messages",
+      "pattern": "^mcp:",
+      "precedence": 10,
+      "theme_slot": "ui.text-muted"
+    },
+    "claude.json_event": {
+      "description": "Claude stream JSON events: {\"type\":...}",
+      "pattern": "^\\{\"type\":",
+      "precedence": 30,
+      "theme_slot": "token.keyword"
+    },
+    "claude.init": {
+      "description": "Claude system init event",
+      "pattern": "\"subtype\":\\s*\"init\"",
+      "precedence": 35,
+      "theme_slot": "ui.accent"
+    },
+    "claude.stream_text": {
+      "description": "Claude text_delta content in stream events",
+      "pattern": "\"text_delta\"",
+      "precedence": 35,
+      "theme_slot": "token.string"
+    },
+    "claude.result": {
+      "description": "Claude result event with turns/cost/usage",
+      "pattern": "\"type\":\\s*\"result\"",
+      "precedence": 35,
+      "theme_slot": "status.info"
+    },
+    "claude.result.success": {
+      "description": "Claude successful result",
+      "pattern": "\"subtype\":\\s*\"success\"",
+      "precedence": 40,
+      "theme_slot": "status.success"
+    },
+    "claude.result.error": {
+      "description": "Claude error result",
+      "pattern": "(\"subtype\":\\s*\"error\"|\"is_error\":\\s*true)",
+      "precedence": 40,
+      "theme_slot": "status.error"
+    },
+    "claude.error": {
+      "description": "Claude error event type",
+      "pattern": "\"type\":\\s*\"error\"",
+      "precedence": 35,
+      "theme_slot": "status.error"
+    },
+    "claude.message_delta": {
+      "description": "Claude message_delta event (stop_reason)",
+      "pattern": "\"message_delta\"",
+      "precedence": 35,
+      "theme_slot": "ui.text-muted"
+    },
+    "claude.assistant": {
+      "description": "Claude assistant/user envelope (suppressed in rendering)",
+      "pattern": "\"type\":\\s*\"(assistant|user)\"",
+      "precedence": 35,
+      "theme_slot": "ui.text-muted"
+    },
+    "code_fence.open": {
+      "description": "Code fence opening: ```lang or ``` (with optional language)",
+      "pattern": "^```[a-zA-Z]*$",
+      "precedence": 50,
+      "theme_slot": "token.keyword"
+    },
+    "code_fence.close": {
+      "description": "Code fence closing: ```",
+      "pattern": "^```$",
+      "precedence": 50,
+      "theme_slot": "token.keyword"
+    },
+    "code_fence.body.rust": {
+      "description": "Code inside rust code fence",
+      "pattern": null,
+      "precedence": 45,
+      "theme_slot": "token.string"
+    },
+    "code_fence.body.python": {
+      "description": "Code inside python code fence",
+      "pattern": null,
+      "precedence": 45,
+      "theme_slot": "token.string"
+    },
+    "code_fence.body.go": {
+      "description": "Code inside go code fence",
+      "pattern": null,
+      "precedence": 45,
+      "theme_slot": "token.string"
+    },
+    "code_fence.body.sql": {
+      "description": "Code inside SQL code fence",
+      "pattern": null,
+      "precedence": 45,
+      "theme_slot": "token.string"
+    },
+    "code_fence.body.json": {
+      "description": "Code inside JSON code fence",
+      "pattern": null,
+      "precedence": 45,
+      "theme_slot": "token.string"
+    },
+    "code_fence.body.yaml": {
+      "description": "Code inside YAML code fence",
+      "pattern": null,
+      "precedence": 45,
+      "theme_slot": "token.string"
+    },
+    "code_fence.body.toml": {
+      "description": "Code inside TOML code fence",
+      "pattern": null,
+      "precedence": 45,
+      "theme_slot": "token.string"
+    },
+    "code_fence.body.diff": {
+      "description": "Code inside diff code fence",
+      "pattern": null,
+      "precedence": 45,
+      "theme_slot": "token.string"
+    },
+    "code_fence.body.generic": {
+      "description": "Code inside untyped/unknown code fence",
+      "pattern": null,
+      "precedence": 45,
+      "theme_slot": "token.string"
+    },
+    "diff.header": {
+      "description": "Diff file headers: --- a/path, +++ b/path, diff --git",
+      "pattern": "^(---\\s+a/|\\+\\+\\+\\s+b/|diff\\s+--git)",
+      "precedence": 60,
+      "theme_slot": "token.path"
+    },
+    "diff.hunk_header": {
+      "description": "Diff hunk headers: @@ -n,m +n,m @@",
+      "pattern": "^@@\\s",
+      "precedence": 60,
+      "theme_slot": "token.keyword"
+    },
+    "diff.addition": {
+      "description": "Diff added lines: +...",
+      "pattern": "^\\+[^+]",
+      "precedence": 55,
+      "theme_slot": "status.success"
+    },
+    "diff.deletion": {
+      "description": "Diff removed lines: -...",
+      "pattern": "^-[^-]",
+      "precedence": 55,
+      "theme_slot": "status.error"
+    },
+    "diff.context": {
+      "description": "Diff context lines (unchanged)",
+      "pattern": "^\\s",
+      "precedence": 50,
+      "theme_slot": "ui.text-primary"
+    },
+    "diff.index": {
+      "description": "Diff index/mode lines: index abc..def, new file mode",
+      "pattern": "^(index\\s+[0-9a-f]+|new file mode)",
+      "precedence": 58,
+      "theme_slot": "ui.text-muted"
+    },
+    "test.pass": {
+      "description": "Test passing lines: ok, ... ok, PASSED",
+      "pattern": "(\\.\\.\\. ok$|^ok\\s|^test result: ok|PASSED)",
+      "precedence": 70,
+      "theme_slot": "status.success"
+    },
+    "test.fail": {
+      "description": "Test failure lines: FAILED, FAIL, failures:",
+      "pattern": "(FAILED|^FAIL\\s|^failures:)",
+      "precedence": 70,
+      "theme_slot": "status.error"
+    },
+    "test.summary": {
+      "description": "Test result summary: test result: X. N passed; M failed",
+      "pattern": "^test result:",
+      "precedence": 72,
+      "theme_slot": "status.info"
+    },
+    "test.running": {
+      "description": "Test running indicators: running N tests, Compiling, Finished",
+      "pattern": "^(running \\d+ tests|\\s*(Compiling|Finished|Running)\\s)",
+      "precedence": 65,
+      "theme_slot": "ui.text-muted"
+    },
+    "error.message": {
+      "description": "Error messages: error:, error[EXXXX]:, Error:",
+      "pattern": "^\\s*(error(\\[E\\d+\\])?:|Error:)",
+      "precedence": 80,
+      "theme_slot": "status.error"
+    },
+    "error.warning": {
+      "description": "Warning messages and indicators",
+      "pattern": "(^⚠️|^warning:|^Warning:)",
+      "precedence": 78,
+      "theme_slot": "status.warning"
+    },
+    "stacktrace.frame": {
+      "description": "Stack frame lines: at function (file:line), goroutine N [running]",
+      "pattern": "(^\\s+at\\s+|^goroutine \\d+|^\\s+/.*:\\d+)",
+      "precedence": 75,
+      "theme_slot": "status.error"
+    },
+    "stacktrace.panic": {
+      "description": "Panic/crash indicators: panic:, panicked at, SIGSEGV",
+      "pattern": "(^panic:|panicked at|SIGSEGV|signal )",
+      "precedence": 85,
+      "theme_slot": "status.error"
+    },
+    "stacktrace.rust_backtrace": {
+      "description": "Rust-specific backtrace: thread ... panicked, note: run with RUST_BACKTRACE",
+      "pattern": "(^thread '.*' panicked|RUST_BACKTRACE)",
+      "precedence": 83,
+      "theme_slot": "status.error"
+    },
+    "tool.invocation": {
+      "description": "Tool invocations: tool: read/run/write, ● Reading/Analyzing/Making",
+      "pattern": "(^tool:\\s|^●\\s)",
+      "precedence": 40,
+      "theme_slot": "token.command"
+    },
+    "tool.action": {
+      "description": "Action reports: action: apply patch/approved",
+      "pattern": "^action:\\s",
+      "precedence": 40,
+      "theme_slot": "token.command"
+    },
+    "command.prompt": {
+      "description": "Command prompts: $ command, > command",
+      "pattern": "^[>$]\\s",
+      "precedence": 45,
+      "theme_slot": "token.command"
+    },
+    "command.output": {
+      "description": "Command output lines (context-dependent, inside tool execution)",
+      "pattern": null,
+      "precedence": 30,
+      "theme_slot": "ui.text-primary"
+    },
+    "codex.role": {
+      "description": "Codex role markers: user, codex, thinking, exec",
+      "pattern": "^(user|codex|thinking|exec)$",
+      "precedence": 50,
+      "theme_slot": "token.keyword"
+    },
+    "codex.thinking": {
+      "description": "Codex thinking blocks: **bold text**",
+      "pattern": "^\\*\\*.*\\*\\*$",
+      "precedence": 48,
+      "theme_slot": "ui.text-muted"
+    },
+    "codex.token_count": {
+      "description": "Codex token usage: tokens used / N,NNN",
+      "pattern": "^(tokens used|[\\d,]+)$",
+      "precedence": 45,
+      "theme_slot": "token.number"
+    },
+    "codex.conflict": {
+      "description": "Codex conflict detection messages",
+      "pattern": "^unexpected concurrent change",
+      "precedence": 80,
+      "theme_slot": "status.warning"
+    },
+    "approval.required": {
+      "description": "Approval request messages",
+      "pattern": "(approval required|APPROVAL REQUIRED|Awaiting Approval)",
+      "precedence": 60,
+      "theme_slot": "status.warning"
+    },
+    "approval.granted": {
+      "description": "Approval granted messages",
+      "pattern": "(approved by operator|Press \\[y\\])",
+      "precedence": 60,
+      "theme_slot": "status.success"
+    },
+    "number.literal": {
+      "description": "Standalone numbers: token counts, line numbers, durations",
+      "pattern": "\\b\\d[\\d,.]+\\b",
+      "precedence": 10,
+      "theme_slot": "token.number"
+    },
+    "path.file": {
+      "description": "File paths: /foo/bar.rs, src/lib.rs, crates/...",
+      "pattern": "(/[\\w.-]+)+\\.(rs|go|ts|js|py|sql|toml|json|yaml|yml|md|sh|log)",
+      "precedence": 20,
+      "theme_slot": "token.path"
+    },
+    "text.plain": {
+      "description": "Unclassified plain text (prose, instructions, descriptions)",
+      "pattern": null,
+      "precedence": 0,
+      "theme_slot": "ui.text-primary"
+    },
+    "text.empty": {
+      "description": "Empty/blank lines",
+      "pattern": "^\\s*$",
+      "precedence": 0,
+      "theme_slot": "ui.text-primary"
+    }
+  }
+}
