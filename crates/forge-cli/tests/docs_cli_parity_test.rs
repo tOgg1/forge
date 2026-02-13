@@ -14,19 +14,7 @@ fn docs_cli_covers_root_help_command_families() {
     let command_ids = parse_root_help_command_ids(&help.stdout);
     let documented_ids = parse_documented_command_ids(&docs_text);
 
-    // Non-reference/infra command families intentionally excluded from docs parity gate.
-    const DOC_EXCLUSIONS: [&str; 10] = [
-        "completion",
-        "context",
-        "hook",
-        "inject",
-        "lock",
-        "mail",
-        "migrate",
-        "send",
-        "skills",
-        "use",
-    ];
+    const DOC_EXCLUSIONS: [&str; 0] = [];
 
     let missing = command_ids
         .into_iter()
