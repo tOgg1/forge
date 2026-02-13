@@ -358,21 +358,40 @@ fn is_missing_table(err: &forge_db::DbError, table: &str) -> bool {
 }
 
 fn resolve_database_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
-        return PathBuf::from(path);
+    if let Some(path) = non_empty_env_path("FORGE_DATABASE_PATH") {
+        return path;
     }
-    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
-        return PathBuf::from(path);
+    if let Some(path) = non_empty_env_path("FORGE_DB_PATH") {
+        return path;
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let mut path = PathBuf::from(home);
+    for key in [
+        "FORGE_DATA_DIR",
+        "FORGE_GLOBAL_DATA_DIR",
+        "SWARM_GLOBAL_DATA_DIR",
+    ] {
+        if let Some(path) = non_empty_env_path(key) {
+            return path.join("forge.db");
+        }
+    }
+    if let Some(home) = non_empty_env_path("HOME") {
+        let mut path = home;
         path.push(".local");
         path.push("share");
         path.push("forge");
         path.push("forge.db");
         return path;
     }
-    PathBuf::from("forge.db")
+    PathBuf::from(".forge-data/forge.db")
+}
+
+fn non_empty_env_path(key: &str) -> Option<PathBuf> {
+    std::env::var_os(key).and_then(|raw| {
+        if raw.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(raw))
+        }
+    })
 }
 
 fn trim(value: &str, max: usize) -> String {
@@ -391,9 +410,11 @@ fn trim(value: &str, max: usize) -> String {
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+    use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use forge_db::loop_queue_repository::LoopQueueItem;
@@ -402,7 +423,9 @@ mod tests {
     use forge_db::pool_repository::{Pool, PoolRepository};
     use forge_db::profile_repository::{Profile, ProfileRepository};
 
-    use super::{load_live_loop_snapshot, plan_render_diff, IncrementalRenderEngine};
+    use super::{
+        load_live_loop_snapshot, plan_render_diff, resolve_database_path, IncrementalRenderEngine,
+    };
 
     #[test]
     fn live_snapshot_includes_loop_queue_and_profile_fields() {
@@ -566,6 +589,19 @@ mod tests {
         assert!(ansi.ends_with("\x1b[3;1H"));
     }
 
+    #[test]
+    fn resolve_database_path_uses_global_data_dir_alias_when_db_env_is_unset() {
+        let _lock = env_lock();
+        let _g_db = EnvGuard::unset("FORGE_DATABASE_PATH");
+        let _g_legacy_db = EnvGuard::unset("FORGE_DB_PATH");
+        let _g_data = EnvGuard::set("FORGE_GLOBAL_DATA_DIR", "/tmp/forge-tui-global");
+
+        assert_eq!(
+            resolve_database_path(),
+            PathBuf::from("/tmp/forge-tui-global/forge.db")
+        );
+    }
+
     fn lines<const N: usize>(rows: [&str; N]) -> Vec<String> {
         rows.into_iter().map(str::to_owned).collect()
     }
@@ -585,5 +621,49 @@ mod tests {
 
     fn cleanup_temp_dir(path: &Path) {
         let _ = fs::remove_file(path);
+    }
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = LOCK.get_or_init(|| Mutex::new(()));
+        match lock.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    struct EnvGuard {
+        key: String,
+        previous: Option<OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self {
+                key: key.to_string(),
+                previous,
+            }
+        }
+
+        fn unset(key: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self {
+                key: key.to_string(),
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.take() {
+                std::env::set_var(&self.key, value);
+            } else {
+                std::env::remove_var(&self.key);
+            }
+        }
     }
 }
