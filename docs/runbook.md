@@ -29,6 +29,27 @@ but not yet wired up. Planned steps are labeled.
   ./build/forge migrate version
   ```
 
+### TUI cutover health checks (FrankenTUI runtime)
+
+Use this checklist after upgrading `forge-tui` or changing pane/shell behavior:
+
+1. Launch TUI from a real terminal:
+
+   ```bash
+   ./build/forge tui
+   ```
+
+2. Confirm expected tabs render and switch correctly:
+   - `Overview`, `Logs`, `Runs`, `Multi Logs`, `Inbox`
+3. Runtime fallback policy:
+   - interactive path: FrankenTUI runtime only (no silent snapshot fallback)
+   - non-TTY local path: explicit preflight error unless fallback is opted in
+4. Optional explicit dev fallback (diagnostics only):
+
+   ```bash
+   FORGE_TUI_DEV_SNAPSHOT_FALLBACK=1 ./build/forge tui
+   ```
+
 ### `rforged` daemon mode health checks (Rust parity)
 
 For daemon-owned loops (`--spawn-owner daemon`) use these checks:
@@ -52,7 +73,6 @@ If daemon health is bad, follow recovery flow below.
 
 ### Planned
 
-- TUI dashboard for agent/workspace state.
 - Event stream with `--watch` and JSONL output.
 
 ## `rforged` daemon operator flow

@@ -48,6 +48,16 @@ Record these before tagging a release:
     `docs/adr/0005-rust-single-switch-policy.md`
   - link runbook: `docs/rust-post-cutover-incident-runbook.md`
 
+### Draft cutover changelog (FrankenTUI shell rollout, 2026-02-13)
+
+Use or adapt these bullets in release notes/changelog output:
+
+- Interactive TUI now runs on a single FrankenTUI runtime root; no silent interactive fallback renderer.
+- Runs pane moved to table + sticky output flow where run selection drives output context.
+- Inbox pane switched to subject-first threads with compact IDs/badges and persistent detail view.
+- Multi-logs pane now renders as a responsive health wall with refreshed layout snapshot baselines.
+- Shell status line now surfaces queued notification count and error-first status fallback from notification queue.
+
 ## Change communication checklist
 
 Audiences:
