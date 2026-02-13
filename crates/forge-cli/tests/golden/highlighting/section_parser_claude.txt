@@ -1,0 +1,6 @@
+Start:json-event:1:{"type":"system","subtype":"init","model":"claude-opus-4-6"}
+End:json-event:1
+Start:json-event:2:{"type":"stream_event","event":{"type":"content_block_start"}}
+End:json-event:2
+Start:status-line:3:[2026-02-09T16:00:01Z] status: idle
+End:status-line:3

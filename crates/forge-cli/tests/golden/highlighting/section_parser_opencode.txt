@@ -1,0 +1,6 @@
+Start:harness-header:1:╭─────────────────────────╮
+Continue:harness-header:2:│ OpenCode v0.1.0         │
+Continue:harness-header:3:╰─────────────────────────╯
+End:harness-header:3
+Start:unknown:4:some output
+End:unknown:4

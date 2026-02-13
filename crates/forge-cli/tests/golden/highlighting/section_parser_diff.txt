@@ -1,0 +1,11 @@
+Start:diff:1:diff --git a/foo.rs b/foo.rs
+Continue:diff:2:index 0000000..a1b2c3d
+Continue:diff:3:--- a/foo.rs
+Continue:diff:4:+++ b/foo.rs
+Continue:diff:5:@@ -10,7 +10,12 @@
+Continue:diff:6:-old line
+Continue:diff:7:+new line
+Continue:diff:8: context line
+End:diff:8
+Start:unknown:9:next section here
+End:unknown:9

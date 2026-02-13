@@ -1,0 +1,7 @@
+FenceOpen:1:3:rust
+FenceLine:2:rust:fn main() {}
+FenceClose:3:3
+FenceOpen:4:4:python
+FenceLine:5:python:print("hello")
+FenceLine:6:python:# comment
+FenceClose:7:4

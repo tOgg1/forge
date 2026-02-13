@@ -1,0 +1,13 @@
+Start:harness-header:1:Pi Coding Agent v2.1.0
+Continue:harness-header:2:Configuration loaded from /home/user/.pi/config.toml
+End:harness-header:2
+Start:status-line:3:[2026-01-10T20:10:00Z] status: starting
+End:status-line:3
+Start:tool-call:4:tool: read /repo/src/api/client.rs
+End:tool-call:4
+Start:code-fence:5:```rust
+Continue:code-fence:6:pub struct RetryPolicy {}
+Continue:code-fence:7:```
+End:code-fence:7
+Start:status-line:8:[2026-01-10T20:11:30Z] status: success
+End:status-line:8

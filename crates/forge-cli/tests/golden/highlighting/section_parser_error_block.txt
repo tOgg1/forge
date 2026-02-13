@@ -1,0 +1,6 @@
+Start:error-block:1:error: integration tests failed with 1 failure
+Continue:error-block:2:caused by: connection refused
+Continue:error-block:3:recovery: fix rate limiter test fixture
+End:error-block:3
+Start:unknown:4:plain line after
+End:unknown:4
