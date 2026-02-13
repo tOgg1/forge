@@ -334,29 +334,13 @@ pub fn default_log_path(data_dir: &str, name: &str, id: &str) -> String {
 }
 
 fn resolve_database_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
-        return PathBuf::from(path);
-    }
-    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
-        return PathBuf::from(path);
-    }
-    let mut path = PathBuf::from(resolve_data_dir());
-    path.push("forge.db");
-    path
+    crate::runtime_paths::resolve_database_path()
 }
 
 fn resolve_data_dir() -> String {
-    if let Some(path) = std::env::var_os("FORGE_DATA_DIR") {
-        return PathBuf::from(path).to_string_lossy().into_owned();
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        let mut path = PathBuf::from(home);
-        path.push(".local");
-        path.push("share");
-        path.push("forge");
-        return path.to_string_lossy().into_owned();
-    }
-    ".forge-data".to_string()
+    crate::runtime_paths::resolve_data_dir()
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn filter_log_content(content: &str, lines: i32, since: &str) -> String {

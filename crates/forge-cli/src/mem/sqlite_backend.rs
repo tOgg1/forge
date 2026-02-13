@@ -108,19 +108,5 @@ fn map_repo_error(err: forge_db::DbError) -> String {
 }
 
 fn resolve_database_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("FORGE_DATABASE_PATH") {
-        return PathBuf::from(path);
-    }
-    if let Some(path) = std::env::var_os("FORGE_DB_PATH") {
-        return PathBuf::from(path);
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        let mut path = PathBuf::from(home);
-        path.push(".local");
-        path.push("share");
-        path.push("forge");
-        path.push("forge.db");
-        return path;
-    }
-    PathBuf::from("forge.db")
+    crate::runtime_paths::resolve_database_path()
 }

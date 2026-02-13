@@ -225,6 +225,47 @@ fn up_command_dispatches_to_sqlite_backend() {
 }
 
 #[test]
+fn up_command_dispatches_with_global_data_dir_alias() {
+    let _lock = env_lock();
+    let data_dir = std::env::temp_dir().join(format!(
+        "forge-cli-root-global-data-{}-{}",
+        unique_suffix(),
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&data_dir)
+        .unwrap_or_else(|err| panic!("create global data dir {}: {err}", data_dir.display()));
+
+    let _g_db = EnvGuard::unset("FORGE_DATABASE_PATH");
+    let _g_legacy_db = EnvGuard::unset("FORGE_DB_PATH");
+    let _g_data = EnvGuard::unset("FORGE_DATA_DIR");
+    let _g_global_data = EnvGuard::set("FORGE_GLOBAL_DATA_DIR", &data_dir);
+
+    let migrate = run(&["migrate", "up"]);
+    assert_eq!(migrate.exit_code, 0, "migrate failed: {}", migrate.stderr);
+
+    let name = format!("dispatch-global-data-{}", unique_suffix());
+    let up = run(&["up", "--name", &name, "--prompt-msg", "hello", "--json"]);
+    assert_eq!(up.exit_code, 0, "up failed: {}", up.stderr);
+
+    let ps = run(&["ps", "--json"]);
+    assert_eq!(ps.exit_code, 0, "ps failed: {}", ps.stderr);
+    assert!(
+        ps.stdout.contains(&name),
+        "expected loop {name} in ps output, got: {}",
+        ps.stdout
+    );
+
+    let db_path = data_dir.join("forge.db");
+    assert!(
+        db_path.exists(),
+        "expected sqlite db at {}, but file missing",
+        db_path.display()
+    );
+
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+#[test]
 fn kill_command_dispatches_to_sqlite_backend() {
     let _lock = env_lock();
     let db_path = temp_db_path("root-kill-dispatch");
@@ -444,6 +485,13 @@ impl EnvGuard {
         let key = key.into();
         let previous = std::env::var_os(&key);
         std::env::set_var(&key, value.as_ref());
+        Self { key, previous }
+    }
+
+    fn unset<K: Into<String>>(key: K) -> Self {
+        let key = key.into();
+        let previous = std::env::var_os(&key);
+        std::env::remove_var(&key);
         Self { key, previous }
     }
 }

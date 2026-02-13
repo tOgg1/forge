@@ -37,6 +37,7 @@ pub mod resume;
 pub mod rm;
 pub mod run;
 mod run_exec;
+mod runtime_paths;
 pub mod scale;
 pub mod section_parser;
 pub mod send;

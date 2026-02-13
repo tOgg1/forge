@@ -1092,21 +1092,7 @@ fn discover_project_dir(cwd: &Path) -> PathBuf {
 }
 
 fn resolve_database_path() -> PathBuf {
-    if let Some(path) = env::var_os("FORGE_DATABASE_PATH") {
-        return PathBuf::from(path);
-    }
-    if let Some(path) = env::var_os("FORGE_DB_PATH") {
-        return PathBuf::from(path);
-    }
-    if let Some(home) = env::var_os("HOME") {
-        let mut path = PathBuf::from(home);
-        path.push(".local");
-        path.push("share");
-        path.push("forge");
-        path.push("forge.db");
-        return path;
-    }
-    PathBuf::from("forge.db")
+    crate::runtime_paths::resolve_database_path()
 }
 
 fn template_search_paths(project_dir: &Path, user_dir: &Path) -> Vec<PathBuf> {

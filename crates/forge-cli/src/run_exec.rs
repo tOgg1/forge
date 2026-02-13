@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
@@ -1173,17 +1173,9 @@ fn to_prompt_mode(value: &str) -> HarnessPromptMode {
 }
 
 fn resolve_data_dir() -> String {
-    if let Some(path) = std::env::var_os("FORGE_DATA_DIR") {
-        return PathBuf::from(path).to_string_lossy().into_owned();
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        let mut path = PathBuf::from(home);
-        path.push(".local");
-        path.push("share");
-        path.push("forge");
-        return path.to_string_lossy().into_owned();
-    }
-    ".forge-data".to_string()
+    crate::runtime_paths::resolve_data_dir()
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn default_log_path(data_dir: &str, name: &str, id: &str) -> String {
