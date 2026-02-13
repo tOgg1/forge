@@ -30,12 +30,15 @@ pub mod mem;
 pub mod mesh;
 pub mod migrate;
 pub mod msg;
+pub mod node;
 pub mod pool;
 pub mod profile;
 mod profile_catalog;
 pub mod prompt;
+mod prompt_resolution;
 pub mod ps;
 pub mod queue;
+pub mod registry;
 pub mod resume;
 pub mod rm;
 pub mod run;
@@ -252,6 +255,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let forwarded = forward_args(remaining, &flags);
             mesh::run_with_store(&forwarded, &store, stdout, stderr)
         }
+        Some("node") => {
+            let mut backend = node::ShellNodeBackend::open_from_env();
+            let forwarded = forward_args(remaining, &flags);
+            node::run_with_backend(&forwarded, &mut backend, stdout, stderr)
+        }
         Some("msg") => {
             let mut backend = msg::SqliteMsgBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
@@ -281,6 +289,10 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let mut backend = run::SqliteRunBackend::open_from_env();
             let forwarded = remaining.to_vec();
             run::run_with_backend(&forwarded, &mut backend, stdout, stderr)
+        }
+        Some("registry") => {
+            let forwarded = forward_args(remaining, &flags);
+            registry::run_with_store(&forwarded, stdout, stderr)
         }
         Some("scale") => {
             let mut backend = scale::SqliteScaleBackend::open_from_env();
@@ -450,6 +462,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  mail      Forge Mail messaging")?;
     writeln!(out, "  migrate   Database migration command family")?;
     writeln!(out, "  mesh      Manage mesh registry and master")?;
+    writeln!(out, "  node      Manage mesh nodes and remote execution")?;
     writeln!(out, "  mem       Loop memory command family")?;
     writeln!(out, "  msg       Queue a message for loop(s)")?;
     writeln!(out, "  pool      Profile pool command family")?;
@@ -457,6 +470,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  prompt    Loop prompt command family")?;
     writeln!(out, "  ps        List loops")?;
     writeln!(out, "  queue     Manage loop queues")?;
+    writeln!(out, "  registry  Manage agent and prompt registry")?;
     writeln!(out, "  resume    Resume loop execution")?;
     writeln!(out, "  rm        Remove loop records")?;
     writeln!(out, "  run       Run a single loop iteration")?;
