@@ -457,11 +457,210 @@ fn focus_spec(view: TuiView) -> &'static ViewFocusSpec {
     &FOCUS_SPECS[0]
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ZoomLayer {
+    Fleet,
+    Group,
+    Loop,
+    Task,
+    Diff,
+}
+
+impl ZoomLayer {
+    pub const ORDER: [ZoomLayer; 5] = [
+        ZoomLayer::Fleet,
+        ZoomLayer::Group,
+        ZoomLayer::Loop,
+        ZoomLayer::Task,
+        ZoomLayer::Diff,
+    ];
+
+    #[must_use]
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Fleet => "fleet",
+            Self::Group => "group",
+            Self::Loop => "loop",
+            Self::Task => "task",
+            Self::Diff => "diff",
+        }
+    }
+
+    #[must_use]
+    pub fn default_zoom_percent(self) -> u8 {
+        match self {
+            Self::Fleet => 20,
+            Self::Group => 40,
+            Self::Loop => 60,
+            Self::Task => 80,
+            Self::Diff => 100,
+        }
+    }
+
+    #[must_use]
+    pub fn detail_hint(self) -> &'static str {
+        match self {
+            Self::Fleet => "bird's-eye dots",
+            Self::Group => "clustered loop cards",
+            Self::Loop => "single-loop panel",
+            Self::Task => "task work-item detail",
+            Self::Diff => "code diff hunks",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ZoomCommand {
+    In,
+    Out,
+    Set(ZoomLayer),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZoomSpatialAnchor {
+    pub fleet_cell_x: u16,
+    pub fleet_cell_y: u16,
+    pub cluster_id: String,
+    pub loop_id: String,
+    pub task_id: String,
+}
+
+impl Default for ZoomSpatialAnchor {
+    fn default() -> Self {
+        Self {
+            fleet_cell_x: 0,
+            fleet_cell_y: 0,
+            cluster_id: String::new(),
+            loop_id: String::new(),
+            task_id: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticZoomState {
+    pub layer: ZoomLayer,
+    pub zoom_percent: u8,
+    pub anchor: ZoomSpatialAnchor,
+}
+
+impl Default for SemanticZoomState {
+    fn default() -> Self {
+        let layer = ZoomLayer::Fleet;
+        Self {
+            layer,
+            zoom_percent: layer.default_zoom_percent(),
+            anchor: ZoomSpatialAnchor::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticZoomTransition {
+    pub from: ZoomLayer,
+    pub to: ZoomLayer,
+    pub command: ZoomCommand,
+    pub zoom_percent: u8,
+    pub anchor_preserved: bool,
+    pub detail_hint: &'static str,
+}
+
+#[must_use]
+pub fn apply_semantic_zoom(
+    state: &SemanticZoomState,
+    command: ZoomCommand,
+) -> (SemanticZoomState, SemanticZoomTransition) {
+    let target_layer = match command {
+        ZoomCommand::In => zoom_layer_step(state.layer, 1),
+        ZoomCommand::Out => zoom_layer_step(state.layer, -1),
+        ZoomCommand::Set(layer) => layer,
+    };
+    let next = SemanticZoomState {
+        layer: target_layer,
+        zoom_percent: target_layer.default_zoom_percent(),
+        anchor: state.anchor.clone(),
+    };
+    let transition = SemanticZoomTransition {
+        from: state.layer,
+        to: target_layer,
+        command,
+        zoom_percent: next.zoom_percent,
+        anchor_preserved: next.anchor == state.anchor,
+        detail_hint: target_layer.detail_hint(),
+    };
+    (next, transition)
+}
+
+#[must_use]
+pub fn zoom_layer_for_percent(percent: u8) -> ZoomLayer {
+    match percent {
+        0..=29 => ZoomLayer::Fleet,
+        30..=49 => ZoomLayer::Group,
+        50..=69 => ZoomLayer::Loop,
+        70..=89 => ZoomLayer::Task,
+        _ => ZoomLayer::Diff,
+    }
+}
+
+#[must_use]
+pub fn semantic_zoom_status_rows(state: &SemanticZoomState, max_rows: usize) -> Vec<String> {
+    if max_rows == 0 {
+        return Vec::new();
+    }
+    let mut rows = vec![
+        format!(
+            "zoom:{} ({:>3}%) {}",
+            state.layer.slug(),
+            state.zoom_percent,
+            state.layer.detail_hint()
+        ),
+        format!(
+            "anchor:fleet=({}, {}) cluster={} loop={} task={}",
+            state.anchor.fleet_cell_x,
+            state.anchor.fleet_cell_y,
+            if state.anchor.cluster_id.is_empty() {
+                "-"
+            } else {
+                state.anchor.cluster_id.as_str()
+            },
+            if state.anchor.loop_id.is_empty() {
+                "-"
+            } else {
+                state.anchor.loop_id.as_str()
+            },
+            if state.anchor.task_id.is_empty() {
+                "-"
+            } else {
+                state.anchor.task_id.as_str()
+            },
+        ),
+    ];
+    rows.truncate(max_rows);
+    rows
+}
+
+fn zoom_layer_step(layer: ZoomLayer, delta: i32) -> ZoomLayer {
+    let mut idx = 0i32;
+    for (current_idx, candidate) in ZoomLayer::ORDER.iter().enumerate() {
+        if *candidate == layer {
+            idx = current_idx as i32;
+            break;
+        }
+    }
+    let max_idx = (ZoomLayer::ORDER.len() as i32) - 1;
+    let next_idx = (idx + delta).clamp(0, max_idx);
+    ZoomLayer::ORDER[next_idx as usize]
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
 
-    use super::{can_transition, focus_target, FocusMove, PaneId, TuiView, ViewRoute, VIEW_ROUTES};
+    use super::{
+        apply_semantic_zoom, can_transition, focus_target, semantic_zoom_status_rows,
+        zoom_layer_for_percent, FocusMove, PaneId, SemanticZoomState, TuiView, ViewRoute,
+        ZoomCommand, ZoomLayer, ZoomSpatialAnchor, VIEW_ROUTES,
+    };
 
     fn adjacency_snapshot() -> String {
         TuiView::ORDER
@@ -605,5 +804,73 @@ mod tests {
         assert!(can_transition(TuiView::Incidents, TuiView::Logs));
         assert!(can_transition(TuiView::Tasks, TuiView::Inbox));
         assert!(can_transition(TuiView::Inbox, TuiView::Tasks));
+    }
+
+    #[test]
+    fn semantic_zoom_in_and_out_steps_layers_with_clamp() {
+        let mut state = SemanticZoomState::default();
+        for _ in 0..8 {
+            (state, _) = apply_semantic_zoom(&state, ZoomCommand::In);
+        }
+        assert_eq!(state.layer, ZoomLayer::Diff);
+        assert_eq!(state.zoom_percent, 100);
+
+        for _ in 0..8 {
+            (state, _) = apply_semantic_zoom(&state, ZoomCommand::Out);
+        }
+        assert_eq!(state.layer, ZoomLayer::Fleet);
+        assert_eq!(state.zoom_percent, 20);
+    }
+
+    #[test]
+    fn semantic_zoom_preserves_spatial_anchor_across_layers() {
+        let state = SemanticZoomState {
+            layer: ZoomLayer::Fleet,
+            zoom_percent: 20,
+            anchor: ZoomSpatialAnchor {
+                fleet_cell_x: 7,
+                fleet_cell_y: 3,
+                cluster_id: "cluster-night".to_owned(),
+                loop_id: "loop-17".to_owned(),
+                task_id: "forge-sd4".to_owned(),
+            },
+        };
+        let (next, transition) = apply_semantic_zoom(&state, ZoomCommand::Set(ZoomLayer::Task));
+        assert_eq!(next.layer, ZoomLayer::Task);
+        assert!(transition.anchor_preserved);
+        assert_eq!(next.anchor, state.anchor);
+        assert_eq!(transition.detail_hint, "task work-item detail");
+    }
+
+    #[test]
+    fn zoom_layer_for_percent_uses_semantic_bands() {
+        assert_eq!(zoom_layer_for_percent(0), ZoomLayer::Fleet);
+        assert_eq!(zoom_layer_for_percent(35), ZoomLayer::Group);
+        assert_eq!(zoom_layer_for_percent(65), ZoomLayer::Loop);
+        assert_eq!(zoom_layer_for_percent(75), ZoomLayer::Task);
+        assert_eq!(zoom_layer_for_percent(100), ZoomLayer::Diff);
+    }
+
+    #[test]
+    fn semantic_zoom_status_rows_snapshot() {
+        let state = SemanticZoomState {
+            layer: ZoomLayer::Loop,
+            zoom_percent: 60,
+            anchor: ZoomSpatialAnchor {
+                fleet_cell_x: 12,
+                fleet_cell_y: 4,
+                cluster_id: "east".to_owned(),
+                loop_id: "loop-9".to_owned(),
+                task_id: "forge-ecp".to_owned(),
+            },
+        };
+        let rows = semantic_zoom_status_rows(&state, 4);
+        assert_eq!(
+            rows,
+            vec![
+                "zoom:loop ( 60%) single-loop panel".to_owned(),
+                "anchor:fleet=(12, 4) cluster=east loop=loop-9 task=forge-ecp".to_owned(),
+            ]
+        );
     }
 }
