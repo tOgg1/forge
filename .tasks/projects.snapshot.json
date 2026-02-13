@@ -1,7 +1,17 @@
 {
   "schema_version": "sv.projects.v1",
-  "generated_at": "2026-02-13T12:11:12.271171Z",
+  "generated_at": "2026-02-13T19:23:14.356426Z",
   "projects": [
+    {
+      "id": "prj-9e5nsdh9",
+      "name": "frankentui-bootstrap-unified",
+      "description": "Unified FrankenTUI bootstrap + full rewrite execution plan aligned to upstream getting-started.md",
+      "archived": false,
+      "created_at": "2026-02-13T19:23:14.347652Z",
+      "updated_at": "2026-02-13T19:23:14.347652Z",
+      "created_by": "rforged-runtime-parity-specialist",
+      "updated_by": "rforged-runtime-parity-specialist"
+    },
     {
       "id": "prj-d9j8dpeh",
       "name": "tui-superdash",
