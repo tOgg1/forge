@@ -219,6 +219,9 @@ forge logs review-loop -f
 forge logs --all
 ```
 
+Highlighting behavior, limits, customization:
+- `docs/par-115-operator-highlighting-behavior-limits-customization.md`
+
 ### `forge loop msg` (alias: `forge msg`)
 
 Queue a message or override for a loop.
