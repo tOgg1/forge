@@ -2,8 +2,8 @@
  1:Overview    2:Logs    3:Runs    4:Multi Logs    5:Inbox                                                              
 Inbox filter:all  threads:2  unread:2  pending-ack:2  claims:3  conflicts:1                                             
 ╭─ Threads ────────────────────────────────────╮ ╭─ thread:thread-hotfix  msgs:1  participants:1 ──────────────────────╮
-│▸ m-33 u:1 a:1 incident forge-333             │ │enter=read  a=ack  h=handoff  r=reply  o=next-conflict  O=resolution │
-│  m-32 u:1 a:1 handoff forge-9r4 loop-2       │ │*! m-33 agent-c incident forge-333                                   │
+│▸ incident forge-333 [u:1][a:1] (m-33)        │ │enter=read  a=ack  h=handoff  r=reply  o=next-conflict  O=resolution │
+│  re: handoff forge-9r4 loop-2 [u:1][a:1] (m-3│ │*! m-33 agent-c incident forge-333                                   │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │
 │                                              │ │                                                                     │

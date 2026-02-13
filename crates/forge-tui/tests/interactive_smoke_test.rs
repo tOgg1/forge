@@ -495,8 +495,13 @@ fn confirm_kill_then_accept() {
 
     app.update(key('K'));
     assert_eq!(app.mode(), UiMode::Confirm);
+    assert!(app.confirm().is_some_and(|confirm| confirm.reason_required));
 
-    let cmd = app.update(key('y'));
+    app.update(key_tab());
+    for ch in "containment reason".chars() {
+        app.update(key(ch));
+    }
+    let cmd = app.update(key_enter());
     assert_eq!(app.mode(), UiMode::Main);
     assert!(app.confirm().is_none());
     assert!(matches!(cmd, Command::RunAction(ActionKind::Kill { .. })));
@@ -508,8 +513,13 @@ fn confirm_delete_then_accept() {
 
     app.update(key('D'));
     assert_eq!(app.mode(), UiMode::Confirm);
+    assert!(app.confirm().is_some_and(|confirm| confirm.reason_required));
 
-    let cmd = app.update(key('Y'));
+    app.update(key_tab());
+    for ch in "retire orphaned loop".chars() {
+        app.update(key(ch));
+    }
+    let cmd = app.update(key_enter());
     assert_eq!(app.mode(), UiMode::Main);
     assert!(matches!(cmd, Command::RunAction(ActionKind::Delete { .. })));
 }

@@ -4,7 +4,7 @@
 //! modal UI modes (filter/confirm/wizard/help/expanded-logs), loop selection,
 //! log source/layer cycling, multi-log pagination, and pinned loops.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use forge_cli::logs::{render_lines_for_layer, LogRenderLayer};
 use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent};
@@ -38,6 +38,9 @@ pub const MULTI_HEADER_ROWS: i32 = 2;
 pub const MULTI_CELL_GAP: i32 = 1;
 pub const MULTI_MIN_CELL_WIDTH: i32 = 38;
 pub const MULTI_MIN_CELL_HEIGHT: i32 = 8;
+const MAX_NOTIFICATION_QUEUE: usize = 32;
+const DESTRUCTIVE_CONFIRM_REASON_MIN_CHARS: usize = 12;
+const MAX_DESTRUCTIVE_CONFIRM_REASON_CHARS: usize = 160;
 
 pub const FILTER_STATUS_OPTIONS: &[&str] =
     &["all", "running", "sleeping", "waiting", "stopped", "error"];
@@ -115,6 +118,24 @@ pub enum StatusKind {
     Info,
     Ok,
     Err,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NotificationEvent {
+    kind: StatusKind,
+    text: String,
+    acknowledged: bool,
+    escalated: bool,
+    snoozed_until_sequence: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationCenterEntry {
+    pub kind: StatusKind,
+    pub text: String,
+    pub acknowledged: bool,
+    pub escalated: bool,
+    pub snoozed: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -411,7 +432,10 @@ pub struct ConfirmState {
     pub action: ActionType,
     pub loop_id: String,
     pub prompt: String,
+    pub force_delete: bool,
     pub selected: ConfirmRailSelection,
+    pub reason: String,
+    pub reason_required: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -741,6 +765,8 @@ pub struct App {
     // -- status bar --
     status_text: String,
     status_kind: StatusKind,
+    notification_queue: VecDeque<NotificationEvent>,
+    notification_sequence: u64,
     action_busy: bool,
 
     // -- display --
@@ -831,6 +857,8 @@ impl App {
 
             status_text: String::new(),
             status_kind: StatusKind::Info,
+            notification_queue: VecDeque::new(),
+            notification_sequence: 0,
             action_busy: false,
 
             width: 120,
@@ -986,6 +1014,26 @@ impl App {
     }
 
     #[must_use]
+    pub fn notification_queue_len(&self) -> usize {
+        self.notification_queue.len()
+    }
+
+    #[must_use]
+    pub fn notification_center_entries(&self) -> Vec<NotificationCenterEntry> {
+        self.notification_queue
+            .iter()
+            .rev()
+            .map(|event| NotificationCenterEntry {
+                kind: event.kind,
+                text: event.text.clone(),
+                acknowledged: event.acknowledged,
+                escalated: event.escalated,
+                snoozed: self.notification_event_is_snoozed(event),
+            })
+            .collect()
+    }
+
+    #[must_use]
     pub fn confirm(&self) -> Option<&ConfirmState> {
         self.confirm.as_ref()
     }
@@ -1119,16 +1167,18 @@ impl App {
                 });
 
             entry.message_indices.push(idx);
+            let candidate_subject = if message.subject.trim().is_empty() {
+                "(no subject)".to_owned()
+            } else {
+                message.subject.trim().to_owned()
+            };
             if entry.subject.is_empty() {
-                entry.subject = if message.subject.trim().is_empty() {
-                    "(no subject)".to_owned()
-                } else {
-                    message.subject.trim().to_owned()
-                };
+                entry.subject = candidate_subject.clone();
             }
             if message.created_at >= entry.latest_created_at {
                 entry.latest_created_at = message.created_at.clone();
                 entry.latest_message_id = message.id;
+                entry.subject = candidate_subject;
             }
             if message.read_at.is_none() {
                 entry.unread_count += 1;
@@ -1541,6 +1591,52 @@ impl App {
 
     pub fn clear_status(&mut self) {
         self.status_text.clear();
+        self.notification_queue.clear();
+    }
+
+    pub fn advance_notification_clock(&mut self, ticks: u64) {
+        self.notification_sequence = self.notification_sequence.saturating_add(ticks);
+    }
+
+    pub fn notification_center_ack_latest(&mut self) -> bool {
+        if let Some(event) = self
+            .notification_queue
+            .iter_mut()
+            .rev()
+            .find(|event| !event.acknowledged)
+        {
+            event.acknowledged = true;
+            return true;
+        }
+        false
+    }
+
+    pub fn notification_center_escalate_latest(&mut self) -> bool {
+        if let Some(event) = self
+            .notification_queue
+            .iter_mut()
+            .rev()
+            .find(|event| !event.acknowledged)
+        {
+            event.escalated = true;
+            return true;
+        }
+        false
+    }
+
+    pub fn notification_center_snooze_latest(&mut self, ticks: u64) -> bool {
+        let ticks = ticks.max(1);
+        let wake_sequence = self.notification_sequence.saturating_add(ticks);
+        if let Some(event) = self
+            .notification_queue
+            .iter_mut()
+            .rev()
+            .find(|event| !event.acknowledged)
+        {
+            event.snoozed_until_sequence = Some(wake_sequence);
+            return true;
+        }
+        false
     }
 
     // -- tab management (matching Go) ----------------------------------------
@@ -2134,6 +2230,19 @@ impl App {
     pub fn set_status(&mut self, kind: StatusKind, text: &str) {
         self.status_kind = kind;
         self.status_text = text.to_owned();
+        self.notification_sequence = self.notification_sequence.saturating_add(1);
+        if !text.trim().is_empty() {
+            if self.notification_queue.len() >= MAX_NOTIFICATION_QUEUE {
+                self.notification_queue.pop_front();
+            }
+            self.notification_queue.push_back(NotificationEvent {
+                kind,
+                text: text.to_owned(),
+                acknowledged: false,
+                escalated: false,
+                snoozed_until_sequence: None,
+            });
+        }
     }
 
     // -- wizard helpers ------------------------------------------------------
@@ -2227,12 +2336,17 @@ impl App {
                 return Command::None;
             }
         };
+        let force_delete = action == ActionType::Delete && view.state != "stopped";
+        let reason_required = action == ActionType::Kill || force_delete;
 
         self.confirm = Some(ConfirmState {
             action,
             loop_id: loop_id.to_owned(),
             prompt,
+            force_delete,
             selected: ConfirmRailSelection::Cancel,
+            reason: String::new(),
+            reason_required,
         });
         self.mode = UiMode::Confirm;
         Command::None
@@ -2933,6 +3047,10 @@ impl App {
             self.mode = UiMode::Main;
             return Command::None;
         }
+        let reason_required = self
+            .confirm
+            .as_ref()
+            .is_some_and(|confirm| confirm.reason_required);
 
         let set_confirm_selection = |confirm: &mut ConfirmState, delta: i32| {
             let options = [ConfirmRailSelection::Cancel, ConfirmRailSelection::Confirm];
@@ -2943,10 +3061,14 @@ impl App {
             let next = (current + delta).rem_euclid(options.len() as i32) as usize;
             confirm.selected = options[next];
         };
+        let confirm_reason_is_valid = |confirm: &ConfirmState| {
+            if !confirm.reason_required {
+                return true;
+            }
+            confirm.reason.trim().chars().count() >= DESTRUCTIVE_CONFIRM_REASON_MIN_CHARS
+        };
 
         let submit_confirm = |confirm: ConfirmState| -> Command {
-            let force =
-                confirm.action == ActionType::Delete && confirm.prompt.contains("Force delete");
             let action = match confirm.action {
                 ActionType::Stop => ActionKind::Stop {
                     loop_id: confirm.loop_id,
@@ -2956,7 +3078,7 @@ impl App {
                 },
                 ActionType::Delete => ActionKind::Delete {
                     loop_id: confirm.loop_id,
-                    force,
+                    force: confirm.force_delete,
                 },
                 _ => return Command::None,
             };
@@ -2964,7 +3086,13 @@ impl App {
         };
 
         match key.key {
-            Key::Char('q') | Key::Escape | Key::Char('n') | Key::Char('N') => {
+            Key::Char('q') | Key::Escape => {
+                self.mode = UiMode::Main;
+                self.confirm = None;
+                self.set_status(StatusKind::Info, "Action cancelled");
+                Command::None
+            }
+            Key::Char('n') | Key::Char('N') if !reason_required => {
                 self.mode = UiMode::Main;
                 self.confirm = None;
                 self.set_status(StatusKind::Info, "Action cancelled");
@@ -2991,21 +3119,56 @@ impl App {
                 }
                 Command::None
             }
+            Key::Backspace if reason_required => {
+                if let Some(confirm) = self.confirm.as_mut() {
+                    confirm.reason.pop();
+                }
+                Command::None
+            }
+            Key::Char('u') if reason_required && key.modifiers.ctrl => {
+                if let Some(confirm) = self.confirm.as_mut() {
+                    confirm.reason.clear();
+                }
+                Command::None
+            }
+            Key::Char(ch) if reason_required && !key.modifiers.ctrl && !key.modifiers.alt => {
+                if let Some(confirm) = self.confirm.as_mut() {
+                    if confirm.reason.chars().count() < MAX_DESTRUCTIVE_CONFIRM_REASON_CHARS {
+                        confirm.reason.push(ch);
+                    }
+                }
+                Command::None
+            }
             Key::Enter => {
+                let submit_selected = self
+                    .confirm
+                    .as_ref()
+                    .is_some_and(|confirm| confirm.selected == ConfirmRailSelection::Confirm);
+                if !submit_selected {
+                    self.mode = UiMode::Main;
+                    self.confirm = None;
+                    self.set_status(StatusKind::Info, "Action cancelled");
+                    return Command::None;
+                }
+                if let Some(confirm) = self.confirm.as_ref() {
+                    if !confirm_reason_is_valid(confirm) {
+                        let message = format!(
+                            "Reason required for high-risk action (min {} chars)",
+                            DESTRUCTIVE_CONFIRM_REASON_MIN_CHARS
+                        );
+                        self.set_status(StatusKind::Err, &message);
+                        return Command::None;
+                    }
+                }
                 let confirm = self.confirm.take();
                 self.mode = UiMode::Main;
                 if let Some(confirm) = confirm {
-                    if confirm.selected == ConfirmRailSelection::Confirm {
-                        submit_confirm(confirm)
-                    } else {
-                        self.set_status(StatusKind::Info, "Action cancelled");
-                        Command::None
-                    }
+                    submit_confirm(confirm)
                 } else {
                     Command::None
                 }
             }
-            Key::Char('y') | Key::Char('Y') => {
+            Key::Char('y') | Key::Char('Y') if !reason_required => {
                 let confirm = self.confirm.take();
                 self.mode = UiMode::Main;
                 if let Some(confirm) = confirm {
@@ -3416,7 +3579,45 @@ impl App {
                     frame.draw_text(
                         0,
                         content_start + 2,
-                        "tab/left/right switch  enter select  y confirm  n cancel",
+                        &{
+                            if confirm.reason_required {
+                                trim_to_width(
+                                    &format!(
+                                        "Reason ({}/{}+): {}",
+                                        confirm.reason.trim().chars().count(),
+                                        DESTRUCTIVE_CONFIRM_REASON_MIN_CHARS,
+                                        if confirm.reason.is_empty() {
+                                            "<type reason>"
+                                        } else {
+                                            &confirm.reason
+                                        }
+                                    ),
+                                    width,
+                                )
+                            } else {
+                                "tab/left/right switch  enter select  y confirm  n cancel"
+                                    .to_owned()
+                            }
+                        },
+                        if confirm.reason_required
+                            && confirm.reason.trim().chars().count()
+                                < DESTRUCTIVE_CONFIRM_REASON_MIN_CHARS
+                        {
+                            TextRole::Danger
+                        } else if confirm.reason_required {
+                            TextRole::Success
+                        } else {
+                            TextRole::Muted
+                        },
+                    );
+                    frame.draw_text(
+                        0,
+                        content_start + 3,
+                        if confirm.reason_required {
+                            "type reason  backspace edit  Ctrl+U clear  tab/left/right switch  enter select  esc/q cancel"
+                        } else {
+                            ""
+                        },
                         TextRole::Muted,
                     );
                 }
@@ -3447,77 +3648,143 @@ impl App {
             _ => {
                 // Delegate to registered view if available.
                 if let Some(view) = self.views.get(&self.tab) {
-                    let view_frame = view.view(
+                    let view_frame = crate::panel_error_boundary::render_panel_with_boundary(
+                        self.tab.label(),
                         FrameSize {
                             width,
                             height: content_height,
                         },
                         theme,
+                        &pal,
+                        || {
+                            view.view(
+                                FrameSize {
+                                    width,
+                                    height: content_height,
+                                },
+                                theme,
+                            )
+                        },
                     );
                     blit_frame(&mut frame, &view_frame, 0, content_start);
                 } else if self.mode == UiMode::Main && self.tab == MainTab::Overview {
-                    let content_rect = Rect {
-                        x: 0,
-                        y: content_start,
-                        width,
-                        height: content_height,
-                    };
-                    crate::overview_tab::render_overview_paneled(
-                        &mut frame,
-                        &self.loops,
-                        self.selected_view(),
-                        &self.run_history,
-                        self.selected_run,
-                        &pal,
-                        content_rect,
-                        self.focus_right,
-                    );
-                } else if self.mode == UiMode::Main && self.tab == MainTab::Logs {
-                    let logs_frame =
-                        self.render_logs_pane(width, content_height, &pal, self.focus_right);
-                    blit_frame(&mut frame, &logs_frame, 0, content_start);
-                } else if self.mode == UiMode::Main && self.tab == MainTab::Runs {
-                    let runs_state = crate::runs_tab::RunsTabState {
-                        runs: self
-                            .run_history
-                            .iter()
-                            .map(|rv| crate::runs_tab::RunEntry {
-                                id: rv.id.clone(),
-                                status: rv.status.clone(),
-                                exit_code: rv.exit_code,
-                                profile_name: rv.profile_name.clone(),
-                                profile_id: rv.profile_id.clone(),
-                                harness: rv.harness.clone(),
-                                started_at: rv.started_at.clone(),
-                                duration_display: rv.duration.clone(),
-                                output_lines: rv.output_lines.clone(),
-                            })
-                            .collect(),
-                        selected_run: self.selected_run,
-                        layer_label: self.log_layer.label().to_owned(),
-                        loop_display_id: self
-                            .selected_view()
-                            .map(|lv| crate::filter::loop_display_id(&lv.id, &lv.short_id))
-                            .unwrap_or_default(),
-                        log_scroll: self.log_scroll,
-                    };
-                    let runs_frame = crate::runs_tab::render_runs_paneled(
-                        &runs_state,
+                    let overview_frame = crate::panel_error_boundary::render_panel_with_boundary(
+                        MainTab::Overview.label(),
                         FrameSize {
                             width,
                             height: content_height,
                         },
                         theme,
                         &pal,
-                        self.focus_right,
+                        || {
+                            let mut pane_frame = RenderFrame::new(
+                                FrameSize {
+                                    width,
+                                    height: content_height,
+                                },
+                                theme,
+                            );
+                            crate::overview_tab::render_overview_paneled(
+                                &mut pane_frame,
+                                &self.loops,
+                                self.selected_view(),
+                                &self.run_history,
+                                self.selected_run,
+                                &pal,
+                                Rect {
+                                    x: 0,
+                                    y: 0,
+                                    width,
+                                    height: content_height,
+                                },
+                                self.focus_right,
+                            );
+                            pane_frame
+                        },
+                    );
+                    blit_frame(&mut frame, &overview_frame, 0, content_start);
+                } else if self.mode == UiMode::Main && self.tab == MainTab::Logs {
+                    let logs_frame = crate::panel_error_boundary::render_panel_with_boundary(
+                        MainTab::Logs.label(),
+                        FrameSize {
+                            width,
+                            height: content_height,
+                        },
+                        theme,
+                        &pal,
+                        || self.render_logs_pane(width, content_height, &pal, self.focus_right),
+                    );
+                    blit_frame(&mut frame, &logs_frame, 0, content_start);
+                } else if self.mode == UiMode::Main && self.tab == MainTab::Runs {
+                    let runs_frame = crate::panel_error_boundary::render_panel_with_boundary(
+                        MainTab::Runs.label(),
+                        FrameSize {
+                            width,
+                            height: content_height,
+                        },
+                        theme,
+                        &pal,
+                        || {
+                            let runs_state = crate::runs_tab::RunsTabState {
+                                runs: self
+                                    .run_history
+                                    .iter()
+                                    .map(|rv| crate::runs_tab::RunEntry {
+                                        id: rv.id.clone(),
+                                        status: rv.status.clone(),
+                                        exit_code: rv.exit_code,
+                                        profile_name: rv.profile_name.clone(),
+                                        profile_id: rv.profile_id.clone(),
+                                        harness: rv.harness.clone(),
+                                        started_at: rv.started_at.clone(),
+                                        duration_display: rv.duration.clone(),
+                                        output_lines: rv.output_lines.clone(),
+                                    })
+                                    .collect(),
+                                selected_run: self.selected_run,
+                                layer_label: self.log_layer.label().to_owned(),
+                                loop_display_id: self
+                                    .selected_view()
+                                    .map(|lv| crate::filter::loop_display_id(&lv.id, &lv.short_id))
+                                    .unwrap_or_default(),
+                                log_scroll: self.log_scroll,
+                            };
+                            crate::runs_tab::render_runs_paneled(
+                                &runs_state,
+                                FrameSize {
+                                    width,
+                                    height: content_height,
+                                },
+                                theme,
+                                &pal,
+                                self.focus_right,
+                            )
+                        },
                     );
                     blit_frame(&mut frame, &runs_frame, 0, content_start);
                 } else if self.mode == UiMode::Main && self.tab == MainTab::MultiLogs {
-                    let multi_frame = self.render_multi_logs_pane(width, content_height);
+                    let multi_frame = crate::panel_error_boundary::render_panel_with_boundary(
+                        MainTab::MultiLogs.label(),
+                        FrameSize {
+                            width,
+                            height: content_height,
+                        },
+                        theme,
+                        &pal,
+                        || self.render_multi_logs_pane(width, content_height, &pal),
+                    );
                     blit_frame(&mut frame, &multi_frame, 0, content_start);
                 } else if self.mode == UiMode::Main && self.tab == MainTab::Inbox {
-                    let inbox_frame =
-                        self.render_inbox_pane(width, content_height, &pal, self.focus_right);
+                    let inbox_frame = crate::panel_error_boundary::render_panel_with_boundary(
+                        MainTab::Inbox.label(),
+                        FrameSize {
+                            width,
+                            height: content_height,
+                        },
+                        theme,
+                        &pal,
+                        || self.render_inbox_pane(width, content_height, &pal, self.focus_right),
+                    );
                     blit_frame(&mut frame, &inbox_frame, 0, content_start);
                 } else {
                     // Placeholder: show tab label + selection info.
@@ -3846,6 +4113,50 @@ impl App {
         }
 
         frame.draw_spans(0, 1, &spans);
+    }
+
+    /// Build tab rail badges for the upstream ftui render path.
+    ///
+    /// Returns a `Vec` of `Badge` widgets, one per tab, with active/inactive
+    /// styling derived from the adapter's theme tokens.  Callers position and
+    /// render each badge side-by-side into an ftui `Frame`.
+    #[cfg(feature = "frankentui-bootstrap")]
+    #[must_use]
+    pub fn build_ftui_tab_badges(
+        &self,
+        theme: forge_ftui_adapter::style::ThemeSpec,
+    ) -> Vec<forge_ftui_adapter::upstream_primitives::Badge<'static>> {
+        use forge_ftui_adapter::style::StyleToken;
+        use forge_ftui_adapter::upstream_bridge::{term_color_to_packed_rgba, token_style};
+        use forge_ftui_adapter::upstream_primitives::badge;
+
+        let active_style = {
+            let s = token_style(theme, StyleToken::Accent);
+            let bg = term_color_to_packed_rgba(forge_ftui_adapter::render::TermColor::Ansi256(
+                theme.color(StyleToken::Surface),
+            ));
+            s.bg(bg)
+        };
+        let inactive_style = token_style(theme, StyleToken::Muted);
+
+        MainTab::ORDER
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let label = if self.density_mode == DensityMode::Compact {
+                    t.short_label()
+                } else {
+                    t.label()
+                };
+                let is_active = *t == self.tab;
+                let text: &'static str = Box::leak(format!("{}:{}", i + 1, label).into_boxed_str());
+                badge(text).with_style(if is_active {
+                    active_style
+                } else {
+                    inactive_style
+                })
+            })
+            .collect()
     }
 
     fn render_wizard_lines(&self, width: usize) -> Vec<String> {
@@ -4187,11 +4498,11 @@ impl App {
                 let selected = row == self.inbox_selected_thread;
                 let prefix = if selected { "\u{25B8}" } else { " " }; // ▸ for selected
                 let line = format!(
-                    "{prefix} {} u:{} a:{} {}",
-                    format_mail_id(thread.latest_message_id),
+                    "{prefix} {} [u:{}][a:{}] ({})",
+                    thread.subject,
                     thread.unread_count,
                     thread.pending_ack_count,
-                    thread.subject
+                    format_mail_id(thread.latest_message_id),
                 );
                 let fg = if selected { pal.accent } else { pal.text_muted };
                 let bold = selected;
@@ -4406,14 +4717,59 @@ impl App {
     }
 
     fn status_display_text(&self) -> String {
-        if self.status_kind == StatusKind::Err {
+        let mut out = if self.status_kind == StatusKind::Err {
             let trimmed = self.status_text.trim();
             if trimmed.starts_with("Error:") {
-                return trimmed.to_owned();
+                trimmed.to_owned()
+            } else {
+                format!("Error: {trimmed}")
             }
-            return format!("Error: {trimmed}");
+        } else {
+            self.status_text.clone()
+        };
+        if out.trim().is_empty() {
+            if let Some(event) = self.latest_visible_notification() {
+                out = if event.kind == StatusKind::Err {
+                    let trimmed = event.text.trim();
+                    if trimmed.starts_with("Error:") {
+                        trimmed.to_owned()
+                    } else {
+                        format!("Error: {trimmed}")
+                    }
+                } else {
+                    event.text.clone()
+                };
+            }
         }
-        self.status_text.clone()
+        let queued = self.visible_notification_count().saturating_sub(1);
+        if queued > 0 && !out.trim().is_empty() {
+            out.push_str(&format!(" (+{queued} queued)"));
+        }
+        out
+    }
+
+    fn notification_event_is_snoozed(&self, event: &NotificationEvent) -> bool {
+        event
+            .snoozed_until_sequence
+            .is_some_and(|until| self.notification_sequence < until)
+    }
+
+    fn notification_event_is_visible(&self, event: &NotificationEvent) -> bool {
+        !event.acknowledged && !self.notification_event_is_snoozed(event)
+    }
+
+    fn latest_visible_notification(&self) -> Option<&NotificationEvent> {
+        self.notification_queue
+            .iter()
+            .rev()
+            .find(|event| self.notification_event_is_visible(event))
+    }
+
+    fn visible_notification_count(&self) -> usize {
+        self.notification_queue
+            .iter()
+            .filter(|event| self.notification_event_is_visible(event))
+            .count()
     }
 
     fn render_help_content(
@@ -4438,6 +4794,9 @@ impl App {
             "  D         delete selected loop".to_owned(),
             "  r         resume selected loop".to_owned(),
             "  n         new loop wizard".to_owned(),
+            "  confirm rail: tab/left/right choose action, enter selects (safe default=cancel)"
+                .to_owned(),
+            "  high-risk confirm (kill/force-delete): type reason (12+ chars)".to_owned(),
             "  E         export current view as text/html/svg".to_owned(),
             "".to_owned(),
             "Command Palette:".to_owned(),
@@ -4755,6 +5114,22 @@ mod tests {
         })
     }
 
+    struct PanicView;
+
+    impl View for PanicView {
+        fn init(&mut self) -> Command {
+            Command::None
+        }
+
+        fn update(&mut self, _event: InputEvent) -> Command {
+            Command::None
+        }
+
+        fn view(&self, _size: FrameSize, _theme: ThemeSpec) -> RenderFrame {
+            panic!("pane exploded");
+        }
+    }
+
     fn sample_loops(n: usize) -> Vec<LoopView> {
         (0..n)
             .map(|i| LoopView {
@@ -5030,6 +5405,36 @@ mod tests {
         assert!(snapshot.contains("thread:thread-b"));
         assert!(snapshot.contains("Claim Timeline (latest)"));
         assert!(snapshot.contains("! 2026-02-12T08:12:00Z forge-jws <- agent-b"));
+    }
+
+    #[test]
+    fn inbox_thread_list_is_subject_first_with_badges() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 200,
+            height: 36,
+        }));
+        app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('i'))); // dismiss onboarding overlay
+        let snapshot = app.render().snapshot();
+        assert!(snapshot.contains("incident escalated [u:0][a:1] (m-3)"));
+        assert!(snapshot.contains("re: handoff ready [u:2][a:1] (m-2)"));
+    }
+
+    #[test]
+    fn inbox_detail_pane_keeps_thread_details_visible() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 140,
+            height: 36,
+        }));
+        app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('i'))); // dismiss onboarding overlay
+        let snapshot = app.render().snapshot();
+        assert!(snapshot.contains("thread:thread-b"));
+        assert!(snapshot.contains("m-3 agent-c incident escalated"));
     }
 
     #[test]
@@ -6464,6 +6869,34 @@ mod tests {
         }
     }
 
+    #[test]
+    fn confirm_kill_requires_typed_reason_before_submit() {
+        let mut app = app_with_loops(3);
+        app.update(key(Key::Char('K')));
+        app.update(key(Key::Tab));
+        let cmd = app.update(key(Key::Enter));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(app.mode(), UiMode::Confirm);
+        assert!(app.status_text().contains("Reason required"));
+    }
+
+    #[test]
+    fn confirm_kill_submit_after_reason_input() {
+        let mut app = app_with_loops(3);
+        app.update(key(Key::Char('K')));
+        app.update(key(Key::Tab));
+        for ch in "incident risk".chars() {
+            app.update(key(Key::Char(ch)));
+        }
+        let cmd = app.update(key(Key::Enter));
+        match cmd {
+            Command::RunAction(ActionKind::Kill { loop_id }) => {
+                assert_eq!(loop_id, "loop-0");
+            }
+            other => panic!("Expected RunAction(Kill), got {other:?}"),
+        }
+    }
+
     // -- confirm no selection --
 
     #[test]
@@ -6497,6 +6930,19 @@ mod tests {
         assert_eq!(frame.size().height, 40);
         assert!(frame.row_text(0).contains("Forge Loops"));
         assert!(frame.row_text(1).contains("Overview"));
+    }
+
+    #[test]
+    fn render_panicking_registered_view_falls_back_locally() {
+        let mut app = app_with_loops(2);
+        app.register_view(MainTab::Overview, Box::new(PanicView));
+        app.update(key(Key::Char('i')));
+
+        let frame = app.render();
+        let snapshot = frame.snapshot();
+        assert!(snapshot.contains("Overview unavailable"), "{snapshot}");
+        assert!(snapshot.contains("cause: pane exploded"), "{snapshot}");
+        assert!(snapshot.contains("Forge Loops"), "{snapshot}");
     }
 
     #[test]
@@ -6629,6 +7075,101 @@ mod tests {
     // -- action busy --
 
     #[test]
+    fn set_status_enqueues_notification_event() {
+        let mut app = App::new("default", 12);
+        assert_eq!(app.notification_queue_len(), 0);
+        app.set_status(StatusKind::Info, "hello");
+        assert_eq!(app.notification_queue_len(), 1);
+        app.set_status(StatusKind::Err, "boom");
+        assert_eq!(app.notification_queue_len(), 2);
+    }
+
+    #[test]
+    fn notification_queue_caps_at_max_entries() {
+        let mut app = App::new("default", 12);
+        for i in 0..(MAX_NOTIFICATION_QUEUE + 5) {
+            app.set_status(StatusKind::Info, &format!("event-{i}"));
+        }
+        assert_eq!(app.notification_queue_len(), MAX_NOTIFICATION_QUEUE);
+    }
+
+    #[test]
+    fn status_display_uses_latest_notification_when_current_status_empty() {
+        let mut app = App::new("default", 12);
+        app.set_status(StatusKind::Info, "hello");
+        app.status_text.clear();
+
+        let display = app.status_display_text();
+        assert_eq!(display, "hello");
+    }
+
+    #[test]
+    fn status_display_appends_queued_count_suffix() {
+        let mut app = App::new("default", 12);
+        app.set_status(StatusKind::Info, "first");
+        app.set_status(StatusKind::Info, "second");
+
+        let display = app.status_display_text();
+        assert_eq!(display, "second (+1 queued)");
+    }
+
+    #[test]
+    fn status_display_prefixes_error_from_notification_queue() {
+        let mut app = App::new("default", 12);
+        app.set_status(StatusKind::Err, "boom");
+        app.status_text.clear();
+        app.status_kind = StatusKind::Info;
+
+        let display = app.status_display_text();
+        assert_eq!(display, "Error: boom");
+    }
+
+    #[test]
+    fn notification_center_ack_hides_latest_from_status_fallback() {
+        let mut app = App::new("default", 12);
+        app.set_status(StatusKind::Info, "first");
+        app.set_status(StatusKind::Info, "second");
+        app.status_text.clear();
+        app.status_kind = StatusKind::Info;
+        assert!(app.notification_center_ack_latest());
+
+        let display = app.status_display_text();
+        assert_eq!(display, "first");
+    }
+
+    #[test]
+    fn notification_center_snooze_hides_until_clock_advances() {
+        let mut app = App::new("default", 12);
+        app.set_status(StatusKind::Info, "only");
+        app.status_text.clear();
+        app.status_kind = StatusKind::Info;
+        assert!(app.notification_center_snooze_latest(3));
+        assert_eq!(app.status_display_text(), "");
+
+        app.advance_notification_clock(2);
+        assert_eq!(app.status_display_text(), "");
+
+        app.advance_notification_clock(1);
+        assert_eq!(app.status_display_text(), "only");
+    }
+
+    #[test]
+    fn notification_center_entries_include_escalation_and_snooze_flags() {
+        let mut app = App::new("default", 12);
+        app.set_status(StatusKind::Err, "critical");
+        assert!(app.notification_center_escalate_latest());
+        assert!(app.notification_center_snooze_latest(2));
+
+        let entries = app.notification_center_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, StatusKind::Err);
+        assert_eq!(entries[0].text, "critical");
+        assert!(entries[0].escalated);
+        assert!(entries[0].snoozed);
+        assert!(!entries[0].acknowledged);
+    }
+
+    #[test]
     fn action_busy_blocks_new_action() {
         let mut app = app_with_loops(3);
         app.set_action_busy(true);
@@ -6662,6 +7203,8 @@ mod tests {
             None => panic!("expected confirm state"),
         };
         assert!(confirm.prompt.contains("Force delete"));
+        assert!(confirm.force_delete);
+        assert!(confirm.reason_required);
     }
 
     #[test]
@@ -6675,6 +7218,19 @@ mod tests {
         };
         assert!(confirm.prompt.contains("Delete loop record"));
         assert!(!confirm.prompt.contains("Force"));
+        assert!(!confirm.force_delete);
+        assert!(!confirm.reason_required);
+    }
+
+    #[test]
+    fn force_delete_requires_typed_reason_before_submit() {
+        let mut app = app_with_loops(3);
+        app.update(key(Key::Char('D')));
+        app.update(key(Key::Tab));
+        let cmd = app.update(key(Key::Enter));
+        assert_eq!(cmd, Command::None);
+        assert_eq!(app.mode(), UiMode::Confirm);
+        assert!(app.status_text().contains("Reason required"));
     }
 
     // -- handle_action_result --
