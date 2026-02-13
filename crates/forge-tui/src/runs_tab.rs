@@ -1130,6 +1130,58 @@ mod tests {
     }
 
     #[test]
+    fn paneled_output_applies_syntax_colors_to_tokens() {
+        let mut runs = sample_runs(1);
+        runs[0].output_lines = vec![
+            "Tool: Bash(command=\"echo hi\", timeout=42s) path=/tmp/demo.txt".to_owned(),
+        ];
+        let state = RunsTabState {
+            runs,
+            selected_run: 0,
+            layer_label: "raw".to_owned(),
+            loop_display_id: "lp".to_owned(),
+            log_scroll: 0,
+        };
+        let pal = test_palette();
+        let frame = render_runs_paneled(
+            &state,
+            FrameSize {
+                width: 110,
+                height: 18,
+            },
+            test_theme(),
+            &pal,
+            false,
+        );
+
+        let mut number_pos = None;
+        let mut path_pos = None;
+        for y in 0..18 {
+            let row = frame.row_text(y);
+            if number_pos.is_none() {
+                if let Some(x) = row.find("42s") {
+                    number_pos = Some((x, y));
+                }
+            }
+            if path_pos.is_none() {
+                if let Some(x) = row.find("/tmp/demo.txt") {
+                    path_pos = Some((x, y));
+                }
+            }
+        }
+
+        let (number_x, number_y) = number_pos.expect("number token should be rendered");
+        let number_cell = frame
+            .cell(number_x, number_y)
+            .expect("number cell should exist");
+        assert_eq!(number_cell.style.fg, pal.warning);
+
+        let (path_x, path_y) = path_pos.expect("path token should be rendered");
+        let path_cell = frame.cell(path_x, path_y).expect("path cell should exist");
+        assert_eq!(path_cell.style.fg, pal.info);
+    }
+
+    #[test]
     fn paneled_scroll_offset_respected() {
         let mut runs = sample_runs(1);
         runs[0].output_lines = (0..50).map(|i| format!("output line {i}")).collect();
