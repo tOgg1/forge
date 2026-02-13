@@ -1,9 +1,13 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command as ProcessCommand;
 
 use serde::Serialize;
+
+use crate::profile_catalog::{AuthStatus, ProfileCatalogStore};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -572,12 +576,34 @@ enum Command {
     Help,
     List,
     Add(ProfileCreateInput),
-    Edit { name: String, patch: ProfilePatch },
-    Remove { name: String },
+    Edit {
+        name: String,
+        patch: ProfilePatch,
+    },
+    Remove {
+        name: String,
+    },
     Init,
-    Doctor { name: String },
-    CooldownSet { name: String, until: String },
-    CooldownClear { name: String },
+    Doctor {
+        name: String,
+    },
+    CooldownSet {
+        name: String,
+        until: String,
+    },
+    CooldownClear {
+        name: String,
+    },
+    CatalogStatus,
+    CatalogInit {
+        node_id: String,
+        harness_counts: BTreeMap<String, u32>,
+    },
+    CatalogAuth {
+        node_id: String,
+        profile_id: String,
+        auth_status: AuthStatus,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -586,6 +612,38 @@ struct ParsedArgs {
     json: bool,
     jsonl: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProfileInitDetection {
+    harnesses: Vec<String>,
+    aliases: Vec<AliasDetection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct AliasDetection {
+    name: String,
+    harness: String,
+    command: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    auth_home: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ProfileInitResult {
+    imported: usize,
+    profiles: Vec<String>,
+    harnesses: Vec<String>,
+    aliases: Vec<AliasDetection>,
+}
+
+const PROFILE_INIT_HARNESS_BINARIES: &[(&str, &[&str])] = &[
+    ("amp", &["amp"]),
+    ("claude", &["claude"]),
+    ("codex", &["codex"]),
+    ("droid", &["droid", "factory"]),
+    ("opencode", &["opencode"]),
+    ("pi", &["pi"]),
+];
 
 pub fn run_from_env_with_backend(backend: &mut dyn ProfileBackend) -> i32 {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -711,11 +769,21 @@ fn execute(
             Ok(())
         }
         Command::Init => {
+            let detection = detect_profile_init()?;
+            let result = instantiate_profiles_from_detection(backend, &detection)?;
             if parsed.json || parsed.jsonl {
-                let payload = serde_json::json!({"imported": 0});
-                write_serialized(stdout, &payload, parsed.jsonl)?;
+                write_serialized(stdout, &result, parsed.jsonl)?;
             } else {
-                writeln!(stdout, "No shell aliases found").map_err(|err| err.to_string())?;
+                if result.imported == 0 {
+                    writeln!(stdout, "No profiles imported from shell aliases/harnesses")
+                        .map_err(|err| err.to_string())?;
+                } else {
+                    writeln!(stdout, "Imported {} profiles", result.imported)
+                        .map_err(|err| err.to_string())?;
+                    for profile in &result.profiles {
+                        writeln!(stdout, "- {profile}").map_err(|err| err.to_string())?;
+                    }
+                }
             }
             Ok(())
         }
@@ -761,7 +829,397 @@ fn execute(
                 .map_err(|err| err.to_string())?;
             Ok(())
         }
+        Command::CatalogStatus => {
+            let store = ProfileCatalogStore::open_from_env();
+            let catalog = store.status()?;
+            if parsed.json || parsed.jsonl {
+                write_serialized(stdout, &catalog, parsed.jsonl)?;
+                return Ok(());
+            }
+
+            if catalog.harness_counts.is_empty() {
+                writeln!(stdout, "No profile catalog configured").map_err(|err| err.to_string())?;
+                return Ok(());
+            }
+
+            writeln!(stdout, "Harness Counts").map_err(|err| err.to_string())?;
+            for (harness, count) in &catalog.harness_counts {
+                writeln!(stdout, "- {harness}: {count}").map_err(|err| err.to_string())?;
+            }
+            writeln!(stdout).map_err(|err| err.to_string())?;
+            writeln!(stdout, "Node Profile Auth Status").map_err(|err| err.to_string())?;
+            if catalog.nodes.is_empty() {
+                writeln!(stdout, "(no nodes provisioned)").map_err(|err| err.to_string())?;
+                return Ok(());
+            }
+
+            let mut rows = Vec::new();
+            for node_id in catalog.nodes.keys() {
+                if let Some(summary) = store.node_summary(node_id)? {
+                    rows.push(vec![
+                        node_id.clone(),
+                        summary.total.to_string(),
+                        summary.ok.to_string(),
+                        summary.expired.to_string(),
+                        summary.missing.to_string(),
+                    ]);
+                }
+            }
+            write_table(
+                stdout,
+                &["NODE", "TOTAL", "OK", "EXPIRED", "MISSING"],
+                &rows,
+            )
+        }
+        Command::CatalogInit {
+            node_id,
+            harness_counts,
+        } => {
+            let mut counts = harness_counts;
+            if counts.is_empty() {
+                let profiles = backend.list_profiles()?;
+                for profile in profiles {
+                    *counts.entry(profile.harness).or_insert(0) += 1;
+                }
+            }
+            if counts.is_empty() {
+                return Err(
+                    "no harness counts provided and no local profiles to derive from".to_string(),
+                );
+            }
+            let store = ProfileCatalogStore::open_from_env();
+            let provisioned = store.provision_node(&node_id, &counts)?;
+            if parsed.json || parsed.jsonl {
+                write_serialized(stdout, &provisioned, parsed.jsonl)?;
+                return Ok(());
+            }
+
+            writeln!(
+                stdout,
+                "Provisioned node {} with {} catalog profiles",
+                provisioned.node_id,
+                provisioned.profiles.len()
+            )
+            .map_err(|err| err.to_string())?;
+            Ok(())
+        }
+        Command::CatalogAuth {
+            node_id,
+            profile_id,
+            auth_status,
+        } => {
+            let store = ProfileCatalogStore::open_from_env();
+            let updated = store.set_auth_status(&node_id, &profile_id, auth_status)?;
+            if parsed.json || parsed.jsonl {
+                write_serialized(stdout, &updated, parsed.jsonl)?;
+                return Ok(());
+            }
+
+            writeln!(
+                stdout,
+                "Updated {} on {}",
+                profile_id.trim(),
+                updated.node_id
+            )
+            .map_err(|err| err.to_string())?;
+            Ok(())
+        }
     }
+}
+
+fn detect_profile_init() -> Result<ProfileInitDetection, String> {
+    let harnesses = detect_installed_harnesses();
+    let alias_lines = collect_alias_lines()?;
+    let aliases = parse_alias_lines(&alias_lines);
+    Ok(ProfileInitDetection { harnesses, aliases })
+}
+
+fn detect_installed_harnesses() -> Vec<String> {
+    let mut installed = BTreeSet::new();
+    for (harness, binaries) in PROFILE_INIT_HARNESS_BINARIES {
+        if binaries.iter().any(|binary| is_command_available(binary)) {
+            installed.insert((*harness).to_string());
+        }
+    }
+    installed.into_iter().collect()
+}
+
+fn collect_alias_lines() -> Result<Vec<String>, String> {
+    let mut lines = Vec::new();
+
+    if let Some(path) = alias_file_path() {
+        match fs::read_to_string(&path) {
+            Ok(raw) => {
+                lines.extend(raw.lines().map(|line| line.to_string()));
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(format!("read alias file {}: {err}", path.display())),
+        }
+    }
+
+    if env::var_os("FORGE_PROFILE_INIT_SKIP_ZSH_ALIAS").is_none() {
+        lines.extend(alias_lines_from_zsh());
+    }
+
+    Ok(lines)
+}
+
+fn alias_file_path() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("FORGE_PROFILE_INIT_ALIAS_FILE") {
+        return Some(PathBuf::from(path));
+    }
+    env::var_os("HOME").map(|home| PathBuf::from(home).join(".zsh_aliases"))
+}
+
+fn alias_lines_from_zsh() -> Vec<String> {
+    let output = ProcessCommand::new("zsh").args(["-ic", "alias"]).output();
+    match output {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|line| line.to_string())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn parse_alias_lines(lines: &[String]) -> Vec<AliasDetection> {
+    let mut by_name = BTreeMap::<String, AliasDetection>::new();
+    for line in lines {
+        let Some((name, command)) = parse_alias_line(line) else {
+            continue;
+        };
+        if by_name.contains_key(&name) {
+            continue;
+        }
+        let Some(harness) = detect_alias_harness(&name, &command) else {
+            continue;
+        };
+        by_name.insert(
+            name.clone(),
+            AliasDetection {
+                name,
+                harness: harness.to_string(),
+                auth_home: alias_auth_home(harness, &command),
+                command,
+            },
+        );
+    }
+    by_name.into_values().collect()
+}
+
+fn parse_alias_line(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    let payload = trimmed.strip_prefix("alias ")?;
+    let (raw_name, raw_command) = payload.split_once('=')?;
+    let name = raw_name.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let command = strip_matching_quotes(raw_command.trim()).trim().to_string();
+    if command.is_empty() {
+        return None;
+    }
+    Some((name, command))
+}
+
+fn strip_matching_quotes(value: &str) -> &str {
+    if value.len() >= 2 {
+        let first = value.chars().next().unwrap_or_default();
+        let last = value.chars().last().unwrap_or_default();
+        if (first == '\'' && last == '\'') || (first == '"' && last == '"') {
+            return &value[1..value.len() - 1];
+        }
+    }
+    value
+}
+
+fn detect_alias_harness(name: &str, command: &str) -> Option<&'static str> {
+    if let Some(binary) = first_executable_token(command) {
+        if let Some(harness) = harness_from_binary(binary) {
+            return Some(harness);
+        }
+    }
+    harness_from_alias_name(name)
+}
+
+fn first_executable_token(command: &str) -> Option<&str> {
+    for token in command.split_whitespace() {
+        let token = strip_matching_quotes(token).trim();
+        if token.is_empty() {
+            continue;
+        }
+        if looks_like_assignment(token) {
+            continue;
+        }
+        if matches!(token, "command" | "noglob" | "nocorrect") {
+            continue;
+        }
+        return Some(
+            token
+                .rsplit('/')
+                .next()
+                .unwrap_or(token)
+                .trim_end_matches(';'),
+        );
+    }
+    None
+}
+
+fn looks_like_assignment(token: &str) -> bool {
+    let Some((key, _)) = token.split_once('=') else {
+        return false;
+    };
+    let mut chars = key.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+fn harness_from_binary(binary: &str) -> Option<&'static str> {
+    let normalized = binary.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "amp" => Some("amp"),
+        "claude" | "claude-code" => Some("claude"),
+        "codex" => Some("codex"),
+        "droid" | "factory" => Some("droid"),
+        "opencode" => Some("opencode"),
+        "pi" => Some("pi"),
+        _ => None,
+    }
+}
+
+fn harness_from_alias_name(name: &str) -> Option<&'static str> {
+    let normalized = name.trim().to_ascii_lowercase();
+    if normalized.starts_with("oc") || normalized.contains("opencode") {
+        return Some("opencode");
+    }
+    if normalized.starts_with("cc") || normalized.contains("claude") {
+        return Some("claude");
+    }
+    if normalized.starts_with("codex") || normalized.starts_with("cx") {
+        return Some("codex");
+    }
+    if normalized.starts_with("pi") {
+        return Some("pi");
+    }
+    if normalized.starts_with("amp") {
+        return Some("amp");
+    }
+    if normalized.starts_with("droid") || normalized.starts_with("factory") {
+        return Some("droid");
+    }
+    None
+}
+
+fn alias_auth_home(harness: &str, command: &str) -> String {
+    let keys: &[&str] = match harness {
+        "amp" => &["AMP_HOME"],
+        "claude" => &["CLAUDE_HOME", "CLAUDE_CONFIG_DIR"],
+        "codex" => &["CODEX_HOME"],
+        "droid" => &["DROID_HOME", "FACTORY_HOME"],
+        "opencode" => &["OPENCODE_HOME"],
+        "pi" => &["PI_HOME"],
+        _ => &[],
+    };
+    if keys.is_empty() {
+        return String::new();
+    }
+
+    for token in command.split_whitespace() {
+        let token = strip_matching_quotes(token).trim();
+        if let Some((key, value)) = token.split_once('=') {
+            if keys.iter().any(|allowed| *allowed == key) {
+                return strip_matching_quotes(value).to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+fn instantiate_profiles_from_detection(
+    backend: &mut dyn ProfileBackend,
+    detection: &ProfileInitDetection,
+) -> Result<ProfileInitResult, String> {
+    let mut used_names: BTreeSet<String> = backend
+        .list_profiles()?
+        .into_iter()
+        .map(|profile| profile.name)
+        .collect();
+    let mut imported = Vec::new();
+    let mut alias_harnesses = BTreeSet::new();
+
+    for alias in &detection.aliases {
+        alias_harnesses.insert(alias.harness.clone());
+        let profile_name = next_profile_name(&used_names, &alias.name);
+        let created = backend.create_profile(ProfileCreateInput {
+            name: profile_name.clone(),
+            harness: alias.harness.clone(),
+            auth_kind: Some(alias.harness.clone()),
+            auth_home: if alias.auth_home.is_empty() {
+                None
+            } else {
+                Some(alias.auth_home.clone())
+            },
+            prompt_mode: None,
+            command_template: Some(alias.command.clone()),
+            model: None,
+            extra_args: Vec::new(),
+            env: BTreeMap::new(),
+            max_concurrency: Some(1),
+        })?;
+        used_names.insert(created.name.clone());
+        imported.push(created.name);
+    }
+
+    for harness in &detection.harnesses {
+        if alias_harnesses.contains(harness) {
+            continue;
+        }
+        let profile_name = next_profile_name(&used_names, harness);
+        let created = backend.create_profile(ProfileCreateInput {
+            name: profile_name,
+            harness: harness.clone(),
+            auth_kind: Some(harness.clone()),
+            auth_home: None,
+            prompt_mode: None,
+            command_template: None,
+            model: None,
+            extra_args: Vec::new(),
+            env: BTreeMap::new(),
+            max_concurrency: Some(1),
+        })?;
+        used_names.insert(created.name.clone());
+        imported.push(created.name);
+    }
+
+    Ok(ProfileInitResult {
+        imported: imported.len(),
+        profiles: imported,
+        harnesses: detection.harnesses.clone(),
+        aliases: detection.aliases.clone(),
+    })
+}
+
+fn next_profile_name(used_names: &BTreeSet<String>, base: &str) -> String {
+    let base = if base.trim().is_empty() {
+        "profile"
+    } else {
+        base.trim()
+    };
+    let mut candidate = base.to_string();
+    let mut suffix = 2usize;
+    while used_names.contains(&candidate) {
+        candidate = format!("{base}-{suffix}");
+        suffix += 1;
+    }
+    candidate
 }
 
 fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
@@ -827,6 +1285,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             Command::Init
         }
         Some("cooldown") => parse_cooldown_args(&subcommand_args)?,
+        Some("catalog") => parse_catalog_args(&subcommand_args)?,
         Some(other) => return Err(format!("unknown profile argument: {other}")),
     };
 
@@ -1022,6 +1481,87 @@ fn parse_cooldown_set_args(args: &[String]) -> Result<Command, String> {
     Ok(Command::CooldownSet { name, until })
 }
 
+fn parse_catalog_args(args: &[String]) -> Result<Command, String> {
+    if args.is_empty() {
+        return Ok(Command::CatalogStatus);
+    }
+    match args[0].as_str() {
+        "status" => {
+            ensure_no_args("profile catalog status", &args[1..])?;
+            Ok(Command::CatalogStatus)
+        }
+        "init" => parse_catalog_init_args(&args[1..]),
+        "auth" => parse_catalog_auth_args(&args[1..]),
+        other => Err(format!("unknown profile catalog argument: {other}")),
+    }
+}
+
+fn parse_catalog_init_args(args: &[String]) -> Result<Command, String> {
+    let mut node_id = String::new();
+    let mut harness_counts: BTreeMap<String, u32> = BTreeMap::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--node" => {
+                node_id = next_value(args, index, "--node")?.to_string();
+                index += 2;
+            }
+            "--count" => {
+                let raw = next_value(args, index, "--count")?;
+                let (harness, count) = parse_harness_count(raw)?;
+                harness_counts.insert(harness, count);
+                index += 2;
+            }
+            token => return Err(format!("unknown profile catalog init flag: {token}")),
+        }
+    }
+    if node_id.trim().is_empty() {
+        return Err("--node is required".to_string());
+    }
+    Ok(Command::CatalogInit {
+        node_id,
+        harness_counts,
+    })
+}
+
+fn parse_catalog_auth_args(args: &[String]) -> Result<Command, String> {
+    let mut node_id = String::new();
+    let mut profile_id = String::new();
+    let mut auth_status: Option<AuthStatus> = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--node" => {
+                node_id = next_value(args, index, "--node")?.to_string();
+                index += 2;
+            }
+            "--profile" => {
+                profile_id = next_value(args, index, "--profile")?.to_string();
+                index += 2;
+            }
+            "--status" => {
+                auth_status = Some(AuthStatus::parse(next_value(args, index, "--status")?)?);
+                index += 2;
+            }
+            token => return Err(format!("unknown profile catalog auth flag: {token}")),
+        }
+    }
+    if node_id.trim().is_empty() {
+        return Err("--node is required".to_string());
+    }
+    if profile_id.trim().is_empty() {
+        return Err("--profile is required".to_string());
+    }
+    let Some(auth_status) = auth_status else {
+        return Err("--status is required".to_string());
+    };
+    Ok(Command::CatalogAuth {
+        node_id,
+        profile_id,
+        auth_status,
+    })
+}
+
 fn parse_single_ref<F>(name: &str, args: &[String], builder: F) -> Result<Command, String>
 where
     F: FnOnce(String) -> Command,
@@ -1062,10 +1602,37 @@ fn parse_i32(value: &str, flag: &str) -> Result<i32, String> {
         .map_err(|_| format!("invalid value {value:?} for {flag}"))
 }
 
+fn parse_harness_count(value: &str) -> Result<(String, u32), String> {
+    let Some((harness, count_raw)) = value.split_once('=') else {
+        return Err(format!(
+            "invalid harness count {:?} (expected harness=count)",
+            value
+        ));
+    };
+    let harness = harness.trim().to_ascii_lowercase();
+    if harness.is_empty() {
+        return Err(format!(
+            "invalid harness count {:?} (harness missing)",
+            value
+        ));
+    }
+    let count = count_raw
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| format!("invalid harness count {:?} (count must be u32)", value))?;
+    if count == 0 {
+        return Err(format!(
+            "invalid harness count {:?} (count must be > 0)",
+            value
+        ));
+    }
+    Ok((harness, count))
+}
+
 fn normalize_harness(value: &str) -> Result<String, String> {
     let normalized = value.trim().to_lowercase();
     match normalized.as_str() {
-        "pi" | "opencode" | "codex" | "claude" | "claude-code" | "droid" | "factory" => {
+        "pi" | "opencode" | "codex" | "claude" | "claude-code" | "droid" | "factory" | "amp" => {
             Ok(if normalized == "claude-code" {
                 "claude".to_string()
             } else if normalized == "factory" {
@@ -1095,6 +1662,7 @@ fn default_prompt_mode(harness: &str) -> &'static str {
 
 fn default_command_template(harness: &str) -> &'static str {
     match harness {
+        "amp" => "amp",
         "codex" => "codex exec",
         "claude" => {
             "claude --dangerously-skip-permissions --verbose --output-format stream-json --include-partial-messages -p \"$FORGE_PROMPT_CONTENT\""
@@ -1294,6 +1862,15 @@ fn write_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  doctor <name>           Check profile configuration")?;
     writeln!(out, "  cooldown set <name>     Set profile cooldown")?;
     writeln!(out, "  cooldown clear <name>   Clear profile cooldown")?;
+    writeln!(
+        out,
+        "  catalog status          Show mesh profile catalog status"
+    )?;
+    writeln!(out, "  catalog init --node <id> [--count harness=n]...")?;
+    writeln!(
+        out,
+        "  catalog auth --node <id> --profile <pid> --status <ok|expired|missing>"
+    )?;
     Ok(())
 }
 
@@ -1332,7 +1909,57 @@ fn write_table(out: &mut dyn Write, headers: &[&str], rows: &[Vec<String>]) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_go_duration, parse_time_or_duration, run_for_test, InMemoryProfileBackend};
+    use std::ffi::OsString;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+
+    use super::{
+        detect_installed_harnesses, instantiate_profiles_from_detection, parse_alias_line,
+        parse_alias_lines, parse_go_duration, parse_time_or_duration, run_for_test, AliasDetection,
+        InMemoryProfileBackend, ProfileInitDetection,
+    };
+
+    struct EnvVarGuard {
+        key: String,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self {
+                key: key.to_string(),
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.take() {
+                std::env::set_var(&self.key, value);
+            } else {
+                std::env::remove_var(&self.key);
+            }
+        }
+    }
+
+    fn temp_path(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "forge-profile-init-{tag}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ))
+    }
+
+    fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env test lock poisoned")
+    }
 
     #[test]
     fn profile_add_list_edit_remove_flow() {
@@ -1468,6 +2095,121 @@ mod tests {
         assert_eq!(bad_cooldown.stderr, "--until is required\n");
     }
 
+    #[test]
+    fn parse_alias_line_supports_common_forms() {
+        let parsed = parse_alias_line("alias oc1='OPENCODE_HOME=~/.oc1 opencode run'");
+        assert_eq!(
+            parsed,
+            Some((
+                "oc1".to_string(),
+                "OPENCODE_HOME=~/.oc1 opencode run".to_string()
+            ))
+        );
+
+        let parsed = parse_alias_line("alias codex2=\"CODEX_HOME=~/.codex2 codex exec\"");
+        assert_eq!(
+            parsed,
+            Some((
+                "codex2".to_string(),
+                "CODEX_HOME=~/.codex2 codex exec".to_string()
+            ))
+        );
+
+        assert_eq!(parse_alias_line("export X=1"), None);
+        assert_eq!(parse_alias_line("# comment"), None);
+    }
+
+    #[test]
+    fn parse_alias_lines_is_deterministic_and_extracts_hints() {
+        let lines = vec![
+            "alias zz='echo ignored'".to_string(),
+            "alias oc1='OPENCODE_HOME=~/.oc1 opencode run'".to_string(),
+            "alias codex2='CODEX_HOME=~/.codex2 codex exec'".to_string(),
+            "alias cc3='CLAUDE_HOME=~/.claude3 claude -p \"$FORGE_PROMPT_CONTENT\"'".to_string(),
+            "alias oc1='OPENCODE_HOME=~/.override opencode run'".to_string(),
+        ];
+        let detected = parse_alias_lines(&lines);
+        assert_eq!(detected.len(), 3);
+        assert_eq!(detected[0].name, "cc3");
+        assert_eq!(detected[0].harness, "claude");
+        assert_eq!(detected[0].auth_home, "~/.claude3");
+        assert_eq!(detected[1].name, "codex2");
+        assert_eq!(detected[1].harness, "codex");
+        assert_eq!(detected[1].auth_home, "~/.codex2");
+        assert_eq!(detected[2].name, "oc1");
+        assert_eq!(detected[2].harness, "opencode");
+        assert_eq!(detected[2].auth_home, "~/.oc1");
+    }
+
+    #[test]
+    fn instantiate_profiles_from_detection_creates_alias_and_harness_stubs() {
+        let detection = ProfileInitDetection {
+            harnesses: vec!["claude".to_string(), "codex".to_string()],
+            aliases: vec![AliasDetection {
+                name: "oc1".to_string(),
+                harness: "opencode".to_string(),
+                command: "OPENCODE_HOME=~/.oc1 opencode run".to_string(),
+                auth_home: "~/.oc1".to_string(),
+            }],
+        };
+        let mut backend = InMemoryProfileBackend::default();
+        let result = instantiate_profiles_from_detection(&mut backend, &detection).unwrap();
+        assert_eq!(result.imported, 3);
+        assert_eq!(
+            result.profiles,
+            vec!["oc1".to_string(), "claude".to_string(), "codex".to_string()]
+        );
+        assert_eq!(result.harnesses, vec!["claude", "codex"]);
+
+        let list = run_for_test(&["profile", "ls", "--json"], &mut backend);
+        assert_eq!(list.exit_code, 0);
+        assert!(list.stdout.contains("\"name\": \"oc1\""));
+        assert!(list.stdout.contains("\"auth_home\": \"~/.oc1\""));
+        assert!(list.stdout.contains("\"name\": \"claude\""));
+        assert!(list.stdout.contains("\"name\": \"codex\""));
+    }
+
+    #[test]
+    fn profile_init_uses_alias_fixture_file() {
+        let _env_lock = env_test_lock();
+        let _skip_zsh = EnvVarGuard::set("FORGE_PROFILE_INIT_SKIP_ZSH_ALIAS", "1");
+        let _path_guard = EnvVarGuard::set("PATH", "/dev/null");
+        let alias_path = temp_path("aliases");
+        let _ = fs::write(
+            &alias_path,
+            "alias amp1='AMP_HOME=~/.amp1 amp run'\nalias d1='factory run'\n",
+        );
+        let _alias_file = EnvVarGuard::set(
+            "FORGE_PROFILE_INIT_ALIAS_FILE",
+            alias_path.to_string_lossy().as_ref(),
+        );
+
+        let mut backend = InMemoryProfileBackend::default();
+        let out = run_for_test(&["profile", "init", "--json"], &mut backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(parsed["imported"], 2);
+        assert_eq!(parsed["aliases"][0]["name"], "amp1");
+        assert_eq!(parsed["aliases"][1]["name"], "d1");
+
+        let _ = fs::remove_file(alias_path);
+    }
+
+    #[test]
+    fn detect_installed_harnesses_from_path_fixture() {
+        let _env_lock = env_test_lock();
+        let bin_dir = temp_path("harness-bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        fs::write(bin_dir.join("codex"), "").unwrap();
+        fs::write(bin_dir.join("factory"), "").unwrap();
+        let _path_guard = EnvVarGuard::set("PATH", bin_dir.to_string_lossy().as_ref());
+
+        let harnesses = detect_installed_harnesses();
+        assert_eq!(harnesses, vec!["codex".to_string(), "droid".to_string()]);
+
+        let _ = fs::remove_dir_all(bin_dir);
+    }
+
     fn assert_duration_secs(input: &str, expected_secs: i64) {
         match parse_go_duration(input) {
             Some(d) => assert_eq!(d.num_seconds(), expected_secs, "input: {input}"),
@@ -1588,5 +2330,66 @@ mod tests {
         );
         assert_eq!(set.exit_code, 1);
         assert!(set.stderr.contains("invalid time"));
+    }
+
+    #[test]
+    fn catalog_init_and_auth_status_flow() {
+        let _lock = env_test_lock();
+        let catalog_root = temp_path("catalog-flow");
+        let _data_dir = EnvVarGuard::set("FORGE_DATA_DIR", catalog_root.to_string_lossy().as_ref());
+
+        let mut backend = InMemoryProfileBackend::default();
+        let _ = run_for_test(
+            &["profile", "add", "claude", "--name", "claude-main"],
+            &mut backend,
+        );
+        let _ = run_for_test(
+            &["profile", "add", "codex", "--name", "codex-main"],
+            &mut backend,
+        );
+        let _ = run_for_test(
+            &["profile", "add", "codex", "--name", "codex-shadow"],
+            &mut backend,
+        );
+
+        let init = run_for_test(
+            &["profile", "catalog", "init", "--node", "node-a"],
+            &mut backend,
+        );
+        assert_eq!(init.exit_code, 0, "stderr={}", init.stderr);
+        assert!(init.stdout.contains("Provisioned node node-a"));
+
+        let auth = run_for_test(
+            &[
+                "profile",
+                "catalog",
+                "auth",
+                "--node",
+                "node-a",
+                "--profile",
+                "Codex2",
+                "--status",
+                "ok",
+            ],
+            &mut backend,
+        );
+        assert_eq!(auth.exit_code, 0, "stderr={}", auth.stderr);
+
+        let status = run_for_test(&["profile", "--json", "catalog", "status"], &mut backend);
+        assert_eq!(status.exit_code, 0, "stderr={}", status.stderr);
+        assert!(status.stdout.contains("\"node-a\""));
+        assert!(status.stdout.contains("\"Codex2\""));
+        assert!(status.stdout.contains("\"ok\""));
+
+        let _ = fs::remove_dir_all(catalog_root);
+    }
+
+    #[test]
+    fn catalog_init_requires_node_flag() {
+        let _lock = env_test_lock();
+        let mut backend = InMemoryProfileBackend::default();
+        let out = run_for_test(&["profile", "catalog", "init"], &mut backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("--node is required"));
     }
 }

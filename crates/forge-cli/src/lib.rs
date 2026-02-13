@@ -31,6 +31,7 @@ pub mod migrate;
 pub mod msg;
 pub mod pool;
 pub mod profile;
+mod profile_catalog;
 pub mod prompt;
 pub mod ps;
 pub mod queue;
