@@ -594,6 +594,174 @@ fn execute_validate(
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct WorkflowRunCommandResult {
+    run_id: String,
+    workflow_name: String,
+    status: String,
+}
+
+fn execute_run(
+    backend: &dyn WorkflowBackend,
+    name: &str,
+    json: bool,
+    jsonl: bool,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<(), String> {
+    let wf = backend.load_workflow_by_name(name)?;
+    let (validated, errors) = validate_workflow(&wf);
+    if !errors.is_empty() {
+        writeln!(stderr, "Workflow invalid: {}", validated.name).map_err(|e| e.to_string())?;
+        for err in &errors {
+            let _ = writeln!(stderr, "- {}", err.human_string());
+        }
+        return Err(String::new());
+    }
+
+    let result = run_workflow(&validated)?;
+    if json || jsonl {
+        write_json_output(stdout, &result, jsonl)?;
+        if result.status == "failed" {
+            return Err(String::new());
+        }
+        return Ok(());
+    }
+
+    writeln!(stdout, "Workflow run: {}", result.run_id).map_err(|e| e.to_string())?;
+    writeln!(stdout, "Workflow: {}", result.workflow_name).map_err(|e| e.to_string())?;
+    writeln!(stdout, "Status: {}", result.status).map_err(|e| e.to_string())?;
+    if result.status == "failed" {
+        return Err(format!("workflow run {} failed", result.run_id));
+    }
+    Ok(())
+}
+
+fn run_workflow(wf: &Workflow) -> Result<WorkflowRunCommandResult, String> {
+    let store = run_persistence::WorkflowRunStore::open_from_env();
+    let step_ids: Vec<String> = wf.steps.iter().map(|step| step.id.clone()).collect();
+    let mut run = store.create_run(&wf.name, &wf.source, &step_ids)?;
+
+    let engine_steps: Vec<run_persistence::WorkflowEngineStep> = wf
+        .steps
+        .iter()
+        .map(|step| run_persistence::WorkflowEngineStep {
+            id: step.id.clone(),
+            depends_on: step.depends_on.clone(),
+        })
+        .collect();
+    let step_lookup: HashMap<String, WorkflowStep> = wf
+        .steps
+        .iter()
+        .cloned()
+        .map(|step| (step.id.clone(), step))
+        .collect();
+    let repo_workdir = resolved_workflow_repo_dir(wf)?;
+
+    let engine_result = run_persistence::execute_sequential_workflow(&engine_steps, |step_id| {
+        let Some(step) = step_lookup.get(step_id) else {
+            return Err(format!("step {:?} missing from lookup", step_id));
+        };
+        store.update_step_status(
+            &run.id,
+            step_id,
+            run_persistence::WorkflowStepStatus::Running,
+        )?;
+
+        match step.step_type.as_str() {
+            STEP_TYPE_BASH => {
+                let request = run_persistence::BashStepRequest::new(
+                    step_id,
+                    &step.cmd,
+                    repo_workdir.clone(),
+                    &step.workdir,
+                );
+                let result = run_persistence::execute_bash_step(&request)?;
+                run_persistence::append_bash_step_logs(&store, &run.id, &result)?;
+                if result.success {
+                    store.update_step_status(
+                        &run.id,
+                        step_id,
+                        run_persistence::WorkflowStepStatus::Success,
+                    )?;
+                    Ok(())
+                } else {
+                    let err = format!("exit status {}", result.exit_code);
+                    store.update_step_status(
+                        &run.id,
+                        step_id,
+                        run_persistence::WorkflowStepStatus::Failed,
+                    )?;
+                    store.append_step_log(&run.id, step_id, format!("error: {err}").as_str())?;
+                    Err(err)
+                }
+            }
+            other => {
+                let err = format!(
+                    "workflow run currently supports bash steps only; got step type {:?}",
+                    other
+                );
+                store.update_step_status(
+                    &run.id,
+                    step_id,
+                    run_persistence::WorkflowStepStatus::Failed,
+                )?;
+                store.append_step_log(&run.id, step_id, format!("error: {err}").as_str())?;
+                Err(err)
+            }
+        }
+    })?;
+
+    let mut failed = false;
+    for record in &engine_result.steps {
+        match record.status {
+            run_persistence::WorkflowEngineStepStatus::Skipped => {
+                store.update_step_status(
+                    &run.id,
+                    &record.step_id,
+                    run_persistence::WorkflowStepStatus::Skipped,
+                )?;
+            }
+            run_persistence::WorkflowEngineStepStatus::Failed => {
+                failed = true;
+            }
+            run_persistence::WorkflowEngineStepStatus::Pending
+            | run_persistence::WorkflowEngineStepStatus::Running
+            | run_persistence::WorkflowEngineStepStatus::Success => {}
+        }
+        if !record.error.is_empty() {
+            store.append_step_log(
+                &run.id,
+                &record.step_id,
+                format!("error: {}", record.error).as_str(),
+            )?;
+        }
+    }
+
+    run = store.update_run_status(
+        &run.id,
+        if failed {
+            run_persistence::WorkflowRunStatus::Failed
+        } else {
+            run_persistence::WorkflowRunStatus::Success
+        },
+    )?;
+
+    Ok(WorkflowRunCommandResult {
+        run_id: run.id,
+        workflow_name: run.workflow_name,
+        status: run_status_label(&run.status).to_string(),
+    })
+}
+
+fn resolved_workflow_repo_dir(wf: &Workflow) -> Result<PathBuf, String> {
+    let repo_root = repo_root_from_workflow(wf);
+    if !repo_root.is_empty() {
+        return Ok(PathBuf::from(repo_root));
+    }
+    std::env::current_dir().map_err(|err| format!("resolve current directory: {err}"))
+}
+
 fn execute_logs(
     run_id: &str,
     json: bool,
@@ -2051,6 +2219,116 @@ mod tests {
         assert!(out.stderr.contains("not found"));
     }
 
+    // -- run --
+
+    #[test]
+    fn run_executes_simple_bash_workflow_and_returns_success() {
+        let _lock = env_lock();
+        let data_dir = temp_data_dir("run-success");
+        let _guard = EnvGuard::set("FORGE_DATA_DIR", &data_dir);
+
+        let repo_root = data_dir.join("repo-success");
+        let workflow_source = repo_root
+            .join(".forge")
+            .join("workflows")
+            .join("bash-only.toml");
+        let _ = std::fs::create_dir_all(
+            workflow_source
+                .parent()
+                .unwrap_or_else(|| Path::new("/tmp/forge-workflow-tests")),
+        );
+
+        let backend = InMemoryWorkflowBackend {
+            workflows: vec![workflow_for_run_test(
+                "bash-only",
+                &workflow_source,
+                vec![
+                    ("setup", "printf setup", Vec::new()),
+                    ("build", "printf build", vec!["setup".to_string()]),
+                ],
+            )],
+            project_dir: Some(repo_root.clone()),
+        };
+
+        let out = run_for_test(&["workflow", "--json", "run", "bash-only"], &backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        let run_id = parsed["run_id"].as_str().unwrap_or_default().to_string();
+        assert!(!run_id.is_empty());
+        assert_eq!(parsed["status"], "success");
+
+        let store = run_persistence::WorkflowRunStore::open_from_env();
+        let run = store.get_run(&run_id).unwrap();
+        assert_eq!(run.status, run_persistence::WorkflowRunStatus::Success);
+        assert_eq!(run.steps.len(), 2);
+        assert_eq!(
+            run.steps[0].status,
+            run_persistence::WorkflowStepStatus::Success
+        );
+        assert_eq!(
+            run.steps[1].status,
+            run_persistence::WorkflowStepStatus::Success
+        );
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    #[test]
+    fn run_failure_marks_downstream_step_as_skipped() {
+        let _lock = env_lock();
+        let data_dir = temp_data_dir("run-failure");
+        let _guard = EnvGuard::set("FORGE_DATA_DIR", &data_dir);
+
+        let repo_root = data_dir.join("repo-failure");
+        let workflow_source = repo_root
+            .join(".forge")
+            .join("workflows")
+            .join("fail-chain.toml");
+        let _ = std::fs::create_dir_all(
+            workflow_source
+                .parent()
+                .unwrap_or_else(|| Path::new("/tmp/forge-workflow-tests")),
+        );
+
+        let backend = InMemoryWorkflowBackend {
+            workflows: vec![workflow_for_run_test(
+                "fail-chain",
+                &workflow_source,
+                vec![
+                    ("setup", "printf setup", Vec::new()),
+                    ("build", "printf err >&2; exit 3", vec!["setup".to_string()]),
+                    ("ship", "printf ship", vec!["build".to_string()]),
+                ],
+            )],
+            project_dir: Some(repo_root.clone()),
+        };
+
+        let out = run_for_test(&["workflow", "--json", "run", "fail-chain"], &backend);
+        assert_eq!(out.exit_code, 1);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        let run_id = parsed["run_id"].as_str().unwrap_or_default().to_string();
+        assert!(!run_id.is_empty());
+        assert_eq!(parsed["status"], "failed");
+
+        let store = run_persistence::WorkflowRunStore::open_from_env();
+        let run = store.get_run(&run_id).unwrap();
+        assert_eq!(run.status, run_persistence::WorkflowRunStatus::Failed);
+        assert_eq!(
+            run.steps[0].status,
+            run_persistence::WorkflowStepStatus::Success
+        );
+        assert_eq!(
+            run.steps[1].status,
+            run_persistence::WorkflowStepStatus::Failed
+        );
+        assert_eq!(
+            run.steps[2].status,
+            run_persistence::WorkflowStepStatus::Skipped
+        );
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
     // -- logs --
 
     #[test]
@@ -2170,6 +2448,32 @@ mod tests {
         assert!(out
             .stderr
             .contains("--json and --jsonl cannot be used together"));
+    }
+
+    fn workflow_for_run_test(
+        name: &str,
+        source: &Path,
+        steps: Vec<(&str, &str, Vec<String>)>,
+    ) -> Workflow {
+        Workflow {
+            name: name.to_string(),
+            version: "0.1".to_string(),
+            description: "run workflow fixture".to_string(),
+            inputs: BTreeMap::new(),
+            outputs: BTreeMap::new(),
+            steps: steps
+                .into_iter()
+                .map(|(id, cmd, depends_on)| WorkflowStep {
+                    id: id.to_string(),
+                    step_type: "bash".to_string(),
+                    cmd: cmd.to_string(),
+                    depends_on,
+                    ..default_step()
+                })
+                .collect(),
+            hooks: None,
+            source: source.to_string_lossy().to_string(),
+        }
     }
 
     // -- validation logic unit tests --
