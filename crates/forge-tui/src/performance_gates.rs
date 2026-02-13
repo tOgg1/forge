@@ -123,12 +123,23 @@ pub fn default_view_slos() -> Vec<ViewSlo> {
 }
 
 pub fn run_benchmark_case(case: &BenchmarkCase, mut f: impl FnMut()) -> BenchmarkSample {
+    run_benchmark_case_with_work_units(case, 1, move || {
+        f();
+    })
+}
+
+pub fn run_benchmark_case_with_work_units(
+    case: &BenchmarkCase,
+    work_units_per_iteration: u64,
+    mut f: impl FnMut(),
+) -> BenchmarkSample {
     let warmup = case.warmup_iterations.max(1);
     for _ in 0..warmup {
         f();
     }
 
     let iterations = case.measure_iterations.max(1);
+    let work_units_per_iteration = work_units_per_iteration.max(1);
     let mut latencies = Vec::with_capacity(iterations as usize);
     let total_start = Instant::now();
     for _ in 0..iterations {
@@ -138,10 +149,11 @@ pub fn run_benchmark_case(case: &BenchmarkCase, mut f: impl FnMut()) -> Benchmar
         latencies.push(elapsed_ms);
     }
     let total_ms = (total_start.elapsed().as_nanos() / 1_000_000) as u64;
+    let total_work_units = iterations.saturating_mul(work_units_per_iteration);
     let throughput_per_second = if total_ms == 0 {
-        iterations
+        total_work_units
     } else {
-        iterations.saturating_mul(1_000) / total_ms
+        total_work_units.saturating_mul(1_000) / total_ms
     };
 
     BenchmarkSample {
@@ -422,11 +434,16 @@ fn percentile_ms(values: &[u64], percentile: u8) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::hint::black_box;
+
     use super::{
         default_benchmark_suite, default_view_slos, evaluate_slo_gates, format_ci_gate_summary,
-        persist_benchmark_suite, restore_benchmark_suite, run_benchmark_case, BenchmarkCase,
-        BenchmarkSample, ViewSlo,
+        persist_benchmark_suite, restore_benchmark_suite, run_benchmark_case,
+        run_benchmark_case_with_work_units, BenchmarkCase, BenchmarkSample, ViewSlo,
     };
+    use crate::app::{App, LogTailView, LoopView, MainTab, RunView};
+    use forge_cli::logs::{render_lines_for_layer, LogRenderLayer};
 
     #[test]
     fn default_suite_has_expected_views() {
@@ -453,6 +470,19 @@ mod tests {
         assert_eq!(sample.view_id, "overview");
         assert_eq!(sample.latency_ms.len(), 5);
         assert!(sample.throughput_per_second >= 1);
+    }
+
+    #[test]
+    fn throughput_scales_with_work_units() {
+        let case = BenchmarkCase {
+            view_id: "stream-follow".to_owned(),
+            warmup_iterations: 1,
+            measure_iterations: 8,
+        };
+        let sample = run_benchmark_case_with_work_units(&case, 64, || {});
+        assert_eq!(sample.view_id, "stream-follow");
+        assert_eq!(sample.latency_ms.len(), 8);
+        assert!(sample.throughput_per_second >= 64);
     }
 
     #[test]
@@ -580,5 +610,205 @@ mod tests {
         assert!(!restored.warnings.is_empty());
         assert_eq!(restored.suite.cases.len(), 1);
         assert_eq!(restored.suite.cases[0].view_id, "overview");
+    }
+
+    fn sample_loop(index: usize) -> LoopView {
+        LoopView {
+            id: format!("loop-{index:03}"),
+            short_id: format!("l{index:03}"),
+            name: format!("operator-loop-{index:03}"),
+            state: if index.is_multiple_of(6) {
+                "error".to_owned()
+            } else if index.is_multiple_of(3) {
+                "sleeping".to_owned()
+            } else {
+                "running".to_owned()
+            },
+            repo_path: format!("/repo/operator-{index}"),
+            runs: 40 + index,
+            queue_depth: (index * 3) % 19,
+            last_run_at: Some("2026-02-13T12:00:00Z".to_owned()),
+            interval_seconds: 60,
+            max_runtime_seconds: 900,
+            max_iterations: 200,
+            last_error: if index.is_multiple_of(6) {
+                "exit status 1".to_owned()
+            } else {
+                String::new()
+            },
+            profile_name: "ops-prod".to_owned(),
+            profile_harness: "codex".to_owned(),
+            profile_auth: "sso".to_owned(),
+            profile_id: "p-prod".to_owned(),
+            pool_name: "fleet-main".to_owned(),
+            pool_id: "pool-main".to_owned(),
+        }
+    }
+
+    fn sample_run(index: usize) -> RunView {
+        RunView {
+            id: format!("run-{index:04}"),
+            status: if index.is_multiple_of(7) {
+                "error".to_owned()
+            } else if index.is_multiple_of(5) {
+                "running".to_owned()
+            } else {
+                "success".to_owned()
+            },
+            exit_code: if index.is_multiple_of(7) {
+                Some(1)
+            } else {
+                Some(0)
+            },
+            duration: format!("{}s", 5 + index),
+            profile_name: "ops-prod".to_owned(),
+            harness: "codex".to_owned(),
+            auth_kind: "sso".to_owned(),
+        }
+    }
+
+    fn sample_log_lines(line_count: usize) -> Vec<String> {
+        const PATTERNS: &[&str] = &[
+            "[2026-02-13T12:00:00Z] status: running loop=operator",
+            "tool: read file src/app.rs",
+            "$ cargo test -p forge-tui",
+            "diff --git a/src/app.rs b/src/app.rs",
+            "@@ -1,2 +1,2 @@",
+            "-old line",
+            "+new line",
+            "Traceback (most recent call last):",
+            "  File \"runner.py\", line 42, in <module>",
+            "ValueError: boom",
+            "```rust",
+            "fn main() { println!(\"ok\"); }",
+            "```",
+        ];
+
+        (0..line_count)
+            .map(|index| PATTERNS[index % PATTERNS.len()].to_owned())
+            .collect()
+    }
+
+    fn build_render_fixture() -> App {
+        let mut app = App::new("default", 400);
+        let loops = (0..48).map(sample_loop).collect::<Vec<_>>();
+        let runs = (0..64).map(sample_run).collect::<Vec<_>>();
+        let selected_log = LogTailView {
+            lines: sample_log_lines(1_200),
+            message: String::new(),
+        };
+
+        let mut multi_logs = HashMap::new();
+        for loop_view in loops.iter().take(12) {
+            multi_logs.insert(
+                loop_view.id.clone(),
+                LogTailView {
+                    lines: sample_log_lines(180),
+                    message: String::new(),
+                },
+            );
+        }
+
+        app.set_loops(loops);
+        app.set_run_history(runs);
+        app.set_selected_log(selected_log);
+        app.set_multi_logs(multi_logs);
+        app
+    }
+
+    fn render_gate_slos() -> Vec<ViewSlo> {
+        vec![
+            ViewSlo {
+                view_id: "overview".to_owned(),
+                max_p50_ms: 18,
+                max_p95_ms: 40,
+                min_throughput_per_second: 45,
+            },
+            ViewSlo {
+                view_id: "logs".to_owned(),
+                max_p50_ms: 18,
+                max_p95_ms: 40,
+                min_throughput_per_second: 45,
+            },
+            ViewSlo {
+                view_id: "runs".to_owned(),
+                max_p50_ms: 18,
+                max_p95_ms: 40,
+                min_throughput_per_second: 45,
+            },
+            ViewSlo {
+                view_id: "multi-logs".to_owned(),
+                max_p50_ms: 35,
+                max_p95_ms: 70,
+                min_throughput_per_second: 25,
+            },
+        ]
+    }
+
+    fn measure_render_for_view(view_id: &str, app: &mut App) -> BenchmarkSample {
+        let tab = match view_id {
+            "overview" => MainTab::Overview,
+            "logs" => MainTab::Logs,
+            "runs" => MainTab::Runs,
+            "multi-logs" => MainTab::MultiLogs,
+            _ => MainTab::Overview,
+        };
+        app.set_tab(tab);
+        let case = BenchmarkCase {
+            view_id: view_id.to_owned(),
+            warmup_iterations: 16,
+            measure_iterations: 160,
+        };
+        run_benchmark_case(&case, || {
+            black_box(app.render());
+        })
+    }
+
+    #[test]
+    fn ci_render_latency_and_throughput_budgets_hold() {
+        let mut app = build_render_fixture();
+        let samples = vec![
+            measure_render_for_view("overview", &mut app),
+            measure_render_for_view("logs", &mut app),
+            measure_render_for_view("runs", &mut app),
+            measure_render_for_view("multi-logs", &mut app),
+        ];
+
+        let report = evaluate_slo_gates(&render_gate_slos(), &samples);
+        assert!(report.passed, "{}", format_ci_gate_summary(&report));
+    }
+
+    #[test]
+    fn ci_follow_throughput_budget_holds() {
+        const CHUNK_LINES: usize = 180;
+        const MAX_WINDOW_LINES: usize = 1_200;
+        let chunk = sample_log_lines(CHUNK_LINES);
+        let mut rolling = Vec::new();
+        let case = BenchmarkCase {
+            view_id: "follow".to_owned(),
+            warmup_iterations: 12,
+            measure_iterations: 140,
+        };
+
+        let sample = run_benchmark_case_with_work_units(&case, CHUNK_LINES as u64, || {
+            rolling.extend(chunk.iter().cloned());
+            if rolling.len() > MAX_WINDOW_LINES {
+                let overflow = rolling.len().saturating_sub(MAX_WINDOW_LINES);
+                rolling.drain(0..overflow);
+            }
+            let rendered = render_lines_for_layer(&rolling, LogRenderLayer::Raw, true);
+            black_box(rendered.len());
+        });
+
+        let report = evaluate_slo_gates(
+            &[ViewSlo {
+                view_id: "follow".to_owned(),
+                max_p50_ms: 12,
+                max_p95_ms: 24,
+                min_throughput_per_second: 12_000,
+            }],
+            &[sample],
+        );
+        assert!(report.passed, "{}", format_ci_gate_summary(&report));
     }
 }
