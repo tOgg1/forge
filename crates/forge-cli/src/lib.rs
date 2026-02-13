@@ -99,7 +99,18 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
     let remaining = &args[index..];
     let command = remaining.first().map(|arg| arg.as_str());
     match command {
-        None | Some("help") | Some("-h") | Some("--help") => {
+        None => {
+            if flags.robot_help {
+                if let Err(err) = write_root_help(stdout) {
+                    let _ = writeln!(stderr, "{err}");
+                    return 1;
+                }
+                return 0;
+            }
+            let forwarded = forward_tui_args(&flags);
+            tui::run_from_env(&forwarded, stdout, stderr)
+        }
+        Some("help") | Some("-h") | Some("--help") => {
             if let Err(err) = write_root_help(stdout) {
                 let _ = writeln!(stderr, "{err}");
                 return 1;
@@ -351,6 +362,17 @@ fn forward_args(remaining: &[String], flags: &GlobalFlags) -> Vec<String> {
     out
 }
 
+fn forward_tui_args(flags: &GlobalFlags) -> Vec<String> {
+    let mut out = Vec::new();
+    if flags.json {
+        out.push("--json".to_string());
+    }
+    if flags.jsonl {
+        out.push("--jsonl".to_string());
+    }
+    out
+}
+
 fn forward_loop_spawn_args(remaining: &[String], flags: &GlobalFlags) -> Vec<String> {
     let mut out = forward_args(remaining, flags);
     if !flags.config.trim().is_empty() && !out.is_empty() {
@@ -501,7 +523,7 @@ mod tests {
     use super::{
         agent, audit, clean, completion, config, context, crate_label, doctor, explain, export,
         hook, init, inject, kill, lock, logs, loop_internal, mail, mem, migrate, msg, pool,
-        profile, prompt, ps, queue, resume, rm, run, run_for_test, run_with_args, scale, send, seq,
+        profile, prompt, ps, queue, resume, rm, run, run_for_test, scale, send, seq,
         skills, status, stop, template, tui, up, wait, work, workflow,
     };
 
@@ -719,54 +741,20 @@ mod tests {
     }
 
     #[test]
-    fn root_help_renders_when_no_command() {
-        let args: Vec<String> = Vec::new();
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let code = run_with_args(&args, &mut stdout, &mut stderr);
-        assert_eq!(code, 0);
-        assert!(stderr.is_empty());
-        let rendered = match String::from_utf8(stdout) {
-            Ok(value) => value,
-            Err(err) => panic!("stdout should be utf-8: {err}"),
-        };
-        assert!(rendered.contains("Control plane for AI coding agents"));
-        assert!(rendered.contains("agent"));
-        assert!(rendered.contains("audit"));
-        assert!(rendered.contains("clean"));
-        assert!(rendered.contains("config"));
-        assert!(rendered.contains("doctor"));
-        assert!(rendered.contains("explain"));
-        assert!(rendered.contains("export"));
-        assert!(rendered.contains("hook"));
-        assert!(rendered.contains("inject"));
-        assert!(rendered.contains("init"));
-        assert!(rendered.contains("kill"));
-        assert!(rendered.contains("lock"));
-        assert!(rendered.contains("logs"));
-        assert!(rendered.contains("mail"));
-        assert!(rendered.contains("msg"));
-        assert!(rendered.contains("pool"));
-        assert!(rendered.contains("profile"));
-        assert!(rendered.contains("prompt"));
-        assert!(rendered.contains("ps"));
-        assert!(rendered.contains("queue"));
-        assert!(rendered.contains("resume"));
-        assert!(rendered.contains("rm"));
-        assert!(rendered.contains("run"));
-        assert!(rendered.contains("scale"));
-        assert!(rendered.contains("send"));
-        assert!(rendered.contains("status"));
-        assert!(rendered.contains("stop"));
-        assert!(rendered.contains("tui"));
-        assert!(rendered.contains("up"));
-        assert!(rendered.contains("use"));
-        assert!(rendered.contains("work"));
-        assert!(rendered.contains("workflow"));
-        assert!(rendered.contains("Global Flags:"));
-        assert!(rendered.contains("--json"));
-        assert!(rendered.contains("--version"));
-        assert!(!rendered.contains("loop run"));
+    fn no_command_dispatches_to_tui() {
+        let out = run_for_test(&[]);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stdout.is_empty());
+        assert!(out.stderr.contains("TUI requires an interactive terminal"));
+    }
+
+    #[test]
+    fn robot_help_renders_root_help() {
+        let out = run_for_test(&["--robot-help"]);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stdout.contains("Control plane for AI coding agents"));
+        assert!(out.stdout.contains("Commands:"));
+        assert!(out.stderr.is_empty());
     }
 
     #[test]

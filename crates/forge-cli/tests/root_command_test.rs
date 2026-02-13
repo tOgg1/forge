@@ -10,13 +10,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 // -- Help ----------------------------------------------------------------
 
 #[test]
-fn root_no_args_shows_help() {
+fn root_no_args_dispatches_to_tui() {
     let out = run(&[]);
-    assert_eq!(out.exit_code, 0);
-    assert!(out.stderr.is_empty());
-    assert!(out.stdout.contains("Control plane for AI coding agents"));
-    assert!(out.stdout.contains("Commands:"));
-    assert!(out.stdout.contains("Global Flags:"));
+    assert_eq!(out.exit_code, 1);
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.contains("TUI requires an interactive terminal"));
 }
 
 #[test]
