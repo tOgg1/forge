@@ -157,6 +157,8 @@ pub mod upstream_widgets {
 /// Minimum primitive surface used by the immediate rewrite scope.
 #[cfg(feature = "frankentui-upstream")]
 pub mod upstream_primitives {
+    use super::style::{StyleToken, ThemeSpec};
+    use super::upstream_bridge::token_style;
     use super::upstream_ftui as ftui;
 
     pub use ftui::layout::{Constraint, Direction, Flex};
@@ -175,10 +177,34 @@ pub mod upstream_primitives {
         StatusLine::new()
     }
 
+    /// Build a status line with Forge default foreground/background style.
+    #[must_use]
+    pub fn forge_status_line<'a>(theme: ThemeSpec) -> StatusLine<'a> {
+        StatusLine::new().style(token_style(theme, StyleToken::Foreground))
+    }
+
     /// Build a simple badge with one label.
     #[must_use]
     pub fn badge<'a>(label: &'a str) -> Badge<'a> {
         Badge::new(label)
+    }
+
+    /// Build a badge with Forge palette defaults for a semantic token.
+    #[must_use]
+    pub fn forge_badge<'a>(label: &'a str, theme: ThemeSpec, token: StyleToken) -> Badge<'a> {
+        Badge::new(label).with_style(token_style(theme, token))
+    }
+
+    /// Build a table with Forge default base/highlight styles.
+    #[must_use]
+    pub fn forge_table<'a>(
+        rows: impl IntoIterator<Item = TableRow>,
+        widths: impl IntoIterator<Item = Constraint>,
+        theme: ThemeSpec,
+    ) -> Table<'a> {
+        Table::new(rows, widths)
+            .style(token_style(theme, StyleToken::Foreground))
+            .highlight_style(token_style(theme, StyleToken::Focus))
     }
 
     /// Build a horizontal flex layout from constraints.
@@ -358,6 +384,9 @@ pub mod style {
 /// Render and frame primitives consumed by Forge TUI crates.
 pub mod render {
     use super::style::{StyleToken, ThemeSpec};
+
+    /// Track when deprecated legacy aliases can be deleted.
+    pub const LEGACY_RENDER_FRAME_API_DELETE_GATE: &str = "forge-brp";
     use super::widgets::BorderStyle;
 
     /// Terminal color: ANSI256 index or 24-bit RGB.
@@ -518,6 +547,53 @@ pub mod render {
         Focus,
     }
 
+    /// Styling selector for span-oriented rendering.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum SpanStyle {
+        /// Semantic role translated through `ThemeSpec`.
+        Role(TextRole),
+        /// Direct `StyleToken` selector for markdown/syntax integration seams.
+        Token(StyleToken),
+        /// Explicit terminal style for callers with pre-resolved colors/attrs.
+        Cell(CellStyle),
+    }
+
+    /// One text span with a style selector.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct StyledSpan<'a> {
+        pub text: &'a str,
+        pub style: SpanStyle,
+    }
+
+    impl<'a> StyledSpan<'a> {
+        /// Build a semantic role span.
+        #[must_use]
+        pub fn role(text: &'a str, role: TextRole) -> Self {
+            Self {
+                text,
+                style: SpanStyle::Role(role),
+            }
+        }
+
+        /// Build a style-token span.
+        #[must_use]
+        pub fn token(text: &'a str, token: StyleToken) -> Self {
+            Self {
+                text,
+                style: SpanStyle::Token(token),
+            }
+        }
+
+        /// Build an explicit style span.
+        #[must_use]
+        pub fn cell(text: &'a str, style: CellStyle) -> Self {
+            Self {
+                text,
+                style: SpanStyle::Cell(style),
+            }
+        }
+    }
+
     /// Box-drawing character sets.
     struct BorderChars {
         top_left: char,
@@ -597,6 +673,24 @@ pub mod render {
             self.size
         }
 
+        /// Legacy helper retained during adapter migration.
+        #[deprecated(
+            note = "use size().width instead; removal tracked by LEGACY_RENDER_FRAME_API_DELETE_GATE"
+        )]
+        #[must_use]
+        pub fn width(&self) -> usize {
+            self.size.width
+        }
+
+        /// Legacy helper retained during adapter migration.
+        #[deprecated(
+            note = "use size().height instead; removal tracked by LEGACY_RENDER_FRAME_API_DELETE_GATE"
+        )]
+        #[must_use]
+        pub fn height(&self) -> usize {
+            self.size.height
+        }
+
         /// Returns one frame cell for assertions/snapshot helpers.
         #[must_use]
         pub fn cell(&self, x: usize, y: usize) -> Option<FrameCell> {
@@ -615,32 +709,15 @@ pub mod render {
         }
 
         /// Draw text on a single row, clipped to frame width.
+        ///
+        /// Legacy single-span helper retained during migration to `draw_spans`.
         pub fn draw_text(&mut self, x: usize, y: usize, text: &str, role: TextRole) {
-            if y >= self.size.height || x >= self.size.width {
-                return;
-            }
-            let fg = self.color_for_role(role);
-            let bg = TermColor::Ansi256(self.theme.color(StyleToken::Background));
-            let (bold, dim, underline) = self.style_for_role(role);
-            for (offset, glyph) in text.chars().enumerate() {
-                let col = x + offset;
-                if col >= self.size.width {
-                    break;
-                }
-                self.cells[y * self.size.width + col] = FrameCell {
-                    glyph,
-                    style: CellStyle {
-                        fg,
-                        bg,
-                        bold,
-                        dim,
-                        underline,
-                    },
-                };
-            }
+            self.draw_spans(x, y, &[StyledSpan::role(text, role)]);
         }
 
         /// Draw text with explicit foreground/background colors.
+        ///
+        /// Legacy single-span helper retained during migration to `draw_spans`.
         pub fn draw_styled_text(
             &mut self,
             x: usize,
@@ -650,9 +727,6 @@ pub mod render {
             bg: TermColor,
             bold: bool,
         ) {
-            if y >= self.size.height || x >= self.size.width {
-                return;
-            }
             let style = CellStyle {
                 fg,
                 bg,
@@ -660,12 +734,53 @@ pub mod render {
                 dim: false,
                 underline: false,
             };
-            for (offset, glyph) in text.chars().enumerate() {
-                let col = x + offset;
-                if col >= self.size.width {
-                    break;
+            self.draw_spans(x, y, &[StyledSpan::cell(text, style)]);
+        }
+
+        /// Draw styled spans in order, clipped to frame bounds.
+        pub fn draw_spans(&mut self, x: usize, y: usize, spans: &[StyledSpan<'_>]) {
+            if y >= self.size.height || x >= self.size.width {
+                return;
+            }
+
+            let mut col = x;
+            for span in spans {
+                let style = self.resolve_span_style(span.style);
+                for glyph in span.text.chars() {
+                    if col >= self.size.width {
+                        return;
+                    }
+                    self.cells[y * self.size.width + col] = FrameCell { glyph, style };
+                    col += 1;
                 }
-                self.cells[y * self.size.width + col] = FrameCell { glyph, style };
+            }
+        }
+
+        /// Draw styled spans in order, clipped to the provided rect.
+        pub fn draw_spans_in_rect(
+            &mut self,
+            rect: Rect,
+            x_offset: usize,
+            y_offset: usize,
+            spans: &[StyledSpan<'_>],
+        ) {
+            let abs_x = rect.x + x_offset;
+            let abs_y = rect.y + y_offset;
+            let max_col = (rect.x + rect.width).min(self.size.width);
+            if abs_y >= rect.y + rect.height || abs_y >= self.size.height || abs_x >= max_col {
+                return;
+            }
+
+            let mut col = abs_x;
+            for span in spans {
+                let style = self.resolve_span_style(span.style);
+                for glyph in span.text.chars() {
+                    if col >= max_col {
+                        return;
+                    }
+                    self.cells[abs_y * self.size.width + col] = FrameCell { glyph, style };
+                    col += 1;
+                }
             }
         }
 
@@ -990,6 +1105,8 @@ pub mod render {
         }
 
         /// Draw text within a rect, clipped to rect bounds.
+        ///
+        /// Legacy single-span helper retained during migration to `draw_spans_in_rect`.
         pub fn draw_text_in_rect(
             &mut self,
             rect: Rect,
@@ -998,31 +1115,7 @@ pub mod render {
             text: &str,
             role: TextRole,
         ) {
-            let abs_x = rect.x + x_offset;
-            let abs_y = rect.y + y_offset;
-            if abs_y >= rect.y + rect.height {
-                return;
-            }
-            let max_chars = (rect.x + rect.width).saturating_sub(abs_x);
-            let fg = self.color_for_role(role);
-            let bg = TermColor::Ansi256(self.theme.color(StyleToken::Background));
-            let (bold, dim, underline) = self.style_for_role(role);
-            for (offset, glyph) in text.chars().take(max_chars).enumerate() {
-                let col = abs_x + offset;
-                if col >= self.size.width || abs_y >= self.size.height {
-                    break;
-                }
-                self.cells[abs_y * self.size.width + col] = FrameCell {
-                    glyph,
-                    style: CellStyle {
-                        fg,
-                        bg,
-                        bold,
-                        dim,
-                        underline,
-                    },
-                };
-            }
+            self.draw_spans_in_rect(rect, x_offset, y_offset, &[StyledSpan::role(text, role)]);
         }
 
         #[must_use]
@@ -1045,6 +1138,15 @@ pub mod render {
                 .map(|row| self.row_text(row))
                 .collect::<Vec<_>>()
                 .join("\n")
+        }
+
+        /// Legacy full-frame text helper retained during adapter migration.
+        #[deprecated(
+            note = "use snapshot() for full frame text or row_text(y) for one row; removal tracked by LEGACY_RENDER_FRAME_API_DELETE_GATE"
+        )]
+        #[must_use]
+        pub fn to_text(&self) -> String {
+            self.snapshot()
         }
 
         /// Returns the `TermColor` for a semantic role.
@@ -1073,6 +1175,49 @@ pub mod render {
                 TextRole::Warning => (typography.warning_bold, false, false),
                 TextRole::Info => (false, false, false),
                 TextRole::Focus => (true, false, typography.focus_underline),
+            }
+        }
+
+        fn style_for_token(&self, token: StyleToken) -> (bool, bool, bool) {
+            let typography = self.theme.typography;
+            match token {
+                StyleToken::Accent => (typography.accent_bold, false, false),
+                StyleToken::Success => (typography.success_bold, false, false),
+                StyleToken::Danger => (typography.danger_bold, false, false),
+                StyleToken::Warning => (typography.warning_bold, false, false),
+                StyleToken::Muted => (false, typography.muted_dim, false),
+                StyleToken::Focus => (true, false, typography.focus_underline),
+                _ => (false, false, false),
+            }
+        }
+
+        fn resolve_span_style(&self, style: SpanStyle) -> CellStyle {
+            match style {
+                SpanStyle::Cell(style) => style,
+                SpanStyle::Role(role) => {
+                    let fg = self.color_for_role(role);
+                    let bg = TermColor::Ansi256(self.theme.color(StyleToken::Background));
+                    let (bold, dim, underline) = self.style_for_role(role);
+                    CellStyle {
+                        fg,
+                        bg,
+                        bold,
+                        dim,
+                        underline,
+                    }
+                }
+                SpanStyle::Token(token) => {
+                    let fg = TermColor::Ansi256(self.theme.color(token));
+                    let bg = TermColor::Ansi256(self.theme.color(StyleToken::Background));
+                    let (bold, dim, underline) = self.style_for_token(token);
+                    CellStyle {
+                        fg,
+                        bg,
+                        bold,
+                        dim,
+                        underline,
+                    }
+                }
             }
         }
     }
@@ -1474,7 +1619,10 @@ mod tests {
         translate_input, InputEvent, Key, KeyEvent, Modifiers, MouseEvent, MouseWheelDirection,
         ResizeEvent, UiAction,
     };
-    use super::render::{FrameSize, RenderFrame, TextRole};
+    use super::render::{
+        FrameSize, RenderFrame, SpanStyle, StyledSpan, TermColor, TextRole,
+        LEGACY_RENDER_FRAME_API_DELETE_GATE,
+    };
     use super::style::{StyleToken, ThemeKind, ThemeSpec};
     use super::widgets::{self, Padding, TextAlign, WidgetSpec};
     use super::{crate_label, FRANKENTUI_PIN};
@@ -1534,6 +1682,25 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
+    fn render_frame_legacy_aliases_map_to_current_apis() {
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 12,
+                height: 2,
+            },
+            ThemeSpec::default(),
+        );
+        frame.draw_text(0, 0, "forge", TextRole::Accent);
+        frame.draw_text(0, 1, "ready", TextRole::Muted);
+
+        assert_eq!(frame.width(), frame.size().width);
+        assert_eq!(frame.height(), frame.size().height);
+        assert_eq!(frame.to_text(), frame.snapshot());
+        assert_eq!(LEGACY_RENDER_FRAME_API_DELETE_GATE, "forge-brp");
+    }
+
+    #[test]
     fn render_frame_uses_role_color_tokens() {
         use super::render::TermColor;
         let theme = ThemeSpec::for_kind(ThemeKind::Dark);
@@ -1563,6 +1730,145 @@ mod tests {
         );
         frame.draw_text(0, 0, "muted", TextRole::Muted);
         assert_eq!(frame.cell(0, 0).map(|cell| cell.style.dim), Some(true));
+    }
+
+    #[test]
+    fn draw_spans_supports_mixed_role_and_cell_styles() {
+        let theme = ThemeSpec::for_kind(ThemeKind::Dark);
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 16,
+                height: 1,
+            },
+            theme,
+        );
+        let custom = super::render::CellStyle {
+            fg: TermColor::Ansi256(196),
+            bg: TermColor::Ansi256(theme.color(StyleToken::Background)),
+            bold: true,
+            dim: false,
+            underline: false,
+        };
+        frame.draw_spans(
+            0,
+            0,
+            &[
+                StyledSpan::role("ok", TextRole::Success),
+                StyledSpan {
+                    text: " ",
+                    style: SpanStyle::Role(TextRole::Muted),
+                },
+                StyledSpan::cell("ERR", custom),
+            ],
+        );
+
+        assert_eq!(frame.row_text(0), "ok ERR          ");
+        assert_eq!(
+            frame.cell(0, 0).map(|cell| cell.style.fg),
+            Some(TermColor::Ansi256(theme.color(StyleToken::Success)))
+        );
+        assert_eq!(
+            frame.cell(2, 0).map(|cell| cell.style.fg),
+            Some(TermColor::Ansi256(theme.color(StyleToken::Muted)))
+        );
+        assert_eq!(frame.cell(3, 0).map(|cell| cell.style.fg), Some(custom.fg));
+        assert_eq!(frame.cell(3, 0).map(|cell| cell.style.bold), Some(true));
+    }
+
+    #[test]
+    fn draw_spans_clips_to_frame_width() {
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 5,
+                height: 1,
+            },
+            ThemeSpec::default(),
+        );
+        frame.draw_spans(
+            3,
+            0,
+            &[
+                StyledSpan::role("abc", TextRole::Accent),
+                StyledSpan::role("zzz", TextRole::Danger),
+            ],
+        );
+        assert_eq!(frame.row_text(0), "   ab");
+    }
+
+    #[test]
+    fn draw_spans_supports_style_token_variant() {
+        let theme = ThemeSpec::for_kind(ThemeKind::Dark);
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 4,
+                height: 1,
+            },
+            theme,
+        );
+        frame.draw_spans(
+            0,
+            0,
+            &[StyledSpan {
+                text: "A",
+                style: SpanStyle::Token(StyleToken::Accent),
+            }],
+        );
+        let fg = frame.cell(0, 0).map(|cell| cell.style.fg);
+        assert_eq!(
+            fg,
+            Some(TermColor::Ansi256(theme.color(StyleToken::Accent)))
+        );
+    }
+
+    #[test]
+    fn draw_spans_in_rect_clips_to_rect_bounds() {
+        use super::render::Rect;
+
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 7,
+                height: 1,
+            },
+            ThemeSpec::default(),
+        );
+        frame.draw_spans_in_rect(
+            Rect {
+                x: 2,
+                y: 0,
+                width: 3,
+                height: 1,
+            },
+            0,
+            0,
+            &[StyledSpan::role("abcdef", TextRole::Primary)],
+        );
+        assert_eq!(frame.row_text(0), "  abc  ");
+    }
+
+    #[test]
+    fn draw_text_in_rect_uses_span_pipeline() {
+        use super::render::Rect;
+
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 8,
+                height: 1,
+            },
+            ThemeSpec::default(),
+        );
+        frame.draw_text_in_rect(
+            Rect {
+                x: 1,
+                y: 0,
+                width: 4,
+                height: 1,
+            },
+            0,
+            0,
+            "status=ok",
+            TextRole::Primary,
+        );
+        assert_eq!(frame.row_text(0), " stat   ");
     }
 
     #[test]
@@ -1886,8 +2192,13 @@ mod upstream_widgets_tests {
 #[cfg(all(test, feature = "frankentui-upstream"))]
 mod upstream_primitives_tests {
     use super::upstream_primitives::{
-        badge, horizontal_flex, status_line, table_state, vertical_flex, Constraint,
+        badge, forge_badge, forge_status_line, forge_table, horizontal_flex, status_line,
+        table_state, vertical_flex, Constraint, TableRow,
     };
+    use super::{style::ThemeSpec, upstream_ftui as ftui};
+    use ftui::core::geometry::Rect;
+    use ftui::render::frame::Frame;
+    use ftui::widgets::{StatefulWidget, Widget};
 
     #[test]
     fn primitive_constructor_helpers_build_expected_shapes() {
@@ -1902,5 +2213,49 @@ mod upstream_primitives_tests {
 
         let vertical = vertical_flex([Constraint::Fixed(1), Constraint::Fixed(2)]);
         assert_eq!(vertical.constraint_count(), 2);
+    }
+
+    #[test]
+    fn forge_badge_applies_theme_token_style() {
+        let theme = ThemeSpec::for_kind(super::style::ThemeKind::Dark);
+        let badge = forge_badge("ERR", theme, super::style::StyleToken::Danger);
+
+        let mut pool = ftui::render::grapheme_pool::GraphemePool::new();
+        let mut frame = Frame::new(8, 1, &mut pool);
+        badge.render(Rect::new(0, 0, 8, 1), &mut frame);
+
+        let fg = frame.buffer.get(1, 0).expect("cell").fg;
+        let danger_rgb =
+            ftui::Color::Ansi256(theme.color(super::style::StyleToken::Danger)).to_rgb();
+        assert_eq!(
+            fg,
+            ftui::render::cell::PackedRgba::rgb(danger_rgb.r, danger_rgb.g, danger_rgb.b)
+        );
+    }
+
+    #[test]
+    fn forge_statusline_and_table_render_smoke() {
+        let theme = ThemeSpec::for_kind(super::style::ThemeKind::Dark);
+
+        let status = forge_status_line(theme)
+            .left(ftui::widgets::StatusItem::text("forge"))
+            .right(ftui::widgets::StatusItem::key_hint("q", "quit"));
+        let mut pool = ftui::render::grapheme_pool::GraphemePool::new();
+        let mut frame = Frame::new(40, 4, &mut pool);
+        status.render(Rect::new(0, 0, 40, 1), &mut frame);
+        assert_eq!(
+            frame
+                .buffer
+                .get(0, 0)
+                .expect("status cell")
+                .content
+                .as_char(),
+            Some('f')
+        );
+
+        let rows = vec![TableRow::new(vec!["id-1", "running"])];
+        let table = forge_table(rows, [Constraint::Fixed(10), Constraint::Fill], theme);
+        let mut table_state = table_state();
+        StatefulWidget::render(&table, Rect::new(0, 1, 40, 3), &mut frame, &mut table_state);
     }
 }
