@@ -453,7 +453,7 @@ fn runtime_flavor_from_env() -> RuntimeFlavor {
         return RuntimeFlavor::FrankentuiBootstrap;
     }
 
-    default_runtime_flavor()
+    RuntimeFlavor::FrankentuiBootstrap
 }
 
 fn env_truthy(key: &str) -> bool {
@@ -463,16 +463,6 @@ fn env_truthy(key: &str) -> bool {
             matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
         })
         .unwrap_or(false)
-}
-
-#[cfg(feature = "frankentui-bootstrap")]
-const fn default_runtime_flavor() -> RuntimeFlavor {
-    RuntimeFlavor::FrankentuiBootstrap
-}
-
-#[cfg(not(feature = "frankentui-bootstrap"))]
-const fn default_runtime_flavor() -> RuntimeFlavor {
-    RuntimeFlavor::Legacy
 }
 
 fn trim(value: &str, max: usize) -> String {
@@ -637,19 +627,14 @@ mod tests {
     }
 
     #[test]
-    fn runtime_flavor_default_matches_build_feature() {
+    fn runtime_flavor_defaults_to_frankentui_bootstrap() {
         let _guard = env_lock();
         let _unset_runtime = EnvGuard::unset("FORGE_TUI_RUNTIME");
         let _unset_toggle = EnvGuard::unset("FORGE_TUI_USE_FRANKENTUI_BOOTSTRAP");
-
-        #[cfg(feature = "frankentui-bootstrap")]
         assert_eq!(
             runtime_flavor_from_env(),
             RuntimeFlavor::FrankentuiBootstrap
         );
-
-        #[cfg(not(feature = "frankentui-bootstrap"))]
-        assert_eq!(runtime_flavor_from_env(), RuntimeFlavor::Legacy);
     }
 
     #[test]
