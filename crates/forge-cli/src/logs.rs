@@ -6,6 +6,15 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use crate::command_renderer::{
+    looks_like_command_prompt, looks_like_exit_code, render_command_lines,
+};
+use crate::diff_renderer::{
+    flush_diff_lines, render_diff_lines, render_diff_lines_incremental, DiffRenderState,
+};
+use crate::error_renderer::render_error_lines;
+use crate::section_parser::{SectionEvent, SectionKind, SectionParser};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
     pub stdout: String,
@@ -31,12 +40,14 @@ struct ParsedArgs {
     since: String,
     no_color: bool,
     raw: bool,
+    compact: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderOptions {
     no_color: bool,
     raw: bool,
+    compact: bool,
 }
 
 pub trait LogsBackend {
@@ -222,10 +233,15 @@ impl LogsBackend for SqliteLogsBackend {
         render: RenderOptions,
         stdout: &mut dyn Write,
     ) -> Result<(), String> {
+        let mut diff_state = DiffRenderState::default();
         let tail = self.read_log(path, lines, "")?;
-        let rendered = render_log_content(&tail, render);
+        let rendered = render_log_chunk(&tail, render, &mut diff_state);
         write_log_block(stdout, &rendered)?;
         if std::env::var_os("FORGE_LOGS_FOLLOW_ONCE").is_some() {
+            let trailing = flush_diff_lines(colors_enabled(render.no_color), &mut diff_state);
+            if !trailing.is_empty() {
+                write_log_block(stdout, &trailing.join("\n"))?;
+            }
             return Ok(());
         }
 
@@ -245,6 +261,8 @@ impl LogsBackend for SqliteLogsBackend {
                 current[known_content.len()..].to_string()
             } else {
                 // File truncated/rotated/replaced: treat full current content as new.
+                diff_state.reset();
+                carry.clear();
                 current.clone()
             };
             known_content = current;
@@ -263,7 +281,7 @@ impl LogsBackend for SqliteLogsBackend {
             if complete.is_empty() {
                 continue;
             }
-            let rendered = render_log_content(&complete, render);
+            let rendered = render_log_chunk(&complete, render, &mut diff_state);
             write_log_block(stdout, &rendered)?;
         }
     }
@@ -359,6 +377,7 @@ fn execute(
     let render = RenderOptions {
         no_color: parsed.no_color,
         raw: parsed.raw,
+        compact: parsed.compact,
     };
     let mut loops = backend.list_loops()?;
 
@@ -414,6 +433,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut since = String::new();
     let mut no_color = false;
     let mut raw = false;
+    let mut compact = false;
     let mut positionals = Vec::new();
 
     while let Some(token) = args.get(index) {
@@ -446,6 +466,10 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 raw = true;
                 index += 1;
             }
+            "--compact" => {
+                compact = true;
+                index += 1;
+            }
             flag if flag.starts_with('-') => {
                 return Err(format!("error: unknown argument for logs: '{flag}'"));
             }
@@ -473,6 +497,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         since,
         no_color,
         raw,
+        compact,
     })
 }
 
@@ -506,6 +531,27 @@ fn render_log_content(content: &str, options: RenderOptions) -> String {
     }
 
     let use_color = colors_enabled(options.no_color);
+    let out = collect_render_lines(content, use_color);
+    let out = render_section_aware(&out, use_color, options.compact);
+    render_diff_lines(&out, use_color).join("\n")
+}
+
+fn render_log_chunk(
+    content: &str,
+    options: RenderOptions,
+    diff_state: &mut DiffRenderState,
+) -> String {
+    if options.raw || content.is_empty() {
+        return content.to_string();
+    }
+
+    let use_color = colors_enabled(options.no_color);
+    let out = collect_render_lines(content, use_color);
+    let out = render_section_aware(&out, use_color, options.compact);
+    render_diff_lines_incremental(&out, use_color, diff_state).join("\n")
+}
+
+fn collect_render_lines(content: &str, use_color: bool) -> Vec<String> {
     let mut out = Vec::new();
 
     for line in content.lines() {
@@ -515,8 +561,273 @@ fn render_log_content(content: &str, options: RenderOptions) -> String {
             None => out.push(line.to_string()),
         }
     }
+    out
+}
 
-    out.join("\n")
+const COLOR_BOLD: &str = "\x1b[1m";
+const COLOR_MAGENTA: &str = "\x1b[35m";
+
+/// Section-aware rendering pass: emphasize headers, dim timestamps, insert
+/// separators between major sections, collapse blocks in compact mode, and
+/// route error/command blocks through their respective renderers.
+fn render_section_aware(lines: &[String], use_color: bool, compact: bool) -> Vec<String> {
+    let mut parser = SectionParser::new();
+    let mut out = Vec::with_capacity(lines.len());
+    let mut error_buf: Vec<String> = Vec::new();
+    let mut in_error = false;
+    let mut cmd_buf: Vec<String> = Vec::new();
+    let mut in_cmd = false;
+    let mut prev_major: Option<SectionKind> = None;
+    // Compact-mode collapse tracking.
+    let mut collapse_kind: Option<SectionKind> = None;
+    let mut collapse_count: usize = 0;
+
+    for line in lines {
+        let events = parser.feed(line);
+        for event in &events {
+            match event {
+                // ── Error block: accumulate and delegate ─────────────
+                SectionEvent::Start {
+                    kind: SectionKind::ErrorBlock,
+                    line: l,
+                    ..
+                } => {
+                    flush_cmd_buf(&mut out, &mut cmd_buf, &mut in_cmd, use_color);
+                    flush_collapse(&mut out, &mut collapse_kind, &mut collapse_count, use_color);
+                    maybe_insert_separator(
+                        &mut out,
+                        &mut prev_major,
+                        SectionKind::ErrorBlock,
+                        use_color,
+                    );
+                    in_error = true;
+                    error_buf.push(l.clone());
+                }
+                SectionEvent::Continue {
+                    kind: SectionKind::ErrorBlock,
+                    line: l,
+                    ..
+                } => {
+                    error_buf.push(l.clone());
+                }
+                SectionEvent::End {
+                    kind: SectionKind::ErrorBlock,
+                    ..
+                } => {
+                    out.extend(render_error_lines(&error_buf, use_color));
+                    error_buf.clear();
+                    in_error = false;
+                }
+                // ── Section start ────────────────────────────────────
+                SectionEvent::Start { kind, line: l, .. } => {
+                    if in_error {
+                        continue;
+                    }
+                    // Check for command transcript: Unknown lines that look
+                    // like shell prompt or are continuation of a command block.
+                    if *kind == SectionKind::Unknown {
+                        if looks_like_command_prompt(l) || looks_like_exit_code(l) {
+                            if !in_cmd {
+                                flush_collapse(
+                                    &mut out,
+                                    &mut collapse_kind,
+                                    &mut collapse_count,
+                                    use_color,
+                                );
+                                in_cmd = true;
+                            }
+                            cmd_buf.push(l.clone());
+                            continue;
+                        }
+                        if in_cmd {
+                            // Continuation of command output (stdout lines).
+                            cmd_buf.push(l.clone());
+                            continue;
+                        }
+                    } else {
+                        flush_cmd_buf(&mut out, &mut cmd_buf, &mut in_cmd, use_color);
+                    }
+                    flush_collapse(&mut out, &mut collapse_kind, &mut collapse_count, use_color);
+                    maybe_insert_separator(&mut out, &mut prev_major, *kind, use_color);
+                    let styled = style_section_line(l, *kind, use_color);
+                    if compact && is_collapsible(*kind) {
+                        out.push(styled);
+                        collapse_kind = Some(*kind);
+                        collapse_count = 0;
+                    } else {
+                        out.push(styled);
+                    }
+                }
+                // ── Section continue ─────────────────────────────────
+                SectionEvent::Continue { kind, line: l, .. } => {
+                    if in_error {
+                        continue;
+                    }
+                    if compact && collapse_kind == Some(*kind) {
+                        collapse_count += 1;
+                        continue;
+                    }
+                    out.push(style_section_line(l, *kind, use_color));
+                }
+                // ── Section end ──────────────────────────────────────
+                SectionEvent::End { kind, .. } => {
+                    if *kind != SectionKind::ErrorBlock {
+                        flush_collapse(
+                            &mut out,
+                            &mut collapse_kind,
+                            &mut collapse_count,
+                            use_color,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Flush any remaining error block.
+    if !error_buf.is_empty() {
+        out.extend(render_error_lines(&error_buf, use_color));
+    }
+    flush_cmd_buf(&mut out, &mut cmd_buf, &mut in_cmd, use_color);
+    flush_collapse(&mut out, &mut collapse_kind, &mut collapse_count, use_color);
+
+    out
+}
+
+/// Flush accumulated command transcript buffer through the command renderer.
+fn flush_cmd_buf(
+    out: &mut Vec<String>,
+    cmd_buf: &mut Vec<String>,
+    in_cmd: &mut bool,
+    use_color: bool,
+) {
+    if !cmd_buf.is_empty() {
+        out.extend(render_command_lines(cmd_buf, use_color));
+        cmd_buf.clear();
+    }
+    *in_cmd = false;
+}
+
+/// Apply section-aware styling to a single line.
+fn style_section_line(line: &str, kind: SectionKind, use_color: bool) -> String {
+    match kind {
+        SectionKind::HarnessHeader => {
+            if use_color {
+                format!("{COLOR_BOLD}{COLOR_CYAN}{line}{COLOR_RESET}")
+            } else {
+                format!("== {line}")
+            }
+        }
+        SectionKind::RoleMarker => {
+            if use_color {
+                format!("{COLOR_BOLD}{COLOR_MAGENTA}{line}{COLOR_RESET}")
+            } else {
+                format!(">> {line}")
+            }
+        }
+        SectionKind::StatusLine => {
+            if use_color {
+                format!("{COLOR_DIM}{line}{COLOR_RESET}")
+            } else {
+                line.to_string()
+            }
+        }
+        SectionKind::Summary => {
+            if use_color {
+                format!("{COLOR_DIM}{line}{COLOR_RESET}")
+            } else {
+                line.to_string()
+            }
+        }
+        SectionKind::ToolCall => {
+            if use_color {
+                format!("{COLOR_YELLOW}{line}{COLOR_RESET}")
+            } else {
+                line.to_string()
+            }
+        }
+        SectionKind::Thinking => {
+            if use_color {
+                format!("{COLOR_DIM}{line}{COLOR_RESET}")
+            } else {
+                line.to_string()
+            }
+        }
+        // CodeFence, Diff, JsonEvent, Approval, Unknown, ErrorBlock — pass through.
+        // Diff and CodeFence get styled by diff_renderer later in the pipeline.
+        _ => line.to_string(),
+    }
+}
+
+/// Insert a visual separator between major sections when appropriate.
+fn maybe_insert_separator(
+    out: &mut Vec<String>,
+    prev_major: &mut Option<SectionKind>,
+    next: SectionKind,
+    use_color: bool,
+) {
+    if let Some(prev) = *prev_major {
+        if should_insert_separator(prev, next) {
+            let rule = "\u{2500}".repeat(40); // ─ repeated
+            if use_color {
+                out.push(format!("{COLOR_DIM}{rule}{COLOR_RESET}"));
+            } else {
+                out.push(rule);
+            }
+        }
+    }
+    if is_major_section(next) {
+        *prev_major = Some(next);
+    }
+}
+
+fn should_insert_separator(prev: SectionKind, next: SectionKind) -> bool {
+    // Don't double-separate same-kind adjacent major sections.
+    if prev == next {
+        return false;
+    }
+    true
+}
+
+fn is_major_section(kind: SectionKind) -> bool {
+    matches!(
+        kind,
+        SectionKind::HarnessHeader
+            | SectionKind::RoleMarker
+            | SectionKind::Diff
+            | SectionKind::CodeFence
+            | SectionKind::Summary
+            | SectionKind::Approval
+            | SectionKind::ErrorBlock
+    )
+}
+
+fn is_collapsible(kind: SectionKind) -> bool {
+    matches!(kind, SectionKind::Thinking | SectionKind::CodeFence)
+}
+
+fn flush_collapse(
+    out: &mut Vec<String>,
+    collapse_kind: &mut Option<SectionKind>,
+    collapse_count: &mut usize,
+    use_color: bool,
+) {
+    if let Some(ck) = collapse_kind.take() {
+        if *collapse_count > 0 {
+            let label = match ck {
+                SectionKind::Thinking => "thinking",
+                SectionKind::CodeFence => "code",
+                _ => "content",
+            };
+            let text = format!("  ... ({} {label} lines collapsed)", *collapse_count);
+            if use_color {
+                out.push(format!("{COLOR_DIM}{text}{COLOR_RESET}"));
+            } else {
+                out.push(text);
+            }
+        }
+        *collapse_count = 0;
+    }
 }
 
 const COLOR_RESET: &str = "\x1b[0m";
@@ -836,6 +1147,7 @@ Flags:
   -n, --lines N     number of lines to show (default 50)
       --since VAL   show logs since duration or timestamp
       --all         show logs for all loops in repo
+      --compact     collapse thinking blocks and large code fences
       --raw         disable Claude stream-json rendering
       --no-color    disable colored log rendering
 ";
@@ -843,8 +1155,10 @@ Flags:
 #[cfg(test)]
 mod tests {
     use super::{
-        default_log_path, run_for_test, split_complete_lines, InMemoryLogsBackend, LoopRecord,
+        default_log_path, render_log_chunk, run_for_test, split_complete_lines,
+        InMemoryLogsBackend, LoopRecord, RenderOptions,
     };
+    use crate::diff_renderer::DiffRenderState;
 
     #[test]
     fn logs_requires_loop_or_all() {
@@ -870,7 +1184,10 @@ mod tests {
             "[2026-01-01T00:00:00Z] one\n[2026-01-01T00:00:01Z] two\n[2026-01-01T00:00:02Z] three\n",
         );
 
-        let out = run_for_test(&["logs", "alpha", "--lines", "2"], &mut backend);
+        let out = run_for_test(
+            &["logs", "alpha", "--lines", "2", "--no-color"],
+            &mut backend,
+        );
         assert_eq!(out.exit_code, 0);
         assert!(out.stderr.is_empty());
         assert_eq!(
@@ -988,7 +1305,13 @@ mod tests {
             "[2026-01-01T00:00:00Z] old\n[2026-01-01T00:00:01Z] keep\n[2026-01-01T00:00:02Z] keep2\n",
         );
         let out = run_for_test(
-            &["logs", "alpha", "--since", "2026-01-01T00:00:01Z"],
+            &[
+                "logs",
+                "alpha",
+                "--since",
+                "2026-01-01T00:00:01Z",
+                "--no-color",
+            ],
             &mut backend,
         );
         assert_eq!(out.exit_code, 0);
@@ -1028,7 +1351,7 @@ mod tests {
             log_path: path.to_string(),
         }])
         .with_follow_output(path, "[2026-01-01T00:00:03Z] streaming\n");
-        let out = run_for_test(&["logs", "alpha", "--follow"], &mut backend);
+        let out = run_for_test(&["logs", "alpha", "--follow", "--no-color"], &mut backend);
         assert_eq!(out.exit_code, 0);
         assert!(out.stderr.is_empty());
         assert_eq!(
@@ -1103,6 +1426,38 @@ mod tests {
     }
 
     #[test]
+    fn logs_formats_diff_patch_and_intraline_changes() {
+        let path = "/tmp/forge/logs/loops/diff.log";
+        let mut backend = InMemoryLogsBackend::with_loops(vec![LoopRecord {
+            id: "loop-diff".to_string(),
+            short_id: "df123456".to_string(),
+            name: "diff-loop".to_string(),
+            repo: "/repo".to_string(),
+            log_path: path.to_string(),
+        }])
+        .with_log(
+            path,
+            "diff --git a/src/main.rs b/src/main.rs\n\
+             index 1111111..2222222 100644\n\
+             --- a/src/main.rs\n\
+             +++ b/src/main.rs\n\
+             @@ -1,2 +1,2 @@\n\
+             -let answer = 41;\n\
+             +let answer = 42;\n",
+        );
+
+        let out = run_for_test(&["logs", "diff-loop", "--no-color"], &mut backend);
+        assert_eq!(out.exit_code, 0);
+        assert!(out.stderr.is_empty());
+        assert!(out
+            .stdout
+            .contains("diff --git a/src/main.rs b/src/main.rs"));
+        assert!(out.stdout.contains("@@ -1,2 +1,2 @@"));
+        assert!(out.stdout.contains("-let answer = 4[-1-];"));
+        assert!(out.stdout.contains("+let answer = 4{+2+};"));
+    }
+
+    #[test]
     fn default_log_path_matches_go_shape() {
         assert_eq!(
             default_log_path("/tmp/forge", "My Loop_Name", "loop-1"),
@@ -1133,5 +1488,402 @@ mod tests {
         let (complete, rest) = split_complete_lines("partial");
         assert_eq!(complete, "");
         assert_eq!(rest, "partial");
+    }
+
+    #[test]
+    fn render_log_chunk_carries_diff_run_across_boundaries() {
+        let mut diff_state = DiffRenderState::default();
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+
+        let first = render_log_chunk("@@ -1 +1 @@\n-old\n", options, &mut diff_state);
+        assert_eq!(first, "@@ -1 +1 @@");
+
+        let second = render_log_chunk("+new\n", options, &mut diff_state);
+        assert_eq!(second, "-[-old-]\n+{+new+}");
+    }
+
+    #[test]
+    fn render_log_chunk_flushes_pending_diff_on_context_line() {
+        let mut diff_state = DiffRenderState::default();
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+
+        let _ = render_log_chunk("@@ -1 +1 @@\n-old\n", options, &mut diff_state);
+        let second = render_log_chunk(" context\n", options, &mut diff_state);
+        assert_eq!(second, "-old\n context");
+    }
+
+    // ── PAR-111: Readability layer tests ────────────────────────────
+
+    #[test]
+    fn readability_harness_header_emphasized_no_color() {
+        use super::render_log_content;
+        let content = "OpenAI Codex v0.80.0 (research preview)\n--------\nworkdir: /repo/forge\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        // Header should get "== " prefix in no-color mode.
+        assert!(
+            rendered.contains("== OpenAI Codex v0.80.0"),
+            "header should be prefixed with == ; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn readability_harness_header_emphasized_color() {
+        use super::{render_log_content, COLOR_BOLD, COLOR_CYAN, COLOR_RESET};
+        let content = "OpenAI Codex v0.80.0 (research preview)\n";
+        let options = RenderOptions {
+            no_color: false,
+            raw: false,
+            compact: false,
+        };
+        // Force NO_COLOR unset for this test.
+        std::env::remove_var("NO_COLOR");
+        let rendered = render_log_content(content, options);
+        assert!(
+            rendered.contains(COLOR_BOLD) && rendered.contains(COLOR_CYAN),
+            "header should be bold+cyan; got: {rendered}"
+        );
+        assert!(rendered.contains(COLOR_RESET));
+    }
+
+    #[test]
+    fn readability_role_marker_emphasized_no_color() {
+        use super::render_log_content;
+        let content = "user\nHello world\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        assert!(
+            rendered.contains(">> user"),
+            "role marker should get >> prefix; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn readability_timestamp_dimmed_color() {
+        use super::{render_log_content, COLOR_DIM, COLOR_RESET};
+        let content = "[2026-02-09T16:00:01Z] status: idle\n";
+        let options = RenderOptions {
+            no_color: false,
+            raw: false,
+            compact: false,
+        };
+        std::env::remove_var("NO_COLOR");
+        let rendered = render_log_content(content, options);
+        assert!(
+            rendered.contains(COLOR_DIM),
+            "timestamp line should be dimmed; got: {rendered}"
+        );
+        assert!(rendered.contains(COLOR_RESET));
+    }
+
+    #[test]
+    fn readability_section_separators_between_major_sections() {
+        use super::render_log_content;
+        let content = "user\nHello\n```rust\nfn main() {}\n```\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        // Should contain a separator (─ characters) between role marker and code fence.
+        assert!(
+            rendered.contains('\u{2500}'),
+            "should contain separator between major sections; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn readability_compact_collapses_thinking_block() {
+        use super::render_log_content;
+        let content =
+            "thinking\n**Planning approach**\nLine 2\nLine 3\nLine 4\nLine 5\ncodex\nDone\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: true,
+        };
+        let rendered = render_log_content(content, options);
+        // The thinking block should show the first line + collapse summary.
+        assert!(
+            rendered.contains("thinking lines collapsed"),
+            "compact mode should collapse thinking block; got: {rendered}"
+        );
+        // The individual continuation lines should NOT appear.
+        assert!(
+            !rendered.contains("Line 5"),
+            "compact mode should hide continuation lines; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn readability_compact_collapses_code_fence() {
+        use super::render_log_content;
+        let content = "```rust\nfn one() {}\nfn two() {}\nfn three() {}\n```\nplain text\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: true,
+        };
+        let rendered = render_log_content(content, options);
+        assert!(
+            rendered.contains("code lines collapsed"),
+            "compact mode should collapse code fence; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn readability_no_compact_shows_all_lines() {
+        use super::render_log_content;
+        let content = "thinking\n**Planning approach**\nLine 2\nLine 3\ncodex\nDone\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        assert!(
+            rendered.contains("Line 2") && rendered.contains("Line 3"),
+            "non-compact mode should show all lines; got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("collapsed"),
+            "non-compact mode should not collapse; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn readability_tool_call_highlighted_color() {
+        use super::{render_log_content, COLOR_RESET, COLOR_YELLOW};
+        let content = "tool: read file `foo.rs`\n";
+        let options = RenderOptions {
+            no_color: false,
+            raw: false,
+            compact: false,
+        };
+        std::env::remove_var("NO_COLOR");
+        let rendered = render_log_content(content, options);
+        assert!(
+            rendered.contains(COLOR_YELLOW),
+            "tool call should be yellow; got: {rendered}"
+        );
+        assert!(rendered.contains(COLOR_RESET));
+    }
+
+    #[test]
+    fn readability_compact_flag_parsed() {
+        let mut backend = InMemoryLogsBackend::default();
+        let out = run_for_test(&["logs", "--compact", "--bogus"], &mut backend);
+        // --bogus should still fail; --compact alone shouldn't cause issues.
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("--bogus"));
+    }
+
+    #[test]
+    fn readability_raw_bypasses_section_styling() {
+        use super::render_log_content;
+        let content = "user\nHello\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: true,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        // Raw mode should pass through without ">> " prefix.
+        assert_eq!(rendered, content);
+    }
+
+    // ── PAR-107: Command transcript renderer tests ──────────────────
+
+    #[test]
+    fn command_prompt_highlighted_color() {
+        use super::{render_log_content, COLOR_RESET};
+        let content = "exec\n$ cargo test --lib\nrunning 8 tests\nexit code: 0\n";
+        let options = RenderOptions {
+            no_color: false,
+            raw: false,
+            compact: false,
+        };
+        std::env::remove_var("NO_COLOR");
+        let rendered = render_log_content(content, options);
+        // Prompt line should be styled with ANSI escape sequences.
+        assert!(
+            rendered.contains("\x1b["),
+            "command prompt should be styled; got: {rendered}"
+        );
+        assert!(rendered.contains(COLOR_RESET));
+    }
+
+    #[test]
+    fn command_prompt_highlighted_no_color() {
+        use super::render_log_content;
+        let content = "exec\n$ cargo test --lib\nrunning 8 tests\nexit code: 0\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        // In no-color mode, command prompt gets "$ " signifier.
+        assert!(
+            rendered.contains("$ $ cargo test --lib"),
+            "command prompt should get $ prefix in no-color; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn command_exit_code_zero_not_error_styled() {
+        use super::render_log_content;
+        let content = "exec\n$ cargo test\nexit code: 0\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        // Exit code 0 should NOT get [ERROR] prefix.
+        assert!(
+            !rendered.contains("[ERROR] exit code: 0"),
+            "exit code 0 should not be error-styled; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn command_exit_code_nonzero_error_styled() {
+        use super::render_log_content;
+        let content = "exec\n$ cargo test\nexit code: 1\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        // Exit code 1 should get [ERROR] prefix in no-color mode.
+        assert!(
+            rendered.contains("[ERROR] exit code: 1"),
+            "exit code 1 should be error-styled; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn command_exit_code_nonzero_bold_red_in_color() {
+        use super::render_log_content;
+        let content = "exec\n$ cargo test\nexit code: 1\n";
+        let options = RenderOptions {
+            no_color: false,
+            raw: false,
+            compact: false,
+        };
+        std::env::remove_var("NO_COLOR");
+        let rendered = render_log_content(content, options);
+        assert!(
+            rendered.contains("\x1b[1;31m"),
+            "exit code 1 should be bold red; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn command_stdout_preserved_plain() {
+        use super::render_log_content;
+        let content =
+            "exec\n$ cargo test\nrunning 8 tests\ntest pool::tests::acquire ... ok\nexit code: 0\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        // Stdout lines should be preserved as-is.
+        assert!(
+            rendered.contains("running 8 tests"),
+            "stdout should be preserved; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("test pool::tests::acquire ... ok"),
+            "stdout should be preserved; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn command_stderr_highlighted() {
+        use super::render_log_content;
+        let content = "exec\n$ cargo test\nstderr: thread panicked\nexit code: 101\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        // Stderr lines should get [WARN] prefix in no-color mode.
+        assert!(
+            rendered.contains("[WARN] stderr: thread panicked"),
+            "stderr should be warning-styled; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn command_known_commands_detected() {
+        use super::render_log_content;
+        // Test multiple known commands.
+        let content = "exec\n$ git status\nexit code: 0\n$ sv task list\nexit code: 0\n$ forge logs alpha\nexit code: 0\n";
+        let options = RenderOptions {
+            no_color: false,
+            raw: false,
+            compact: false,
+        };
+        std::env::remove_var("NO_COLOR");
+        let rendered = render_log_content(content, options);
+        // All prompt lines should be styled.
+        assert!(
+            rendered.contains("\x1b["),
+            "known commands should be styled; got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn command_raw_bypasses_styling() {
+        use super::render_log_content;
+        let content = "$ cargo test\nrunning 8 tests\nexit code: 0\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: true,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        // Raw mode should pass through without any modification.
+        assert_eq!(rendered, content);
+    }
+
+    #[test]
+    fn command_plain_mode_preserves_ambiguous_lines() {
+        use super::render_log_content;
+        // Lines that don't look like commands should remain plain.
+        let content = "Just some text\nMore text\n";
+        let options = RenderOptions {
+            no_color: true,
+            raw: false,
+            compact: false,
+        };
+        let rendered = render_log_content(content, options);
+        assert!(
+            rendered.contains("Just some text"),
+            "plain lines should be preserved; got: {rendered}"
+        );
     }
 }
