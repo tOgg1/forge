@@ -558,7 +558,7 @@ mod tests {
         let timeline_matches = draft
             .markdown
             .lines()
-            .filter(|line| line.contains("timeout"))
+            .filter(|line| line.contains("summary=timeout"))
             .count();
         assert_eq!(timeline_matches, 1);
 
