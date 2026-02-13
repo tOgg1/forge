@@ -27,6 +27,7 @@ pub mod loop_internal;
 pub mod mail;
 pub mod markdown_lexer;
 pub mod mem;
+pub mod mesh;
 pub mod migrate;
 pub mod msg;
 pub mod pool;
@@ -246,6 +247,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let forwarded = forward_args(remaining, &flags);
             mem::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
+        Some("mesh") => {
+            let store = mesh::MeshStore::open_from_env();
+            let forwarded = forward_args(remaining, &flags);
+            mesh::run_with_store(&forwarded, &store, stdout, stderr)
+        }
         Some("msg") => {
             let mut backend = msg::SqliteMsgBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
@@ -443,6 +449,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  logs      Tail loop logs")?;
     writeln!(out, "  mail      Forge Mail messaging")?;
     writeln!(out, "  migrate   Database migration command family")?;
+    writeln!(out, "  mesh      Manage mesh registry and master")?;
     writeln!(out, "  mem       Loop memory command family")?;
     writeln!(out, "  msg       Queue a message for loop(s)")?;
     writeln!(out, "  pool      Profile pool command family")?;
