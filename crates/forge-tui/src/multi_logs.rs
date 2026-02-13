@@ -230,7 +230,12 @@ impl App {
         let theme = crate::theme_for_capability(self.color_capability);
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
         frame.fill_bg(
-            Rect { x: 0, y: 0, width, height },
+            Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
             pal.background,
         );
 
@@ -257,24 +262,37 @@ impl App {
 
         if total_targets == 0 {
             draw_text_on_bg(
-                &mut frame, 0, 0,
+                &mut frame,
+                0,
+                0,
                 "No loops selected. Pin with <space> or create loops.",
-                pal.text_muted, pal.background,
+                pal.text_muted,
+                pal.background,
             );
             return frame;
         }
         if targets.is_empty() {
             draw_text_on_bg(
-                &mut frame, 0, 0,
+                &mut frame,
+                0,
+                0,
                 "No loops on this page. Use ,/. or g/G.",
-                pal.text_muted, pal.background,
+                pal.text_muted,
+                pal.background,
             );
             return frame;
         }
 
         if self.multi_compare_mode() {
             return self.render_compare_logs_pane(
-                width, height, page, total_pages, start, end, total_targets, pal,
+                width,
+                height,
+                page,
+                total_pages,
+                start,
+                end,
+                total_targets,
+                pal,
             );
         }
 
@@ -282,8 +300,13 @@ impl App {
         let header = truncate(
             &format!(
                 "View 4 Matrix  requested={} effective={}  page={}/{}  showing={}-{}/{}",
-                requested.label(), layout.label(),
-                page + 1, total_pages, start + 1, end, total_targets,
+                requested.label(),
+                layout.label(),
+                page + 1,
+                total_pages,
+                start + 1,
+                end,
+                total_targets,
             ),
             width,
         );
@@ -372,15 +395,23 @@ impl App {
         let theme = crate::theme_for_capability(self.color_capability);
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
         frame.fill_bg(
-            Rect { x: 0, y: 0, width, height },
+            Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
             pal.background,
         );
 
         let Some((left_id, right_id)) = self.compare_pair_ids() else {
             draw_text_on_bg(
-                &mut frame, 0, 0,
+                &mut frame,
+                0,
+                0,
                 "Compare mode needs at least two loops. Pin another loop or change filters.",
-                pal.text_muted, pal.background,
+                pal.text_muted,
+                pal.background,
             );
             return frame;
         };
@@ -391,9 +422,12 @@ impl App {
             .or_else(|| self.loops().iter().find(|view| view.id == left_id))
         else {
             draw_text_on_bg(
-                &mut frame, 0, 0,
+                &mut frame,
+                0,
+                0,
                 "Compare mode unavailable: missing left loop.",
-                pal.error, pal.background,
+                pal.error,
+                pal.background,
             );
             return frame;
         };
@@ -404,9 +438,12 @@ impl App {
             .or_else(|| self.loops().iter().find(|view| view.id == right_id))
         else {
             draw_text_on_bg(
-                &mut frame, 0, 0,
+                &mut frame,
+                0,
+                0,
                 "Compare mode unavailable: missing right loop.",
-                pal.error, pal.background,
+                pal.error,
+                pal.background,
             );
             return frame;
         };
@@ -414,9 +451,12 @@ impl App {
         let divider_width = 3usize;
         if width <= divider_width + 6 || height <= 3 {
             draw_text_on_bg(
-                &mut frame, 0, 0,
+                &mut frame,
+                0,
+                0,
                 "Compare mode: enlarge terminal viewport.",
-                pal.text_muted, pal.background,
+                pal.text_muted,
+                pal.background,
             );
             return frame;
         }
@@ -445,25 +485,40 @@ impl App {
         let header = truncate(
             &format!(
                 "Compare {}:{} <> {}:{}  page={}/{} showing={}-{}/{}  anchor={}  scroll={}",
-                left_display, left_view.name,
-                right_display, right_view.name,
-                page + 1, total_pages, start + 1, end, total_targets,
-                anchor, synced.scroll_from_bottom,
+                left_display,
+                left_view.name,
+                right_display,
+                right_view.name,
+                page + 1,
+                total_pages,
+                start + 1,
+                end,
+                total_targets,
+                anchor,
+                synced.scroll_from_bottom,
             ),
             width,
         );
         draw_text_on_bg(&mut frame, 0, 0, &header, pal.accent, pal.background);
-        let subheader = truncate(
-            &format!(
+        let subheader =
+            truncate(
+                &format!(
                 "layer:{}  toggle:C  sync:u/d ctrl+u/d  hints: same={} diff={} left={} right={}",
                 self.log_layer().label(),
                 diff_summary.equal, diff_summary.different,
                 diff_summary.left_only, diff_summary.right_only,
             ),
-            width,
-        );
+                width,
+            );
         draw_text_on_bg(&mut frame, 0, 1, &subheader, pal.text_muted, pal.background);
-        draw_text_on_bg(&mut frame, 0, 2, &"-".repeat(width), pal.border, pal.background);
+        draw_text_on_bg(
+            &mut frame,
+            0,
+            2,
+            &"-".repeat(width),
+            pal.border,
+            pal.background,
+        );
 
         for row in 0..content_rows {
             let y = content_start + row;
@@ -473,11 +528,39 @@ impl App {
             let left_text = pad_right(&truncate(left.unwrap_or(""), left_width), left_width);
             let right_text = pad_right(&truncate(right.unwrap_or(""), right_width), right_width);
             draw_text_on_bg(&mut frame, 0, y, &left_text, pal.text, pal.background);
-            draw_text_on_bg(&mut frame, left_width, y, " ", pal.text_muted, pal.background);
+            draw_text_on_bg(
+                &mut frame,
+                left_width,
+                y,
+                " ",
+                pal.text_muted,
+                pal.background,
+            );
             let hint_color = color_for_diff_hint(hint, pal);
-            draw_text_on_bg(&mut frame, left_width + 1, y, &hint.glyph().to_string(), hint_color, pal.background);
-            draw_text_on_bg(&mut frame, left_width + 2, y, " ", pal.text_muted, pal.background);
-            draw_text_on_bg(&mut frame, left_width + divider_width, y, &right_text, pal.text, pal.background);
+            draw_text_on_bg(
+                &mut frame,
+                left_width + 1,
+                y,
+                &hint.glyph().to_string(),
+                hint_color,
+                pal.background,
+            );
+            draw_text_on_bg(
+                &mut frame,
+                left_width + 2,
+                y,
+                " ",
+                pal.text_muted,
+                pal.background,
+            );
+            draw_text_on_bg(
+                &mut frame,
+                left_width + divider_width,
+                y,
+                &right_text,
+                pal.text,
+                pal.background,
+            );
         }
 
         frame
@@ -505,7 +588,12 @@ impl App {
         }
 
         let inner = frame.draw_panel(
-            Rect { x: 0, y: 0, width, height },
+            Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
             &title,
             BorderStyle::Rounded,
             border_color,
@@ -518,7 +606,11 @@ impl App {
 
         let status_upper = view.state.to_uppercase();
         let harness_display = display_name(&view.profile_harness, "-");
-        let health_flag = if view.last_error.trim().is_empty() { "ok" } else { "err" };
+        let health_flag = if view.last_error.trim().is_empty() {
+            "ok"
+        } else {
+            "err"
+        };
         let meta = truncate(
             &format!(
                 "{:<8} q={} runs={} health={} harness={}",
@@ -526,7 +618,14 @@ impl App {
             ),
             inner.width,
         );
-        draw_text_on_bg(&mut frame, inner.x, inner.y, &meta, pal.text_muted, pal.panel);
+        draw_text_on_bg(
+            &mut frame,
+            inner.x,
+            inner.y,
+            &meta,
+            pal.text_muted,
+            pal.panel,
+        );
 
         let log_start = 1;
         let log_available = inner.height.saturating_sub(log_start).max(1);
@@ -536,26 +635,46 @@ impl App {
         let tail = tail.unwrap_or(&empty_tail);
 
         let log_lines = render_log_block(
-            &tail.lines, &tail.message, inner.width, log_available, self.log_layer(),
+            &tail.lines,
+            &tail.message,
+            inner.width,
+            log_available,
+            self.log_layer(),
         );
 
         for (i, line) in log_lines.iter().enumerate() {
             if i >= log_available {
                 break;
             }
-            draw_text_on_bg(&mut frame, inner.x, inner.y + log_start + i, line, pal.text, pal.panel);
+            draw_text_on_bg(
+                &mut frame,
+                inner.x,
+                inner.y + log_start + i,
+                line,
+                pal.text,
+                pal.panel,
+            );
         }
 
         frame
     }
 
     /// Render an empty mini pane (placeholder), matching Go's `renderMiniLogEmptyPane`.
-    fn render_mini_log_empty_pane(width: usize, height: usize, pal: &ResolvedPalette) -> RenderFrame {
+    fn render_mini_log_empty_pane(
+        width: usize,
+        height: usize,
+        pal: &ResolvedPalette,
+    ) -> RenderFrame {
         let theme = crate::default_theme();
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
 
         let inner = frame.draw_panel(
-            Rect { x: 0, y: 0, width, height },
+            Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
             "empty",
             BorderStyle::Rounded,
             pal.border,
@@ -564,16 +683,22 @@ impl App {
 
         if inner.height >= 1 {
             draw_text_on_bg(
-                &mut frame, inner.x, inner.y,
+                &mut frame,
+                inner.x,
+                inner.y,
                 &truncate("Pin loops with <space>.", inner.width),
-                pal.text_muted, pal.panel,
+                pal.text_muted,
+                pal.panel,
             );
         }
         if inner.height >= 2 {
             draw_text_on_bg(
-                &mut frame, inner.x, inner.y + 1,
+                &mut frame,
+                inner.x,
+                inner.y + 1,
                 &truncate("Change layout with m.", inner.width),
-                pal.text_muted, pal.panel,
+                pal.text_muted,
+                pal.panel,
             );
         }
         frame
@@ -806,7 +931,10 @@ mod tests {
         let app = App::new("default", 12);
         let frame = app.render_multi_logs_pane(80, 30, &test_pal());
         let snapshot = frame.snapshot();
-        assert!(snapshot.contains("No loops selected"), "expected empty message, got:\n{snapshot}");
+        assert!(
+            snapshot.contains("No loops selected"),
+            "expected empty message, got:\n{snapshot}"
+        );
     }
 
     #[test]
@@ -814,7 +942,10 @@ mod tests {
         let app = multi_app(4);
         let frame = app.render_multi_logs_pane(120, 40, &test_pal());
         let header = frame.row_text(0);
-        assert!(header.contains("View 4 Matrix"), "expected header, got: {header}");
+        assert!(
+            header.contains("View 4 Matrix"),
+            "expected header, got: {header}"
+        );
         assert!(header.contains("page="), "expected page info in header");
     }
 
@@ -823,7 +954,10 @@ mod tests {
         let app = multi_app(4);
         let frame = app.render_multi_logs_pane(120, 40, &test_pal());
         let subheader = frame.row_text(1);
-        assert!(subheader.contains("layer:raw"), "expected subheader, got: {subheader}");
+        assert!(
+            subheader.contains("layer:raw"),
+            "expected subheader, got: {subheader}"
+        );
         assert!(subheader.contains("clusters:"));
         assert!(subheader.contains("pin:<space>"));
     }
@@ -833,58 +967,98 @@ mod tests {
         let app = multi_app(4);
         let frame = app.render_multi_logs_pane(120, 40, &test_pal());
         let snapshot = frame.snapshot();
-        assert!(snapshot.contains("test-loop-0"), "expected loop name in grid:\n{snapshot}");
+        assert!(
+            snapshot.contains("test-loop-0"),
+            "expected loop name in grid:\n{snapshot}"
+        );
     }
 
     #[test]
     fn render_multi_logs_pane_with_logs() {
         let mut app = multi_app(2);
         let mut logs = HashMap::new();
-        logs.insert("loop-0".to_owned(), LogTailView {
-            lines: vec!["hello from loop-0".to_owned()],
-            message: String::new(),
-        });
+        logs.insert(
+            "loop-0".to_owned(),
+            LogTailView {
+                lines: vec!["hello from loop-0".to_owned()],
+                message: String::new(),
+            },
+        );
         app.set_multi_logs(logs);
         let frame = app.render_multi_logs_pane(120, 40, &test_pal());
         let snapshot = frame.snapshot();
-        assert!(snapshot.contains("hello from loop-0"), "expected log content:\n{snapshot}");
+        assert!(
+            snapshot.contains("hello from loop-0"),
+            "expected log content:\n{snapshot}"
+        );
     }
 
     #[test]
     fn compare_mode_toggle_renders_side_by_side_header() {
         let mut app = multi_app(2);
         let mut logs = HashMap::new();
-        logs.insert("loop-0".to_owned(), LogTailView {
-            lines: vec!["2026-02-12T11:00:00Z start".to_owned(), "2026-02-12T11:00:01Z sync".to_owned()],
-            message: String::new(),
-        });
-        logs.insert("loop-1".to_owned(), LogTailView {
-            lines: vec!["2026-02-12T11:00:00Z start".to_owned(), "2026-02-12T11:00:01Z sync".to_owned()],
-            message: String::new(),
-        });
+        logs.insert(
+            "loop-0".to_owned(),
+            LogTailView {
+                lines: vec![
+                    "2026-02-12T11:00:00Z start".to_owned(),
+                    "2026-02-12T11:00:01Z sync".to_owned(),
+                ],
+                message: String::new(),
+            },
+        );
+        logs.insert(
+            "loop-1".to_owned(),
+            LogTailView {
+                lines: vec![
+                    "2026-02-12T11:00:00Z start".to_owned(),
+                    "2026-02-12T11:00:01Z sync".to_owned(),
+                ],
+                message: String::new(),
+            },
+        );
         app.set_multi_logs(logs);
         app.update(key(Key::Char('C')));
         assert!(app.multi_compare_mode());
         let frame = app.render_multi_logs_pane(120, 24, &test_pal());
         let header = frame.row_text(0);
         let subheader = frame.row_text(1);
-        assert!(header.contains("Compare"), "expected compare header: {header}");
-        assert!(header.contains("<>"), "expected paired loops in header: {header}");
-        assert!(subheader.contains("sync:u/d"), "expected compare controls in subheader: {subheader}");
+        assert!(
+            header.contains("Compare"),
+            "expected compare header: {header}"
+        );
+        assert!(
+            header.contains("<>"),
+            "expected paired loops in header: {header}"
+        );
+        assert!(
+            subheader.contains("sync:u/d"),
+            "expected compare controls in subheader: {subheader}"
+        );
     }
 
     #[test]
     fn compare_mode_scroll_keys_update_shared_scroll() {
         let mut app = multi_app(2);
         let mut logs = HashMap::new();
-        logs.insert("loop-0".to_owned(), LogTailView {
-            lines: (0..80).map(|idx| format!("2026-02-12T11:00:{idx:02}Z left-{idx}")).collect(),
-            message: String::new(),
-        });
-        logs.insert("loop-1".to_owned(), LogTailView {
-            lines: (0..80).map(|idx| format!("2026-02-12T11:00:{idx:02}Z right-{idx}")).collect(),
-            message: String::new(),
-        });
+        logs.insert(
+            "loop-0".to_owned(),
+            LogTailView {
+                lines: (0..80)
+                    .map(|idx| format!("2026-02-12T11:00:{idx:02}Z left-{idx}"))
+                    .collect(),
+                message: String::new(),
+            },
+        );
+        logs.insert(
+            "loop-1".to_owned(),
+            LogTailView {
+                lines: (0..80)
+                    .map(|idx| format!("2026-02-12T11:00:{idx:02}Z right-{idx}"))
+                    .collect(),
+                message: String::new(),
+            },
+        );
         app.set_multi_logs(logs);
         app.update(key(Key::Char('C')));
         assert_eq!(app.log_scroll(), 0);
@@ -892,28 +1066,37 @@ mod tests {
         let after_up = app.log_scroll();
         assert!(after_up > 0, "expected compare scroll to move up");
         app.update(key(Key::Char('d')));
-        assert!(app.log_scroll() < after_up, "expected compare scroll to move back down");
+        assert!(
+            app.log_scroll() < after_up,
+            "expected compare scroll to move back down"
+        );
     }
 
     #[test]
     fn compare_mode_renders_row_level_diff_hints() {
         let mut app = multi_app(2);
         let mut logs = HashMap::new();
-        logs.insert("loop-0".to_owned(), LogTailView {
-            lines: vec![
-                "2026-02-12T11:00:00Z same".to_owned(),
-                "2026-02-12T11:00:01Z left-change".to_owned(),
-                "2026-02-12T11:00:02Z left-only".to_owned(),
-            ],
-            message: String::new(),
-        });
-        logs.insert("loop-1".to_owned(), LogTailView {
-            lines: vec![
-                "2026-02-12T11:00:00Z same".to_owned(),
-                "2026-02-12T11:00:01Z right-change".to_owned(),
-            ],
-            message: String::new(),
-        });
+        logs.insert(
+            "loop-0".to_owned(),
+            LogTailView {
+                lines: vec![
+                    "2026-02-12T11:00:00Z same".to_owned(),
+                    "2026-02-12T11:00:01Z left-change".to_owned(),
+                    "2026-02-12T11:00:02Z left-only".to_owned(),
+                ],
+                message: String::new(),
+            },
+        );
+        logs.insert(
+            "loop-1".to_owned(),
+            LogTailView {
+                lines: vec![
+                    "2026-02-12T11:00:00Z same".to_owned(),
+                    "2026-02-12T11:00:01Z right-change".to_owned(),
+                ],
+                message: String::new(),
+            },
+        );
         app.set_multi_logs(logs);
         app.update(key(Key::Char('C')));
         let frame = app.render_multi_logs_pane(60, 14, &test_pal());
@@ -940,10 +1123,13 @@ mod tests {
     fn mini_pane_headers_stay_sticky_when_scrolling() {
         let mut app = multi_app(1);
         let mut logs = HashMap::new();
-        logs.insert("loop-0".to_owned(), LogTailView {
-            lines: (0..80).map(|idx| format!("line {idx}")).collect(),
-            message: String::new(),
-        });
+        logs.insert(
+            "loop-0".to_owned(),
+            LogTailView {
+                lines: (0..80).map(|idx| format!("line {idx}")).collect(),
+                message: String::new(),
+            },
+        );
         app.set_multi_logs(logs);
         let pal = test_pal();
         let view = app.filtered()[0].clone();
@@ -952,10 +1138,13 @@ mod tests {
         let meta = baseline.row_text(1);
         let first_body_row = baseline.row_text(2);
         let mut updated_logs = HashMap::new();
-        updated_logs.insert("loop-0".to_owned(), LogTailView {
-            lines: (0..81).map(|idx| format!("line {idx}")).collect(),
-            message: String::new(),
-        });
+        updated_logs.insert(
+            "loop-0".to_owned(),
+            LogTailView {
+                lines: (0..81).map(|idx| format!("line {idx}")).collect(),
+                message: String::new(),
+            },
+        );
         app.set_multi_logs(updated_logs);
         let scrolled = app.render_mini_log_pane(&view, 50, 10, &pal);
         assert_eq!(scrolled.row_text(0), border_top);
@@ -970,7 +1159,10 @@ mod tests {
         let view = &app.filtered()[0].clone();
         let frame = app.render_mini_log_pane(view, 40, 10, &test_pal());
         let snapshot = frame.snapshot();
-        assert!(snapshot.contains("[PIN]"), "expected [PIN] marker:\n{snapshot}");
+        assert!(
+            snapshot.contains("[PIN]"),
+            "expected [PIN] marker:\n{snapshot}"
+        );
     }
 
     #[test]
@@ -980,8 +1172,14 @@ mod tests {
         let frame = app.render_mini_log_pane(view, 40, 10, &test_pal());
         let top_row = frame.row_text(0);
         let bottom_row = frame.row_text(9);
-        assert!(top_row.starts_with('╭'), "expected panel top border, got: {top_row}");
-        assert!(bottom_row.starts_with('╰'), "expected panel bottom border, got: {bottom_row}");
+        assert!(
+            top_row.starts_with('╭'),
+            "expected panel top border, got: {top_row}"
+        );
+        assert!(
+            bottom_row.starts_with('╰'),
+            "expected panel bottom border, got: {bottom_row}"
+        );
     }
 
     #[test]
@@ -1016,18 +1214,27 @@ mod tests {
         app.set_tab(MainTab::MultiLogs);
         let mut logs = HashMap::new();
         for i in 0..4 {
-            logs.insert(format!("loop-{i}"), LogTailView {
-                lines: vec![format!("output from loop-{i}")],
-                message: String::new(),
-            });
+            logs.insert(
+                format!("loop-{i}"),
+                LogTailView {
+                    lines: vec![format!("output from loop-{i}")],
+                    message: String::new(),
+                },
+            );
         }
         app.set_multi_logs(logs);
         let frame = app.render_multi_logs_pane(100, 30, &test_pal());
         let snapshot = frame.snapshot();
         assert!(snapshot.contains("View 4 Matrix"));
         for i in 0..4 {
-            assert!(snapshot.contains(&format!("test-loop-{i}")), "expected test-loop-{i} in snapshot:\n{snapshot}");
-            assert!(snapshot.contains(&format!("output from loop-{i}")), "expected output from loop-{i} in snapshot:\n{snapshot}");
+            assert!(
+                snapshot.contains(&format!("test-loop-{i}")),
+                "expected test-loop-{i} in snapshot:\n{snapshot}"
+            );
+            assert!(
+                snapshot.contains(&format!("output from loop-{i}")),
+                "expected output from loop-{i} in snapshot:\n{snapshot}"
+            );
         }
     }
 }
