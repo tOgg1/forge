@@ -28,6 +28,8 @@ pub mod extension_sandbox;
 pub mod failure_focus;
 pub mod filter;
 pub mod fleet_selection;
+#[cfg(feature = "frankentui-bootstrap")]
+pub mod frankentui_bootstrap;
 pub mod global_search_index;
 pub mod help_overlay;
 pub mod hero_widgets;

@@ -17,7 +17,7 @@ default = []
 frankentui-upstream = ["dep:ftui"]
 
 [dependencies]
-ftui = { git = "https://github.com/Dicklesworthstone/frankentui", rev = "23429fac0e739635c7b8e0b995bde09401ff6ea0", default-features = false, optional = true }
+ftui = { git = "https://github.com/Dicklesworthstone/frankentui", rev = "23429fac0e739635c7b8e0b995bde09401ff6ea0", default-features = false, features = ["runtime", "crossterm"], optional = true }
 
 [lints]
 workspace = true

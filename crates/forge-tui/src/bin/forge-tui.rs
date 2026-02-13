@@ -11,6 +11,12 @@ use forge_tui::theme::detect_terminal_color_capability;
 #[path = "../interactive_runtime.rs"]
 mod interactive_runtime;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeFlavor {
+    Legacy,
+    FrankentuiBootstrap,
+}
+
 #[derive(Debug, Clone, Default)]
 struct LiveLoopSnapshot {
     loops: Vec<LoopView>,
@@ -77,9 +83,38 @@ fn main() {
 }
 
 fn run_interactive() {
-    if let Err(err) = interactive_runtime::run() {
-        eprintln!("warning: failed to run interactive runtime ({err}); using snapshot renderer");
-        run_interactive_snapshot();
+    let result = match runtime_flavor_from_env() {
+        RuntimeFlavor::Legacy => interactive_runtime::run(),
+        RuntimeFlavor::FrankentuiBootstrap => run_frankentui_bootstrap(),
+    };
+
+    if let Err(err) = result {
+        if dev_snapshot_fallback_enabled() {
+            eprintln!(
+                "warning: failed to run interactive runtime ({err}); using snapshot renderer because FORGE_TUI_DEV_SNAPSHOT_FALLBACK is enabled"
+            );
+            run_interactive_snapshot();
+        } else {
+            eprintln!(
+                "error: failed to run interactive runtime ({err}); set FORGE_TUI_DEV_SNAPSHOT_FALLBACK=1 for explicit dev fallback"
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_frankentui_bootstrap() -> Result<(), String> {
+    #[cfg(feature = "frankentui-bootstrap")]
+    {
+        return forge_tui::frankentui_bootstrap::run(resolve_database_path());
+    }
+
+    #[cfg(not(feature = "frankentui-bootstrap"))]
+    {
+        Err(
+            "frankentui bootstrap requested via FORGE_TUI_RUNTIME but build is missing feature `frankentui-bootstrap`"
+                .to_owned(),
+        )
     }
 }
 
@@ -394,6 +429,36 @@ fn non_empty_env_path(key: &str) -> Option<PathBuf> {
     })
 }
 
+fn dev_snapshot_fallback_enabled() -> bool {
+    std::env::var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK")
+        .map(|raw| {
+            let normalized = raw.trim().to_ascii_lowercase();
+            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+        })
+        .unwrap_or(false)
+}
+
+fn runtime_flavor_from_env() -> RuntimeFlavor {
+    if std::env::var("FORGE_TUI_RUNTIME")
+        .ok()
+        .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("frankentui"))
+        || env_truthy("FORGE_TUI_USE_FRANKENTUI_BOOTSTRAP")
+    {
+        RuntimeFlavor::FrankentuiBootstrap
+    } else {
+        RuntimeFlavor::Legacy
+    }
+}
+
+fn env_truthy(key: &str) -> bool {
+    std::env::var(key)
+        .map(|raw| {
+            let normalized = raw.trim().to_ascii_lowercase();
+            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+        })
+        .unwrap_or(false)
+}
+
 fn trim(value: &str, max: usize) -> String {
     if value.chars().count() <= max {
         return value.to_string();
@@ -424,7 +489,8 @@ mod tests {
     use forge_db::profile_repository::{Profile, ProfileRepository};
 
     use super::{
-        load_live_loop_snapshot, plan_render_diff, resolve_database_path, IncrementalRenderEngine,
+        dev_snapshot_fallback_enabled, load_live_loop_snapshot, plan_render_diff,
+        resolve_database_path, runtime_flavor_from_env, IncrementalRenderEngine, RuntimeFlavor,
     };
 
     #[test]
@@ -530,6 +596,61 @@ mod tests {
         assert_eq!(after.loops[0].queue_depth, 1);
 
         cleanup_temp_dir(&path);
+    }
+
+    #[test]
+    fn dev_snapshot_fallback_env_parser_matches_expected_values() {
+        let _guard = env_lock();
+        let _reset = EnvGuard::unset("FORGE_TUI_DEV_SNAPSHOT_FALLBACK");
+        assert!(!dev_snapshot_fallback_enabled());
+
+        std::env::set_var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK", "1");
+        assert!(dev_snapshot_fallback_enabled());
+
+        std::env::set_var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK", "true");
+        assert!(dev_snapshot_fallback_enabled());
+
+        std::env::set_var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK", "YES");
+        assert!(dev_snapshot_fallback_enabled());
+
+        std::env::set_var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK", "0");
+        assert!(!dev_snapshot_fallback_enabled());
+
+        std::env::set_var("FORGE_TUI_DEV_SNAPSHOT_FALLBACK", "no");
+        assert!(!dev_snapshot_fallback_enabled());
+    }
+
+    #[test]
+    fn runtime_flavor_defaults_to_legacy() {
+        let _guard = env_lock();
+        let _unset_runtime = EnvGuard::unset("FORGE_TUI_RUNTIME");
+        let _unset_toggle = EnvGuard::unset("FORGE_TUI_USE_FRANKENTUI_BOOTSTRAP");
+
+        assert_eq!(runtime_flavor_from_env(), RuntimeFlavor::Legacy);
+    }
+
+    #[test]
+    fn runtime_flavor_accepts_frankentui_runtime_name() {
+        let _guard = env_lock();
+        let _set_runtime = EnvGuard::set("FORGE_TUI_RUNTIME", "frankentui");
+        let _unset_toggle = EnvGuard::unset("FORGE_TUI_USE_FRANKENTUI_BOOTSTRAP");
+
+        assert_eq!(
+            runtime_flavor_from_env(),
+            RuntimeFlavor::FrankentuiBootstrap
+        );
+    }
+
+    #[test]
+    fn runtime_flavor_accepts_boolean_toggle() {
+        let _guard = env_lock();
+        let _unset_runtime = EnvGuard::unset("FORGE_TUI_RUNTIME");
+        let _set_toggle = EnvGuard::set("FORGE_TUI_USE_FRANKENTUI_BOOTSTRAP", "YES");
+
+        assert_eq!(
+            runtime_flavor_from_env(),
+            RuntimeFlavor::FrankentuiBootstrap
+        );
     }
 
     #[test]

@@ -12,6 +12,10 @@ path = "src/lib.rs"
 name = "forge-tui"
 path = "src/bin/forge-tui.rs"
 
+[features]
+default = []
+frankentui-bootstrap = ["forge-ftui-adapter/frankentui-upstream"]
+
 [dependencies]
 forge-cli = { path = "../forge-cli" }
 forge-ftui-adapter = { path = "../forge-ftui-adapter" }
