@@ -19,6 +19,7 @@ pub mod highlight_spec;
 pub mod hook;
 pub mod init;
 pub mod inject;
+pub mod job;
 pub mod kill;
 pub mod lock;
 pub mod logs;
@@ -48,6 +49,7 @@ pub mod status;
 pub mod stop;
 mod structured_data_renderer;
 pub mod template;
+pub mod trigger;
 pub mod tui;
 pub mod up;
 pub mod wait;
@@ -131,6 +133,16 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let mut backend = inject::SqliteInjectBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             inject::run_with_backend(&forwarded, &mut backend, stdout, stderr)
+        }
+        Some("job") => {
+            let store = job::JobStore::open_from_env();
+            let forwarded = forward_args(remaining, &flags);
+            job::run_with_store(&forwarded, &store, stdout, stderr)
+        }
+        Some("trigger") => {
+            let store = job::JobStore::open_from_env();
+            let forwarded = forward_args(remaining, &flags);
+            trigger::run_with_store(&forwarded, &store, stdout, stderr)
         }
         Some("init") => {
             let backend = init::FilesystemInitBackend;
@@ -424,6 +436,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  hook      Manage event hooks")?;
     writeln!(out, "  inject    Inject message directly into agent")?;
     writeln!(out, "  init      Initialize a repo for Forge loops")?;
+    writeln!(out, "  job       Manage jobs")?;
     writeln!(out, "  kill      Kill loops immediately")?;
     writeln!(out, "  lock      Manage advisory file locks")?;
     writeln!(out, "  logs      Tail loop logs")?;
@@ -445,6 +458,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  status    Show fleet status summary")?;
     writeln!(out, "  stop      Stop loops after current iteration")?;
     writeln!(out, "  template  Manage message templates")?;
+    writeln!(out, "  trigger   Manage job triggers")?;
     writeln!(out, "  tui       Launch the Forge TUI")?;
     writeln!(out, "  up        Start loop(s) for a repo")?;
     writeln!(out, "  use       Set current workspace or agent context")?;
