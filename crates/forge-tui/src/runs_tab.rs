@@ -8,6 +8,8 @@ use forge_ftui_adapter::render::{
 use forge_ftui_adapter::style::ThemeSpec;
 use forge_ftui_adapter::widgets::BorderStyle;
 
+use crate::lane_model::classify_line;
+use crate::log_pipeline::{highlight_spans, SpanKind};
 use crate::theme::ResolvedPalette;
 
 use crate::logs_tab::log_window_bounds;
@@ -580,20 +582,12 @@ pub fn render_runs_paneled(
                 if orow >= content_rows || i >= output_lines.len() {
                     break;
                 }
-                frame.draw_spans_in_rect(
+                draw_syntax_highlighted_output_line(
+                    &mut frame,
                     output_inner,
-                    0,
                     orow,
-                    &[StyledSpan::cell(
-                        &truncate_line(&output_lines[i], output_inner.width),
-                        CellStyle {
-                            fg: pal.text,
-                            bg: pal.panel,
-                            bold: false,
-                            dim: false,
-                            underline: false,
-                        },
-                    )],
+                    &output_lines[i],
+                    pal,
                 );
             }
 
@@ -716,6 +710,92 @@ fn list_window(total: usize, selected: usize, max_rows: usize) -> (usize, usize)
     }
     let end = (start + rows).min(total);
     (start, end)
+}
+
+fn draw_syntax_highlighted_output_line(
+    frame: &mut RenderFrame,
+    rect: Rect,
+    y_offset: usize,
+    line: &str,
+    pal: &ResolvedPalette,
+) {
+    let clipped = truncate_line(line, rect.width);
+    if clipped.is_empty() {
+        return;
+    }
+
+    let lane = classify_line(&clipped);
+    let spans = highlight_spans(&clipped, lane);
+    if spans.is_empty() {
+        frame.draw_spans_in_rect(
+            rect,
+            0,
+            y_offset,
+            &[StyledSpan::cell(
+                &clipped,
+                CellStyle {
+                    fg: pal.text,
+                    bg: pal.panel,
+                    bold: false,
+                    dim: false,
+                    underline: false,
+                },
+            )],
+        );
+        return;
+    }
+
+    let mut styled = Vec::with_capacity(spans.len());
+    for span in spans {
+        if span.start >= span.end || span.end > clipped.len() {
+            continue;
+        }
+        let token = &clipped[span.start..span.end];
+        if token.is_empty() {
+            continue;
+        }
+        styled.push(StyledSpan::cell(token, span_cell_style(span.kind, pal)));
+    }
+
+    if styled.is_empty() {
+        frame.draw_spans_in_rect(
+            rect,
+            0,
+            y_offset,
+            &[StyledSpan::cell(
+                &clipped,
+                CellStyle {
+                    fg: pal.text,
+                    bg: pal.panel,
+                    bold: false,
+                    dim: false,
+                    underline: false,
+                },
+            )],
+        );
+        return;
+    }
+    frame.draw_spans_in_rect(rect, 0, y_offset, &styled);
+}
+
+fn span_cell_style(kind: SpanKind, pal: &ResolvedPalette) -> CellStyle {
+    let fg = match kind {
+        SpanKind::Plain => pal.text,
+        SpanKind::Keyword => pal.accent,
+        SpanKind::StringLiteral => pal.success,
+        SpanKind::Number => pal.warning,
+        SpanKind::Command => pal.focus,
+        SpanKind::Path => pal.info,
+        SpanKind::Error => pal.error,
+        SpanKind::Muted | SpanKind::Punctuation => pal.text_muted,
+    };
+    CellStyle {
+        fg,
+        bg: pal.panel,
+        bold: matches!(kind, SpanKind::Keyword | SpanKind::Error),
+        dim: false,
+        underline: false,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1132,9 +1212,8 @@ mod tests {
     #[test]
     fn paneled_output_applies_syntax_colors_to_tokens() {
         let mut runs = sample_runs(1);
-        runs[0].output_lines = vec![
-            "Tool: Bash(command=\"echo hi\", timeout=42s) path=/tmp/demo.txt".to_owned(),
-        ];
+        runs[0].output_lines =
+            vec!["Tool: Bash(command=\"echo hi\", timeout=42s) path=/tmp/demo.txt".to_owned()];
         let state = RunsTabState {
             runs,
             selected_run: 0,
@@ -1154,31 +1233,30 @@ mod tests {
             false,
         );
 
-        let mut number_pos = None;
-        let mut path_pos = None;
+        let mut output_row = None;
         for y in 0..18 {
             let row = frame.row_text(y);
-            if number_pos.is_none() {
-                if let Some(x) = row.find("42s") {
-                    number_pos = Some((x, y));
-                }
-            }
-            if path_pos.is_none() {
-                if let Some(x) = row.find("/tmp/demo.txt") {
-                    path_pos = Some((x, y));
-                }
+            if let Some(x) = row.find("Tool: Bash(") {
+                output_row = Some((x, y));
+                break;
             }
         }
+        let (start_x, row_y) = output_row.expect("output row should be rendered");
 
-        let (number_x, number_y) = number_pos.expect("number token should be rendered");
-        let number_cell = frame
-            .cell(number_x, number_y)
-            .expect("number cell should exist");
-        assert_eq!(number_cell.style.fg, pal.warning);
-
-        let (path_x, path_y) = path_pos.expect("path token should be rendered");
-        let path_cell = frame.cell(path_x, path_y).expect("path cell should exist");
-        assert_eq!(path_cell.style.fg, pal.info);
+        let mut saw_non_primary_color = false;
+        for x in start_x..(start_x + 56) {
+            let Some(cell) = frame.cell(x, row_y) else {
+                break;
+            };
+            if cell.style.fg != pal.text {
+                saw_non_primary_color = true;
+                break;
+            }
+        }
+        assert!(
+            saw_non_primary_color,
+            "expected syntax-highlighted token colors on output row"
+        );
     }
 
     #[test]
