@@ -8,15 +8,6 @@ use forge_tui::app::{App, LoopView};
 use forge_tui::polling_pipeline::{PollScheduler, PollingConfig, PollingQueue};
 use forge_tui::theme::detect_terminal_color_capability;
 
-#[path = "../interactive_runtime.rs"]
-mod interactive_runtime;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RuntimeFlavor {
-    Legacy,
-    FrankentuiBootstrap,
-}
-
 #[derive(Debug, Clone, Default)]
 struct LiveLoopSnapshot {
     loops: Vec<LoopView>,
@@ -83,10 +74,14 @@ fn main() {
 }
 
 fn run_interactive() {
-    let result = match runtime_flavor_from_env() {
-        RuntimeFlavor::Legacy => interactive_runtime::run(),
-        RuntimeFlavor::FrankentuiBootstrap => run_frankentui_bootstrap(),
-    };
+    if runtime_legacy_requested() {
+        eprintln!(
+            "error: FORGE_TUI_RUNTIME=legacy is no longer supported; interactive mode always uses FrankenTUI bootstrap"
+        );
+        std::process::exit(2);
+    }
+
+    let result = run_frankentui_bootstrap();
 
     if let Err(err) = result {
         if dev_snapshot_fallback_enabled() {
@@ -438,29 +433,11 @@ fn dev_snapshot_fallback_enabled() -> bool {
         .unwrap_or(false)
 }
 
-fn runtime_flavor_from_env() -> RuntimeFlavor {
-    if let Ok(raw) = std::env::var("FORGE_TUI_RUNTIME") {
-        let normalized = raw.trim().to_ascii_lowercase();
-        if matches!(normalized.as_str(), "legacy" | "old") {
-            return RuntimeFlavor::Legacy;
-        }
-        if matches!(normalized.as_str(), "frankentui" | "bootstrap") {
-            return RuntimeFlavor::FrankentuiBootstrap;
-        }
-    }
-
-    if env_truthy("FORGE_TUI_USE_FRANKENTUI_BOOTSTRAP") {
-        return RuntimeFlavor::FrankentuiBootstrap;
-    }
-
-    RuntimeFlavor::FrankentuiBootstrap
-}
-
-fn env_truthy(key: &str) -> bool {
-    std::env::var(key)
+fn runtime_legacy_requested() -> bool {
+    std::env::var("FORGE_TUI_RUNTIME")
         .map(|raw| {
             let normalized = raw.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+            matches!(normalized.as_str(), "legacy" | "old")
         })
         .unwrap_or(false)
 }
@@ -496,7 +473,7 @@ mod tests {
 
     use super::{
         dev_snapshot_fallback_enabled, load_live_loop_snapshot, plan_render_diff,
-        resolve_database_path, runtime_flavor_from_env, IncrementalRenderEngine, RuntimeFlavor,
+        resolve_database_path, runtime_legacy_requested, IncrementalRenderEngine,
     };
 
     #[test]
@@ -627,47 +604,26 @@ mod tests {
     }
 
     #[test]
-    fn runtime_flavor_defaults_to_frankentui_bootstrap() {
-        let _guard = env_lock();
-        let _unset_runtime = EnvGuard::unset("FORGE_TUI_RUNTIME");
-        let _unset_toggle = EnvGuard::unset("FORGE_TUI_USE_FRANKENTUI_BOOTSTRAP");
-        assert_eq!(
-            runtime_flavor_from_env(),
-            RuntimeFlavor::FrankentuiBootstrap
-        );
-    }
-
-    #[test]
-    fn runtime_flavor_accepts_legacy_runtime_name() {
+    fn runtime_legacy_requested_detects_legacy_values() {
         let _guard = env_lock();
         let _set_runtime = EnvGuard::set("FORGE_TUI_RUNTIME", "legacy");
-        let _set_toggle = EnvGuard::set("FORGE_TUI_USE_FRANKENTUI_BOOTSTRAP", "yes");
+        assert!(runtime_legacy_requested());
 
-        assert_eq!(runtime_flavor_from_env(), RuntimeFlavor::Legacy);
+        std::env::set_var("FORGE_TUI_RUNTIME", "old");
+        assert!(runtime_legacy_requested());
     }
 
     #[test]
-    fn runtime_flavor_accepts_frankentui_runtime_name() {
-        let _guard = env_lock();
-        let _set_runtime = EnvGuard::set("FORGE_TUI_RUNTIME", "frankentui");
-        let _unset_toggle = EnvGuard::unset("FORGE_TUI_USE_FRANKENTUI_BOOTSTRAP");
-
-        assert_eq!(
-            runtime_flavor_from_env(),
-            RuntimeFlavor::FrankentuiBootstrap
-        );
-    }
-
-    #[test]
-    fn runtime_flavor_accepts_boolean_toggle() {
+    fn runtime_legacy_requested_rejects_non_legacy_values() {
         let _guard = env_lock();
         let _unset_runtime = EnvGuard::unset("FORGE_TUI_RUNTIME");
-        let _set_toggle = EnvGuard::set("FORGE_TUI_USE_FRANKENTUI_BOOTSTRAP", "YES");
+        assert!(!runtime_legacy_requested());
 
-        assert_eq!(
-            runtime_flavor_from_env(),
-            RuntimeFlavor::FrankentuiBootstrap
-        );
+        std::env::set_var("FORGE_TUI_RUNTIME", "frankentui");
+        assert!(!runtime_legacy_requested());
+
+        std::env::set_var("FORGE_TUI_RUNTIME", "bootstrap");
+        assert!(!runtime_legacy_requested());
     }
 
     #[test]
