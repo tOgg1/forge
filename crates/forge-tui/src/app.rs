@@ -3493,7 +3493,12 @@ impl App {
             self.render_tab_rail(&mut frame, width, &pal);
             2
         };
-        let footer_lines = if self.status_text.is_empty() { 1 } else { 2 };
+        let failure_explain_strip = self.failure_explain_strip_text();
+        let footer_lines = if self.status_text.is_empty() && failure_explain_strip.is_none() {
+            1
+        } else {
+            2
+        };
         let content_height = height.saturating_sub(content_start + footer_lines).max(1);
 
         match self.mode {
@@ -3818,6 +3823,10 @@ impl App {
             let status_text = self.status_display_text();
             let truncated = trim_to_width(&status_text, width);
             frame.draw_styled_text(0, status_y, &truncated, status_fg, pal.background, false);
+        } else if let Some(strip) = &failure_explain_strip {
+            let status_y = height.saturating_sub(2);
+            let truncated = trim_to_width(strip, width);
+            frame.draw_styled_text(0, status_y, &truncated, pal.warning, pal.background, false);
         }
 
         // Footer hint line with panel background stripe.
@@ -4748,6 +4757,54 @@ impl App {
         out
     }
 
+    fn failure_explain_strip_text(&self) -> Option<String> {
+        let lines = self.failure_explain_source_lines()?;
+        let focus = crate::failure_focus::build_failure_focus(lines, None)?;
+        let mut links = focus.links;
+        links.sort_by(|a, b| {
+            failure_explain_label_priority(&a.label)
+                .cmp(&failure_explain_label_priority(&b.label))
+                .then(a.line_index.cmp(&b.line_index))
+        });
+
+        let mut seen_labels: HashSet<&'static str> = HashSet::new();
+        let mut top_causes = Vec::new();
+        for link in links {
+            let label = failure_explain_label_display(&link.label);
+            if !seen_labels.insert(label) {
+                continue;
+            }
+            let compact = trim_to_width(
+                &link.text.split_whitespace().collect::<Vec<_>>().join(" "),
+                36,
+            );
+            top_causes.push(format!("{label}={compact}"));
+            if top_causes.len() >= 3 {
+                break;
+            }
+        }
+
+        if top_causes.is_empty() {
+            None
+        } else {
+            Some(format!("Failure explain: {}", top_causes.join("  |  ")))
+        }
+    }
+
+    fn failure_explain_source_lines(&self) -> Option<&[String]> {
+        if self.tab == MainTab::Runs {
+            if let Some(run) = self.run_history.get(self.selected_run) {
+                if !run.output_lines.is_empty() {
+                    return Some(&run.output_lines);
+                }
+            }
+        }
+        if !self.selected_log.lines.is_empty() {
+            return Some(&self.selected_log.lines);
+        }
+        None
+    }
+
     fn notification_event_is_snoozed(&self, event: &NotificationEvent) -> bool {
         event
             .snoozed_until_sequence
@@ -5021,6 +5078,28 @@ fn trim_to_width(value: &str, width: usize) -> String {
         return value.to_owned();
     }
     value.chars().take(width).collect()
+}
+
+fn failure_explain_label_priority(label: &str) -> usize {
+    match label {
+        "root-cause" => 0,
+        "root-frame" => 1,
+        "command" => 2,
+        "failure" => 3,
+        "cause-context" => 4,
+        _ => 5,
+    }
+}
+
+fn failure_explain_label_display(label: &str) -> &'static str {
+    match label {
+        "root-cause" => "root cause",
+        "root-frame" => "frame",
+        "command" => "command",
+        "failure" => "failure",
+        "cause-context" => "context",
+        _ => "cause",
+    }
 }
 
 /// Multi-page pagination bounds, matching Go's `multiPageBounds`.
@@ -7144,13 +7223,24 @@ mod tests {
         app.status_text.clear();
         app.status_kind = StatusKind::Info;
         assert!(app.notification_center_snooze_latest(3));
-        assert_eq!(app.status_display_text(), "");
+        assert_eq!(app.status_display_text(), "timers:1 next:3t");
 
         app.advance_notification_clock(2);
-        assert_eq!(app.status_display_text(), "");
+        assert_eq!(app.status_display_text(), "timers:1 next:1t");
 
         app.advance_notification_clock(1);
         assert_eq!(app.status_display_text(), "only");
+    }
+
+    #[test]
+    fn status_display_appends_timer_summary_when_status_present() {
+        let mut app = App::new("default", 12);
+        app.set_status(StatusKind::Info, "first");
+        app.set_status(StatusKind::Info, "second");
+        assert!(app.notification_center_snooze_latest(4));
+
+        let display = app.status_display_text();
+        assert_eq!(display, "second [timers:1 next:4t]");
     }
 
     #[test]
