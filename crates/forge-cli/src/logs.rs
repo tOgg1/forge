@@ -51,6 +51,45 @@ pub struct RenderOptions {
     compact: bool,
 }
 
+/// Semantic log layer used by shared renderers (CLI/TUI).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogRenderLayer {
+    Raw,
+    Events,
+    Errors,
+    Tools,
+    Diff,
+}
+
+/// Render already-loaded log lines using the same parser/renderer pipeline as
+/// `forge logs`, constrained to one semantic layer.
+#[must_use]
+pub fn render_lines_for_layer(
+    lines: &[String],
+    layer: LogRenderLayer,
+    no_color: bool,
+) -> Vec<String> {
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    let filtered = filter_lines_for_layer(lines, layer);
+    if filtered.is_empty() {
+        return Vec::new();
+    }
+
+    let rendered = render_log_content(
+        &filtered.join("\n"),
+        RenderOptions {
+            no_color,
+            raw: false,
+            compact: false,
+        },
+    );
+
+    rendered.lines().map(str::to_owned).collect()
+}
+
 pub trait LogsBackend {
     fn data_dir(&self) -> &str;
     fn repo_path(&self) -> Result<String, String>;
@@ -550,6 +589,68 @@ fn render_log_chunk(
     let out = collect_render_lines(content, use_color);
     let out = render_section_aware(&out, use_color, options.compact);
     render_diff_lines_incremental(&out, use_color, diff_state).join("\n")
+}
+
+fn filter_lines_for_layer(lines: &[String], layer: LogRenderLayer) -> Vec<String> {
+    if matches!(layer, LogRenderLayer::Raw) {
+        return lines.to_vec();
+    }
+
+    let mut parser = SectionParser::new();
+    let mut filtered = Vec::new();
+    let mut in_command_block = false;
+
+    for line in lines {
+        let events = parser.feed(line);
+        let kind = line_kind_for_events(&events);
+
+        let starts_command = matches!(kind, SectionKind::Unknown)
+            && (looks_like_command_prompt(line) || looks_like_exit_code(line));
+        if starts_command {
+            in_command_block = true;
+        } else if !matches!(kind, SectionKind::Unknown) {
+            in_command_block = false;
+        }
+
+        let include = match layer {
+            LogRenderLayer::Raw => true,
+            LogRenderLayer::Events => is_event_layer_kind(kind),
+            LogRenderLayer::Errors => kind == SectionKind::ErrorBlock,
+            LogRenderLayer::Tools => kind == SectionKind::ToolCall || in_command_block,
+            LogRenderLayer::Diff => kind == SectionKind::Diff,
+        };
+
+        if include {
+            filtered.push(line.clone());
+        }
+    }
+
+    filtered
+}
+
+fn line_kind_for_events(events: &[SectionEvent]) -> SectionKind {
+    for event in events {
+        match event {
+            SectionEvent::Start { kind, .. } | SectionEvent::Continue { kind, .. } => {
+                return *kind;
+            }
+            SectionEvent::End { .. } => {}
+        }
+    }
+    SectionKind::Unknown
+}
+
+fn is_event_layer_kind(kind: SectionKind) -> bool {
+    matches!(
+        kind,
+        SectionKind::HarnessHeader
+            | SectionKind::RoleMarker
+            | SectionKind::Thinking
+            | SectionKind::JsonEvent
+            | SectionKind::Summary
+            | SectionKind::Approval
+            | SectionKind::StatusLine
+    )
 }
 
 fn collect_render_lines(content: &str, use_color: bool) -> Vec<String> {
@@ -1158,10 +1259,80 @@ Flags:
 #[cfg(test)]
 mod tests {
     use super::{
-        default_log_path, render_log_chunk, run_for_test, split_complete_lines,
-        InMemoryLogsBackend, LoopRecord, RenderOptions,
+        default_log_path, render_lines_for_layer, render_log_chunk, run_for_test,
+        split_complete_lines, InMemoryLogsBackend, LogRenderLayer, LoopRecord, RenderOptions,
     };
     use crate::diff_renderer::DiffRenderState;
+
+    fn mixed_layer_lines() -> Vec<String> {
+        vec![
+            "OpenAI Codex v0.81.0".to_owned(),
+            "model: gpt-5".to_owned(),
+            "user".to_owned(),
+            "tool: Bash(command=\"ls\")".to_owned(),
+            "$ cargo test -q".to_owned(),
+            "running 3 tests".to_owned(),
+            "exit code: 1".to_owned(),
+            "error: failed to compile".to_owned(),
+            "  at src/main.rs:10:5".to_owned(),
+            "diff --git a/src/main.rs b/src/main.rs".to_owned(),
+            "@@ -1 +1 @@".to_owned(),
+            "-old".to_owned(),
+            "+new".to_owned(),
+            "{\"type\":\"result\",\"num_turns\":1}".to_owned(),
+        ]
+    }
+
+    #[test]
+    fn render_lines_for_layer_events_filters_non_event_blocks() {
+        let rendered = render_lines_for_layer(&mixed_layer_lines(), LogRenderLayer::Events, true);
+        let text = rendered.join("\n");
+
+        assert!(text.contains("OpenAI Codex v0.81.0"));
+        assert!(text.contains("user"));
+        assert!(text.contains("result"));
+        assert!(!text.contains("tool: Bash"));
+        assert!(!text.contains("cargo test"));
+        assert!(!text.contains("error: failed to compile"));
+        assert!(!text.contains("diff --git"));
+    }
+
+    #[test]
+    fn render_lines_for_layer_errors_only_keeps_error_block() {
+        let rendered = render_lines_for_layer(&mixed_layer_lines(), LogRenderLayer::Errors, true);
+        let text = rendered.join("\n");
+
+        assert!(text.contains("failed to compile"));
+        assert!(text.contains("src/main.rs:10:5"));
+        assert!(!text.contains("tool: Bash"));
+        assert!(!text.contains("cargo test"));
+        assert!(!text.contains("diff --git"));
+    }
+
+    #[test]
+    fn render_lines_for_layer_tools_keeps_tool_and_command_transcript() {
+        let rendered = render_lines_for_layer(&mixed_layer_lines(), LogRenderLayer::Tools, true);
+        let text = rendered.join("\n");
+
+        assert!(text.contains("tool: Bash"));
+        assert!(text.contains("cargo test -q"));
+        assert!(text.contains("exit code: 1"));
+        assert!(!text.contains("failed to compile"));
+        assert!(!text.contains("diff --git"));
+    }
+
+    #[test]
+    fn render_lines_for_layer_diff_only_keeps_diff_lines() {
+        let rendered = render_lines_for_layer(&mixed_layer_lines(), LogRenderLayer::Diff, true);
+        let text = rendered.join("\n");
+
+        assert!(text.contains("diff --git a/src/main.rs b/src/main.rs"));
+        assert!(text.contains("@@ -1 +1 @@"));
+        assert!(text.contains("-old"));
+        assert!(text.contains("+new"));
+        assert!(!text.contains("tool: Bash"));
+        assert!(!text.contains("failed to compile"));
+    }
 
     #[test]
     fn logs_requires_loop_or_all() {
