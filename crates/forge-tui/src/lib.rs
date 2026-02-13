@@ -38,6 +38,7 @@ pub mod layout_presets;
 pub mod layouts;
 pub mod log_anchors;
 pub mod log_compare;
+pub mod log_pipeline;
 pub mod log_query;
 pub mod logs_tab;
 pub mod loop_health_score;
