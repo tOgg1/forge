@@ -8,6 +8,7 @@ use forge_ftui_adapter::widgets::BorderStyle;
 
 use crate::app::{LoopView, RunView};
 use crate::hero_widgets::{build_fleet_snapshot, FleetSnapshot};
+use crate::smart_loop_clustering::{cluster_loops_by_domain, compact_domain_summary};
 use crate::theme::ResolvedPalette;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -341,7 +342,14 @@ pub fn render_overview_paneled(
             pal.border,
             pal.panel,
         );
-        draw_text_on_bg(frame, inner.x, inner.y, "No loop selected.", pal.text, pal.panel);
+        draw_text_on_bg(
+            frame,
+            inner.x,
+            inner.y,
+            "No loop selected.",
+            pal.text,
+            pal.panel,
+        );
         if inner.height > 1 {
             draw_text_on_bg(
                 frame,
@@ -369,7 +377,10 @@ pub fn render_overview_paneled(
     let detail_fields = build_detail_fields(loop_view, pal);
     let detail_h = (detail_fields.len() + 2).min(rest.height); // +2 for borders
     let (detail_rect, rest2) = rest.split_vertical(detail_h);
-    let detail_title = format!("Loop: {}", display_name(&loop_view.name, &loop_display_id(loop_view)));
+    let detail_title = format!(
+        "Loop: {}",
+        display_name(&loop_view.name, &loop_display_id(loop_view))
+    );
     let detail_inner = frame.draw_panel(
         detail_rect,
         &detail_title,
@@ -382,13 +393,25 @@ pub fn render_overview_paneled(
             break;
         }
         let trunc = truncate_line(text, detail_inner.width);
-        draw_text_on_bg(frame, detail_inner.x, detail_inner.y + i, &trunc, *color, pal.panel);
+        draw_text_on_bg(
+            frame,
+            detail_inner.x,
+            detail_inner.y + i,
+            &trunc,
+            *color,
+            pal.panel,
+        );
     }
 
     // -- Run snapshot panel --
     if rest2.height >= 4 {
         let counts = count_runs(run_history);
-        let snap_h = 4usize.min(rest2.height);
+        let has_domain_panel = rest2.height >= 9;
+        let snap_h = 4usize.min(
+            rest2
+                .height
+                .saturating_sub(if has_domain_panel { 4 } else { 0 }),
+        );
         let (snap_rect, rest3) = rest2.split_vertical(snap_h);
         let snap_inner = frame.draw_panel(
             snap_rect,
@@ -433,12 +456,53 @@ pub fn render_overview_paneled(
             );
         }
 
+        let mut rest = rest3;
+
+        // -- Work domain panel (smart loop clustering) --
+        if has_domain_panel {
+            let domain_h = 4usize.min(rest.height);
+            let (domain_rect, rest_after_domain) = rest.split_vertical(domain_h);
+            rest = rest_after_domain;
+            let domain_inner = frame.draw_panel(
+                domain_rect,
+                "Work Domains (Auto)",
+                BorderStyle::Rounded,
+                pal.border,
+                pal.panel,
+            );
+
+            let groups = cluster_loops_by_domain(loops);
+            let summary = compact_domain_summary(&groups, 2);
+            if domain_inner.height > 0 {
+                let line = format!("top: {summary}");
+                draw_text_on_bg(
+                    frame,
+                    domain_inner.x,
+                    domain_inner.y,
+                    &truncate_line(&line, domain_inner.width),
+                    pal.text,
+                    pal.panel,
+                );
+            }
+            if domain_inner.height > 1 {
+                let groups_line = format!("groups:{}  loops:{}", groups.len(), loops.len());
+                draw_text_on_bg(
+                    frame,
+                    domain_inner.x,
+                    domain_inner.y + 1,
+                    &truncate_line(&groups_line, domain_inner.width),
+                    pal.text_muted,
+                    pal.panel,
+                );
+            }
+        }
+
         // -- Workflow hint --
-        if rest3.height >= 1 {
+        if rest.height >= 1 {
             draw_text_on_bg(
                 frame,
-                rest3.x + 1,
-                rest3.y,
+                rest.x + 1,
+                rest.y,
                 "Workflow: 2=Logs (deep scroll) | 3=Runs | 4=Multi Logs",
                 pal.text_muted,
                 pal.background,
@@ -464,10 +528,10 @@ fn render_fleet_hero(
     let max_col = inner.x + inner.width;
 
     let segments: Vec<(&str, usize, TermColor)> = vec![
-        ("\u{25CF}", snap.running_loops, pal.success),     // ● running
+        ("\u{25CF}", snap.running_loops, pal.success), // ● running
         ("\u{25CB}", snap.sleeping_loops, pal.text_muted), // ○ sleeping
-        ("\u{25A0}", snap.stopped_loops, pal.warning),     // ■ stopped
-        ("\u{2716}", snap.error_loops, pal.error),         // ✗ error
+        ("\u{25A0}", snap.stopped_loops, pal.warning), // ■ stopped
+        ("\u{2716}", snap.error_loops, pal.error),     // ✗ error
     ];
 
     for (icon, count, color) in &segments {
@@ -551,7 +615,10 @@ fn build_detail_fields(lv: &LoopView, pal: &ResolvedPalette) -> Vec<(String, Ter
         pal.text,
     ));
     fields.push((
-        format!("Profile: {}", display_name(&lv.profile_name, &lv.profile_id)),
+        format!(
+            "Profile: {}",
+            display_name(&lv.profile_name, &lv.profile_id)
+        ),
         pal.text,
     ));
     fields.push((
@@ -572,7 +639,10 @@ fn build_detail_fields(lv: &LoopView, pal: &ResolvedPalette) -> Vec<(String, Ter
         pal.text,
     ));
     fields.push((
-        format!("Max Runtime: {}", format_duration_seconds(lv.max_runtime_seconds)),
+        format!(
+            "Max Runtime: {}",
+            format_duration_seconds(lv.max_runtime_seconds)
+        ),
         pal.text,
     ));
     fields.push((
@@ -685,5 +755,73 @@ mod tests {
             &frame,
             "ID: abc12345                                                \nName: demo-loop                                             \nStatus: RUNNING                                             \nRuns: 7                                                     \nDir: /repo/demo                                             \nPool: pool-1                                                \nProfile: dev                                                \nHarness/Auth: - / ssh                                       \nLast Run: 2026-02-09T20:00:00Z                              \nQueue Depth: 3                                              \nInterval: 1m0s                                              \nMax Runtime: 1h0m0s                                         \nMax Iterations: unlimited                                   \nLast Error: boom                                            \n                                                            \nRun snapshot:                                               \n  total=4 success=1 error=1 killed=1 running=1              \n  latest=run-0000 status=ERROR exit=1 duration=3s           \n                                                            \nWorkflow: 2=Logs (deep scroll) | 3=Runs | 4=Multi Logs      ",
         );
+    }
+
+    #[test]
+    fn paneled_overview_shows_work_domains_when_space_allows() {
+        let theme = crate::default_theme();
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 120,
+                height: 30,
+            },
+            theme,
+        );
+        let loops = vec![
+            LoopView {
+                id: "loop-a".to_owned(),
+                short_id: "a".to_owned(),
+                name: "auth-worker-a".to_owned(),
+                repo_path: "/repo/crates/auth-core/src".to_owned(),
+                profile_name: "dev".to_owned(),
+                ..LoopView::default()
+            },
+            LoopView {
+                id: "loop-b".to_owned(),
+                short_id: "b".to_owned(),
+                name: "auth-worker-b".to_owned(),
+                repo_path: "/repo/crates/auth-core/tests".to_owned(),
+                profile_name: "dev".to_owned(),
+                ..LoopView::default()
+            },
+            LoopView {
+                id: "loop-c".to_owned(),
+                short_id: "c".to_owned(),
+                name: "db-worker".to_owned(),
+                repo_path: "/repo/crates/db-layer/src".to_owned(),
+                profile_name: "dev".to_owned(),
+                ..LoopView::default()
+            },
+        ];
+
+        let runs = vec![RunView {
+            id: "run-1".to_owned(),
+            status: "success".to_owned(),
+            exit_code: Some(0),
+            duration: "2s".to_owned(),
+            ..RunView::default()
+        }];
+        let pal = crate::theme::resolve_palette_colors(&crate::theme::DEFAULT_PALETTE);
+
+        render_overview_paneled(
+            &mut frame,
+            &loops,
+            Some(&loops[0]),
+            &runs,
+            0,
+            &pal,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 120,
+                height: 30,
+            },
+            false,
+        );
+
+        let snapshot = frame.snapshot();
+        assert!(snapshot.contains("Work Domains (Auto)"));
+        assert!(snapshot.contains("groups:"));
+        assert!(snapshot.contains("auth-core"));
     }
 }
