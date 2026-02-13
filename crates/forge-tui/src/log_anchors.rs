@@ -9,6 +9,7 @@ pub const LOG_ANCHOR_SCHEMA_VERSION: u32 = 1;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogAnchor {
     pub anchor_id: String,
+    pub marker: String,
     pub loop_id: String,
     pub log_source: String,
     pub line_index: usize,
@@ -22,6 +23,7 @@ pub struct LogAnchor {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogAnchorDraft {
+    pub marker: String,
     pub loop_id: String,
     pub log_source: String,
     pub line_index: usize,
@@ -35,6 +37,7 @@ pub struct LogAnchorDraft {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LogAnchorFilter {
+    pub marker: String,
     pub loop_id: String,
     pub log_source: String,
     pub text: String,
@@ -71,6 +74,15 @@ impl LogAnchorStore {
     pub fn contains(&self, anchor_id: &str) -> bool {
         self.get(anchor_id).is_some()
     }
+
+    #[must_use]
+    pub fn get_by_marker(&self, marker: &str) -> Option<&LogAnchor> {
+        let marker = normalize_marker(marker);
+        if marker.is_empty() {
+            return None;
+        }
+        self.anchors.iter().find(|anchor| anchor.marker == marker)
+    }
 }
 
 pub fn add_log_anchor(store: &mut LogAnchorStore, draft: LogAnchorDraft) -> Result<String, String> {
@@ -95,6 +107,12 @@ pub fn add_log_anchor(store: &mut LogAnchorStore, draft: LogAnchorDraft) -> Resu
         return Err("created_at is required".to_owned());
     }
 
+    let marker = next_marker(
+        &normalize_marker(&draft.marker),
+        draft.line_index,
+        &store.anchors,
+    );
+
     let base_id = format!(
         "{}:{}:{}",
         slugify(&loop_id),
@@ -105,6 +123,7 @@ pub fn add_log_anchor(store: &mut LogAnchorStore, draft: LogAnchorDraft) -> Resu
 
     let anchor = LogAnchor {
         anchor_id: anchor_id.clone(),
+        marker,
         loop_id,
         log_source,
         line_index: draft.line_index,
@@ -154,6 +173,7 @@ pub fn remove_log_anchor(store: &mut LogAnchorStore, anchor_id: &str) -> Result<
 
 #[must_use]
 pub fn list_log_anchors(store: &LogAnchorStore, filter: &LogAnchorFilter) -> Vec<LogAnchor> {
+    let marker = normalize_marker(&filter.marker);
     let loop_id = normalize_required(&filter.loop_id);
     let source = normalize_required(&filter.log_source).to_ascii_lowercase();
     let text = normalize_required(&filter.text).to_ascii_lowercase();
@@ -163,6 +183,9 @@ pub fn list_log_anchors(store: &LogAnchorStore, filter: &LogAnchorFilter) -> Vec
         .anchors
         .iter()
         .filter(|anchor| {
+            if !marker.is_empty() && !anchor.marker.eq_ignore_ascii_case(&marker) {
+                return false;
+            }
             if !loop_id.is_empty() && !anchor.loop_id.eq_ignore_ascii_case(&loop_id) {
                 return false;
             }
@@ -182,9 +205,10 @@ pub fn list_log_anchors(store: &LogAnchorStore, filter: &LogAnchorFilter) -> Vec
             }
 
             let blob = format!(
-                "{} {} {} {}",
+                "{} {} {} {} {}",
                 anchor.excerpt.to_ascii_lowercase(),
                 anchor.annotation.to_ascii_lowercase(),
+                anchor.marker.to_ascii_lowercase(),
                 anchor.loop_id.to_ascii_lowercase(),
                 anchor.tags.join(" ").to_ascii_lowercase(),
             );
@@ -192,6 +216,23 @@ pub fn list_log_anchors(store: &LogAnchorStore, filter: &LogAnchorFilter) -> Vec
         })
         .cloned()
         .collect()
+}
+
+#[must_use]
+pub fn resolve_anchor_target(
+    store: &LogAnchorStore,
+    marker_or_id: &str,
+) -> Option<(String, usize)> {
+    let query = normalize_required(marker_or_id);
+    if query.is_empty() {
+        return None;
+    }
+    if let Some(anchor) = store.get(&query) {
+        return Some((anchor.log_source.clone(), anchor.line_index));
+    }
+    let marker = normalize_marker(&query);
+    let anchor = store.get_by_marker(&marker)?;
+    Some((anchor.log_source.clone(), anchor.line_index))
 }
 
 #[must_use]
@@ -215,6 +256,7 @@ pub fn export_anchor_bundle_json(store: &LogAnchorStore, filter: &LogAnchorFilte
                         "anchor_id".to_owned(),
                         Value::from(anchor.anchor_id.clone()),
                     );
+                    item.insert("marker".to_owned(), Value::from(anchor.marker.clone()));
                     item.insert("loop_id".to_owned(), Value::from(anchor.loop_id.clone()));
                     item.insert(
                         "log_source".to_owned(),
@@ -355,8 +397,13 @@ pub fn export_anchor_handoff_markdown(store: &LogAnchorStore, filter: &LogAnchor
             anchor.timestamp.trim().to_owned()
         };
         lines.push(format!(
-            "- {} loop={} src={} line={} ts={}",
-            anchor.anchor_id, anchor.loop_id, anchor.log_source, anchor.line_index, timestamp
+            "- {} marker={} loop={} src={} line={} ts={}",
+            anchor.anchor_id,
+            anchor.marker,
+            anchor.loop_id,
+            anchor.log_source,
+            anchor.line_index,
+            timestamp
         ));
         lines.push(format!("  excerpt: {}", anchor.excerpt.trim()));
         if !anchor.annotation.trim().is_empty() {
@@ -401,7 +448,8 @@ pub fn render_anchor_rows(
             break;
         }
         let row = format!(
-            "{} {}:{} {}",
+            "{} {} {}:{} {}",
+            anchor.marker,
             anchor.loop_id,
             anchor.log_source,
             anchor.line_index,
@@ -426,6 +474,11 @@ fn parse_import_anchor(
         .get("anchor_id")
         .and_then(Value::as_str)
         .map(normalize_required)
+        .unwrap_or_default();
+    let marker = obj
+        .get("marker")
+        .and_then(Value::as_str)
+        .map(normalize_marker)
         .unwrap_or_default();
     let loop_id = obj
         .get("loop_id")
@@ -482,6 +535,11 @@ fn parse_import_anchor(
 
     Some(LogAnchor {
         anchor_id,
+        marker: if marker.is_empty() {
+            format!("m{}", line_index)
+        } else {
+            marker
+        },
         loop_id,
         log_source,
         line_index,
@@ -540,6 +598,24 @@ fn next_anchor_id(base: &str, anchors: &[LogAnchor]) -> String {
     format!("{base}-overflow")
 }
 
+fn next_marker(marker: &str, line_index: usize, anchors: &[LogAnchor]) -> String {
+    let base = if marker.is_empty() {
+        format!("m{line_index}")
+    } else {
+        marker.to_owned()
+    };
+    if anchors.iter().all(|anchor| anchor.marker != base) {
+        return base;
+    }
+    for ordinal in 2..10_000 {
+        let candidate = format!("{base}-{ordinal}");
+        if anchors.iter().all(|anchor| anchor.marker != candidate) {
+            return candidate;
+        }
+    }
+    format!("{base}-overflow")
+}
+
 fn normalize_required(value: &str) -> String {
     value.trim().to_owned()
 }
@@ -560,6 +636,27 @@ fn normalize_log_source(value: &str) -> String {
     } else {
         value
     }
+}
+
+fn normalize_marker(value: &str) -> String {
+    let cleaned = value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let compact = cleaned
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    compact.trim().to_owned()
 }
 
 fn normalize_tags(values: &[String]) -> Vec<String> {
@@ -610,11 +707,13 @@ mod tests {
     use super::{
         add_log_anchor, annotate_log_anchor, export_anchor_bundle_json,
         export_anchor_handoff_markdown, import_anchor_bundle_json, list_log_anchors,
-        remove_log_anchor, render_anchor_rows, LogAnchorDraft, LogAnchorFilter, LogAnchorStore,
+        remove_log_anchor, render_anchor_rows, resolve_anchor_target, LogAnchorDraft,
+        LogAnchorFilter, LogAnchorStore,
     };
 
     fn draft(loop_id: &str, source: &str, line: usize, excerpt: &str) -> LogAnchorDraft {
         LogAnchorDraft {
+            marker: format!("m{line}"),
             loop_id: loop_id.to_owned(),
             log_source: source.to_owned(),
             line_index: line,
@@ -637,6 +736,7 @@ mod tests {
             .expect("annotate anchor");
         let anchor = store.get(&anchor_id).expect("anchor exists");
         assert_eq!(anchor.annotation, "retry after cache clear");
+        assert_eq!(anchor.marker, "m42");
 
         remove_log_anchor(&mut store, &anchor_id).expect("remove anchor");
         assert!(store.get(&anchor_id).is_none());
@@ -652,6 +752,12 @@ mod tests {
 
         assert_ne!(first, second);
         assert!(second.ends_with("-2"));
+        let markers = store
+            .anchors()
+            .iter()
+            .map(|anchor| anchor.marker.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(markers, vec!["m42", "m42-2"]);
     }
 
     #[test]
@@ -660,6 +766,7 @@ mod tests {
         let mut first = draft("loop-1", "live", 7, "queue depth spike");
         first.annotation = "investigate scheduler".to_owned();
         first.tags = vec!["perf".to_owned(), "handoff".to_owned()];
+        first.marker = "spike-1".to_owned();
         add_log_anchor(&mut store, first).expect("first anchor");
 
         let mut second = draft("loop-2", "latest-run", 3, "all green");
@@ -667,6 +774,7 @@ mod tests {
         add_log_anchor(&mut store, second).expect("second anchor");
 
         let filter = LogAnchorFilter {
+            marker: "spike-1".to_owned(),
             loop_id: "loop-1".to_owned(),
             log_source: "live".to_owned(),
             text: "scheduler".to_owned(),
@@ -694,6 +802,7 @@ mod tests {
         assert!(outcome.warnings.is_empty());
         assert_eq!(target.anchors().len(), 1);
         assert_eq!(target.anchors()[0].annotation, "root cause in adapter");
+        assert_eq!(target.anchors()[0].marker, "m88");
     }
 
     #[test]
@@ -733,6 +842,7 @@ mod tests {
 
         let markdown = export_anchor_handoff_markdown(&store, &LogAnchorFilter::default());
         assert!(markdown.contains("# log anchors handoff"));
+        assert!(markdown.contains("marker=m101"));
         assert!(markdown.contains("note: repro in tmux pane 3"));
         assert!(markdown.contains("tags: handoff,p1") || markdown.contains("tags: p1,handoff"));
     }
@@ -746,7 +856,7 @@ mod tests {
 
         let rows = render_anchor_rows(&store, &LogAnchorFilter::default(), 40, 4);
         assert_eq!(rows[0], "log anchors rows=1");
-        assert!(rows[1].contains("loop-3 latest-run:17"));
+        assert!(rows[1].contains("m17 loop-3 latest-run:17"));
         assert!(rows[1].contains("fix pending"));
     }
 
@@ -761,5 +871,19 @@ mod tests {
         for row in rows {
             assert!(row.chars().count() <= 8);
         }
+    }
+
+    #[test]
+    fn resolve_target_accepts_marker_and_anchor_id() {
+        let mut store = LogAnchorStore::default();
+        let mut item = draft("loop-3", "latest-run", 17, "build failed");
+        item.marker = "hotspot".to_owned();
+        let anchor_id = add_log_anchor(&mut store, item).expect("add anchor");
+
+        let by_marker = resolve_anchor_target(&store, "hotspot");
+        assert_eq!(by_marker, Some(("latest-run".to_owned(), 17)));
+
+        let by_id = resolve_anchor_target(&store, &anchor_id);
+        assert_eq!(by_id, Some(("latest-run".to_owned(), 17)));
     }
 }
