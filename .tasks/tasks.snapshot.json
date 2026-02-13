@@ -1,7 +1,17 @@
 {
   "schema_version": "sv.tasks.v1",
-  "generated_at": "2026-02-13T06:26:00.758094Z",
+  "generated_at": "2026-02-13T17:51:05.186115Z",
   "tasks": [
+    {
+      "id": "forge-5xm",
+      "title": "BUG: Resolve --prompt names before path fallback in loop startup",
+      "status": "open",
+      "priority": "P2",
+      "created_at": "2026-02-13T17:51:05.170553Z",
+      "updated_at": "2026-02-13T17:51:05.170553Z",
+      "body": "Problem\n- `forge up --prompt <name>` and `forge scale --prompt <name>` advertise prompt-name support but currently persist `<name>` directly as `base_prompt_path`.\n- Runtime then tries to read `<repo>/<name>` as a file path, causing loop runner failure and stale-runner stop.\n\nRepro\n1. `forge prompt add po-design PROMPT_DESIGNER.md`\n2. `forge up --prompt po-design`\n3. Loop is marked stopped; `forge loop run <id>` can fail with `No such file or directory (os error 2)` depending on context.\n\nExpected\n- Prompt resolution should first try registered prompt names (e.g. `.forge/prompts/<name>.md`) and only then treat value as explicit path.\n\nWorkaround\n- Use explicit path now: `--prompt .forge/prompts/po-design.md`.\n\nSuggested fix\n- Centralize prompt resolution helper and use it in `up` and `scale` (and any other command accepting prompt name/path).\n- Keep current behavior for absolute/relative paths that exist.\n\nAcceptance criteria\n- `forge up --prompt po-design` resolves to `.forge/prompts/po-design.md` when prompt exists.\n- `forge scale --prompt po-design` does the same.\n- Existing explicit path usage remains unchanged.\n- Add regression tests covering name resolution and path passthrough.",
+      "comments_count": 0
+    },
     {
       "id": "forge-k52",
       "title": "TUI-000 Epic: Forge Next-Gen TUI program",
