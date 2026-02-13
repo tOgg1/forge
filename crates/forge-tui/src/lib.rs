@@ -88,6 +88,7 @@ pub mod triage_score_queue;
 pub mod ui_undo_redo;
 pub mod universal_switcher;
 pub mod view_export;
+pub mod what_if_simulator;
 /// Stable crate label used by bootstrap smoke tests.
 pub fn crate_label() -> &'static str {
     "forge-tui"
