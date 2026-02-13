@@ -1849,7 +1849,9 @@ mod tests {
     fn detect_rule_based_anomalies_does_not_flag_boom_as_oom() {
         let lines = vec!["panic: boom".to_owned()];
         let anomalies = detect_rule_based_anomalies(&lines);
-        assert!(anomalies.iter().any(|a| a.kind == LogAnomalyKind::PanicLike));
+        assert!(anomalies
+            .iter()
+            .any(|a| a.kind == LogAnomalyKind::PanicLike));
         assert!(!anomalies
             .iter()
             .any(|a| a.kind == LogAnomalyKind::ResourceExhaustion));

@@ -4,6 +4,7 @@
 pub enum HighlightRole {
     Failure,
     RootCause,
+    RootFrame,
     CommandContext,
     CauseContext,
 }
@@ -25,6 +26,7 @@ pub struct CauseLink {
 pub struct FailureFocus {
     pub failure_line: usize,
     pub root_cause_line: usize,
+    pub root_frame_line: Option<usize>,
     pub command_context_line: Option<usize>,
     pub highlights: Vec<HighlightedLine>,
     pub links: Vec<CauseLink>,
@@ -66,6 +68,12 @@ pub fn jump_to_root_cause(lines: &[String], failure_line: Option<usize>) -> Opti
 }
 
 #[must_use]
+pub fn jump_to_probable_root_frame(lines: &[String], failure_line: Option<usize>) -> Option<usize> {
+    build_failure_focus(lines, failure_line)
+        .map(|focus| focus.root_frame_line.unwrap_or(focus.root_cause_line))
+}
+
+#[must_use]
 pub fn build_failure_focus(lines: &[String], failure_line: Option<usize>) -> Option<FailureFocus> {
     if lines.is_empty() {
         return None;
@@ -77,8 +85,15 @@ pub fn build_failure_focus(lines: &[String], failure_line: Option<usize>) -> Opt
     };
 
     let root_cause_line = find_root_cause_line(lines, failure_line);
+    let root_frame_line = find_root_frame_line(lines, root_cause_line, failure_line);
     let command_context_line = find_command_context(lines, root_cause_line, 120);
-    let chain_lines = build_chain_lines(lines, root_cause_line, failure_line, command_context_line);
+    let chain_lines = build_chain_lines(
+        lines,
+        root_cause_line,
+        failure_line,
+        root_frame_line,
+        command_context_line,
+    );
     let highlights = chain_lines
         .iter()
         .map(|line_index| HighlightedLine {
@@ -87,6 +102,8 @@ pub fn build_failure_focus(lines: &[String], failure_line: Option<usize>) -> Opt
                 HighlightRole::Failure
             } else if *line_index == root_cause_line {
                 HighlightRole::RootCause
+            } else if Some(*line_index) == root_frame_line {
+                HighlightRole::RootFrame
             } else if Some(*line_index) == command_context_line {
                 HighlightRole::CommandContext
             } else {
@@ -102,6 +119,8 @@ pub fn build_failure_focus(lines: &[String], failure_line: Option<usize>) -> Opt
                 "failure".to_owned()
             } else if *line_index == root_cause_line {
                 "root-cause".to_owned()
+            } else if Some(*line_index) == root_frame_line {
+                "root-frame".to_owned()
             } else if Some(*line_index) == command_context_line {
                 "command".to_owned()
             } else {
@@ -114,6 +133,7 @@ pub fn build_failure_focus(lines: &[String], failure_line: Option<usize>) -> Opt
     Some(FailureFocus {
         failure_line,
         root_cause_line,
+        root_frame_line,
         command_context_line,
         highlights,
         links,
@@ -124,11 +144,15 @@ fn build_chain_lines(
     lines: &[String],
     root_cause_line: usize,
     failure_line: usize,
+    root_frame_line: Option<usize>,
     command_context_line: Option<usize>,
 ) -> Vec<usize> {
     let mut chain = Vec::new();
     if let Some(command_line) = command_context_line {
         chain.push(command_line);
+    }
+    if let Some(root_frame_line) = root_frame_line {
+        chain.push(root_frame_line);
     }
 
     let context_start = root_cause_line.saturating_sub(2);
@@ -151,6 +175,41 @@ fn build_chain_lines(
     chain.sort_unstable();
     chain.dedup();
     chain
+}
+
+fn find_root_frame_line(
+    lines: &[String],
+    root_cause_line: usize,
+    failure_line: usize,
+) -> Option<usize> {
+    let search_start = root_cause_line.saturating_sub(3);
+    let search_end = failure_line
+        .saturating_add(80)
+        .min(lines.len().saturating_sub(1));
+
+    let mut stack_frames = Vec::new();
+    for (idx, line) in lines
+        .iter()
+        .enumerate()
+        .take(search_end + 1)
+        .skip(search_start)
+    {
+        if is_stack_frame_line(line) {
+            stack_frames.push(idx);
+        }
+    }
+
+    if stack_frames.is_empty() {
+        return None;
+    }
+
+    for idx in stack_frames.iter().rev() {
+        if is_application_frame_line(&lines[*idx]) {
+            return Some(*idx);
+        }
+    }
+
+    stack_frames.last().copied()
 }
 
 fn find_root_cause_line(lines: &[String], failure_line: usize) -> usize {
@@ -275,10 +334,90 @@ fn is_cause_context_line(line: &str) -> bool {
         || lower.starts_with("stderr:")
 }
 
+fn is_stack_frame_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+
+    if lower.starts_with("traceback (most recent call last):")
+        || lower.starts_with("stack backtrace:")
+        || lower.starts_with("stack trace:")
+        || lower.starts_with("stacktrace:")
+    {
+        return true;
+    }
+
+    if lower.starts_with("file \"") && lower.contains(", line ") {
+        return true;
+    }
+
+    if lower.starts_with("at ")
+        && (lower.contains("::")
+            || lower.contains(".rs:")
+            || lower.contains(".go:")
+            || lower.contains(".py:")
+            || lower.contains(".js:")
+            || lower.contains(".ts:")
+            || lower.contains(".java:")
+            || lower.contains(".kt:")
+            || lower.contains(".swift:")
+            || lower.contains('('))
+    {
+        return true;
+    }
+
+    parse_numbered_frame_prefix(&lower).is_some()
+}
+
+fn parse_numbered_frame_prefix(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+    let digits_start = idx;
+    while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+        idx += 1;
+    }
+    if idx == digits_start || idx >= bytes.len() || bytes[idx] != b':' {
+        return None;
+    }
+    Some(idx + 1)
+}
+
+fn is_application_frame_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    let app_markers = [
+        "forge::", "src/", "/src/", ".rs:", ".go:", ".py:", ".js:", ".ts:", ".java:", ".kt:",
+        ".swift:",
+    ];
+    if !app_markers.iter().any(|marker| lower.contains(marker)) {
+        return false;
+    }
+
+    let library_markers = [
+        "std::",
+        "core::",
+        "tokio::",
+        "futures::",
+        "backtrace::",
+        "__rust_begin_short_backtrace",
+        "python/lib",
+        "site-packages",
+        "node_modules",
+    ];
+    !library_markers.iter().any(|marker| lower.contains(marker))
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use super::{build_failure_focus, jump_to_first_failure, jump_to_root_cause, HighlightRole};
+    use super::{
+        build_failure_focus, jump_to_first_failure, jump_to_probable_root_frame,
+        jump_to_root_cause, HighlightRole,
+    };
 
     fn sample_log() -> Vec<String> {
         vec![
@@ -322,6 +461,7 @@ mod tests {
         };
         assert_eq!(focus.failure_line, 3);
         assert_eq!(focus.root_cause_line, 4);
+        assert_eq!(focus.root_frame_line, None);
         assert_eq!(focus.command_context_line, Some(1));
         assert!(focus
             .links
@@ -347,6 +487,10 @@ mod tests {
             .highlights
             .iter()
             .any(|item| item.role == HighlightRole::RootCause && item.line_index == 4));
+        assert!(!focus
+            .highlights
+            .iter()
+            .any(|item| item.role == HighlightRole::RootFrame));
         assert!(focus
             .highlights
             .iter()
@@ -377,6 +521,39 @@ mod tests {
         };
         assert_eq!(focus.failure_line, 1);
         assert_eq!(focus.root_cause_line, 1);
+        assert_eq!(focus.root_frame_line, None);
+    }
+
+    #[test]
+    fn jump_to_probable_root_frame_prefers_last_application_frame() {
+        let lines = vec![
+            "$ cargo test --workspace".to_owned(),
+            "thread 'main' panicked at 'boom', src/main.rs:12:5".to_owned(),
+            "stack backtrace:".to_owned(),
+            "   0: std::panicking::begin_panic".to_owned(),
+            "   1: forge::runtime::run at src/runtime.rs:44".to_owned(),
+            "   2: forge::main at src/main.rs:12".to_owned(),
+            "error: process failed".to_owned(),
+        ];
+        let Some(focus) = build_failure_focus(&lines, Some(6)) else {
+            panic!("expected focus");
+        };
+        assert_eq!(focus.root_frame_line, Some(5));
+        assert!(focus
+            .links
+            .iter()
+            .any(|link| link.label == "root-frame" && link.line_index == 5));
+        assert!(focus
+            .highlights
+            .iter()
+            .any(|item| item.role == HighlightRole::RootFrame && item.line_index == 5));
+        assert_eq!(jump_to_probable_root_frame(&lines, Some(6)), Some(5));
+    }
+
+    #[test]
+    fn jump_to_probable_root_frame_falls_back_to_root_cause() {
+        let lines = sample_log();
+        assert_eq!(jump_to_probable_root_frame(&lines, None), Some(4));
     }
 
     #[test]
