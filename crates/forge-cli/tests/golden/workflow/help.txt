@@ -10,6 +10,7 @@ Commands:
   ls          List workflows
   show        Show workflow details
   validate    Validate a workflow
+  run         Execute a workflow
   logs        Show persisted logs for a workflow run
 
 Flags:
