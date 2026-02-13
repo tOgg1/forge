@@ -746,6 +746,7 @@ fn run_workflow(wf: &Workflow) -> Result<WorkflowRunCommandResult, String> {
             run_persistence::WorkflowRunStatus::Success
         },
     )?;
+    let _ = run_persistence::append_workflow_ledger_entry(&store, &run.id, &repo_workdir)?;
 
     Ok(WorkflowRunCommandResult {
         run_id: run.id,
@@ -2269,6 +2270,11 @@ mod tests {
             run.steps[1].status,
             run_persistence::WorkflowStepStatus::Success
         );
+        let ledger = repo_root.join(".forge").join("ledgers").join("workflow-runs.md");
+        let ledger_text = std::fs::read_to_string(ledger).unwrap();
+        assert!(ledger_text.contains(format!("- run_id: {run_id}").as_str()));
+        assert!(ledger_text.contains("- setup [success]"));
+        assert!(ledger_text.contains("- build [success]"));
 
         let _ = std::fs::remove_dir_all(&data_dir);
     }
@@ -2325,6 +2331,12 @@ mod tests {
             run.steps[2].status,
             run_persistence::WorkflowStepStatus::Skipped
         );
+        let ledger = repo_root.join(".forge").join("ledgers").join("workflow-runs.md");
+        let ledger_text = std::fs::read_to_string(ledger).unwrap();
+        assert!(ledger_text.contains(format!("- run_id: {run_id}").as_str()));
+        assert!(ledger_text.contains("- setup [success]"));
+        assert!(ledger_text.contains("- build [failed]"));
+        assert!(ledger_text.contains("- ship [skipped]"));
 
         let _ = std::fs::remove_dir_all(&data_dir);
     }

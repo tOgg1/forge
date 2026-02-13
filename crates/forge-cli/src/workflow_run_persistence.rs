@@ -340,7 +340,9 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{WorkflowRunStatus, WorkflowRunStore, WorkflowStepStatus};
+    use super::{
+        append_workflow_ledger_entry, WorkflowRunStatus, WorkflowRunStore, WorkflowStepStatus,
+    };
 
     fn temp_root(tag: &str) -> PathBuf {
         static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
@@ -450,6 +452,65 @@ mod tests {
             err.contains("workflow run \"wfr_missing\" not found"),
             "unexpected error message: {err}"
         );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn workflow_ledger_entry_contains_run_id_step_summaries_and_durations() {
+        let root = temp_root("ledger");
+        let repo_root = root.join("repo");
+        if let Err(err) = std::fs::create_dir_all(repo_root.join(".forge").join("workflows")) {
+            panic!("create repo root: {err}");
+        }
+        let store = WorkflowRunStore::new(root.join("store"));
+        let run = match store.create_run(
+            "deploy",
+            repo_root.join(".forge/workflows/deploy.toml").to_string_lossy().as_ref(),
+            &["plan".to_string(), "ship".to_string()],
+        ) {
+            Ok(run) => run,
+            Err(err) => panic!("create run: {err}"),
+        };
+        if let Err(err) = store.update_step_status(&run.id, "plan", WorkflowStepStatus::Running) {
+            panic!("set plan running: {err}");
+        }
+        if let Err(err) = store.update_step_status(&run.id, "plan", WorkflowStepStatus::Success) {
+            panic!("set plan success: {err}");
+        }
+        if let Err(err) = store.update_step_status(&run.id, "ship", WorkflowStepStatus::Running) {
+            panic!("set ship running: {err}");
+        }
+        if let Err(err) = store.update_step_status(&run.id, "ship", WorkflowStepStatus::Failed) {
+            panic!("set ship failed: {err}");
+        }
+        if let Err(err) = store.update_run_status(&run.id, WorkflowRunStatus::Failed) {
+            panic!("set run failed: {err}");
+        }
+
+        let ledger_path = match append_workflow_ledger_entry(&store, &run.id, &repo_root) {
+            Ok(path) => path,
+            Err(err) => panic!("append ledger entry: {err}"),
+        };
+        let text = match std::fs::read_to_string(&ledger_path) {
+            Ok(text) => text,
+            Err(err) => panic!("read workflow ledger: {err}"),
+        };
+        assert!(text.contains("# Workflow Run Ledger"));
+        assert!(text.contains(format!("- run_id: {}", run.id).as_str()));
+        assert!(text.contains("- plan [success] duration_ms:"));
+        assert!(text.contains("- ship [failed] duration_ms:"));
+
+        // Header should be written once.
+        if let Err(err) = append_workflow_ledger_entry(&store, &run.id, &repo_root) {
+            panic!("append ledger entry second pass: {err}");
+        }
+        let text_again = match std::fs::read_to_string(&ledger_path) {
+            Ok(text) => text,
+            Err(err) => panic!("read workflow ledger second pass: {err}"),
+        };
+        let header_count = text_again.matches("# Workflow Run Ledger").count();
+        assert_eq!(header_count, 1);
+
         cleanup(&root);
     }
 }
