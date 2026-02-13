@@ -17,6 +17,8 @@ use ftui::{App as FtuiApp, Cmd, Frame, Model, ScreenMode};
 
 const REFRESH_INTERVAL_MS: u64 = 900;
 const INLINE_UI_HEIGHT: u16 = 10;
+const INLINE_AUTO_MIN_HEIGHT: u16 = 6;
+const INLINE_AUTO_MAX_HEIGHT: u16 = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeEvent {
@@ -165,11 +167,39 @@ impl Model for ForgeShell {
 
 pub fn run(db_path: PathBuf) -> Result<(), String> {
     FtuiApp::new(ForgeShell::new(db_path))
-        .screen_mode(ScreenMode::Inline {
-            ui_height: INLINE_UI_HEIGHT,
-        })
+        .screen_mode(resolve_screen_mode_from_env())
         .run()
         .map_err(|err| format!("run frankentui bootstrap runtime: {err}"))
+}
+
+#[must_use]
+pub fn resolve_screen_mode_from_env() -> ScreenMode {
+    let mode = std::env::var("FORGE_TUI_SCREEN_MODE")
+        .map(|raw| raw.trim().to_ascii_lowercase())
+        .unwrap_or_else(|_| "inline".to_owned());
+
+    match mode.as_str() {
+        "altscreen" | "alt" | "fullscreen" => ScreenMode::AltScreen,
+        "inline-auto" | "inline_auto" | "auto" => {
+            let min_height =
+                parse_u16_env("FORGE_TUI_INLINE_MIN_HEIGHT").unwrap_or(INLINE_AUTO_MIN_HEIGHT);
+            let mut max_height =
+                parse_u16_env("FORGE_TUI_INLINE_MAX_HEIGHT").unwrap_or(INLINE_AUTO_MAX_HEIGHT);
+            let min_height = min_height.max(1);
+            if max_height < min_height {
+                max_height = min_height;
+            }
+            ScreenMode::InlineAuto {
+                min_height,
+                max_height,
+            }
+        }
+        _ => ScreenMode::Inline {
+            ui_height: parse_u16_env("FORGE_TUI_INLINE_HEIGHT")
+                .unwrap_or(INLINE_UI_HEIGHT)
+                .max(1),
+        },
+    }
 }
 
 #[must_use]
@@ -293,11 +323,25 @@ fn unix_timestamp_secs() -> u64 {
         .unwrap_or_default()
 }
 
+fn parse_u16_env(key: &str) -> Option<u16> {
+    std::env::var(key).ok().and_then(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            trimmed.parse::<u16>().ok()
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use super::{translate_runtime_event, ForgeShell, ForgeShellMsg, RuntimeEvent};
+    use super::{
+        resolve_screen_mode_from_env, translate_runtime_event, ForgeShell, ForgeShellMsg,
+        RuntimeEvent,
+    };
     use forge_ftui_adapter::input::{
         InputEvent, Key, KeyEvent, Modifiers, MouseEvent, MouseWheelDirection, ResizeEvent,
     };
@@ -306,7 +350,8 @@ mod tests {
         Event, KeyCode as FtuiKeyCode, KeyEvent as FtuiKeyEvent, KeyEventKind as FtuiKeyEventKind,
         MouseEvent as FtuiMouseEvent, MouseEventKind as FtuiMouseEventKind,
     };
-    use ftui::{Cmd, Model};
+    use ftui::{Cmd, Model, ScreenMode};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
 
     #[test]
     fn translate_runtime_event_maps_key_resize_mouse() {
@@ -406,5 +451,112 @@ mod tests {
                 },
             }))
         );
+    }
+
+    #[test]
+    fn screen_mode_defaults_to_inline() {
+        let _lock = env_lock();
+        let _guard = EnvGuard::set("FORGE_TUI_SCREEN_MODE", "inline");
+        let _reset_height = EnvGuard::unset("FORGE_TUI_INLINE_HEIGHT");
+
+        assert_eq!(
+            resolve_screen_mode_from_env(),
+            ScreenMode::Inline { ui_height: 10 }
+        );
+    }
+
+    #[test]
+    fn screen_mode_uses_inline_height_override() {
+        let _lock = env_lock();
+        let _guard = EnvGuard::set("FORGE_TUI_SCREEN_MODE", "inline");
+        let _height = EnvGuard::set("FORGE_TUI_INLINE_HEIGHT", "14");
+
+        assert_eq!(
+            resolve_screen_mode_from_env(),
+            ScreenMode::Inline { ui_height: 14 }
+        );
+    }
+
+    #[test]
+    fn screen_mode_supports_inline_auto() {
+        let _lock = env_lock();
+        let _guard = EnvGuard::set("FORGE_TUI_SCREEN_MODE", "inline-auto");
+        let _min = EnvGuard::set("FORGE_TUI_INLINE_MIN_HEIGHT", "7");
+        let _max = EnvGuard::set("FORGE_TUI_INLINE_MAX_HEIGHT", "25");
+
+        assert_eq!(
+            resolve_screen_mode_from_env(),
+            ScreenMode::InlineAuto {
+                min_height: 7,
+                max_height: 25,
+            }
+        );
+    }
+
+    #[test]
+    fn screen_mode_inline_auto_clamps_bad_bounds() {
+        let _lock = env_lock();
+        let _guard = EnvGuard::set("FORGE_TUI_SCREEN_MODE", "auto");
+        let _min = EnvGuard::set("FORGE_TUI_INLINE_MIN_HEIGHT", "30");
+        let _max = EnvGuard::set("FORGE_TUI_INLINE_MAX_HEIGHT", "10");
+
+        assert_eq!(
+            resolve_screen_mode_from_env(),
+            ScreenMode::InlineAuto {
+                min_height: 30,
+                max_height: 30,
+            }
+        );
+    }
+
+    #[test]
+    fn screen_mode_supports_alt_screen() {
+        let _lock = env_lock();
+        let _guard = EnvGuard::set("FORGE_TUI_SCREEN_MODE", "altscreen");
+        assert_eq!(resolve_screen_mode_from_env(), ScreenMode::AltScreen);
+    }
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = LOCK.get_or_init(|| Mutex::new(()));
+        match lock.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    struct EnvGuard {
+        key: String,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self {
+                key: key.to_owned(),
+                previous,
+            }
+        }
+
+        fn unset(key: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self {
+                key: key.to_owned(),
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.take() {
+                std::env::set_var(&self.key, previous);
+            } else {
+                std::env::remove_var(&self.key);
+            }
+        }
     }
 }

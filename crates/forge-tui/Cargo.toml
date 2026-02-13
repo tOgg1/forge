@@ -13,7 +13,7 @@ name = "forge-tui"
 path = "src/bin/forge-tui.rs"
 
 [features]
-default = []
+default = ["frankentui-bootstrap"]
 frankentui-bootstrap = ["forge-ftui-adapter/frankentui-upstream"]
 
 [dependencies]
