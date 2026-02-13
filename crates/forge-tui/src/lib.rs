@@ -24,6 +24,7 @@ pub mod communication_quality;
 pub mod cost_resource_tracker;
 pub mod crash_safe_state;
 pub mod cross_loop_impact_analysis;
+pub mod dashboard_snapshot_share;
 pub mod daily_summary;
 pub mod emergency_safe_stop;
 pub mod error_correlation;
