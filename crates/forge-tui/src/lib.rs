@@ -14,6 +14,7 @@ pub mod alert_rail;
 pub mod analytics_dashboard;
 pub mod analytics_fact_model;
 pub mod app;
+pub mod blame_timeline;
 pub mod blocker_graph;
 pub mod budget_guardrails;
 pub mod bulk_action_planner;
