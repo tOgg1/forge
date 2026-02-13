@@ -14,6 +14,7 @@ use crate::diff_renderer::{
 };
 use crate::error_renderer::render_error_lines;
 use crate::section_parser::{SectionEvent, SectionKind, SectionParser};
+use crate::structured_data_renderer::render_structured_data_line;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -753,7 +754,9 @@ fn style_section_line(line: &str, kind: SectionKind, use_color: bool) -> String 
                 line.to_string()
             }
         }
-        // CodeFence, Diff, JsonEvent, Approval, Unknown, ErrorBlock — pass through.
+        // JsonEvent: apply structured-data semantic highlighting.
+        SectionKind::JsonEvent => render_structured_data_line(line, use_color),
+        // CodeFence, Diff, Approval, Unknown, ErrorBlock — pass through.
         // Diff and CodeFence get styled by diff_renderer later in the pipeline.
         _ => line.to_string(),
     }

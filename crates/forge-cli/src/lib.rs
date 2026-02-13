@@ -45,6 +45,7 @@ pub mod skills;
 mod spawn_loop;
 pub mod status;
 pub mod stop;
+mod structured_data_renderer;
 pub mod template;
 pub mod tui;
 pub mod up;
