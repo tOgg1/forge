@@ -108,6 +108,72 @@ pub mod upstream_bridge {
         }
         style
     }
+
+    /// Resolve a [`SpanStyle`] to an ftui [`Style`] using the given theme.
+    #[must_use]
+    pub fn span_style_to_ftui_style(
+        theme: super::style::ThemeSpec,
+        span_style: super::render::SpanStyle,
+    ) -> ftui::Style {
+        use super::render::{SpanStyle, TextRole};
+        match span_style {
+            SpanStyle::Cell(cs) => cell_style_to_ftui_style(cs),
+            SpanStyle::Token(token) => token_style(theme, token),
+            SpanStyle::Role(role) => {
+                let token = match role {
+                    TextRole::Primary => StyleToken::Foreground,
+                    TextRole::Muted => StyleToken::Muted,
+                    TextRole::Accent => StyleToken::Accent,
+                    TextRole::Success => StyleToken::Success,
+                    TextRole::Danger => StyleToken::Danger,
+                    TextRole::Warning => StyleToken::Warning,
+                    TextRole::Info => StyleToken::Info,
+                    TextRole::Focus => StyleToken::Focus,
+                };
+                token_style(theme, token)
+            }
+        }
+    }
+
+    /// Convert a [`StyledSpan`] into an ftui [`Span`].
+    #[must_use]
+    pub fn styled_span_to_ftui_span<'a>(
+        theme: super::style::ThemeSpec,
+        span: &super::render::StyledSpan<'a>,
+    ) -> ftui::text::Span<'a> {
+        let style = span_style_to_ftui_style(theme, span.style);
+        ftui::text::Span::styled(span.text, style)
+    }
+
+    /// Convert a [`StyledLine`] into an ftui [`Line`].
+    #[must_use]
+    pub fn styled_line_to_ftui_line(
+        theme: super::style::ThemeSpec,
+        line: &super::render::StyledLine,
+    ) -> ftui::text::Line {
+        let spans: Vec<ftui::text::Span<'static>> = line
+            .spans
+            .iter()
+            .map(|owned| {
+                let style = span_style_to_ftui_style(theme, owned.style);
+                ftui::text::Span::styled(owned.text.clone(), style)
+            })
+            .collect();
+        ftui::text::Line::from_spans(spans)
+    }
+
+    /// Convert a [`StyledText`] into an ftui [`Text`].
+    #[must_use]
+    pub fn styled_text_to_ftui_text(
+        theme: super::style::ThemeSpec,
+        text: &super::render::StyledText,
+    ) -> ftui::text::Text {
+        let mut out = ftui::text::Text::default();
+        for line in &text.lines {
+            out.push_line(styled_line_to_ftui_line(theme, line));
+        }
+        out
+    }
 }
 
 /// Re-export supporting upstream widgets used by the rewrite path.
@@ -594,6 +660,257 @@ pub mod render {
         }
     }
 
+    // -- Convenience span builders for common semantic roles --
+
+    /// Shorthand constructors for the most common `StyledSpan` patterns.
+    impl<'a> StyledSpan<'a> {
+        /// Primary text (default foreground).
+        #[must_use]
+        pub fn primary(text: &'a str) -> Self {
+            Self::role(text, TextRole::Primary)
+        }
+
+        /// Muted / secondary text.
+        #[must_use]
+        pub fn muted(text: &'a str) -> Self {
+            Self::role(text, TextRole::Muted)
+        }
+
+        /// Accent text (bold in default typography).
+        #[must_use]
+        pub fn accent(text: &'a str) -> Self {
+            Self::role(text, TextRole::Accent)
+        }
+
+        /// Success text.
+        #[must_use]
+        pub fn success(text: &'a str) -> Self {
+            Self::role(text, TextRole::Success)
+        }
+
+        /// Danger / error text.
+        #[must_use]
+        pub fn danger(text: &'a str) -> Self {
+            Self::role(text, TextRole::Danger)
+        }
+
+        /// Warning text.
+        #[must_use]
+        pub fn warning(text: &'a str) -> Self {
+            Self::role(text, TextRole::Warning)
+        }
+
+        /// Info text.
+        #[must_use]
+        pub fn info(text: &'a str) -> Self {
+            Self::role(text, TextRole::Info)
+        }
+
+        /// Focused / selected text.
+        #[must_use]
+        pub fn focus(text: &'a str) -> Self {
+            Self::role(text, TextRole::Focus)
+        }
+    }
+
+    // -- Owned span types for pipeline stages that produce text --
+
+    /// Owned variant of [`StyledSpan`] for pipeline stages that need to store produced text.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct OwnedStyledSpan {
+        pub text: String,
+        pub style: SpanStyle,
+    }
+
+    impl OwnedStyledSpan {
+        /// Build an owned span from text and style.
+        #[must_use]
+        pub fn new(text: impl Into<String>, style: SpanStyle) -> Self {
+            Self {
+                text: text.into(),
+                style,
+            }
+        }
+
+        /// Build from a semantic role.
+        #[must_use]
+        pub fn role(text: impl Into<String>, role: TextRole) -> Self {
+            Self::new(text, SpanStyle::Role(role))
+        }
+
+        /// Build from a style token.
+        #[must_use]
+        pub fn token(text: impl Into<String>, token: StyleToken) -> Self {
+            Self::new(text, SpanStyle::Token(token))
+        }
+
+        /// Build from an explicit cell style.
+        #[must_use]
+        pub fn cell(text: impl Into<String>, style: CellStyle) -> Self {
+            Self::new(text, SpanStyle::Cell(style))
+        }
+
+        /// Borrow as a [`StyledSpan`] for drawing.
+        #[must_use]
+        pub fn as_span(&self) -> StyledSpan<'_> {
+            StyledSpan {
+                text: &self.text,
+                style: self.style,
+            }
+        }
+    }
+
+    // -- Composite types for multi-span lines and multi-line text --
+
+    /// A single line composed of styled spans (owned).
+    ///
+    /// This is the primary pipeline type for passing styled line content between
+    /// parsing stages (markdown, syntax highlighting) and rendering.
+    #[derive(Debug, Clone, PartialEq, Eq, Default)]
+    pub struct StyledLine {
+        pub spans: Vec<OwnedStyledSpan>,
+    }
+
+    impl StyledLine {
+        /// Create an empty line.
+        #[must_use]
+        pub fn new() -> Self {
+            Self { spans: Vec::new() }
+        }
+
+        /// Create a line from a single plain string with the given role.
+        #[must_use]
+        pub fn from_role(text: impl Into<String>, role: TextRole) -> Self {
+            Self {
+                spans: vec![OwnedStyledSpan::role(text, role)],
+            }
+        }
+
+        /// Create a line from a single plain string with Primary role.
+        #[must_use]
+        pub fn plain(text: impl Into<String>) -> Self {
+            Self::from_role(text, TextRole::Primary)
+        }
+
+        /// Push a span onto the line.
+        pub fn push(&mut self, span: OwnedStyledSpan) {
+            self.spans.push(span);
+        }
+
+        /// Push text with a semantic role.
+        pub fn push_role(&mut self, text: impl Into<String>, role: TextRole) {
+            self.spans.push(OwnedStyledSpan::role(text, role));
+        }
+
+        /// Push text with a style token.
+        pub fn push_token(&mut self, text: impl Into<String>, token: StyleToken) {
+            self.spans.push(OwnedStyledSpan::token(text, token));
+        }
+
+        /// Whether the line has no spans.
+        #[must_use]
+        pub fn is_empty(&self) -> bool {
+            self.spans.is_empty()
+        }
+
+        /// Number of spans in the line.
+        #[must_use]
+        pub fn len(&self) -> usize {
+            self.spans.len()
+        }
+
+        /// Total character count across all spans.
+        #[must_use]
+        pub fn char_count(&self) -> usize {
+            self.spans.iter().map(|s| s.text.len()).sum()
+        }
+
+        /// Borrow spans as a slice of [`StyledSpan`] for drawing.
+        ///
+        /// Returns a `Vec` because the borrowed spans have shorter lifetimes than
+        /// the owned data, so a `&[StyledSpan]` cannot be returned directly.
+        #[must_use]
+        pub fn as_spans(&self) -> Vec<StyledSpan<'_>> {
+            self.spans.iter().map(OwnedStyledSpan::as_span).collect()
+        }
+
+        /// Concatenate all span text (unstyled).
+        #[must_use]
+        pub fn plain_text(&self) -> String {
+            self.spans.iter().map(|s| s.text.as_str()).collect()
+        }
+    }
+
+    /// Multi-line styled text composed of [`StyledLine`]s.
+    ///
+    /// Used for rendering multi-line content from markdown, syntax-highlighted
+    /// source code, or any pipeline that produces styled output.
+    #[derive(Debug, Clone, PartialEq, Eq, Default)]
+    pub struct StyledText {
+        pub lines: Vec<StyledLine>,
+    }
+
+    impl StyledText {
+        /// Create empty styled text.
+        #[must_use]
+        pub fn new() -> Self {
+            Self { lines: Vec::new() }
+        }
+
+        /// Create from a single line.
+        #[must_use]
+        pub fn single(line: StyledLine) -> Self {
+            Self { lines: vec![line] }
+        }
+
+        /// Push a line.
+        pub fn push(&mut self, line: StyledLine) {
+            self.lines.push(line);
+        }
+
+        /// Number of lines.
+        #[must_use]
+        pub fn line_count(&self) -> usize {
+            self.lines.len()
+        }
+
+        /// Whether there are no lines.
+        #[must_use]
+        pub fn is_empty(&self) -> bool {
+            self.lines.is_empty()
+        }
+    }
+
+    // -- Pipeline trait: source of styled spans for future markdown/syntax integration --
+
+    /// Trait for sources that produce styled spans from raw text.
+    ///
+    /// Implementors parse raw text (markdown, source code, log output) and
+    /// produce styled spans. This is the integration seam for plugging in
+    /// markdown renderers, syntax highlighters, or custom formatting logic.
+    pub trait SpanSource {
+        /// Parse one line of input text into styled spans.
+        fn style_line(&self, input: &str) -> StyledLine;
+
+        /// Parse multi-line input text into styled text.
+        fn style_text(&self, input: &str) -> StyledText {
+            StyledText {
+                lines: input.lines().map(|line| self.style_line(line)).collect(),
+            }
+        }
+    }
+
+    /// Passthrough span source that wraps all text in Primary role.
+    ///
+    /// Useful as a default / fallback when no specific highlighter is configured.
+    pub struct PlainSpanSource;
+
+    impl SpanSource for PlainSpanSource {
+        fn style_line(&self, input: &str) -> StyledLine {
+            StyledLine::plain(input)
+        }
+    }
+
     /// Box-drawing character sets.
     struct BorderChars {
         top_left: char,
@@ -781,6 +1098,49 @@ pub mod render {
                     self.cells[abs_y * self.size.width + col] = FrameCell { glyph, style };
                     col += 1;
                 }
+            }
+        }
+
+        /// Draw a [`StyledLine`] at the given position, clipped to frame bounds.
+        pub fn draw_styled_line(&mut self, x: usize, y: usize, line: &StyledLine) {
+            let borrowed: Vec<StyledSpan<'_>> = line.as_spans();
+            self.draw_spans(x, y, &borrowed);
+        }
+
+        /// Draw a [`StyledLine`] within a rect, clipped to rect bounds.
+        pub fn draw_styled_line_in_rect(
+            &mut self,
+            rect: Rect,
+            x_offset: usize,
+            y_offset: usize,
+            line: &StyledLine,
+        ) {
+            let borrowed: Vec<StyledSpan<'_>> = line.as_spans();
+            self.draw_spans_in_rect(rect, x_offset, y_offset, &borrowed);
+        }
+
+        /// Draw a [`StyledText`] block starting at `(x, y)`, one line per row.
+        ///
+        /// Lines that fall outside the frame height are silently skipped.
+        pub fn draw_styled_text_block(&mut self, x: usize, y: usize, text: &StyledText) {
+            for (i, line) in text.lines.iter().enumerate() {
+                let row = y + i;
+                if row >= self.size.height {
+                    break;
+                }
+                self.draw_styled_line(x, row, line);
+            }
+        }
+
+        /// Draw a [`StyledText`] within a rect, one line per row.
+        ///
+        /// Lines that fall outside the rect height are silently skipped.
+        pub fn draw_styled_text_in_rect(&mut self, rect: Rect, text: &StyledText) {
+            for (i, line) in text.lines.iter().enumerate() {
+                if i >= rect.height {
+                    break;
+                }
+                self.draw_styled_line_in_rect(rect, 0, i, line);
             }
         }
 
@@ -1620,7 +1980,8 @@ mod tests {
         ResizeEvent, UiAction,
     };
     use super::render::{
-        FrameSize, RenderFrame, SpanStyle, StyledSpan, TermColor, TextRole,
+        FrameSize, OwnedStyledSpan, PlainSpanSource, RenderFrame, SpanSource, SpanStyle,
+        StyledLine, StyledSpan, StyledText, TermColor, TextRole,
         LEGACY_RENDER_FRAME_API_DELETE_GATE,
     };
     use super::style::{StyleToken, ThemeKind, ThemeSpec};
@@ -2080,6 +2441,162 @@ mod tests {
             "from:From:18:Left\nsubject:Subject:32:Left\nage:Age:8:Right\nstatus:Status:10:Center"
         );
     }
+
+    #[test]
+    fn styled_span_convenience_builders() {
+        assert_eq!(
+            StyledSpan::accent("hi").style,
+            SpanStyle::Role(TextRole::Accent)
+        );
+        assert_eq!(
+            StyledSpan::danger("err").style,
+            SpanStyle::Role(TextRole::Danger)
+        );
+        assert_eq!(
+            StyledSpan::muted("dim").style,
+            SpanStyle::Role(TextRole::Muted)
+        );
+        assert_eq!(
+            StyledSpan::success("ok").style,
+            SpanStyle::Role(TextRole::Success)
+        );
+        assert_eq!(
+            StyledSpan::warning("warn").style,
+            SpanStyle::Role(TextRole::Warning)
+        );
+        assert_eq!(
+            StyledSpan::info("note").style,
+            SpanStyle::Role(TextRole::Info)
+        );
+        assert_eq!(
+            StyledSpan::focus("sel").style,
+            SpanStyle::Role(TextRole::Focus)
+        );
+        assert_eq!(
+            StyledSpan::primary("txt").style,
+            SpanStyle::Role(TextRole::Primary)
+        );
+    }
+
+    #[test]
+    fn owned_styled_span_as_span_roundtrips() {
+        let owned = OwnedStyledSpan::role("hello", TextRole::Accent);
+        let borrowed = owned.as_span();
+        assert_eq!(borrowed.text, "hello");
+        assert_eq!(borrowed.style, SpanStyle::Role(TextRole::Accent));
+    }
+
+    #[test]
+    fn styled_line_push_and_plain_text() {
+        let mut line = StyledLine::new();
+        line.push_role("ERR", TextRole::Danger);
+        line.push_role(" ", TextRole::Muted);
+        line.push_role("ok", TextRole::Success);
+        assert_eq!(line.len(), 3);
+        assert_eq!(line.plain_text(), "ERR ok");
+        assert_eq!(line.char_count(), 6);
+    }
+
+    #[test]
+    fn styled_line_from_role_shorthand() {
+        let line = StyledLine::from_role("status: running", TextRole::Info);
+        assert_eq!(line.len(), 1);
+        assert_eq!(line.plain_text(), "status: running");
+    }
+
+    #[test]
+    fn styled_line_plain_shorthand() {
+        let line = StyledLine::plain("hello world");
+        assert_eq!(line.spans[0].style, SpanStyle::Role(TextRole::Primary));
+    }
+
+    #[test]
+    fn styled_text_push_and_count() {
+        let mut text = StyledText::new();
+        text.push(StyledLine::plain("line 1"));
+        text.push(StyledLine::plain("line 2"));
+        assert_eq!(text.line_count(), 2);
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn draw_styled_line_renders_to_frame() {
+        let theme = ThemeSpec::for_kind(ThemeKind::Dark);
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 10,
+                height: 1,
+            },
+            theme,
+        );
+        let mut line = StyledLine::new();
+        line.push_role("AB", TextRole::Accent);
+        line.push_role("cd", TextRole::Muted);
+        frame.draw_styled_line(0, 0, &line);
+        assert_eq!(frame.row_text(0), "ABcd      ");
+        assert_eq!(
+            frame.cell(0, 0).map(|c| c.style.fg),
+            Some(TermColor::Ansi256(theme.color(StyleToken::Accent)))
+        );
+        assert_eq!(
+            frame.cell(2, 0).map(|c| c.style.fg),
+            Some(TermColor::Ansi256(theme.color(StyleToken::Muted)))
+        );
+    }
+
+    #[test]
+    fn draw_styled_text_block_renders_multiple_lines() {
+        let theme = ThemeSpec::for_kind(ThemeKind::Dark);
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 6,
+                height: 3,
+            },
+            theme,
+        );
+        let mut text = StyledText::new();
+        text.push(StyledLine::plain("line1"));
+        text.push(StyledLine::from_role("line2", TextRole::Danger));
+        text.push(StyledLine::plain("line3"));
+        frame.draw_styled_text_block(0, 0, &text);
+        assert_eq!(frame.row_text(0), "line1 ");
+        assert_eq!(frame.row_text(1), "line2 ");
+        assert_eq!(frame.row_text(2), "line3 ");
+    }
+
+    #[test]
+    fn draw_styled_text_block_clips_to_frame_height() {
+        let theme = ThemeSpec::default();
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 6,
+                height: 1,
+            },
+            theme,
+        );
+        let mut text = StyledText::new();
+        text.push(StyledLine::plain("row-0"));
+        text.push(StyledLine::plain("row-1")); // should be clipped
+        frame.draw_styled_text_block(0, 0, &text);
+        assert_eq!(frame.row_text(0), "row-0 ");
+    }
+
+    #[test]
+    fn plain_span_source_wraps_as_primary() {
+        let source = PlainSpanSource;
+        let line = source.style_line("hello world");
+        assert_eq!(line.len(), 1);
+        assert_eq!(line.spans[0].text, "hello world");
+        assert_eq!(line.spans[0].style, SpanStyle::Role(TextRole::Primary));
+    }
+
+    #[test]
+    fn plain_span_source_handles_multiline() {
+        let source = PlainSpanSource;
+        let text = source.style_text("line1\nline2\nline3");
+        assert_eq!(text.line_count(), 3);
+        assert_eq!(text.lines[1].plain_text(), "line2");
+    }
 }
 
 #[cfg(all(test, feature = "frankentui-upstream"))]
@@ -2157,6 +2674,68 @@ mod upstream_bridge_tests {
 
         let focus = token_style(theme, StyleToken::Focus);
         assert!(focus.has_attr(ftui::StyleFlags::UNDERLINE));
+    }
+
+    #[test]
+    fn span_style_to_ftui_style_resolves_all_variants() {
+        use super::render::{SpanStyle, TextRole};
+        use super::upstream_bridge::span_style_to_ftui_style;
+
+        let theme = ThemeSpec::for_kind(ThemeKind::Dark);
+
+        // Role variant
+        let accent_ftui = span_style_to_ftui_style(theme, SpanStyle::Role(TextRole::Accent));
+        let accent_expected = token_style(theme, StyleToken::Accent);
+        assert_eq!(accent_ftui.fg, accent_expected.fg);
+        assert_eq!(accent_ftui.attrs, accent_expected.attrs);
+
+        // Token variant
+        let danger_ftui = span_style_to_ftui_style(theme, SpanStyle::Token(StyleToken::Danger));
+        let danger_expected = token_style(theme, StyleToken::Danger);
+        assert_eq!(danger_ftui.fg, danger_expected.fg);
+
+        // Cell variant
+        let cell = CellStyle {
+            fg: TermColor::Ansi256(196),
+            bg: TermColor::Rgb(1, 2, 3),
+            bold: true,
+            dim: false,
+            underline: false,
+        };
+        let cell_ftui = span_style_to_ftui_style(theme, SpanStyle::Cell(cell));
+        let cell_expected = cell_style_to_ftui_style(cell);
+        assert_eq!(cell_ftui.fg, cell_expected.fg);
+        assert_eq!(cell_ftui.attrs, cell_expected.attrs);
+    }
+
+    #[test]
+    fn styled_line_to_ftui_line_produces_correct_spans() {
+        use super::render::{OwnedStyledSpan, StyledLine, TextRole};
+        use super::upstream_bridge::styled_line_to_ftui_line;
+
+        let theme = ThemeSpec::for_kind(ThemeKind::Dark);
+        let mut line = StyledLine::new();
+        line.push(OwnedStyledSpan::role("ok", TextRole::Success));
+        line.push(OwnedStyledSpan::role(" ", TextRole::Muted));
+        line.push(OwnedStyledSpan::role("ERR", TextRole::Danger));
+
+        let ftui_line = styled_line_to_ftui_line(theme, &line);
+        assert_eq!(ftui_line.len(), 3);
+        assert_eq!(ftui_line.width(), 6);
+    }
+
+    #[test]
+    fn styled_text_to_ftui_text_produces_correct_lines() {
+        use super::render::{StyledLine, StyledText};
+        use super::upstream_bridge::styled_text_to_ftui_text;
+
+        let theme = ThemeSpec::for_kind(ThemeKind::Dark);
+        let mut text = StyledText::new();
+        text.push(StyledLine::plain("line 1"));
+        text.push(StyledLine::plain("line 2"));
+
+        let ftui_text = styled_text_to_ftui_text(theme, &text);
+        assert_eq!(ftui_text.height(), 2);
     }
 }
 
