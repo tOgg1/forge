@@ -70,6 +70,7 @@ pub mod root_cause_waterfall;
 pub mod run_output_diff;
 pub mod runs_tab;
 pub mod search_overlay;
+pub mod semantic_incident_map;
 pub mod semantic_log_clustering;
 pub mod session_restore;
 pub mod smart_loop_clustering;
