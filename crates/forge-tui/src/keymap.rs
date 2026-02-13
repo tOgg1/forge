@@ -182,6 +182,10 @@ pub enum KeyCommand {
     SearchNextMatch,
     SearchPrevMatch,
     ToggleFollow,
+    JumpEvidenceError,
+    JumpEvidenceWarning,
+    JumpEvidenceAck,
+    JumpEvidenceBack,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -556,6 +560,30 @@ impl Keymap {
                 "open search",
             ),
             bind(
+                Scope::Mode(ModeScope::Main),
+                KeyChord::ctrl_char('e'),
+                Cmd::JumpEvidenceError,
+                "jump latest error evidence",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Main),
+                KeyChord::ctrl_char('w'),
+                Cmd::JumpEvidenceWarning,
+                "jump latest warning evidence",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Main),
+                KeyChord::ctrl_char('a'),
+                Cmd::JumpEvidenceAck,
+                "jump latest ack evidence",
+            ),
+            bind(
+                Scope::Mode(ModeScope::Main),
+                KeyChord::ctrl_char('b'),
+                Cmd::JumpEvidenceBack,
+                "jump back from evidence",
+            ),
+            bind(
                 Scope::Mode(ModeScope::Search),
                 KeyChord::plain(Tok::Escape),
                 Cmd::SearchClose,
@@ -758,6 +786,10 @@ mod tests {
                 vec![KeyScope::Mode(ModeScope::Main), KeyScope::Global],
                 KeyChord::ctrl_char('c'),
             ),
+            (
+                vec![KeyScope::Mode(ModeScope::Main), KeyScope::Global],
+                KeyChord::ctrl_char('e'),
+            ),
         ]
         .iter()
         .map(|(scopes, chord)| {
@@ -772,6 +804,7 @@ mod tests {
             "V => None",
             "Ctrl+P => Some(OpenPalette)",
             "Ctrl+C => Some(Quit)",
+            "Ctrl+E => Some(JumpEvidenceError)",
         ]
         .join("\n");
         assert_eq!(lines, expected);

@@ -130,6 +130,15 @@ struct NotificationEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct NavigationReturnPoint {
+    tab: MainTab,
+    selected_id: String,
+    selected_run: usize,
+    log_source: LogSource,
+    log_layer: LogLayer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationCenterEntry {
     pub kind: StatusKind,
     pub text: String,
@@ -421,6 +430,36 @@ impl HandoffSnapshotView {
             format!("pending-risks: {}", self.pending_risks),
         ]
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EvidenceKind {
+    Error,
+    Warning,
+    Ack,
+}
+
+impl EvidenceKind {
+    #[must_use]
+    fn label(self) -> &'static str {
+        match self {
+            Self::Error => "ERROR",
+            Self::Warning => "WARN",
+            Self::Ack => "ACK",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EvidenceReturnPoint {
+    tab: MainTab,
+    selected_id: String,
+    selected_idx: usize,
+    selected_run: usize,
+    log_scroll: usize,
+    inbox_selected_thread: usize,
+    focus_right: bool,
+    multi_page: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -778,6 +817,8 @@ pub struct App {
     hint_ranker: AdaptiveHintRanker,
     command_palette: CommandPalette,
     search_overlay: SearchOverlay,
+    nav_history: Vec<NavigationReturnPoint>,
+    evidence_return: Option<EvidenceReturnPoint>,
     quitting: bool,
 
     // -- view registry (for tab content) --
@@ -869,6 +910,8 @@ impl App {
             hint_ranker: AdaptiveHintRanker::default(),
             command_palette: CommandPalette::new_default(),
             search_overlay: SearchOverlay::new(),
+            nav_history: Vec::new(),
+            evidence_return: None,
             quitting: false,
 
             views: HashMap::new(),
@@ -2058,6 +2101,210 @@ impl App {
         Some(&self.run_history[idx])
     }
 
+    fn stash_evidence_return_point(&mut self) {
+        if self.evidence_return.is_some() {
+            return;
+        }
+        self.evidence_return = Some(EvidenceReturnPoint {
+            tab: self.tab,
+            selected_id: self.selected_id.clone(),
+            selected_idx: self.selected_idx,
+            selected_run: self.selected_run,
+            log_scroll: self.log_scroll,
+            inbox_selected_thread: self.inbox_selected_thread,
+            focus_right: self.focus_right,
+            multi_page: self.multi_page,
+        });
+    }
+
+    fn restore_evidence_return_point(&mut self) -> bool {
+        let Some(point) = self.evidence_return.take() else {
+            self.set_status(StatusKind::Info, "No sticky evidence return point");
+            return false;
+        };
+        self.set_tab(point.tab);
+        self.focus_right = point.focus_right;
+        self.multi_page = point.multi_page;
+        if self.tab == MainTab::MultiLogs {
+            self.clamp_multi_page();
+        }
+
+        if self.filtered.is_empty() {
+            self.selected_idx = 0;
+            self.selected_id.clear();
+        } else if !point.selected_id.is_empty() {
+            if let Some(idx) = self
+                .filtered
+                .iter()
+                .position(|loop_view| loop_view.id == point.selected_id)
+            {
+                self.selected_idx = idx;
+                self.selected_id = point.selected_id.clone();
+            } else {
+                self.selected_idx = point
+                    .selected_idx
+                    .min(self.filtered.len().saturating_sub(1));
+                self.selected_id = self.filtered[self.selected_idx].id.clone();
+            }
+        } else {
+            self.selected_idx = point
+                .selected_idx
+                .min(self.filtered.len().saturating_sub(1));
+            self.selected_id = self.filtered[self.selected_idx].id.clone();
+        }
+
+        if self.run_history.is_empty() {
+            self.selected_run = 0;
+        } else {
+            self.selected_run = point
+                .selected_run
+                .min(self.run_history.len().saturating_sub(1));
+        }
+
+        let thread_count = self.inbox_threads().len();
+        if thread_count == 0 {
+            self.inbox_selected_thread = 0;
+        } else {
+            self.inbox_selected_thread = point
+                .inbox_selected_thread
+                .min(thread_count.saturating_sub(1));
+        }
+
+        self.log_scroll = point.log_scroll;
+        self.follow_mode = self.log_scroll == 0;
+        self.set_status(StatusKind::Info, "Returned to sticky evidence source");
+        true
+    }
+
+    fn jump_to_latest_ack_evidence(&mut self) -> bool {
+        let threads = self.inbox_threads();
+        let Some(thread_idx) = threads
+            .iter()
+            .position(|thread| thread.pending_ack_count > 0)
+        else {
+            self.set_status(StatusKind::Info, "No pending ACK evidence found");
+            return false;
+        };
+        self.stash_evidence_return_point();
+        self.set_tab(MainTab::Inbox);
+        self.inbox_selected_thread = thread_idx;
+        self.clamp_inbox_selection();
+        self.set_status(
+            StatusKind::Info,
+            "Jumped to latest ACK evidence (Ctrl+B to return)",
+        );
+        true
+    }
+
+    fn jump_to_latest_error_warning_evidence(&mut self, kind: EvidenceKind) -> bool {
+        if let Some((line_idx, total_lines)) = self.latest_evidence_line_index(kind) {
+            self.stash_evidence_return_point();
+            self.log_scroll = total_lines.saturating_sub(line_idx + 1);
+            self.follow_mode = self.log_scroll == 0;
+            self.set_status(
+                StatusKind::Info,
+                &format!(
+                    "Jumped to latest {} evidence line (Ctrl+B to return)",
+                    kind.label()
+                ),
+            );
+            return true;
+        }
+
+        if let Some(run_idx) = self.latest_run_index_with_evidence(kind) {
+            self.stash_evidence_return_point();
+            self.set_tab(MainTab::Runs);
+            self.selected_run = run_idx;
+            self.log_scroll = 0;
+            self.follow_mode = true;
+            self.set_status(
+                StatusKind::Info,
+                &format!(
+                    "Jumped to latest {} run evidence (Ctrl+B to return)",
+                    kind.label()
+                ),
+            );
+            return true;
+        }
+
+        if let Some(loop_idx) = self.latest_loop_index_with_evidence(kind) {
+            self.stash_evidence_return_point();
+            self.set_tab(MainTab::Overview);
+            self.selected_idx = loop_idx;
+            self.selected_id = self.filtered[loop_idx].id.clone();
+            self.log_scroll = 0;
+            self.follow_mode = true;
+            self.set_status(
+                StatusKind::Info,
+                &format!(
+                    "Jumped to latest {} loop evidence (Ctrl+B to return)",
+                    kind.label()
+                ),
+            );
+            return true;
+        }
+
+        self.set_status(
+            StatusKind::Info,
+            &format!("No {} evidence found", kind.label()),
+        );
+        false
+    }
+
+    fn jump_to_latest_evidence(&mut self, kind: EvidenceKind) -> bool {
+        match kind {
+            EvidenceKind::Ack => self.jump_to_latest_ack_evidence(),
+            EvidenceKind::Error | EvidenceKind::Warning => {
+                self.jump_to_latest_error_warning_evidence(kind)
+            }
+        }
+    }
+
+    fn latest_evidence_line_index(&self, kind: EvidenceKind) -> Option<(usize, usize)> {
+        let lines = self.failure_explain_source_lines()?;
+        for idx in (0..lines.len()).rev() {
+            if evidence_line_matches(kind, &lines[idx]) {
+                return Some((idx, lines.len()));
+            }
+        }
+        None
+    }
+
+    fn latest_run_index_with_evidence(&self, kind: EvidenceKind) -> Option<usize> {
+        self.run_history.iter().enumerate().find_map(|(idx, run)| {
+            if evidence_line_matches(kind, &run.status)
+                || run
+                    .output_lines
+                    .iter()
+                    .rev()
+                    .any(|line| evidence_line_matches(kind, line))
+            {
+                Some(idx)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn latest_loop_index_with_evidence(&self, kind: EvidenceKind) -> Option<usize> {
+        let mut best: Option<(usize, String)> = None;
+        for (idx, loop_view) in self.filtered.iter().enumerate() {
+            let matches = evidence_line_matches(kind, &loop_view.state)
+                || evidence_line_matches(kind, &loop_view.last_error);
+            if !matches {
+                continue;
+            }
+            let recency = loop_view.last_run_at.clone().unwrap_or_default();
+            if best
+                .as_ref()
+                .map_or(true, |(_, best_recency)| recency > *best_recency)
+            {
+                best = Some((idx, recency));
+            }
+        }
+        best.map(|(idx, _)| idx)
+    }
+
     // -- multi-log / layout helpers ------------------------------------------
 
     #[must_use]
@@ -2540,7 +2787,7 @@ impl App {
                     Command::None
                 }
             }
-            Key::Char('a') => {
+            Key::Char('a') if !key.modifiers.ctrl => {
                 if self.tab == MainTab::Inbox {
                     self.acknowledge_selected_inbox_message();
                     Command::Fetch
@@ -2599,6 +2846,34 @@ impl App {
                 {
                     let page = self.log_scroll_page_size() as i32;
                     self.scroll_logs(-page);
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('e') if key.modifiers.ctrl => {
+                if self.jump_to_latest_evidence(EvidenceKind::Error) {
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('w') if key.modifiers.ctrl => {
+                if self.jump_to_latest_evidence(EvidenceKind::Warning) {
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('a') if key.modifiers.ctrl => {
+                if self.jump_to_latest_evidence(EvidenceKind::Ack) {
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('b') if key.modifiers.ctrl => {
+                if self.restore_evidence_return_point() {
                     Command::Fetch
                 } else {
                     Command::None
@@ -3874,6 +4149,8 @@ impl App {
                 HintSpec::new("z", "zen", 6, Some(KeyCommand::ToggleZen)),
                 HintSpec::new("A", "a11y-mode", 6, None),
                 HintSpec::new("E", "export", 6, Some(KeyCommand::ExportCurrentView)),
+                HintSpec::new("ctrl+e", "evidence", 5, Some(KeyCommand::JumpEvidenceError)),
+                HintSpec::new("ctrl+b", "return", 5, Some(KeyCommand::JumpEvidenceBack)),
                 HintSpec::new("i", "dismiss-hints", 4, None),
                 HintSpec::new("I", "recall-hints", 4, None),
                 HintSpec::new("ctrl+p", "palette", 5, Some(KeyCommand::OpenPalette)),
@@ -3890,6 +4167,8 @@ impl App {
                 HintSpec::new("z", "zen", 6, Some(KeyCommand::ToggleZen)),
                 HintSpec::new("A", "a11y-mode", 6, None),
                 HintSpec::new("E", "export", 6, Some(KeyCommand::ExportCurrentView)),
+                HintSpec::new("ctrl+e", "evidence", 5, Some(KeyCommand::JumpEvidenceError)),
+                HintSpec::new("ctrl+b", "return", 5, Some(KeyCommand::JumpEvidenceBack)),
                 HintSpec::new("F", "follow", 5, Some(KeyCommand::ToggleFollow)),
                 HintSpec::new("M", "density", 5, None),
                 HintSpec::new("Z", "focus", 5, None),
@@ -3904,6 +4183,8 @@ impl App {
                 HintSpec::new("1-5", "tabs", 8, Some(KeyCommand::SwitchTabOverview)),
                 HintSpec::new("j/k", "sel", 7, Some(KeyCommand::MoveSelectionNext)),
                 HintSpec::new("E", "export", 7, Some(KeyCommand::ExportCurrentView)),
+                HintSpec::new("ctrl+e", "evidence", 6, Some(KeyCommand::JumpEvidenceError)),
+                HintSpec::new("ctrl+b", "return", 6, Some(KeyCommand::JumpEvidenceBack)),
                 HintSpec::new("t/T", "theme", 6, Some(KeyCommand::CycleTheme)),
                 HintSpec::new("A", "a11y-mode", 6, None),
                 HintSpec::new("M", "density", 6, None),
@@ -4900,6 +5181,8 @@ impl App {
             "  i         dismiss first-run contextual hints for current tab".to_owned(),
             "  I         recall first-run contextual hints for current tab".to_owned(),
             "  /         filter mode".to_owned(),
+            "  Ctrl+E/W/A jump latest ERROR/WARN/ACK evidence".to_owned(),
+            "  Ctrl+B    return to sticky evidence source".to_owned(),
             "".to_owned(),
         ];
         lines.extend(
@@ -5067,6 +5350,39 @@ fn map_log_render_layer(layer: LogLayer) -> LogRenderLayer {
         LogLayer::Errors => LogRenderLayer::Errors,
         LogLayer::Tools => LogRenderLayer::Tools,
         LogLayer::Diff => LogRenderLayer::Diff,
+    }
+}
+
+fn contains_ascii_token_ci(haystack: &str, needle: &str) -> bool {
+    haystack
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .any(|token| !token.is_empty() && token.eq_ignore_ascii_case(needle))
+}
+
+fn evidence_line_matches(kind: EvidenceKind, line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    match kind {
+        EvidenceKind::Error => {
+            contains_ascii_token_ci(&lower, "error")
+                || contains_ascii_token_ci(&lower, "failed")
+                || contains_ascii_token_ci(&lower, "panic")
+                || contains_ascii_token_ci(&lower, "fatal")
+                || contains_ascii_token_ci(&lower, "exception")
+                || contains_ascii_token_ci(&lower, "timeout")
+                || contains_ascii_token_ci(&lower, "oom")
+        }
+        EvidenceKind::Warning => {
+            contains_ascii_token_ci(&lower, "warn")
+                || contains_ascii_token_ci(&lower, "warning")
+                || contains_ascii_token_ci(&lower, "retry")
+                || contains_ascii_token_ci(&lower, "degraded")
+                || contains_ascii_token_ci(&lower, "slow")
+        }
+        EvidenceKind::Ack => {
+            contains_ascii_token_ci(&lower, "ack")
+                || contains_ascii_token_ci(&lower, "acknowledge")
+                || contains_ascii_token_ci(&lower, "acknowledged")
+        }
     }
 }
 
@@ -5558,6 +5874,98 @@ mod tests {
         assert!(snapshot.contains("task=forge-jws"));
     }
 
+    #[test]
+    fn ctrl_e_jumps_to_latest_error_line_and_ctrl_b_restores_scroll() {
+        let mut app = app_with_loops(2);
+        app.set_tab(MainTab::Logs);
+        app.set_selected_log(LogTailView {
+            lines: vec![
+                "info startup".to_owned(),
+                "warn: latency spike".to_owned(),
+                "error: failed to connect".to_owned(),
+                "info retry scheduled".to_owned(),
+            ],
+            message: String::new(),
+        });
+        assert_eq!(app.log_scroll(), 0);
+
+        let jump_cmd = app.update(ctrl_key('e'));
+        assert_eq!(jump_cmd, Command::Fetch);
+        assert_eq!(app.log_scroll(), 1);
+        assert!(!app.follow_mode());
+        assert!(app.status_text().contains("ERROR evidence"));
+
+        let return_cmd = app.update(ctrl_key('b'));
+        assert_eq!(return_cmd, Command::Fetch);
+        assert_eq!(app.log_scroll(), 0);
+        assert!(app.follow_mode());
+        assert!(app
+            .status_text()
+            .contains("Returned to sticky evidence source"));
+    }
+
+    #[test]
+    fn ctrl_w_jumps_to_warning_run_and_ctrl_b_restores_previous_tab() {
+        let mut app = app_with_loops(3);
+        app.set_tab(MainTab::Overview);
+        app.move_selection(1);
+        app.set_run_history(vec![
+            RunView {
+                id: "run-ok".to_owned(),
+                status: "success".to_owned(),
+                started_at: "2026-02-13T11:00:00Z".to_owned(),
+                ..Default::default()
+            },
+            RunView {
+                id: "run-warn".to_owned(),
+                status: "warning".to_owned(),
+                started_at: "2026-02-13T11:01:00Z".to_owned(),
+                ..Default::default()
+            },
+        ]);
+
+        let jump_cmd = app.update(ctrl_key('w'));
+        assert_eq!(jump_cmd, Command::Fetch);
+        assert_eq!(app.tab(), MainTab::Runs);
+        assert_eq!(app.selected_run, 1);
+        assert!(app.status_text().contains("WARN"));
+
+        let return_cmd = app.update(ctrl_key('b'));
+        assert_eq!(return_cmd, Command::Fetch);
+        assert_eq!(app.tab(), MainTab::Overview);
+        assert_eq!(app.selected_idx(), 1);
+        assert_eq!(app.selected_id(), "loop-1");
+    }
+
+    #[test]
+    fn ctrl_a_jumps_to_latest_ack_thread_and_ctrl_b_restores_tab() {
+        let mut app = app_with_loops(2);
+        app.set_tab(MainTab::Logs);
+        app.set_inbox_messages(sample_inbox_messages());
+
+        let jump_cmd = app.update(ctrl_key('a'));
+        assert_eq!(jump_cmd, Command::Fetch);
+        assert_eq!(app.tab(), MainTab::Inbox);
+        let threads = app.inbox_threads();
+        assert!(!threads.is_empty());
+        assert!(threads[app.inbox_selected_thread].pending_ack_count > 0);
+        assert!(app.status_text().contains("ACK evidence"));
+
+        let return_cmd = app.update(ctrl_key('b'));
+        assert_eq!(return_cmd, Command::Fetch);
+        assert_eq!(app.tab(), MainTab::Logs);
+    }
+
+    #[test]
+    fn ctrl_b_without_prior_jump_reports_missing_return_point() {
+        let mut app = App::new("default", 12);
+        let cmd = app.update(ctrl_key('b'));
+        assert_eq!(cmd, Command::None);
+        assert!(app
+            .status_text()
+            .contains("No sticky evidence return point"));
+    }
+
     // -- quit --
 
     #[test]
@@ -5661,6 +6069,20 @@ mod tests {
             .join("\n");
         assert!(all_text.contains("Keymap diagnostics"));
         assert!(all_text.contains("no conflicts detected"));
+    }
+
+    #[test]
+    fn help_lists_evidence_hotkeys() {
+        let mut app = App::new("default", 12);
+        app.height = 80;
+        app.update(key(Key::Char('?')));
+        let frame = app.render();
+        let all_text = (0..app.height())
+            .map(|row| frame.row_text(row))
+            .collect::<Vec<String>>()
+            .join("\n");
+        assert!(all_text.contains("Ctrl+E/W/A jump latest ERROR/WARN/ACK evidence"));
+        assert!(all_text.contains("Ctrl+B    return to sticky evidence source"));
     }
 
     #[test]
