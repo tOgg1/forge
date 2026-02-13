@@ -20,8 +20,8 @@ use crate::layouts::{
 };
 use crate::search_overlay::SearchOverlay;
 use crate::theme::{
-    cycle_accessibility_preset, cycle_palette, resolve_palette_colors, resolve_palette_for_capability,
-    Palette, ResolvedPalette, TerminalColorCapability,
+    cycle_accessibility_preset, cycle_palette, resolve_palette_colors,
+    resolve_palette_for_capability, Palette, ResolvedPalette, TerminalColorCapability,
 };
 
 // ---------------------------------------------------------------------------
@@ -3101,7 +3101,12 @@ impl App {
 
         // Fill background with palette RGB color
         frame.fill_bg(
-            Rect { x: 0, y: 0, width, height },
+            Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
             pal.background,
         );
 
@@ -3164,12 +3169,8 @@ impl App {
             UiMode::Confirm => {
                 if let Some(ref confirm) = self.confirm {
                     let prompt = &confirm.prompt;
-                    let truncated = if prompt.len() > width {
-                        &prompt[..width]
-                    } else {
-                        prompt
-                    };
-                    frame.draw_text(0, content_start, truncated, TextRole::Danger);
+                    let truncated = trim_to_width(prompt, width);
+                    frame.draw_text(0, content_start, &truncated, TextRole::Danger);
                     frame.draw_text(0, content_start + 1, "  y/n", TextRole::Muted);
                 }
             }
@@ -3178,12 +3179,8 @@ impl App {
                     "Filter: {} [status: {}]",
                     self.filter_text, self.filter_state
                 );
-                let truncated = if filter_line.len() > width {
-                    &filter_line[..width]
-                } else {
-                    &filter_line
-                };
-                frame.draw_text(0, content_start, truncated, TextRole::Accent);
+                let truncated = trim_to_width(&filter_line, width);
+                frame.draw_text(0, content_start, &truncated, TextRole::Accent);
             }
             UiMode::Wizard => {
                 for (idx, line) in self.render_wizard_lines(width).iter().enumerate() {
@@ -3230,27 +3227,35 @@ impl App {
                     );
                 } else if self.mode == UiMode::Main && self.tab == MainTab::Runs {
                     let runs_state = crate::runs_tab::RunsTabState {
-                        runs: self.run_history.iter().map(|rv| crate::runs_tab::RunEntry {
-                            id: rv.id.clone(),
-                            status: rv.status.clone(),
-                            exit_code: rv.exit_code,
-                            profile_name: rv.profile_name.clone(),
-                            profile_id: String::new(),
-                            harness: rv.harness.clone(),
-                            started_at: String::new(),
-                            duration_display: rv.duration.clone(),
-                            output_lines: Vec::new(),
-                        }).collect(),
+                        runs: self
+                            .run_history
+                            .iter()
+                            .map(|rv| crate::runs_tab::RunEntry {
+                                id: rv.id.clone(),
+                                status: rv.status.clone(),
+                                exit_code: rv.exit_code,
+                                profile_name: rv.profile_name.clone(),
+                                profile_id: String::new(),
+                                harness: rv.harness.clone(),
+                                started_at: String::new(),
+                                duration_display: rv.duration.clone(),
+                                output_lines: Vec::new(),
+                            })
+                            .collect(),
                         selected_run: self.selected_run,
                         layer_label: "raw".to_owned(),
-                        loop_display_id: self.selected_view()
+                        loop_display_id: self
+                            .selected_view()
                             .map(|lv| crate::filter::loop_display_id(&lv.id, &lv.short_id))
                             .unwrap_or_default(),
                         log_scroll: 0,
                     };
                     let runs_frame = crate::runs_tab::render_runs_paneled(
                         &runs_state,
-                        FrameSize { width, height: content_height },
+                        FrameSize {
+                            width,
+                            height: content_height,
+                        },
                         theme,
                         &pal,
                         self.focus_right,
@@ -3260,7 +3265,8 @@ impl App {
                     let multi_frame = self.render_multi_logs_pane(width, content_height);
                     blit_frame(&mut frame, &multi_frame, 0, content_start);
                 } else if self.mode == UiMode::Main && self.tab == MainTab::Inbox {
-                    let inbox_frame = self.render_inbox_pane(width, content_height, &pal, self.focus_right);
+                    let inbox_frame =
+                        self.render_inbox_pane(width, content_height, &pal, self.focus_right);
                     blit_frame(&mut frame, &inbox_frame, 0, content_start);
                 } else {
                     // Placeholder: show tab label + selection info.
@@ -3292,12 +3298,8 @@ impl App {
                 StatusKind::Info => pal.info,
             };
             let status_text = self.status_display_text();
-            let truncated = if status_text.len() > width {
-                &status_text[..width]
-            } else {
-                &status_text
-            };
-            frame.draw_styled_text(0, status_y, truncated, status_fg, pal.background, false);
+            let truncated = trim_to_width(&status_text, width);
+            frame.draw_styled_text(0, status_y, &truncated, status_fg, pal.background, false);
         }
 
         // Footer hint line with panel background stripe.
@@ -3309,17 +3311,18 @@ impl App {
         } else {
             "? help  q quit  ctrl+p palette  ctrl+f search  / filter  1-5 tabs  j/k sel  t/T theme  M density  Z focus  F follow"
         };
-        let truncated = if hint.len() > width {
-            &hint[..width]
-        } else {
-            hint
-        };
+        let truncated = trim_to_width(hint, width);
         // Footer bar: fill with panel bg, then draw text
         frame.fill_bg(
-            Rect { x: 0, y: footer_y, width, height: 1 },
+            Rect {
+                x: 0,
+                y: footer_y,
+                width,
+                height: 1,
+            },
             pal.panel,
         );
-        frame.draw_styled_text(0, footer_y, truncated, pal.text_muted, pal.panel, false);
+        frame.draw_styled_text(0, footer_y, &truncated, pal.text_muted, pal.panel, false);
 
         frame
     }
@@ -3366,11 +3369,7 @@ impl App {
             mode = mode_label,
             follow = follow_label,
         );
-        if header.len() > width {
-            header[..width].to_owned()
-        } else {
-            header
-        }
+        trim_to_width(&header, width)
     }
 
     #[allow(dead_code)]
@@ -3392,18 +3391,19 @@ impl App {
             })
             .collect();
         let bar = tabs.join("  ");
-        if bar.len() > width {
-            bar[..width].to_owned()
-        } else {
-            bar
-        }
+        trim_to_width(&bar, width)
     }
 
     /// Render tab bar with colored active-tab indicator.
     fn render_styled_tab_bar(&self, frame: &mut RenderFrame, width: usize, pal: &ResolvedPalette) {
         // Fill row with panel_alt background
         frame.fill_bg(
-            Rect { x: 0, y: 1, width, height: 1 },
+            Rect {
+                x: 0,
+                y: 1,
+                width,
+                height: 1,
+            },
             pal.panel_alt,
         );
 
@@ -3420,7 +3420,11 @@ impl App {
             } else {
                 format!(" {}:{} ", i + 1, label)
             };
-            let fg = if is_active { pal.accent } else { pal.text_muted };
+            let fg = if is_active {
+                pal.accent
+            } else {
+                pal.text_muted
+            };
             let bg = if is_active { pal.panel } else { pal.panel_alt };
             frame.draw_styled_text(col, 1, &text, fg, bg, is_active);
             col += text.len();
@@ -3507,13 +3511,7 @@ impl App {
 
         lines
             .into_iter()
-            .map(|line| {
-                if line.len() > width {
-                    line[..width].to_owned()
-                } else {
-                    line
-                }
-            })
+            .map(|line| trim_to_width(&line, width))
             .collect()
     }
 
@@ -3530,7 +3528,13 @@ impl App {
         }
     }
 
-    fn render_inbox_pane(&self, width: usize, height: usize, pal: &ResolvedPalette, focus_right: bool) -> RenderFrame {
+    fn render_inbox_pane(
+        &self,
+        width: usize,
+        height: usize,
+        pal: &ResolvedPalette,
+        focus_right: bool,
+    ) -> RenderFrame {
         let theme = crate::theme_for_capability(self.color_capability);
         let mut frame = RenderFrame::new(FrameSize { width, height }, theme);
         if width < 4 || height < 4 {
@@ -3538,7 +3542,15 @@ impl App {
         }
 
         // Fill background
-        frame.fill_bg(Rect { x: 0, y: 0, width, height }, pal.background);
+        frame.fill_bg(
+            Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
+            pal.background,
+        );
 
         let threads = self.inbox_threads();
         let claim_conflicts = self.claim_conflicts();
@@ -3555,7 +3567,14 @@ impl App {
             self.claim_events.len(),
             claim_conflicts.len()
         );
-        frame.draw_styled_text(0, 0, &trim_to_width(&header, width), pal.accent, pal.background, false);
+        frame.draw_styled_text(
+            0,
+            0,
+            &trim_to_width(&header, width),
+            pal.accent,
+            pal.background,
+            false,
+        );
 
         // Reserve rows for claim timeline panel at bottom
         let timeline_panel_h = if self.claim_events.is_empty() {
@@ -3569,7 +3588,12 @@ impl App {
         if threads.is_empty() {
             // Empty state panel
             let empty_h = 4usize.min(body_height);
-            let empty_rect = Rect { x: 0, y: body_y, width, height: empty_h };
+            let empty_rect = Rect {
+                x: 0,
+                y: body_y,
+                width,
+                height: empty_h,
+            };
             let inner = frame.draw_panel(
                 empty_rect,
                 "No Messages",
@@ -3579,16 +3603,22 @@ impl App {
             );
             if inner.height > 0 {
                 frame.draw_styled_text(
-                    inner.x, inner.y,
+                    inner.x,
+                    inner.y,
                     "No messages for selected filter",
-                    pal.text_muted, pal.panel, false,
+                    pal.text_muted,
+                    pal.panel,
+                    false,
                 );
             }
             if inner.height > 1 {
                 frame.draw_styled_text(
-                    inner.x, inner.y + 1,
+                    inner.x,
+                    inner.y + 1,
                     "keys: f filter  j/k select  enter read  a ack  h handoff  r reply",
-                    pal.text_muted, pal.panel, false,
+                    pal.text_muted,
+                    pal.panel,
+                    false,
                 );
             }
         } else {
@@ -3608,7 +3638,12 @@ impl App {
 
             // -- Thread list panel (focused when focus_right is false) --
             let list_border = if !focus_right { pal.accent } else { pal.border };
-            let list_rect = Rect { x: 0, y: body_y, width: list_panel_width, height: body_height };
+            let list_rect = Rect {
+                x: 0,
+                y: body_y,
+                width: list_panel_width,
+                height: body_height,
+            };
             let list_inner = frame.draw_panel(
                 list_rect,
                 "Threads",
@@ -3617,7 +3652,9 @@ impl App {
                 pal.panel,
             );
             for row in 0..list_inner.height {
-                let Some(thread) = threads.get(row) else { break };
+                let Some(thread) = threads.get(row) else {
+                    break;
+                };
                 let selected = row == self.inbox_selected_thread;
                 let prefix = if selected { "\u{25B8}" } else { " " }; // ▸ for selected
                 let line = format!(
@@ -3630,9 +3667,12 @@ impl App {
                 let fg = if selected { pal.accent } else { pal.text_muted };
                 let bold = selected;
                 frame.draw_styled_text(
-                    list_inner.x, list_inner.y + row,
+                    list_inner.x,
+                    list_inner.y + row,
                     &trim_to_width(&line, list_inner.width),
-                    fg, pal.panel, bold,
+                    fg,
+                    pal.panel,
+                    bold,
                 );
             }
 
@@ -3685,26 +3725,40 @@ impl App {
                     {
                         if row < detail_inner.height {
                             frame.draw_styled_text(
-                                detail_inner.x, detail_inner.y + row,
-                                &trim_to_width("handoff snapshot (h regenerate)", detail_inner.width),
-                                pal.info, pal.panel, true,
+                                detail_inner.x,
+                                detail_inner.y + row,
+                                &trim_to_width(
+                                    "handoff snapshot (h regenerate)",
+                                    detail_inner.width,
+                                ),
+                                pal.info,
+                                pal.panel,
+                                true,
                             );
                             row += 1;
                         }
                         for line in snapshot.lines() {
-                            if row >= detail_inner.height { break; }
+                            if row >= detail_inner.height {
+                                break;
+                            }
                             frame.draw_styled_text(
-                                detail_inner.x, detail_inner.y + row,
+                                detail_inner.x,
+                                detail_inner.y + row,
                                 &trim_to_width(&line, detail_inner.width),
-                                pal.text, pal.panel, false,
+                                pal.text,
+                                pal.panel,
+                                false,
                             );
                             row += 1;
                         }
                         if row < detail_inner.height {
                             frame.draw_styled_text(
-                                detail_inner.x, detail_inner.y + row,
+                                detail_inner.x,
+                                detail_inner.y + row,
                                 "recent thread messages",
-                                pal.text_muted, pal.panel, false,
+                                pal.text_muted,
+                                pal.panel,
+                                false,
                             );
                             row += 1;
                         }
@@ -3712,8 +3766,12 @@ impl App {
 
                     // Thread messages (newest first)
                     for idx in selected_thread.message_indices.iter().rev() {
-                        if row >= detail_inner.height { break; }
-                        let Some(message) = self.inbox_messages.get(*idx) else { continue };
+                        if row >= detail_inner.height {
+                            break;
+                        }
+                        let Some(message) = self.inbox_messages.get(*idx) else {
+                            continue;
+                        };
                         let unread_mark = if message.read_at.is_none() { "*" } else { " " };
                         let ack_mark = if message.ack_required && message.acked_at.is_none() {
                             "!"
@@ -3735,11 +3793,18 @@ impl App {
                             message.from.trim(),
                             preview
                         );
-                        let fg = if message.read_at.is_none() { pal.text } else { pal.text_muted };
+                        let fg = if message.read_at.is_none() {
+                            pal.text
+                        } else {
+                            pal.text_muted
+                        };
                         frame.draw_styled_text(
-                            detail_inner.x, detail_inner.y + row,
+                            detail_inner.x,
+                            detail_inner.y + row,
                             &trim_to_width(&line, detail_inner.width),
-                            fg, pal.panel, false,
+                            fg,
+                            pal.panel,
+                            false,
                         );
                         row += 1;
                     }
@@ -3759,7 +3824,12 @@ impl App {
         // -- Claim timeline panel (bottom) --
         if timeline_panel_h > 0 {
             let tl_y = height - timeline_panel_h;
-            let tl_rect = Rect { x: 0, y: tl_y, width, height: timeline_panel_h };
+            let tl_rect = Rect {
+                x: 0,
+                y: tl_y,
+                width,
+                height: timeline_panel_h,
+            };
             let tl_inner = frame.draw_panel(
                 tl_rect,
                 "Claim Timeline (latest)",
@@ -3767,15 +3837,15 @@ impl App {
                 pal.border,
                 pal.panel,
             );
-            let conflict_task_ids: HashSet<&str> = claim_conflicts
-                .iter()
-                .map(|c| c.task_id.as_str())
-                .collect();
+            let conflict_task_ids: HashSet<&str> =
+                claim_conflicts.iter().map(|c| c.task_id.as_str()).collect();
             let highlight_task = claim_conflicts
                 .get(self.selected_claim_conflict)
                 .map(|c| c.task_id.as_str());
             for row in 0..tl_inner.height {
-                let Some(event) = self.claim_events.get(row) else { break };
+                let Some(event) = self.claim_events.get(row) else {
+                    break;
+                };
                 let flag = if conflict_task_ids.contains(event.task_id.as_str()) {
                     "!"
                 } else {
@@ -3793,9 +3863,12 @@ impl App {
                     pal.text_muted
                 };
                 frame.draw_styled_text(
-                    tl_inner.x, tl_inner.y + row,
+                    tl_inner.x,
+                    tl_inner.y + row,
                     &trim_to_width(&line, tl_inner.width),
-                    fg, pal.panel, false,
+                    fg,
+                    pal.panel,
+                    false,
                 );
             }
         }
@@ -3888,12 +3961,8 @@ impl App {
             if i >= height {
                 break;
             }
-            let truncated = if line.len() > width {
-                &line[..width]
-            } else {
-                line
-            };
-            frame.draw_text(0, y_offset + i, truncated, TextRole::Primary);
+            let truncated = trim_to_width(line, width);
+            frame.draw_text(0, y_offset + i, &truncated, TextRole::Primary);
         }
     }
 }
@@ -5667,6 +5736,14 @@ mod tests {
         assert_eq!(total_pages, 1);
         assert_eq!(start, 0);
         assert_eq!(end, 0);
+    }
+
+    #[test]
+    fn trim_to_width_handles_unicode_without_panicking() {
+        let value = "⚠ warning: résumé";
+        let trimmed = trim_to_width(value, 5);
+        assert_eq!(trimmed.chars().count(), 5);
+        assert_eq!(trimmed, "⚠ war");
     }
 
     // -- ordered multi target views --

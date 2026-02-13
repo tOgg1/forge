@@ -588,10 +588,10 @@ fn slugify(value: &str) -> String {
 }
 
 fn trim_to_width(text: &str, width: usize) -> String {
-    if text.len() <= width {
+    if text.chars().count() <= width {
         text.to_owned()
     } else {
-        text[..width].to_owned()
+        text.chars().take(width).collect()
     }
 }
 
@@ -748,5 +748,18 @@ mod tests {
         assert_eq!(rows[0], "log anchors rows=1");
         assert!(rows[1].contains("loop-3 latest-run:17"));
         assert!(rows[1].contains("fix pending"));
+    }
+
+    #[test]
+    fn render_anchor_rows_truncates_unicode_without_panicking() {
+        let mut store = LogAnchorStore::default();
+        let mut item = draft("loop-3", "latest-run", 17, "⚠ résumé parsing failure");
+        item.annotation = "⚡".to_owned();
+        add_log_anchor(&mut store, item).expect("add anchor");
+
+        let rows = render_anchor_rows(&store, &LogAnchorFilter::default(), 8, 4);
+        for row in rows {
+            assert!(row.chars().count() <= 8);
+        }
     }
 }
