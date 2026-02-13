@@ -13,8 +13,10 @@ name = "forge-tui"
 path = "src/bin/forge-tui.rs"
 
 [dependencies]
+forge-cli = { path = "../forge-cli" }
 forge-ftui-adapter = { path = "../forge-ftui-adapter" }
 forge-db = { path = "../forge-db" }
+crossterm = "0.28"
 regex = "1"
 serde_json = { workspace = true }
 

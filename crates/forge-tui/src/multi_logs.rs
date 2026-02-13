@@ -8,6 +8,7 @@ use crate::app::{App, LogLayer, LogTailView, LoopView};
 use crate::filter::loop_display_id;
 use crate::layouts::{fit_pane_layout, layout_cell_size};
 use crate::log_compare::{diff_hint, summarize_diff_hints, synchronized_windows, DiffHint};
+use forge_cli::logs::{render_lines_for_layer, LogRenderLayer};
 use forge_ftui_adapter::render::{FrameSize, RenderFrame, TextRole};
 
 // ---------------------------------------------------------------------------
@@ -82,15 +83,35 @@ pub fn log_window_bounds(
 }
 
 // ---------------------------------------------------------------------------
-// render_log_block — simplified for mini panes (no layer filter/highlight)
+// render_log_block — mini panes using shared CLI parser/renderer + layer filter
 // ---------------------------------------------------------------------------
+
+fn to_render_layer(layer: LogLayer) -> LogRenderLayer {
+    match layer {
+        LogLayer::Raw => LogRenderLayer::Raw,
+        LogLayer::Events => LogRenderLayer::Events,
+        LogLayer::Errors => LogRenderLayer::Errors,
+        LogLayer::Tools => LogRenderLayer::Tools,
+        LogLayer::Diff => LogRenderLayer::Diff,
+    }
+}
+
+fn empty_layer_message(layer: LogLayer) -> &'static str {
+    match layer {
+        LogLayer::Raw => "Log is empty.",
+        LogLayer::Events => "No event lines in window.",
+        LogLayer::Errors => "No error lines in window.",
+        LogLayer::Tools => "No tool/command lines in window.",
+        LogLayer::Diff => "No diff lines in window.",
+    }
+}
 
 fn render_log_block(
     lines: &[String],
     message: &str,
     width: usize,
     available: usize,
-    _layer: LogLayer,
+    layer: LogLayer,
 ) -> Vec<String> {
     if available == 0 {
         return vec![];
@@ -103,10 +124,15 @@ fn render_log_block(
         };
         return vec![truncate(msg, width)];
     }
-    let (start, end, _) = log_window_bounds(lines.len(), available, 0);
-    let window = &lines[start..end];
+    let rendered = render_lines_for_layer(lines, to_render_layer(layer), true);
+    if rendered.is_empty() {
+        return vec![truncate(empty_layer_message(layer), width)];
+    }
+
+    let (start, end, _) = log_window_bounds(rendered.len(), available, 0);
+    let window = &rendered[start..end];
     if window.is_empty() {
-        return vec![truncate("Log is empty.", width)];
+        return vec![truncate(empty_layer_message(layer), width)];
     }
     window.iter().map(|line| truncate(line, width)).collect()
 }
@@ -528,6 +554,7 @@ mod tests {
     use super::*;
     use crate::app::{App, LogTailView, LoopView, MainTab};
     use crate::layouts::layout_index_for;
+    use forge_cli::logs::{render_lines_for_layer, LogRenderLayer};
     use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent};
     use std::collections::HashMap;
 
@@ -622,6 +649,45 @@ mod tests {
         let lines = vec!["a".repeat(100)];
         let result = render_log_block(&lines, "", 20, 5, LogLayer::Raw);
         assert_eq!(result[0].len(), 20);
+    }
+
+    #[test]
+    fn render_log_block_errors_layer_filters_non_errors() {
+        let lines = vec![
+            "tool: Bash(command=\"ls\")".to_owned(),
+            "$ cargo test -q".to_owned(),
+            "error: failed to compile".to_owned(),
+            "  at src/main.rs:10:5".to_owned(),
+            "diff --git a/src/main.rs b/src/main.rs".to_owned(),
+        ];
+
+        let result = render_log_block(&lines, "", 80, 10, LogLayer::Errors);
+        let text = result.join("\n");
+        assert!(text.contains("failed to compile"));
+        assert!(text.contains("src/main.rs:10:5"));
+        assert!(!text.contains("tool: Bash"));
+        assert!(!text.contains("cargo test"));
+        assert!(!text.contains("diff --git"));
+    }
+
+    #[test]
+    fn render_log_block_matches_shared_renderer_boundary() {
+        let lines = vec![
+            "tool: Bash(command=\"ls\")".to_owned(),
+            "$ cargo test -q".to_owned(),
+            "running 3 tests".to_owned(),
+            "exit code: 1".to_owned(),
+        ];
+
+        let expected_rendered = render_lines_for_layer(&lines, LogRenderLayer::Tools, true);
+        let (start, end, _) = log_window_bounds(expected_rendered.len(), 2, 0);
+        let expected: Vec<String> = expected_rendered[start..end]
+            .iter()
+            .map(|line| truncate(line, 30))
+            .collect();
+
+        let actual = render_log_block(&lines, "", 30, 2, LogLayer::Tools);
+        assert_eq!(actual, expected);
     }
 
     // -- multi_page_targets --

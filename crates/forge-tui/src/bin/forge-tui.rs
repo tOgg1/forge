@@ -8,6 +8,9 @@ use forge_tui::app::{App, LoopView};
 use forge_tui::polling_pipeline::{PollScheduler, PollingConfig, PollingQueue};
 use forge_tui::theme::detect_terminal_color_capability;
 
+#[path = "../interactive_runtime.rs"]
+mod interactive_runtime;
+
 #[derive(Debug, Clone, Default)]
 struct LiveLoopSnapshot {
     loops: Vec<LoopView>,
@@ -18,6 +21,7 @@ struct LiveLoopSnapshot {
     waiting: usize,
     stopped: usize,
     errored: usize,
+    log_paths: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +77,13 @@ fn main() {
 }
 
 fn run_interactive() {
+    if let Err(err) = interactive_runtime::run() {
+        eprintln!("warning: failed to run interactive runtime ({err}); using snapshot renderer");
+        run_interactive_snapshot();
+    }
+}
+
+fn run_interactive_snapshot() {
     let mut renderer = IncrementalRenderEngine::default();
     let db_path = resolve_database_path();
     let mut scheduler = PollScheduler::new(PollingConfig::default(), &polling_pipeline_key());
@@ -303,6 +314,12 @@ fn load_live_loop_snapshot(db_path: &Path) -> Result<LiveLoopSnapshot, String> {
                 .cloned()
                 .unwrap_or(loop_row.pool_id.clone())
         };
+
+        if !loop_row.log_path.is_empty() {
+            snapshot
+                .log_paths
+                .insert(loop_row.id.clone(), loop_row.log_path.clone());
+        }
 
         snapshot.loops.push(LoopView {
             id: loop_row.id.clone(),
