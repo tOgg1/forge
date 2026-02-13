@@ -105,10 +105,10 @@ fn is_stderr_line(trimmed: &str) -> bool {
 
 /// Case-insensitive starts_with check.
 fn starts_with_ci(text: &str, prefix: &str) -> bool {
-    if text.len() < prefix.len() {
-        return false;
+    match text.get(..prefix.len()) {
+        Some(head) => head.eq_ignore_ascii_case(prefix),
+        None => false,
     }
-    text[..prefix.len()].eq_ignore_ascii_case(prefix)
 }
 
 // ---------------------------------------------------------------------------
@@ -649,5 +649,13 @@ mod tests {
         assert!(starts_with_ci("Exit Code: 1", "exit code:"));
         assert!(starts_with_ci("EXIT CODE: 0", "exit code:"));
         assert!(!starts_with_ci("ex", "exit code:"));
+    }
+
+    #[test]
+    fn starts_with_ci_handles_non_ascii_prefix_boundary() {
+        assert!(!starts_with_ci(
+            "────────────────────────────────────────",
+            "exit code:"
+        ));
     }
 }
