@@ -5,6 +5,11 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+#[path = "workflow_bash_executor.rs"]
+pub mod bash_executor;
+#[path = "workflow_run_persistence.rs"]
+pub mod run_persistence;
+
 // ---------------------------------------------------------------------------
 // Step types
 // ---------------------------------------------------------------------------
@@ -247,6 +252,29 @@ struct ValidationResult {
     errors: Vec<WorkflowError>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct WorkflowLogsResult {
+    run_id: String,
+    workflow_name: String,
+    workflow_source: String,
+    status: String,
+    started_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    finished_at: Option<String>,
+    steps: Vec<WorkflowStepLogsResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WorkflowStepLogsResult {
+    step_id: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    finished_at: Option<String>,
+    log: String,
+}
+
 // ---------------------------------------------------------------------------
 // Backend trait
 // ---------------------------------------------------------------------------
@@ -389,6 +417,8 @@ enum SubCommand {
     List,
     Show { name: String },
     Validate { name: String },
+    Run { name: String },
+    Logs { run_id: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -460,6 +490,10 @@ fn execute(
         SubCommand::Validate { ref name } => {
             execute_validate(backend, name, parsed.json, parsed.jsonl, stdout, stderr)
         }
+        SubCommand::Run { ref name } => {
+            execute_run(backend, name, parsed.json, parsed.jsonl, stdout, stderr)
+        }
+        SubCommand::Logs { ref run_id } => execute_logs(run_id, parsed.json, parsed.jsonl, stdout),
     }
 }
 
@@ -558,6 +592,108 @@ fn execute_validate(
         return Err(String::new()); // exit code 1, but message already written
     }
     Ok(())
+}
+
+fn execute_logs(
+    run_id: &str,
+    json: bool,
+    jsonl: bool,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    let store = run_persistence::WorkflowRunStore::open_from_env();
+    let result = load_workflow_logs_result(&store, run_id)?;
+
+    if json || jsonl {
+        return write_json_output(stdout, &result, jsonl);
+    }
+
+    write_workflow_logs_human(stdout, &result)
+}
+
+fn load_workflow_logs_result(
+    store: &run_persistence::WorkflowRunStore,
+    run_id: &str,
+) -> Result<WorkflowLogsResult, String> {
+    let run = store.get_run(run_id)?;
+    let mut steps = Vec::with_capacity(run.steps.len());
+    for step in &run.steps {
+        let log = store.read_step_log(&run.id, &step.step_id)?;
+        steps.push(WorkflowStepLogsResult {
+            step_id: step.step_id.clone(),
+            status: step_status_label(&step.status).to_string(),
+            started_at: step.started_at.clone(),
+            finished_at: step.finished_at.clone(),
+            log,
+        });
+    }
+
+    Ok(WorkflowLogsResult {
+        run_id: run.id,
+        workflow_name: run.workflow_name,
+        workflow_source: run.workflow_source,
+        status: run_status_label(&run.status).to_string(),
+        started_at: run.started_at,
+        finished_at: run.finished_at,
+        steps,
+    })
+}
+
+fn write_workflow_logs_human(
+    stdout: &mut dyn Write,
+    result: &WorkflowLogsResult,
+) -> Result<(), String> {
+    writeln!(stdout, "Workflow run: {}", result.run_id).map_err(|e| e.to_string())?;
+    writeln!(stdout, "Workflow: {}", result.workflow_name).map_err(|e| e.to_string())?;
+    if !result.workflow_source.is_empty() {
+        writeln!(stdout, "Source: {}", result.workflow_source).map_err(|e| e.to_string())?;
+    }
+    writeln!(stdout, "Status: {}", result.status).map_err(|e| e.to_string())?;
+    writeln!(stdout, "Started: {}", result.started_at).map_err(|e| e.to_string())?;
+    if let Some(finished_at) = &result.finished_at {
+        writeln!(stdout, "Finished: {}", finished_at).map_err(|e| e.to_string())?;
+    }
+
+    writeln!(stdout, "\nStep logs:").map_err(|e| e.to_string())?;
+    for (index, step) in result.steps.iter().enumerate() {
+        writeln!(
+            stdout,
+            "  {}. {} [{}]",
+            index + 1,
+            step.step_id,
+            step.status
+        )
+        .map_err(|e| e.to_string())?;
+
+        if step.log.trim().is_empty() {
+            writeln!(stdout, "     (no log output)").map_err(|e| e.to_string())?;
+            continue;
+        }
+
+        for line in step.log.lines() {
+            writeln!(stdout, "     {line}").map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn run_status_label(status: &run_persistence::WorkflowRunStatus) -> &'static str {
+    match status {
+        run_persistence::WorkflowRunStatus::Running => "running",
+        run_persistence::WorkflowRunStatus::Success => "success",
+        run_persistence::WorkflowRunStatus::Failed => "failed",
+        run_persistence::WorkflowRunStatus::Canceled => "canceled",
+    }
+}
+
+fn step_status_label(status: &run_persistence::WorkflowStepStatus) -> &'static str {
+    match status {
+        run_persistence::WorkflowStepStatus::Pending => "pending",
+        run_persistence::WorkflowStepStatus::Running => "running",
+        run_persistence::WorkflowStepStatus::Success => "success",
+        run_persistence::WorkflowStepStatus::Failed => "failed",
+        run_persistence::WorkflowStepStatus::Skipped => "skipped",
+        run_persistence::WorkflowStepStatus::Canceled => "canceled",
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1423,6 +1559,20 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 .clone();
             SubCommand::Validate { name }
         }
+        Some("run") => {
+            let name = positionals
+                .get(1)
+                .ok_or_else(|| "usage: forge workflow run <name>".to_string())?
+                .clone();
+            SubCommand::Run { name }
+        }
+        Some("logs") => {
+            let run_id = positionals
+                .get(1)
+                .ok_or_else(|| "usage: forge workflow logs <run-id>".to_string())?
+                .clone();
+            SubCommand::Logs { run_id }
+        }
         Some(other) => return Err(format!("unknown workflow subcommand: {other}")),
     };
 
@@ -1469,6 +1619,11 @@ fn write_help(stdout: &mut dyn Write) -> std::io::Result<()> {
     writeln!(stdout, "  ls          List workflows")?;
     writeln!(stdout, "  show        Show workflow details")?;
     writeln!(stdout, "  validate    Validate a workflow")?;
+    writeln!(stdout, "  run         Execute a workflow")?;
+    writeln!(
+        stdout,
+        "  logs        Show persisted logs for a workflow run"
+    )?;
     writeln!(stdout)?;
     writeln!(stdout, "Flags:")?;
     writeln!(stdout, "  -h, --help  help for workflow")?;
@@ -1482,6 +1637,10 @@ fn write_help(stdout: &mut dyn Write) -> std::io::Result<()> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use std::ffi::OsString;
+    use std::path::Path;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
     use super::*;
 
     fn basic_workflow() -> Workflow {
@@ -1605,6 +1764,56 @@ mod tests {
         InMemoryWorkflowBackend {
             workflows: vec![basic_workflow(), multi_workflow(), invalid_workflow()],
             project_dir: Some(PathBuf::from("/project")),
+        }
+    }
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = LOCK.get_or_init(|| Mutex::new(()));
+        match lock.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn temp_data_dir(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: OnceLock<Mutex<u64>> = OnceLock::new();
+        let lock = UNIQUE_SUFFIX.get_or_init(|| Mutex::new(0));
+        let mut guard = match lock.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *guard += 1;
+        let suffix = *guard;
+        std::env::temp_dir().join(format!(
+            "forge-workflow-logs-test-{tag}-{}-{suffix}",
+            std::process::id()
+        ))
+    }
+
+    struct EnvGuard {
+        key: String,
+        previous: Option<OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &str, value: &Path) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self {
+                key: key.to_string(),
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.take() {
+                std::env::set_var(&self.key, value);
+            } else {
+                std::env::remove_var(&self.key);
+            }
         }
     }
 
@@ -1840,6 +2049,107 @@ mod tests {
         let out = run_for_test(&["workflow", "validate", "nonexistent"], &backend);
         assert_eq!(out.exit_code, 1);
         assert!(out.stderr.contains("not found"));
+    }
+
+    // -- logs --
+
+    #[test]
+    fn logs_prints_steps_in_workflow_order() {
+        let _lock = env_lock();
+        let data_dir = temp_data_dir("logs-human");
+        let _guard = EnvGuard::set("FORGE_DATA_DIR", &data_dir);
+        let store = run_persistence::WorkflowRunStore::open_from_env();
+
+        let run = store
+            .create_run(
+                "deploy",
+                "/repo/.forge/workflows/deploy.toml",
+                &["plan".to_string(), "build".to_string(), "ship".to_string()],
+            )
+            .unwrap();
+        store
+            .update_step_status(
+                &run.id,
+                "plan",
+                run_persistence::WorkflowStepStatus::Success,
+            )
+            .unwrap();
+        store.append_step_log(&run.id, "plan", "plan: ok").unwrap();
+        store
+            .update_step_status(
+                &run.id,
+                "build",
+                run_persistence::WorkflowStepStatus::Failed,
+            )
+            .unwrap();
+        store
+            .append_step_log(&run.id, "build", "build: fail")
+            .unwrap();
+
+        let backend = test_backend();
+        let out = run_for_test(&["workflow", "logs", &run.id], &backend);
+        assert_eq!(out.exit_code, 0);
+        let plan_pos = out.stdout.find("1. plan [success]").unwrap();
+        let build_pos = out.stdout.find("2. build [failed]").unwrap();
+        let ship_pos = out.stdout.find("3. ship [pending]").unwrap();
+        assert!(plan_pos < build_pos && build_pos < ship_pos);
+        assert!(out.stdout.contains("plan: ok"));
+        assert!(out.stdout.contains("build: fail"));
+        assert!(out.stdout.contains("(no log output)"));
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    #[test]
+    fn logs_json_includes_step_logs() {
+        let _lock = env_lock();
+        let data_dir = temp_data_dir("logs-json");
+        let _guard = EnvGuard::set("FORGE_DATA_DIR", &data_dir);
+        let store = run_persistence::WorkflowRunStore::open_from_env();
+
+        let run = store
+            .create_run(
+                "deploy",
+                "/repo/.forge/workflows/deploy.toml",
+                &["plan".to_string()],
+            )
+            .unwrap();
+        store.append_step_log(&run.id, "plan", "line one").unwrap();
+        store.append_step_log(&run.id, "plan", "line two").unwrap();
+
+        let backend = test_backend();
+        let out = run_for_test(&["workflow", "--json", "logs", &run.id], &backend);
+        assert_eq!(out.exit_code, 0);
+        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(parsed["run_id"], run.id);
+        assert_eq!(parsed["workflow_name"], "deploy");
+        assert_eq!(parsed["steps"][0]["step_id"], "plan");
+        assert_eq!(parsed["steps"][0]["status"], "pending");
+        assert_eq!(parsed["steps"][0]["log"], "line one\nline two\n");
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    #[test]
+    fn logs_missing_run_is_error() {
+        let _lock = env_lock();
+        let data_dir = temp_data_dir("logs-missing");
+        let _guard = EnvGuard::set("FORGE_DATA_DIR", &data_dir);
+        let backend = test_backend();
+        let out = run_for_test(&["workflow", "logs", "wfr_missing"], &backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out
+            .stderr
+            .contains("workflow run \"wfr_missing\" not found"));
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    #[test]
+    fn logs_missing_run_id_usage_error() {
+        let backend = test_backend();
+        let out = run_for_test(&["workflow", "logs"], &backend);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("usage: forge workflow logs <run-id>"));
     }
 
     // -- error cases --

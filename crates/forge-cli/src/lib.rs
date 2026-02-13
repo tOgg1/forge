@@ -523,8 +523,8 @@ mod tests {
     use super::{
         agent, audit, clean, completion, config, context, crate_label, doctor, explain, export,
         hook, init, inject, kill, lock, logs, loop_internal, mail, mem, migrate, msg, pool,
-        profile, prompt, ps, queue, resume, rm, run, run_for_test, scale, send, seq,
-        skills, status, stop, template, tui, up, wait, work, workflow,
+        profile, prompt, ps, queue, resume, rm, run, run_for_test, scale, send, seq, skills,
+        status, stop, template, tui, up, wait, work, workflow,
     };
 
     #[test]
