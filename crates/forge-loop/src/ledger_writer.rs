@@ -33,6 +33,31 @@ pub struct ProfileRecord {
     pub auth_kind: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowLedgerRecord {
+    pub workflow_name: String,
+    pub workflow_source: String,
+    pub repo_path: String,
+    pub ledger_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowRunLedgerRecord {
+    pub run_id: String,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowStepLedgerRecord {
+    pub step_id: String,
+    pub step_type: String,
+    pub status: String,
+    pub duration_ms: Option<i64>,
+    pub error: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct LedgerConfig {
     #[serde(default)]
@@ -190,6 +215,130 @@ fn append_ledger_entry_with_now(
         .map_err(|err| err.to_string())
 }
 
+pub fn ensure_workflow_ledger_file(record: &WorkflowLedgerRecord) -> Result<(), String> {
+    ensure_workflow_ledger_file_with_now(record, Utc::now())
+}
+
+fn ensure_workflow_ledger_file_with_now(
+    record: &WorkflowLedgerRecord,
+    now: DateTime<Utc>,
+) -> Result<(), String> {
+    if record.ledger_path.is_empty() {
+        return Ok(());
+    }
+
+    let ledger_path = Path::new(&record.ledger_path);
+    if ledger_path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = ledger_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+
+    let mut content = String::new();
+    content.push_str("---\n");
+    content.push_str(&format!("workflow_name: {}\n", record.workflow_name));
+    content.push_str(&format!("workflow_source: {}\n", record.workflow_source));
+    content.push_str(&format!("repo_path: {}\n", record.repo_path));
+    content.push_str(&format!(
+        "created_at: {}\n",
+        now.to_rfc3339_opts(SecondsFormat::Secs, true)
+    ));
+    content.push_str("---\n\n");
+    content.push_str(&format!("# Workflow Ledger: {}\n\n", record.workflow_name));
+
+    let mut options = OpenOptions::new();
+    options.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o644);
+    }
+    let mut file = options.open(ledger_path).map_err(|err| err.to_string())?;
+    file.write_all(content.as_bytes())
+        .map_err(|err| err.to_string())
+}
+
+pub fn append_workflow_ledger_entry(
+    workflow: &WorkflowLedgerRecord,
+    run: &WorkflowRunLedgerRecord,
+    steps: &[WorkflowStepLedgerRecord],
+) -> Result<(), String> {
+    append_workflow_ledger_entry_with_now(workflow, run, steps, Utc::now())
+}
+
+fn append_workflow_ledger_entry_with_now(
+    workflow: &WorkflowLedgerRecord,
+    run: &WorkflowRunLedgerRecord,
+    steps: &[WorkflowStepLedgerRecord],
+    now: DateTime<Utc>,
+) -> Result<(), String> {
+    if workflow.ledger_path.is_empty() {
+        return Ok(());
+    }
+
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o644);
+    }
+    let mut file = options
+        .open(&workflow.ledger_path)
+        .map_err(|err| err.to_string())?;
+
+    let mut entry = String::new();
+    entry.push_str(&format!(
+        "## {}\n\n",
+        now.to_rfc3339_opts(SecondsFormat::Secs, true)
+    ));
+    entry.push_str(&format!("- run_id: {}\n", run.run_id));
+    entry.push_str(&format!("- workflow_name: {}\n", workflow.workflow_name));
+    if !workflow.workflow_source.is_empty() {
+        entry.push_str(&format!(
+            "- workflow_source: {}\n",
+            workflow.workflow_source
+        ));
+    }
+    entry.push_str(&format!("- status: {}\n", run.status));
+    entry.push_str(&format!(
+        "- started_at: {}\n",
+        run.started_at.to_rfc3339_opts(SecondsFormat::Secs, true)
+    ));
+    if let Some(finished_at) = run.finished_at {
+        entry.push_str(&format!(
+            "- finished_at: {}\n",
+            finished_at.to_rfc3339_opts(SecondsFormat::Secs, true)
+        ));
+    }
+    entry.push_str(&format!("- step_count: {}\n", steps.len()));
+    entry.push_str("\n### Steps\n\n");
+    for step in steps {
+        let duration = step
+            .duration_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "n/a".to_string());
+        let step_type = if step.step_type.trim().is_empty() {
+            "unknown"
+        } else {
+            step.step_type.as_str()
+        };
+        entry.push_str(&format!(
+            "- {} [{}] status={} duration_ms={}",
+            step.step_id, step_type, step.status, duration
+        ));
+        if !step.error.trim().is_empty() {
+            entry.push_str(&format!(" error={}", step.error.trim()));
+        }
+        entry.push('\n');
+    }
+    entry.push('\n');
+
+    file.write_all(entry.as_bytes())
+        .map_err(|err| err.to_string())
+}
+
 pub fn limit_output_lines(text: &str, max_lines: usize) -> String {
     if max_lines == 0 {
         return text.to_string();
@@ -268,8 +417,10 @@ fn run_git(repo_path: &str, args: &[&str]) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_ledger_entry_with_now, build_git_summary, ensure_ledger_file_with_now,
-        limit_output_lines, LedgerConfig, LoopLedgerRecord, LoopRunRecord, ProfileRecord,
+        append_ledger_entry_with_now, append_workflow_ledger_entry_with_now, build_git_summary,
+        ensure_ledger_file_with_now, ensure_workflow_ledger_file_with_now, limit_output_lines,
+        LedgerConfig, LoopLedgerRecord, LoopRunRecord, ProfileRecord, WorkflowLedgerRecord,
+        WorkflowRunLedgerRecord, WorkflowStepLedgerRecord,
     };
     use chrono::{TimeZone, Utc};
     use std::fs;
@@ -375,6 +526,103 @@ mod tests {
             git_diff_stat: true,
         };
         assert!(build_git_summary(&temp.path().display().to_string(), &cfg).is_empty());
+    }
+
+    #[test]
+    fn ensure_workflow_ledger_file_writes_header_once() {
+        let temp = TempDir::new("forge-workflow-ledger");
+        let ledger = temp
+            .path()
+            .join(".forge")
+            .join("ledgers")
+            .join("workflow-deploy.md");
+        let workflow = WorkflowLedgerRecord {
+            workflow_name: "deploy".to_string(),
+            workflow_source: "/repo/.forge/workflows/deploy.toml".to_string(),
+            repo_path: temp.path().display().to_string(),
+            ledger_path: ledger.display().to_string(),
+        };
+        let now = Utc.with_ymd_and_hms(2026, 2, 13, 20, 0, 0).unwrap();
+        if let Err(err) = ensure_workflow_ledger_file_with_now(&workflow, now) {
+            panic!("ensure workflow ledger failed: {err}");
+        }
+        let first = match fs::read_to_string(&ledger) {
+            Ok(text) => text,
+            Err(err) => panic!("read workflow ledger failed: {err}"),
+        };
+        assert!(first.contains("workflow_name: deploy"));
+        assert!(first.contains("# Workflow Ledger: deploy"));
+
+        if let Err(err) = ensure_workflow_ledger_file_with_now(&workflow, now) {
+            panic!("ensure workflow ledger second failed: {err}");
+        }
+        let second = match fs::read_to_string(&ledger) {
+            Ok(text) => text,
+            Err(err) => panic!("read workflow ledger second failed: {err}"),
+        };
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn append_workflow_ledger_entry_writes_run_and_step_summaries() {
+        let temp = TempDir::new("forge-workflow-ledger-append");
+        let ledger = temp
+            .path()
+            .join(".forge")
+            .join("ledgers")
+            .join("workflow-release.md");
+        let workflow = WorkflowLedgerRecord {
+            workflow_name: "release".to_string(),
+            workflow_source: "/repo/.forge/workflows/release.toml".to_string(),
+            repo_path: temp.path().display().to_string(),
+            ledger_path: ledger.display().to_string(),
+        };
+        let run = WorkflowRunLedgerRecord {
+            run_id: "wfr_test123".to_string(),
+            status: "failed".to_string(),
+            started_at: Utc.with_ymd_and_hms(2026, 2, 13, 20, 1, 0).unwrap(),
+            finished_at: Some(Utc.with_ymd_and_hms(2026, 2, 13, 20, 2, 0).unwrap()),
+        };
+        let steps = vec![
+            WorkflowStepLedgerRecord {
+                step_id: "plan".to_string(),
+                step_type: "bash".to_string(),
+                status: "success".to_string(),
+                duration_ms: Some(210),
+                error: String::new(),
+            },
+            WorkflowStepLedgerRecord {
+                step_id: "ship".to_string(),
+                step_type: "bash".to_string(),
+                status: "failed".to_string(),
+                duration_ms: Some(97),
+                error: "exit status 3".to_string(),
+            },
+        ];
+
+        if let Err(err) = ensure_workflow_ledger_file_with_now(
+            &workflow,
+            Utc.with_ymd_and_hms(2026, 2, 13, 20, 0, 0).unwrap(),
+        ) {
+            panic!("ensure workflow ledger failed: {err}");
+        }
+        if let Err(err) = append_workflow_ledger_entry_with_now(
+            &workflow,
+            &run,
+            &steps,
+            Utc.with_ymd_and_hms(2026, 2, 13, 20, 3, 0).unwrap(),
+        ) {
+            panic!("append workflow ledger entry failed: {err}");
+        }
+
+        let text = match fs::read_to_string(&ledger) {
+            Ok(text) => text,
+            Err(err) => panic!("read workflow ledger failed: {err}"),
+        };
+        assert!(text.contains("- run_id: wfr_test123"));
+        assert!(text.contains("- step_count: 2"));
+        assert!(text.contains("- plan [bash] status=success duration_ms=210"));
+        assert!(text.contains("- ship [bash] status=failed duration_ms=97 error=exit status 3"));
     }
 
     struct TempDir {

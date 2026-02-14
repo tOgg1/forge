@@ -15,6 +15,169 @@ pub const STOP_DECISION_CONTINUE: &str = "continue";
 pub const QUAL_SIGNAL_STOP: i32 = 0;
 pub const QUAL_SIGNAL_CONTINUE: i32 = 1;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopExprOperator {
+    Eq,
+    NotEq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopExpr {
+    pub operator: StopExprOperator,
+    pub rhs: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StopExprContext {
+    pub tasks_open: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopToolSpec {
+    pub name: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopToolRunResult {
+    pub command: String,
+    pub exit_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+    pub should_stop: bool,
+    pub decision_source: StopToolDecisionSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopToolDecisionSource {
+    Output,
+    ExitStatus,
+}
+
+pub fn parse_stop_expr(expr: &str) -> Result<StopExpr, String> {
+    let trimmed = expr.trim();
+    if trimmed.is_empty() {
+        return Err("stop expression is required".to_string());
+    }
+
+    let pattern = r"(?i)^\s*count\(\s*tasks\.open\s*\)\s*(==|!=|>=|<=|>|<)\s*(-?\d+)\s*$";
+    let re = Regex::new(pattern).map_err(|err| format!("compile stop expression regex: {err}"))?;
+    let captures = re
+        .captures(trimmed)
+        .ok_or_else(|| format!("unsupported stop expression: {trimmed:?}"))?;
+
+    let operator = match captures.get(1).map(|m| m.as_str()).unwrap_or_default() {
+        "==" => StopExprOperator::Eq,
+        "!=" => StopExprOperator::NotEq,
+        ">" => StopExprOperator::Gt,
+        ">=" => StopExprOperator::Gte,
+        "<" => StopExprOperator::Lt,
+        "<=" => StopExprOperator::Lte,
+        other => return Err(format!("unsupported stop operator: {other}")),
+    };
+    let rhs = captures
+        .get(2)
+        .map(|m| m.as_str())
+        .unwrap_or_default()
+        .parse::<i64>()
+        .map_err(|err| format!("invalid stop expression number: {err}"))?;
+    Ok(StopExpr { operator, rhs })
+}
+
+pub fn eval_stop_expr(expr: &StopExpr, ctx: &StopExprContext) -> bool {
+    match expr.operator {
+        StopExprOperator::Eq => ctx.tasks_open == expr.rhs,
+        StopExprOperator::NotEq => ctx.tasks_open != expr.rhs,
+        StopExprOperator::Gt => ctx.tasks_open > expr.rhs,
+        StopExprOperator::Gte => ctx.tasks_open >= expr.rhs,
+        StopExprOperator::Lt => ctx.tasks_open < expr.rhs,
+        StopExprOperator::Lte => ctx.tasks_open <= expr.rhs,
+    }
+}
+
+pub fn eval_stop_expr_text(expr: &str, ctx: &StopExprContext) -> Result<bool, String> {
+    let parsed = parse_stop_expr(expr)?;
+    Ok(eval_stop_expr(&parsed, ctx))
+}
+
+pub fn parse_stop_tool_bool(output: &str) -> Option<bool> {
+    let token = output.split_whitespace().next()?.to_ascii_lowercase();
+    match token.as_str() {
+        "1" | "true" | "yes" | "y" | "stop" => Some(true),
+        "0" | "false" | "no" | "n" | "continue" => Some(false),
+        _ => None,
+    }
+}
+
+pub fn run_stop_tool(
+    work_dir: &Path,
+    spec: &StopToolSpec,
+    timeout: Duration,
+) -> Result<StopToolRunResult, String> {
+    let name = spec.name.trim();
+    if name.is_empty() {
+        return Err("stop tool name is required".to_string());
+    }
+
+    let command = if spec.args.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name} {}", spec.args.join(" "))
+    };
+    let mut cmd = Command::new(name);
+    cmd.args(&spec.args)
+        .current_dir(work_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|err| format!("spawn stop tool {command:?}: {err}"))?;
+
+    let status = if timeout > Duration::ZERO {
+        match child.wait_timeout(timeout) {
+            Ok(Some(status)) => status,
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "stop tool {command:?} timed out after {}ms",
+                    timeout.as_millis()
+                ));
+            }
+            Err(err) => {
+                return Err(format!("wait for stop tool {command:?}: {err}"));
+            }
+        }
+    } else {
+        child
+            .wait()
+            .map_err(|err| format!("wait for stop tool {command:?}: {err}"))?
+    };
+
+    let stdout = read_pipe(child.stdout.take());
+    let stderr = read_pipe(child.stderr.take());
+    let exit_code = status.code().unwrap_or(-1);
+    let output_decision = parse_stop_tool_bool(&stdout).or_else(|| parse_stop_tool_bool(&stderr));
+    let (should_stop, decision_source) = match output_decision {
+        Some(value) => (value, StopToolDecisionSource::Output),
+        None => (status.success(), StopToolDecisionSource::ExitStatus),
+    };
+
+    Ok(StopToolRunResult {
+        command,
+        exit_code,
+        stdout,
+        stderr,
+        should_stop,
+        decision_source,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuantCommandResult {
     pub exit_code: i32,
@@ -362,6 +525,129 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+    fn run_stop_tool_ok(
+        work_dir: &Path,
+        spec: &StopToolSpec,
+        timeout: Duration,
+    ) -> StopToolRunResult {
+        match run_stop_tool(work_dir, spec, timeout) {
+            Ok(res) => res,
+            Err(err) => panic!("run_stop_tool unexpectedly failed: {err}"),
+        }
+    }
+
+    fn run_stop_tool_err(work_dir: &Path, spec: &StopToolSpec, timeout: Duration) -> String {
+        match run_stop_tool(work_dir, spec, timeout) {
+            Ok(res) => panic!("run_stop_tool unexpectedly succeeded: {:?}", res),
+            Err(err) => err,
+        }
+    }
+
+    fn parse_stop_expr_ok(expr: &str) -> StopExpr {
+        match parse_stop_expr(expr) {
+            Ok(parsed) => parsed,
+            Err(err) => panic!("parse_stop_expr unexpectedly failed for {expr:?}: {err}"),
+        }
+    }
+
+    fn parse_stop_expr_err(expr: &str) -> String {
+        match parse_stop_expr(expr) {
+            Ok(parsed) => panic!(
+                "parse_stop_expr unexpectedly succeeded for {expr:?}: {:?}",
+                parsed
+            ),
+            Err(err) => err,
+        }
+    }
+
+    fn eval_stop_expr_ok(expr: &str, ctx: &StopExprContext) -> bool {
+        match eval_stop_expr_text(expr, ctx) {
+            Ok(value) => value,
+            Err(err) => panic!("eval_stop_expr_text unexpectedly failed for {expr:?}: {err}"),
+        }
+    }
+
+    #[test]
+    fn parse_stop_tool_bool_accepts_common_tokens() {
+        assert_eq!(parse_stop_tool_bool("true"), Some(true));
+        assert_eq!(parse_stop_tool_bool("TRUE"), Some(true));
+        assert_eq!(parse_stop_tool_bool("stop now"), Some(true));
+        assert_eq!(parse_stop_tool_bool("false"), Some(false));
+        assert_eq!(parse_stop_tool_bool("continue"), Some(false));
+        assert_eq!(parse_stop_tool_bool("0"), Some(false));
+        assert_eq!(parse_stop_tool_bool("1"), Some(true));
+        assert_eq!(parse_stop_tool_bool("maybe"), None);
+        assert_eq!(parse_stop_tool_bool(""), None);
+    }
+
+    #[test]
+    fn stop_tool_uses_output_boolean_when_present() {
+        let spec = StopToolSpec {
+            name: "bash".to_string(),
+            args: vec!["-lc".to_string(), "echo false; exit 0".to_string()],
+        };
+        let res = run_stop_tool_ok(Path::new("."), &spec, Duration::from_secs(1));
+        assert_eq!(res.exit_code, 0);
+        assert!(!res.should_stop);
+        assert_eq!(res.decision_source, StopToolDecisionSource::Output);
+    }
+
+    #[test]
+    fn stop_tool_falls_back_to_exit_status_when_output_not_boolean() {
+        let true_spec = StopToolSpec {
+            name: "bash".to_string(),
+            args: vec!["-lc".to_string(), "echo not-a-bool; exit 0".to_string()],
+        };
+        let true_res = run_stop_tool_ok(Path::new("."), &true_spec, Duration::from_secs(1));
+        assert!(true_res.should_stop);
+        assert_eq!(true_res.decision_source, StopToolDecisionSource::ExitStatus);
+
+        let false_spec = StopToolSpec {
+            name: "bash".to_string(),
+            args: vec!["-lc".to_string(), "echo still-not-bool; exit 3".to_string()],
+        };
+        let false_res = run_stop_tool_ok(Path::new("."), &false_spec, Duration::from_secs(1));
+        assert_eq!(false_res.exit_code, 3);
+        assert!(!false_res.should_stop);
+        assert_eq!(
+            false_res.decision_source,
+            StopToolDecisionSource::ExitStatus
+        );
+    }
+
+    #[test]
+    fn stop_tool_surfaces_spawn_failures_clearly() {
+        let spec = StopToolSpec {
+            name: "__forge_missing_stop_tool_binary__".to_string(),
+            args: Vec::new(),
+        };
+        let err = run_stop_tool_err(Path::new("."), &spec, Duration::from_secs(1));
+        assert!(err.contains("spawn stop tool"));
+        assert!(err.contains("__forge_missing_stop_tool_binary__"));
+    }
+
+    #[test]
+    fn stop_tool_timeout_is_reported_cleanly() {
+        let spec = StopToolSpec {
+            name: "bash".to_string(),
+            args: vec!["-lc".to_string(), "sleep 2".to_string()],
+        };
+        let err = run_stop_tool_err(Path::new("."), &spec, Duration::from_millis(50));
+        assert!(err.contains("timed out"));
+    }
+
+    #[test]
+    fn stop_tool_respects_work_dir() {
+        let temp = TempDir::new("forge-loop-stop-tool");
+        let spec = StopToolSpec {
+            name: "bash".to_string(),
+            args: vec!["-lc".to_string(), "pwd".to_string()],
+        };
+        let res = run_stop_tool_ok(temp.path(), &spec, Duration::from_secs(1));
+        let expected = temp.path().to_string_lossy().into_owned();
+        assert!(res.stdout.contains(&expected));
+    }
+
     #[test]
     fn empty_command_returns_error_result() {
         let res = run_quant_command(Path::new("."), "   ", Duration::from_secs(1));
@@ -414,6 +700,125 @@ mod tests {
         );
         assert_eq!(res.exit_code, 127);
         assert!(!res.timed_out);
+    }
+
+    #[test]
+    fn parse_stop_expr_supports_count_tasks_open_comparisons() {
+        let parsed = parse_stop_expr_ok("count(tasks.open) == 0");
+        assert_eq!(parsed.operator, StopExprOperator::Eq);
+        assert_eq!(parsed.rhs, 0);
+
+        let parsed = parse_stop_expr_ok("count(tasks.open) > 20");
+        assert_eq!(parsed.operator, StopExprOperator::Gt);
+        assert_eq!(parsed.rhs, 20);
+
+        let parsed = parse_stop_expr_ok(" COUNT(tasks.open) <= -5 ");
+        assert_eq!(parsed.operator, StopExprOperator::Lte);
+        assert_eq!(parsed.rhs, -5);
+    }
+
+    #[test]
+    fn parse_stop_expr_rejects_unsupported_shapes() {
+        let err = parse_stop_expr_err("");
+        assert!(err.contains("required"));
+
+        let err = parse_stop_expr_err("tasks.open == 0");
+        assert!(err.contains("unsupported stop expression"));
+
+        let err = parse_stop_expr_err("count(tasks.closed) == 0");
+        assert!(err.contains("unsupported stop expression"));
+    }
+
+    #[test]
+    fn eval_stop_expr_compares_against_context_tasks_open() {
+        let ctx = StopExprContext { tasks_open: 7 };
+        assert!(eval_stop_expr_ok("count(tasks.open) > 5", &ctx));
+        assert!(eval_stop_expr_ok("count(tasks.open) >= 7", &ctx));
+        assert!(eval_stop_expr_ok("count(tasks.open) != 0", &ctx));
+        assert!(!eval_stop_expr_ok("count(tasks.open) < 3", &ctx));
+        assert!(!eval_stop_expr_ok("count(tasks.open) == 0", &ctx));
+    }
+
+    #[test]
+    fn parse_stop_tool_bool_accepts_common_truthy_and_falsy_tokens() {
+        assert_eq!(parse_stop_tool_bool("1"), Some(true));
+        assert_eq!(parse_stop_tool_bool("true"), Some(true));
+        assert_eq!(parse_stop_tool_bool("yes"), Some(true));
+        assert_eq!(parse_stop_tool_bool("stop"), Some(true));
+
+        assert_eq!(parse_stop_tool_bool("0"), Some(false));
+        assert_eq!(parse_stop_tool_bool("false"), Some(false));
+        assert_eq!(parse_stop_tool_bool("no"), Some(false));
+        assert_eq!(parse_stop_tool_bool("continue"), Some(false));
+    }
+
+    #[test]
+    fn run_stop_tool_true_output_sets_should_stop_true() {
+        let spec = StopToolSpec {
+            name: "sh".to_string(),
+            args: vec!["-c".to_string(), "printf '1\\n'".to_string()],
+        };
+        let res = run_stop_tool_ok(Path::new("."), &spec, Duration::from_secs(1));
+        assert_eq!(res.exit_code, 0);
+        assert!(res.should_stop);
+    }
+
+    #[test]
+    fn run_stop_tool_false_output_sets_should_stop_false() {
+        let spec = StopToolSpec {
+            name: "sh".to_string(),
+            args: vec!["-c".to_string(), "printf '0\\n'".to_string()],
+        };
+        let res = run_stop_tool_ok(Path::new("."), &spec, Duration::from_secs(1));
+        assert_eq!(res.exit_code, 0);
+        assert!(!res.should_stop);
+    }
+
+    #[test]
+    fn run_stop_tool_empty_output_defaults_to_stop() {
+        let spec = StopToolSpec {
+            name: "sh".to_string(),
+            args: vec!["-c".to_string(), ":".to_string()],
+        };
+        let res = run_stop_tool_ok(Path::new("."), &spec, Duration::from_secs(1));
+        assert_eq!(res.exit_code, 0);
+        assert!(res.should_stop);
+    }
+
+    #[test]
+    fn run_stop_tool_non_zero_exit_falls_back_to_exit_status() {
+        let spec = StopToolSpec {
+            name: "sh".to_string(),
+            args: vec!["-c".to_string(), "echo fail >&2; exit 7".to_string()],
+        };
+        let res = run_stop_tool_ok(Path::new("."), &spec, Duration::from_secs(1));
+        assert_eq!(res.exit_code, 7);
+        assert!(res.stderr.contains("fail"));
+        assert!(!res.should_stop);
+        assert_eq!(res.decision_source, StopToolDecisionSource::ExitStatus);
+    }
+
+    #[test]
+    fn run_stop_tool_missing_command_reports_spawn_error() {
+        let spec = StopToolSpec {
+            name: "__forge_missing_stop_tool_for_test__".to_string(),
+            args: Vec::new(),
+        };
+        let err = run_stop_tool_err(Path::new("."), &spec, Duration::from_secs(1));
+        assert!(err.contains("spawn stop tool"), "{err}");
+    }
+
+    #[test]
+    fn run_stop_tool_invalid_output_falls_back_to_exit_status() {
+        let spec = StopToolSpec {
+            name: "sh".to_string(),
+            args: vec!["-c".to_string(), "printf 'maybe\\n'".to_string()],
+        };
+        let res = run_stop_tool_ok(Path::new("."), &spec, Duration::from_secs(1));
+        assert_eq!(res.exit_code, 0);
+        assert_eq!(res.stdout.trim(), "maybe");
+        assert!(res.should_stop);
+        assert_eq!(res.decision_source, StopToolDecisionSource::ExitStatus);
     }
 
     #[test]
