@@ -115,6 +115,19 @@ struct AgentGcResultJson {
     evictions: Vec<AgentGcEvictionJson>,
 }
 
+#[derive(Debug, Serialize)]
+struct AgentValidationIssueJson {
+    agent_id: String,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentValidationResultJson {
+    valid: bool,
+    checked: usize,
+    errors: Vec<AgentValidationIssueJson>,
+}
+
 // ── Backend trait ─────────────────────────────────────────────────────────────
 
 /// Abstraction over the agent service for CLI commands.
@@ -283,6 +296,7 @@ enum Subcommand {
     Wait(WaitArgs),
     Ps(PsArgs),
     Show(ShowArgs),
+    Validate(ValidateArgs),
     Summary(SummaryArgs),
     Gc(GcArgs),
     Interrupt(InterruptArgs),
@@ -328,6 +342,13 @@ struct PsArgs {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ShowArgs {
     agent_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValidateArgs {
+    agent_id: String,
+    workspace_id: String,
+    state: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -448,6 +469,9 @@ fn execute(
         Subcommand::Wait(wait_args) => exec_wait(backend, wait_args, &parsed, stdout),
         Subcommand::Ps(ps_args) => exec_ps(backend, ps_args, &parsed, stdout),
         Subcommand::Show(show_args) => exec_show(backend, show_args, &parsed, stdout),
+        Subcommand::Validate(validate_args) => {
+            exec_validate(backend, validate_args, &parsed, stdout)
+        }
         Subcommand::Summary(summary_args) => exec_summary(summary_args, &parsed, stdout),
         Subcommand::Gc(gc_args) => exec_gc(gc_args, &parsed, stdout),
         Subcommand::Interrupt(int_args) => exec_interrupt(backend, int_args, &parsed, stdout),
@@ -2177,6 +2201,94 @@ fn exec_show(
     write_agent_output(&snapshot, parsed, stdout)
 }
 
+fn exec_validate(
+    backend: &dyn AgentBackend,
+    args: &ValidateArgs,
+    parsed: &ParsedArgs,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    let snapshots = if !args.agent_id.is_empty() {
+        vec![backend.get_agent(&args.agent_id)?]
+    } else {
+        let states = if args.state.is_empty() {
+            Vec::new()
+        } else {
+            vec![parse_agent_state(&args.state)?]
+        };
+        let filter = ListAgentsFilter {
+            workspace_id: if args.workspace_id.is_empty() {
+                None
+            } else {
+                Some(args.workspace_id.clone())
+            },
+            states,
+        };
+        backend.list_agents(filter)?
+    };
+
+    let mut errors = Vec::new();
+    for snapshot in &snapshots {
+        for issue in validate_agent_snapshot(snapshot) {
+            errors.push(AgentValidationIssueJson {
+                agent_id: snapshot.id.clone(),
+                message: issue,
+            });
+        }
+    }
+    let result = AgentValidationResultJson {
+        valid: errors.is_empty(),
+        checked: snapshots.len(),
+        errors,
+    };
+
+    if parsed.json {
+        serde_json::to_writer_pretty(&mut *stdout, &result).map_err(|e| e.to_string())?;
+        writeln!(stdout).map_err(|e| e.to_string())?;
+    } else if parsed.jsonl {
+        serde_json::to_writer(&mut *stdout, &result).map_err(|e| e.to_string())?;
+        writeln!(stdout).map_err(|e| e.to_string())?;
+    } else if result.checked == 0 {
+        writeln!(stdout, "No agents found").map_err(|e| e.to_string())?;
+    } else if result.valid {
+        writeln!(
+            stdout,
+            "Agent definitions valid: {} checked",
+            result.checked
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        writeln!(
+            stdout,
+            "Agent definitions invalid: {} issue(s)",
+            result.errors.len()
+        )
+        .map_err(|e| e.to_string())?;
+        for issue in &result.errors {
+            writeln!(stdout, "- {}: {}", issue.agent_id, issue.message)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    if !result.valid {
+        return Err("agent validation failed".to_string());
+    }
+    Ok(())
+}
+
+fn validate_agent_snapshot(snapshot: &AgentSnapshot) -> Vec<String> {
+    let mut errors = Vec::new();
+    if snapshot.id.trim().is_empty() {
+        errors.push("id is empty".to_string());
+    }
+    if snapshot.workspace_id.trim().is_empty() {
+        errors.push("workspace_id is empty".to_string());
+    }
+    if snapshot.state == AgentState::Unspecified {
+        errors.push("state is unspecified".to_string());
+    }
+    errors
+}
+
 fn exec_interrupt(
     backend: &dyn AgentBackend,
     args: &InterruptArgs,
@@ -2689,7 +2801,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 subcommand: Subcommand::Wait(wait_args),
             })
         }
-        Some("ps") | Some("list") => {
+        Some("ps") | Some("list") | Some("ls") => {
             index += 1;
             let ps_args = parse_ps_args(args, index)?;
             Ok(ParsedArgs {
@@ -2707,6 +2819,16 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 jsonl,
                 quiet,
                 subcommand: Subcommand::Show(show_args),
+            })
+        }
+        Some("validate") => {
+            index += 1;
+            let validate_args = parse_validate_args(args, index)?;
+            Ok(ParsedArgs {
+                json,
+                jsonl,
+                quiet,
+                subcommand: Subcommand::Validate(validate_args),
             })
         }
         Some("summary") => {
@@ -3102,6 +3224,45 @@ fn parse_show_args(args: &[String], mut index: usize) -> Result<ShowArgs, String
     Ok(result)
 }
 
+fn parse_validate_args(args: &[String], mut index: usize) -> Result<ValidateArgs, String> {
+    let mut result = ValidateArgs {
+        agent_id: String::new(),
+        workspace_id: String::new(),
+        state: String::new(),
+    };
+
+    if let Some(token) = args.get(index) {
+        if token == "-h" || token == "--help" {
+            return Err(VALIDATE_HELP.to_string());
+        }
+        if !token.starts_with('-') {
+            result.agent_id = token.clone();
+            index += 1;
+        }
+    }
+
+    while let Some(token) = args.get(index) {
+        match token.as_str() {
+            "--workspace" | "-w" => {
+                result.workspace_id = take_value(args, index, "--workspace")?;
+                index += 2;
+            }
+            "--state" => {
+                result.state = take_value(args, index, "--state")?;
+                index += 2;
+            }
+            flag if flag.starts_with('-') => {
+                return Err(format!("error: unknown flag for agent validate: '{flag}'"));
+            }
+            other => {
+                return Err(format!("error: unexpected positional argument: '{other}'"));
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 fn parse_summary_args(args: &[String], mut index: usize) -> Result<SummaryArgs, String> {
     let mut result = SummaryArgs {
         agent_id: String::new(),
@@ -3317,6 +3478,7 @@ Subcommands:
   wait        Wait for an agent to reach a target state
   ps          List agents
   show        Show agent details
+  validate    Validate agent definitions
   summary     Generate concise parent rehydration summary
   gc          Evict stale parked persistent agents
   interrupt   Interrupt an agent (Ctrl+C)
@@ -3395,7 +3557,7 @@ Usage:
   forge agent ps [flags]
 
 Aliases:
-  ps, list
+  ps, list, ls
 
 Flags:
   -w, --workspace string   filter by workspace
@@ -3409,6 +3571,16 @@ Usage:
 
 Aliases:
   show, get";
+
+const VALIDATE_HELP: &str = "\
+Validate agent definitions
+
+Usage:
+  forge agent validate [agent-id] [flags]
+
+Flags:
+  -w, --workspace string   filter by workspace (when validating multiple agents)
+      --state string       filter by state (when validating multiple agents)";
 
 const SUMMARY_HELP: &str = "\
 Generate concise summary for parent rehydration
@@ -3517,9 +3689,7 @@ mod tests {
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn with_observability_db_path(prefix: &str, callback: impl FnOnce(&Path)) {
-        let _guard = ENV_LOCK
-            .lock()
-            .unwrap_or_else(|err| panic!("lock env guard: {err}"));
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp = temp_dir(prefix);
         let db_path = temp.join("forge.db");
         setup_migrated_db(&db_path);
@@ -3529,7 +3699,8 @@ mod tests {
         std::env::set_var("FORGE_DATABASE_PATH", &db_path);
         std::env::set_var("FORGE_DB_PATH", &db_path);
 
-        callback(&db_path);
+        let callback_result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(&db_path)));
 
         match old_db_path {
             Some(value) => std::env::set_var("FORGE_DATABASE_PATH", value),
@@ -3540,14 +3711,17 @@ mod tests {
             None => std::env::remove_var("FORGE_DB_PATH"),
         }
 
-        std::fs::remove_dir_all(&temp)
-            .unwrap_or_else(|err| panic!("remove temp dir {}: {err}", temp.display()));
+        if let Err(err) = std::fs::remove_dir_all(&temp) {
+            eprintln!("warning: remove temp dir {}: {err}", temp.display());
+        }
+
+        if let Err(payload) = callback_result {
+            std::panic::resume_unwind(payload);
+        }
     }
 
     fn with_temp_env(vars: &[(&str, &str)], callback: impl FnOnce()) {
-        let _guard = ENV_LOCK
-            .lock()
-            .unwrap_or_else(|err| panic!("lock env guard: {err}"));
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
 
         let saved: Vec<(String, Option<std::ffi::OsString>)> = vars
             .iter()
@@ -3558,13 +3732,17 @@ mod tests {
             std::env::set_var(key, value);
         }
 
-        callback();
+        let callback_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback));
 
         for (key, prior) in saved {
             match prior {
                 Some(value) => std::env::set_var(&key, value),
                 None => std::env::remove_var(&key),
             }
+        }
+
+        if let Err(payload) = callback_result {
+            std::panic::resume_unwind(payload);
         }
     }
 
@@ -3944,6 +4122,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_ls_alias() {
+        let args = vec!["agent".to_string(), "ls".to_string()];
+        let parsed = parse_ok(&args);
+        match &parsed.subcommand {
+            Subcommand::Ps(_) => {}
+            other => panic!("expected Ps, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_get_alias() {
         let args = vec!["agent".to_string(), "get".to_string(), "ag-1".to_string()];
         let parsed = parse_ok(&args);
@@ -3952,6 +4140,27 @@ mod tests {
                 assert_eq!(a.agent_id, "ag-1");
             }
             other => panic!("expected Show, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_validate_with_filters() {
+        let args = vec![
+            "agent".to_string(),
+            "validate".to_string(),
+            "--workspace".to_string(),
+            "ws-1".to_string(),
+            "--state".to_string(),
+            "idle".to_string(),
+        ];
+        let parsed = parse_ok(&args);
+        match &parsed.subcommand {
+            Subcommand::Validate(a) => {
+                assert_eq!(a.agent_id, "");
+                assert_eq!(a.workspace_id, "ws-1");
+                assert_eq!(a.state, "idle");
+            }
+            other => panic!("expected Validate, got {other:?}"),
         }
     }
 
@@ -4499,6 +4708,36 @@ Will resume after unblock"
         let out = run_for_test(&["agent", "show"], &backend);
         assert_eq!(out.exit_code, 1);
         assert!(out.stderr.contains("agent ID is required"));
+    }
+
+    #[test]
+    fn agent_validate_json_success() {
+        let backend =
+            InMemoryAgentBackend::new().with_agent(test_snapshot("ag-001", AgentState::Idle));
+        let out = run_for_test(&["agent", "--json", "validate"], &backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        let parsed = parse_json(&out.stdout);
+        assert_eq!(parsed["valid"], true);
+        assert_eq!(parsed["checked"], 1);
+        assert!(parsed["errors"]
+            .as_array()
+            .is_some_and(|items| items.is_empty()));
+    }
+
+    #[test]
+    fn agent_validate_returns_nonzero_for_invalid_snapshot() {
+        let mut bad = test_snapshot("ag-bad", AgentState::Idle);
+        bad.workspace_id = String::new();
+        let backend = InMemoryAgentBackend::new().with_agent(bad);
+
+        let out = run_for_test(&["agent", "--json", "validate"], &backend);
+        assert_eq!(out.exit_code, 1);
+        let parsed = parse_json(&out.stdout);
+        assert_eq!(parsed["valid"], false);
+        assert_eq!(parsed["checked"], 1);
+        assert_eq!(parsed["errors"][0]["agent_id"], "ag-bad");
+        assert_eq!(parsed["errors"][0]["message"], "workspace_id is empty");
+        assert!(out.stderr.contains("agent validation failed"));
     }
 
     #[test]

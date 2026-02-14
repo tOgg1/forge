@@ -41,15 +41,45 @@ pub fn run_with_backend(
 }
 
 fn execute(args: &[String], backend: &mut dyn LoopInternalBackend) -> Result<(), String> {
-    let loop_ref = parse_args(args)?;
+    let parsed = parse_args(args)?;
+    if let Some(node_id) = parsed.node.as_deref() {
+        let command = crate::node::build_remote_command(
+            "forge loop run",
+            std::slice::from_ref(&parsed.loop_ref),
+            false,
+            false,
+        );
+        let result = crate::node::route_exec(node_id, &command)?;
+        if result.exit_code != 0 {
+            let detail = result.stderr.trim();
+            if detail.is_empty() {
+                return Err(format!(
+                    "remote loop run failed on node {node_id} (exit code {})",
+                    result.exit_code
+                ));
+            }
+            return Err(format!(
+                "remote loop run failed on node {node_id} (exit code {}): {detail}",
+                result.exit_code
+            ));
+        }
+        return Ok(());
+    }
+
     let loops = backend.list_loops()?;
-    let entry = crate::run::resolve_loop_ref(&loops, &loop_ref)?;
+    let entry = crate::run::resolve_loop_ref(&loops, &parsed.loop_ref)?;
     backend
         .run_loop(&entry.id)
         .map_err(|err| format!("loop run failed: {err}"))
 }
 
-fn parse_args(args: &[String]) -> Result<String, String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedArgs {
+    loop_ref: String,
+    node: Option<String>,
+}
+
+fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut index = 0usize;
 
     if args.get(index).is_some_and(|token| token == "loop") {
@@ -69,10 +99,23 @@ fn parse_args(args: &[String]) -> Result<String, String> {
     }
 
     let mut loop_ref: Option<String> = None;
+    let mut node: Option<String> = None;
     while let Some(token) = args.get(index) {
         match token.as_str() {
             "-h" | "--help" | "help" => {
                 return Err("Usage: forge loop run <loop-id>".to_string());
+            }
+            "--node" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "usage: --node <node-id>".to_string())?
+                    .trim()
+                    .to_string();
+                if value.is_empty() {
+                    return Err("usage: --node <node-id>".to_string());
+                }
+                node = Some(value);
+                index += 2;
             }
             flag if flag.starts_with('-') => {
                 return Err(format!("error: unknown argument for loop run: '{flag}'"));
@@ -87,12 +130,16 @@ fn parse_args(args: &[String]) -> Result<String, String> {
         }
     }
 
-    loop_ref.ok_or_else(|| "error: requires exactly 1 argument: <loop-id>".to_string())
+    Ok(ParsedArgs {
+        loop_ref: loop_ref
+            .ok_or_else(|| "error: requires exactly 1 argument: <loop-id>".to_string())?,
+        node,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{run_for_test, InMemoryLoopInternalBackend, LoopRecord, LoopState};
+    use super::{parse_args, run_for_test, InMemoryLoopInternalBackend, LoopRecord, LoopState};
 
     #[test]
     fn requires_run_subcommand() {
@@ -119,6 +166,36 @@ mod tests {
         let out = run_for_test(&["loop", "run", "alpha"], &mut backend);
         assert_eq!(out.exit_code, 1);
         assert_eq!(out.stderr, "loop run failed: runner crashed\n");
+    }
+
+    #[test]
+    fn parse_accepts_node_flag() {
+        let parsed = match parse_args(&[
+            "loop".to_string(),
+            "run".to_string(),
+            "alpha".to_string(),
+            "--node".to_string(),
+            "node-a".to_string(),
+        ]) {
+            Ok(parsed) => parsed,
+            Err(err) => panic!("expected parse success, got error: {err}"),
+        };
+        assert_eq!(parsed.loop_ref, "alpha");
+        assert_eq!(parsed.node.as_deref(), Some("node-a"));
+    }
+
+    #[test]
+    fn parse_rejects_node_flag_without_value() {
+        let err = match parse_args(&[
+            "loop".to_string(),
+            "run".to_string(),
+            "alpha".to_string(),
+            "--node".to_string(),
+        ]) {
+            Ok(_) => panic!("expected parse failure"),
+            Err(err) => err,
+        };
+        assert_eq!(err, "usage: --node <node-id>");
     }
 
     fn seeded() -> InMemoryLoopInternalBackend {
