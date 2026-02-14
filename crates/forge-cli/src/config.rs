@@ -402,6 +402,11 @@ scheduler:
   # Default: 1s
   # dispatch_interval: 1s
 
+  # Default max parallel workflow steps for `forge workflow run`
+  # (can be overridden per workflow via `max_parallel`)
+  # Default: 1
+  # workflow_max_parallel: 1
+
   # Maximum dispatch retry count
   # Default: 3
   # max_retries: 3

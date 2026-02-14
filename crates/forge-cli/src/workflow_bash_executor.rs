@@ -195,7 +195,6 @@ fn combine_output(stdout: &str, stderr: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -205,6 +204,7 @@ mod tests {
     use crate::workflow::run_persistence::{
         WorkflowRunStatus, WorkflowRunStore, WorkflowStepStatus,
     };
+    use crate::workflow::InMemoryWorkflowBackend;
 
     fn temp_root(tag: &str) -> PathBuf {
         static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
@@ -223,10 +223,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(path);
     }
 
+    fn ok_or_panic<T, E>(result: Result<T, E>, context: &str) -> T
+    where
+        E: std::fmt::Display,
+    {
+        match result {
+            Ok(value) => value,
+            Err(err) => panic!("{context}: {err}"),
+        }
+    }
+
+    fn err_or_panic<T, E>(result: Result<T, E>, context: &str) -> String
+    where
+        E: std::fmt::Display,
+    {
+        match result {
+            Ok(_) => panic!("{context}"),
+            Err(err) => err.to_string(),
+        }
+    }
+
     #[test]
     fn bash_step_captures_stdout_stderr_and_exit_code() {
         let workdir = temp_root("capture");
-        std::fs::create_dir_all(&workdir).expect("create temp workdir");
+        ok_or_panic(std::fs::create_dir_all(&workdir), "create temp workdir");
 
         let request = BashStepRequest::new(
             "build",
@@ -234,7 +254,7 @@ mod tests {
             workdir.clone(),
             "",
         );
-        let result = execute_bash_step(&request).expect("execute bash step");
+        let result = ok_or_panic(execute_bash_step(&request), "execute bash step");
 
         assert_eq!(result.step_id, "build");
         assert_eq!(result.exit_code, 7);
@@ -259,13 +279,15 @@ mod tests {
     fn bash_step_resolves_relative_workdir() {
         let root = temp_root("workdir");
         let nested = root.join("scripts");
-        std::fs::create_dir_all(&nested).expect("create nested workdir");
+        ok_or_panic(std::fs::create_dir_all(&nested), "create nested workdir");
 
         let request = BashStepRequest::new("build", "pwd", root.clone(), "scripts");
-        let result = execute_bash_step(&request).expect("execute bash step");
-        let expected = std::fs::canonicalize(&nested).expect("canonicalize nested");
-        let reported =
-            std::fs::canonicalize(Path::new(result.stdout.trim())).expect("canonicalize pwd");
+        let result = ok_or_panic(execute_bash_step(&request), "execute bash step");
+        let expected = ok_or_panic(std::fs::canonicalize(&nested), "canonicalize nested");
+        let reported = ok_or_panic(
+            std::fs::canonicalize(Path::new(result.stdout.trim())),
+            "canonicalize pwd",
+        );
 
         assert_eq!(result.exit_code, 0);
         assert_eq!(result.resolved_workdir, nested);
@@ -279,7 +301,10 @@ mod tests {
         let root = temp_root("missing-workdir");
         let request = BashStepRequest::new("build", "echo ok", root.clone(), "missing");
 
-        let err = execute_bash_step(&request).expect_err("expected missing workdir error");
+        let err = err_or_panic(
+            execute_bash_step(&request),
+            "expected missing workdir error",
+        );
         assert!(err.contains("does not exist"));
 
         cleanup(&root);
@@ -289,16 +314,18 @@ mod tests {
     fn bash_step_logs_persist_and_are_viewable() {
         let root = temp_root("persist");
         let repo_workdir = root.join("repo");
-        std::fs::create_dir_all(&repo_workdir).expect("create repo workdir");
+        ok_or_panic(
+            std::fs::create_dir_all(&repo_workdir),
+            "create repo workdir",
+        );
 
         let store = WorkflowRunStore::new(root.join("store"));
-        let run = store
-            .create_run(
-                "deploy",
-                "/repo/.forge/workflows/deploy.toml",
-                &["build".to_string()],
-            )
-            .expect("create run");
+        let run = store.create_run(
+            "deploy",
+            "/repo/.forge/workflows/deploy.toml",
+            &["build".to_string()],
+        );
+        let run = ok_or_panic(run, "create run");
 
         let request = BashStepRequest::new(
             "build",
@@ -306,17 +333,25 @@ mod tests {
             repo_workdir,
             "",
         );
-        let result = execute_bash_step(&request).expect("execute bash step");
-        append_bash_step_logs(&store, &run.id, &result).expect("append run logs");
-        store
-            .update_step_status(&run.id, "build", WorkflowStepStatus::Failed)
-            .expect("set step status");
-        store
-            .update_run_status(&run.id, WorkflowRunStatus::Failed)
-            .expect("set run status");
+        let result = ok_or_panic(execute_bash_step(&request), "execute bash step");
+        ok_or_panic(
+            append_bash_step_logs(&store, &run.id, &result),
+            "append run logs",
+        );
+        ok_or_panic(
+            store.update_step_status(&run.id, "build", WorkflowStepStatus::Failed),
+            "set step status",
+        );
+        ok_or_panic(
+            store.update_run_status(&run.id, WorkflowRunStatus::Failed),
+            "set run status",
+        );
 
-        let logs_result = super::super::load_workflow_logs_result(&store, &run.id)
-            .expect("load workflow logs result");
+        let backend = InMemoryWorkflowBackend::default();
+        let logs_result = ok_or_panic(
+            super::super::load_workflow_logs_result(&backend, &store, &run.id),
+            "load workflow logs result",
+        );
         assert_eq!(logs_result.steps.len(), 1);
         assert_eq!(logs_result.steps[0].step_id, "build");
         assert!(logs_result.steps[0].log.contains("stdout:"));
