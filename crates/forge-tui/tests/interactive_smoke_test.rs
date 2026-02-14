@@ -907,11 +907,16 @@ fn expanded_logs_kill_action_with_confirm() {
     app.update(key('l'));
     assert_eq!(app.mode(), UiMode::ExpandedLogs);
 
-    // Kill triggers confirm, but first exits expanded logs
+    // Kill triggers confirm, but first exits expanded logs.
     app.update(key('K'));
     assert_eq!(app.mode(), UiMode::Confirm);
+    assert!(app.confirm().is_some_and(|confirm| confirm.reason_required));
 
-    let cmd = app.update(key('y'));
+    app.update(key_tab());
+    for ch in "contain incident".chars() {
+        app.update(key(ch));
+    }
+    let cmd = app.update(key_enter());
     assert!(matches!(cmd, Command::RunAction(ActionKind::Kill { .. })));
     assert_eq!(app.mode(), UiMode::Main);
 }

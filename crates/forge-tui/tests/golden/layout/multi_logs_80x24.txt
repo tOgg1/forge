@@ -1,6 +1,6 @@
  Forge Loops  [Multi Logs]  6/6 loops  theme:default  density:comfortable  focus
  1:Overview    2:Logs    3:Runs    4:Multi Logs    5:Inbox                      
-View 4 Matrix  requested=2x2 effective=2x2  page=1/3  showing=1-2/6             
+View 4 Matrix  requested=2x2 effective=2x2  page=1/2  showing=1-4/6             
 layer:raw  clusters:none  pin:<space> clear:c  compare:C  layout:m  page:,/. g/G
 ╭─ l00 operator-loop-0 [PIN] ─────────╮ ╭─ l02 operator-loop-2 [PIN] ─────────╮ 
 │ERROR    q=0 runs=20 health=err harne│ │RUNNING  q=4 runs=22 health=ok harnes│ 
@@ -12,11 +12,11 @@ layer:raw  clusters:none  pin:<space> clear:c  compare:C  layout:m  page:,/. g/G
 │                                     │ │                                     │ 
 ╰─────────────────────────────────────╯ ╰─────────────────────────────────────╯ 
                                                                                 
-╭─ empty ─────────────────────────────╮ ╭─ empty ─────────────────────────────╮ 
-│Pin loops with <space>.              │ │Pin loops with <space>.              │ 
-│Change layout with m.                │ │Change layout with m.                │ 
-│                                     │ │                                     │ 
-│                                     │ │                                     │ 
+╭─ l01 operator-loop-1 ───────────────╮ ╭─ l03 operator-loop-3 ───────────────╮ 
+│WAITING  q=2 runs=21 health=ok harnes│ │ERROR    q=6 runs=23 health=err harne│ 
+│loop-1: status check ok              │ │loop-3: status check ok              │ 
+│loop-1: queue=2                      │ │loop-3: queue=6                      │ 
+│loop-1: deploying worker shard       │ │loop-3: deploying worker shard       │ 
 │                                     │ │                                     │ 
 │                                     │ │                                     │ 
 │                                     │ │                                     │ 

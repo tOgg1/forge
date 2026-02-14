@@ -39,7 +39,10 @@ fn jump_to_probable_root_frame_prefers_application_frame() {
 
     assert_eq!(jump_to_probable_root_frame(&lines, Some(6)), Some(5));
 
-    let focus = build_failure_focus(&lines, Some(6)).expect("failure focus should build");
+    let focus = match build_failure_focus(&lines, Some(6)) {
+        Some(focus) => focus,
+        None => panic!("failure focus should build"),
+    };
     assert_eq!(focus.root_frame_line, Some(5));
     assert!(focus
         .highlights

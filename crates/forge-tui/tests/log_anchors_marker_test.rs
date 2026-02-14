@@ -21,10 +21,14 @@ fn draft(loop_id: &str, source: &str, line: usize, marker: &str) -> LogAnchorDra
 #[test]
 fn marker_lookup_and_suffixing_work() {
     let mut store = LogAnchorStore::default();
-    let first =
-        add_log_anchor(&mut store, draft("loop-1", "live", 42, "hotspot")).expect("first anchor");
-    let second =
-        add_log_anchor(&mut store, draft("loop-1", "live", 43, "hotspot")).expect("second anchor");
+    let first = match add_log_anchor(&mut store, draft("loop-1", "live", 42, "hotspot")) {
+        Ok(anchor) => anchor,
+        Err(err) => panic!("first anchor should insert: {err}"),
+    };
+    let second = match add_log_anchor(&mut store, draft("loop-1", "live", 43, "hotspot")) {
+        Ok(anchor) => anchor,
+        Err(err) => panic!("second anchor should insert: {err}"),
+    };
 
     assert_ne!(first, second);
     assert_eq!(
@@ -40,8 +44,9 @@ fn marker_lookup_and_suffixing_work() {
 #[test]
 fn marker_survives_export_import_round_trip() {
     let mut source = LogAnchorStore::default();
-    add_log_anchor(&mut source, draft("loop-7", "live", 88, "root-cause"))
-        .expect("add source anchor");
+    if let Err(err) = add_log_anchor(&mut source, draft("loop-7", "live", 88, "root-cause")) {
+        panic!("add source anchor should succeed: {err}");
+    }
     let json = export_anchor_bundle_json(&source, &LogAnchorFilter::default());
 
     let mut target = LogAnchorStore::default();
