@@ -420,9 +420,11 @@ fn merge_documents(
     repo: &RegistryDocument,
     preference: MergePreference,
 ) -> RegistryDocument {
-    let mut merged = RegistryDocument::default();
-    merged.schema_version = local.schema_version.max(repo.schema_version);
-    merged.updated_at = now_rfc3339();
+    let mut merged = RegistryDocument {
+        schema_version: local.schema_version.max(repo.schema_version),
+        updated_at: now_rfc3339(),
+        ..RegistryDocument::default()
+    };
 
     merged.agents = local.agents.clone();
     for (name, entry) in &repo.agents {
@@ -1007,14 +1009,21 @@ mod tests {
     fn export_writes_commit_friendly_registry_file() {
         let store = seed_store();
         let repo_prompts_dir = store.repo_root.join(".forge").join("prompts");
-        std::fs::create_dir_all(&repo_prompts_dir).unwrap();
-        std::fs::write(repo_prompts_dir.join("review.md"), "# review prompt\n").unwrap();
+        if let Err(err) = std::fs::create_dir_all(&repo_prompts_dir) {
+            panic!("failed to create repo prompts dir: {err}");
+        }
+        if let Err(err) = std::fs::write(repo_prompts_dir.join("review.md"), "# review prompt\n") {
+            panic!("failed to write prompt fixture: {err}");
+        }
 
         let out = run_for_test(&["registry", "export"], &store);
         assert_eq!(out.exit_code, 0, "stderr={}", out.stderr);
         assert!(out.stdout.contains("Exported registry"));
 
-        let status = store.status().unwrap();
+        let status = match store.status() {
+            Ok(status) => status,
+            Err(err) => panic!("failed to load registry status: {err}"),
+        };
         assert!(status.repo_prompts >= 1);
         cleanup(&store);
     }

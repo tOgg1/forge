@@ -654,7 +654,6 @@ fn run_remote_passthrough_with_backend(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use std::collections::BTreeMap;
 
@@ -754,17 +753,31 @@ mod tests {
         }
     }
 
+    fn ok_or_panic<T>(result: Result<T, String>, context: &str) -> T {
+        match result {
+            Ok(value) => value,
+            Err(err) => panic!("{context}: {err}"),
+        }
+    }
+
+    fn err_or_panic<T>(result: Result<T, String>, context: &str) -> String {
+        match result {
+            Ok(_) => panic!("{context}"),
+            Err(err) => err,
+        }
+    }
+
     #[test]
     fn parse_exec_requires_separator() {
         let args = vec!["node".to_string(), "exec".to_string(), "node-a".to_string()];
-        let err = parse_args(&args).unwrap_err();
+        let err = err_or_panic(parse_args(&args), "parse should fail without separator");
         assert_eq!(err, "usage: forge node exec <node-id> -- <command>");
     }
 
     #[test]
     fn parse_registry_requires_node_id() {
         let args = vec!["node".to_string(), "registry".to_string(), "ls".to_string()];
-        let err = parse_args(&args).unwrap_err();
+        let err = err_or_panic(parse_args(&args), "parse should fail without node id");
         assert_eq!(
             err,
             "usage: forge node registry ls <node-id> [agents|prompts]"
@@ -791,9 +804,10 @@ mod tests {
     fn route_exec_forwards_to_master_for_non_master_target() {
         let mut backend = InMemoryNodeBackend::with_status(mesh_status());
 
-        let result =
-            route_exec_with_stage("node-worker", "echo hi", &mut backend, RouteStage::Default)
-                .expect("route via master");
+        let result = ok_or_panic(
+            route_exec_with_stage("node-worker", "echo hi", &mut backend, RouteStage::Default),
+            "route via master",
+        );
 
         assert_eq!(result.exit_code, 0);
         assert_eq!(result.routed_via.as_deref(), Some("node-master"));
@@ -810,9 +824,10 @@ mod tests {
     fn route_exec_stage_master_targets_worker_directly() {
         let mut backend = InMemoryNodeBackend::with_status(mesh_status());
 
-        let result =
-            route_exec_with_stage("node-worker", "echo hi", &mut backend, RouteStage::Master)
-                .expect("execute on worker");
+        let result = ok_or_panic(
+            route_exec_with_stage("node-worker", "echo hi", &mut backend, RouteStage::Master),
+            "execute on worker",
+        );
 
         assert_eq!(result.exit_code, 0);
         assert!(result.routed_via.is_none());
@@ -824,8 +839,10 @@ mod tests {
     fn route_exec_unknown_node_errors() {
         let mut backend = InMemoryNodeBackend::with_status(mesh_status());
 
-        let err = route_exec_with_stage("missing", "echo hi", &mut backend, RouteStage::Default)
-            .unwrap_err();
+        let err = err_or_panic(
+            route_exec_with_stage("missing", "echo hi", &mut backend, RouteStage::Default),
+            "missing node should error",
+        );
 
         assert_eq!(err, "node missing not found in mesh registry");
     }
@@ -836,9 +853,10 @@ mod tests {
         status.master_node_id = None;
         let mut backend = InMemoryNodeBackend::with_status(status);
 
-        let err =
-            route_exec_with_stage("node-worker", "echo hi", &mut backend, RouteStage::Default)
-                .unwrap_err();
+        let err = err_or_panic(
+            route_exec_with_stage("node-worker", "echo hi", &mut backend, RouteStage::Default),
+            "forwarding without master should error",
+        );
 
         assert_eq!(
             err,
@@ -852,8 +870,10 @@ mod tests {
         status.nodes[1].endpoint = "".to_string();
         let mut backend = InMemoryNodeBackend::with_status(status);
 
-        let err = route_exec_with_stage("node-worker", "echo hi", &mut backend, RouteStage::Master)
-            .unwrap_err();
+        let err = err_or_panic(
+            route_exec_with_stage("node-worker", "echo hi", &mut backend, RouteStage::Master),
+            "offline worker should error",
+        );
 
         assert_eq!(err, "node node-worker offline: endpoint missing");
     }
@@ -869,8 +889,10 @@ mod tests {
             },
         );
 
-        let err = route_exec_with_stage("node-worker", "echo hi", &mut backend, RouteStage::Master)
-            .unwrap_err();
+        let err = err_or_panic(
+            route_exec_with_stage("node-worker", "echo hi", &mut backend, RouteStage::Master),
+            "ssh 255 should map to offline error",
+        );
 
         assert_eq!(err, "node node-worker offline: Connection refused");
     }

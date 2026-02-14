@@ -773,16 +773,14 @@ fn execute(
             let result = instantiate_profiles_from_detection(backend, &detection)?;
             if parsed.json || parsed.jsonl {
                 write_serialized(stdout, &result, parsed.jsonl)?;
+            } else if result.imported == 0 {
+                writeln!(stdout, "No profiles imported from shell aliases/harnesses")
+                    .map_err(|err| err.to_string())?;
             } else {
-                if result.imported == 0 {
-                    writeln!(stdout, "No profiles imported from shell aliases/harnesses")
-                        .map_err(|err| err.to_string())?;
-                } else {
-                    writeln!(stdout, "Imported {} profiles", result.imported)
-                        .map_err(|err| err.to_string())?;
-                    for profile in &result.profiles {
-                        writeln!(stdout, "- {profile}").map_err(|err| err.to_string())?;
-                    }
+                writeln!(stdout, "Imported {} profiles", result.imported)
+                    .map_err(|err| err.to_string())?;
+                for profile in &result.profiles {
+                    writeln!(stdout, "- {profile}").map_err(|err| err.to_string())?;
                 }
             }
             Ok(())
@@ -1135,7 +1133,7 @@ fn alias_auth_home(harness: &str, command: &str) -> String {
     for token in command.split_whitespace() {
         let token = strip_matching_quotes(token).trim();
         if let Some((key, value)) = token.split_once('=') {
-            if keys.iter().any(|allowed| *allowed == key) {
+            if keys.contains(&key) {
                 return strip_matching_quotes(value).to_string();
             }
         }
@@ -1956,9 +1954,10 @@ mod tests {
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env test lock poisoned")
+        match LOCK.get_or_init(|| Mutex::new(())).lock() {
+            Ok(guard) => guard,
+            Err(_) => panic!("env test lock poisoned"),
+        }
     }
 
     #[test]
@@ -2153,7 +2152,10 @@ mod tests {
             }],
         };
         let mut backend = InMemoryProfileBackend::default();
-        let result = instantiate_profiles_from_detection(&mut backend, &detection).unwrap();
+        let result = match instantiate_profiles_from_detection(&mut backend, &detection) {
+            Ok(result) => result,
+            Err(err) => panic!("expected profile instantiation success: {err}"),
+        };
         assert_eq!(result.imported, 3);
         assert_eq!(
             result.profiles,
@@ -2187,7 +2189,10 @@ mod tests {
         let mut backend = InMemoryProfileBackend::default();
         let out = run_for_test(&["profile", "init", "--json"], &mut backend);
         assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        let parsed: serde_json::Value = match serde_json::from_str(&out.stdout) {
+            Ok(parsed) => parsed,
+            Err(err) => panic!("failed to parse profile init json output: {err}"),
+        };
         assert_eq!(parsed["imported"], 2);
         assert_eq!(parsed["aliases"][0]["name"], "amp1");
         assert_eq!(parsed["aliases"][1]["name"], "d1");
@@ -2199,9 +2204,15 @@ mod tests {
     fn detect_installed_harnesses_from_path_fixture() {
         let _env_lock = env_test_lock();
         let bin_dir = temp_path("harness-bin");
-        fs::create_dir_all(&bin_dir).unwrap();
-        fs::write(bin_dir.join("codex"), "").unwrap();
-        fs::write(bin_dir.join("factory"), "").unwrap();
+        if let Err(err) = fs::create_dir_all(&bin_dir) {
+            panic!("failed to create harness fixture bin dir: {err}");
+        }
+        if let Err(err) = fs::write(bin_dir.join("codex"), "") {
+            panic!("failed to write codex fixture binary: {err}");
+        }
+        if let Err(err) = fs::write(bin_dir.join("factory"), "") {
+            panic!("failed to write factory fixture binary: {err}");
+        }
         let _path_guard = EnvVarGuard::set("PATH", bin_dir.to_string_lossy().as_ref());
 
         let harnesses = detect_installed_harnesses();

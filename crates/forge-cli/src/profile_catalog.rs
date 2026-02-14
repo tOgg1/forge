@@ -290,25 +290,27 @@ mod tests {
         counts.insert("claude".to_string(), 1);
         counts.insert("codex".to_string(), 2);
 
-        let provisioned = store
-            .provision_node("node-a", &counts)
-            .expect("provision node");
+        let provisioned = match store.provision_node("node-a", &counts) {
+            Ok(provisioned) => provisioned,
+            Err(err) => panic!("provision node: {err}"),
+        };
         assert_eq!(provisioned.profiles.len(), 3);
 
-        let updated = store
-            .set_auth_status("node-a", "Codex2", AuthStatus::Ok)
-            .expect("set auth");
-        let codex2 = updated
-            .profiles
-            .iter()
-            .find(|entry| entry.id == "Codex2")
-            .expect("Codex2 exists");
+        let updated = match store.set_auth_status("node-a", "Codex2", AuthStatus::Ok) {
+            Ok(updated) => updated,
+            Err(err) => panic!("set auth: {err}"),
+        };
+        let codex2 = match updated.profiles.iter().find(|entry| entry.id == "Codex2") {
+            Some(codex2) => codex2,
+            None => panic!("Codex2 exists"),
+        };
         assert!(matches!(codex2.auth_status, AuthStatus::Ok));
 
-        let summary = store
-            .node_summary("node-a")
-            .expect("summary")
-            .expect("node summary");
+        let summary = match store.node_summary("node-a") {
+            Ok(Some(summary)) => summary,
+            Ok(None) => panic!("node summary"),
+            Err(err) => panic!("summary: {err}"),
+        };
         assert_eq!(summary.total, 3);
         assert_eq!(summary.ok, 1);
         assert_eq!(summary.missing, 2);

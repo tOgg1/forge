@@ -1319,13 +1319,22 @@ mod tests {
 
     #[test]
     fn cron_parser_rejects_misconfigured_expression() {
-        let err = parse_cron_schedule("* * * *").expect_err("cron should have 5 fields");
+        let err = match parse_cron_schedule("* * * *") {
+            Ok(_) => panic!("cron should have 5 fields"),
+            Err(err) => err,
+        };
         assert!(err.contains("expected 5 fields"));
 
-        let err = parse_cron_schedule("61 0 * * *").expect_err("minute out of range");
+        let err = match parse_cron_schedule("61 0 * * *") {
+            Ok(_) => panic!("minute out of range"),
+            Err(err) => err,
+        };
         assert!(err.contains("minute"));
 
-        let err = parse_cron_schedule("*/5 0 * * *").expect_err("unsupported step syntax");
+        let err = match parse_cron_schedule("*/5 0 * * *") {
+            Ok(_) => panic!("unsupported step syntax"),
+            Err(err) => err,
+        };
         assert!(err.contains("unsupported"));
     }
 
@@ -1338,34 +1347,45 @@ mod tests {
         );
         assert_eq!(created.exit_code, 0, "stderr={}", created.stderr);
 
-        let base = DateTime::parse_from_rfc3339("2026-02-13T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let trigger = store
-            .create_cron_trigger("nightly", "1 0 * * *", base)
-            .expect("create trigger");
+        let base = match DateTime::parse_from_rfc3339("2026-02-13T00:00:00Z") {
+            Ok(base) => base.with_timezone(&Utc),
+            Err(err) => panic!("parse base time: {err}"),
+        };
+        let trigger = match store.create_cron_trigger("nightly", "1 0 * * *", base) {
+            Ok(trigger) => trigger,
+            Err(err) => panic!("create trigger: {err}"),
+        };
         assert!(trigger.next_fire_at.starts_with("2026-02-13T00:01:00"));
 
-        let initial = store
-            .tick_cron_triggers(base)
-            .expect("tick at non-fire time");
+        let initial = match store.tick_cron_triggers(base) {
+            Ok(initial) => initial,
+            Err(err) => panic!("tick at non-fire time: {err}"),
+        };
         assert!(initial.is_empty());
 
-        let fire_at = DateTime::parse_from_rfc3339("2026-02-13T00:01:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let fired = store
-            .tick_cron_triggers(fire_at)
-            .expect("tick at fire time");
+        let fire_at = match DateTime::parse_from_rfc3339("2026-02-13T00:01:00Z") {
+            Ok(fire_at) => fire_at.with_timezone(&Utc),
+            Err(err) => panic!("parse fire time: {err}"),
+        };
+        let fired = match store.tick_cron_triggers(fire_at) {
+            Ok(fired) => fired,
+            Err(err) => panic!("tick at fire time: {err}"),
+        };
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].job_name, "nightly");
         assert_eq!(fired[0].trigger, "cron:1 0 * * *");
 
-        let history = store.list_runs("nightly", 10).expect("list runs");
+        let history = match store.list_runs("nightly", 10) {
+            Ok(history) => history,
+            Err(err) => panic!("list runs: {err}"),
+        };
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].trigger, "cron:1 0 * * *");
 
-        let triggers = store.list_triggers().expect("list triggers");
+        let triggers = match store.list_triggers() {
+            Ok(triggers) => triggers,
+            Err(err) => panic!("list triggers: {err}"),
+        };
         assert_eq!(triggers.len(), 1);
         assert!(triggers[0].next_fire_at.starts_with("2026-02-14T00:01:00"));
 
@@ -1419,13 +1439,18 @@ mod tests {
             started_at: "2026-02-13T00:00:00Z".to_string(),
             finished_at: None,
         };
-        store.append_run(&running).expect("append running run");
+        if let Err(err) = store.append_run(&running) {
+            panic!("append running run: {err}");
+        }
 
         let out = run_for_test(&["job", "cancel", "jobrun-running-1"], &store);
         assert_eq!(out.exit_code, 0, "stderr={}", out.stderr);
         assert!(out.stdout.contains("Canceled run"));
 
-        let runs = store.list_runs("ops", 1).expect("list runs");
+        let runs = match store.list_runs("ops", 1) {
+            Ok(runs) => runs,
+            Err(err) => panic!("list runs: {err}"),
+        };
         assert_eq!(runs[0].status, "canceled");
         cleanup(&store);
     }
@@ -1436,19 +1461,22 @@ mod tests {
         let created = run_for_test(&["job", "create", "ship", "--workflow", "wf-ship"], &store);
         assert_eq!(created.exit_code, 0, "stderr={}", created.stderr);
 
-        let now = DateTime::parse_from_rfc3339("2026-02-13T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let trigger = store
-            .create_webhook_trigger("ship", "/hooks/ship", now)
-            .expect("create webhook trigger");
+        let now = match DateTime::parse_from_rfc3339("2026-02-13T00:00:00Z") {
+            Ok(now) => now.with_timezone(&Utc),
+            Err(err) => panic!("parse now time: {err}"),
+        };
+        let trigger = match store.create_webhook_trigger("ship", "/hooks/ship", now) {
+            Ok(trigger) => trigger,
+            Err(err) => panic!("create webhook trigger: {err}"),
+        };
         assert_eq!(trigger.trigger_type, "webhook");
         assert_eq!(trigger.cron, "/hooks/ship");
 
-        let removed = store
-            .remove_trigger(&trigger.trigger_id)
-            .expect("remove trigger")
-            .expect("trigger exists");
+        let removed = match store.remove_trigger(&trigger.trigger_id) {
+            Ok(Some(removed)) => removed,
+            Ok(None) => panic!("trigger exists"),
+            Err(err) => panic!("remove trigger: {err}"),
+        };
         assert_eq!(removed.trigger_id, trigger.trigger_id);
         cleanup(&store);
     }

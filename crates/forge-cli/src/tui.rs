@@ -314,9 +314,22 @@ fn write_help(out: &mut dyn Write) {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    fn parse_json_or_panic(raw: &str, context: &str) -> serde_json::Value {
+        match serde_json::from_str(raw) {
+            Ok(value) => value,
+            Err(err) => panic!("{context}: {err}"),
+        }
+    }
+
+    fn str_or_panic<'a>(value: Option<&'a str>, context: &str) -> &'a str {
+        match value {
+            Some(value) => value,
+            None => panic!("{context}"),
+        }
+    }
 
     fn default_backend() -> InMemoryTuiBackend {
         InMemoryTuiBackend::default()
@@ -393,7 +406,7 @@ mod tests {
         let out = run_for_test(&["tui", "--json"], &backend);
         assert_eq!(out.exit_code, 0);
         assert!(backend.launched.get());
-        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+        let parsed = parse_json_or_panic(&out.stdout, "valid json");
         assert_eq!(parsed["status"], "ok");
         assert_eq!(parsed["message"], "TUI exited normally");
     }
@@ -404,8 +417,7 @@ mod tests {
         let out = run_for_test(&["tui", "--jsonl"], &backend);
         assert_eq!(out.exit_code, 0);
         assert!(backend.launched.get());
-        let parsed: serde_json::Value =
-            serde_json::from_str(out.stdout.trim()).expect("valid jsonl");
+        let parsed = parse_json_or_panic(out.stdout.trim(), "valid jsonl");
         assert_eq!(parsed["status"], "ok");
     }
 
@@ -436,15 +448,13 @@ mod tests {
         let out = run_for_test(&["tui", "--json"], &backend);
         assert_eq!(out.exit_code, 1);
         assert!(!backend.launched.get());
-        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+        let parsed = parse_json_or_panic(&out.stdout, "valid json");
         assert_eq!(parsed["error"]["code"], "ERR_PREFLIGHT");
         assert_eq!(
             parsed["error"]["message"],
             "TUI requires an interactive terminal"
         );
-        assert!(parsed["error"]["hint"]
-            .as_str()
-            .expect("hint present")
+        assert!(str_or_panic(parsed["error"]["hint"].as_str(), "hint present")
             .contains("non-interactive"));
         assert_eq!(parsed["error"]["next_step"], "forge --help");
         assert!(out.stderr.is_empty());
@@ -456,8 +466,7 @@ mod tests {
         let out = run_for_test(&["tui", "--jsonl"], &backend);
         assert_eq!(out.exit_code, 1);
         assert!(!backend.launched.get());
-        let parsed: serde_json::Value =
-            serde_json::from_str(out.stdout.trim()).expect("valid jsonl");
+        let parsed = parse_json_or_panic(out.stdout.trim(), "valid jsonl");
         assert_eq!(parsed["error"]["code"], "ERR_PREFLIGHT");
     }
 
@@ -477,7 +486,7 @@ mod tests {
         let backend = failing_backend("failed to open database");
         let out = run_for_test(&["tui", "--json"], &backend);
         assert_eq!(out.exit_code, 2);
-        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+        let parsed = parse_json_or_panic(&out.stdout, "valid json");
         assert_eq!(parsed["error"]["code"], "ERR_OPERATION_FAILED");
         assert_eq!(parsed["error"]["message"], "failed to open database");
         assert!(out.stderr.is_empty());
@@ -488,8 +497,7 @@ mod tests {
         let backend = failing_backend("failed to open database");
         let out = run_for_test(&["tui", "--jsonl"], &backend);
         assert_eq!(out.exit_code, 2);
-        let parsed: serde_json::Value =
-            serde_json::from_str(out.stdout.trim()).expect("valid jsonl");
+        let parsed = parse_json_or_panic(out.stdout.trim(), "valid jsonl");
         assert_eq!(parsed["error"]["code"], "ERR_OPERATION_FAILED");
     }
 

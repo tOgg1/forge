@@ -839,30 +839,31 @@ mod tests {
             ("beta".to_string(), "codex".to_string()),
         ]);
 
-        store
-            .provision_node_profiles("node-a", &catalog)
-            .expect("provision node-a");
-        store
-            .provision_node_profiles("node-b", &catalog)
-            .expect("provision node-b");
-        store
-            .report_node_profile_auth("node-a", "CC1", "ok", &catalog)
-            .expect("report auth node-a CC1");
-        store
-            .report_node_profile_auth("node-a", "Codex1", "expired", &catalog)
-            .expect("report auth node-a Codex1");
-        store
-            .report_node_profile_auth("node-b", "CC1", "ok", &catalog)
-            .expect("report auth node-b CC1");
+        if let Err(err) = store.provision_node_profiles("node-a", &catalog) {
+            panic!("provision node-a: {err}");
+        }
+        if let Err(err) = store.provision_node_profiles("node-b", &catalog) {
+            panic!("provision node-b: {err}");
+        }
+        if let Err(err) = store.report_node_profile_auth("node-a", "CC1", "ok", &catalog) {
+            panic!("report auth node-a CC1: {err}");
+        }
+        if let Err(err) = store.report_node_profile_auth("node-a", "Codex1", "expired", &catalog) {
+            panic!("report auth node-a Codex1: {err}");
+        }
+        if let Err(err) = store.report_node_profile_auth("node-b", "CC1", "ok", &catalog) {
+            panic!("report auth node-b CC1: {err}");
+        }
 
-        let status = store
-            .status_with_catalog(&catalog)
-            .expect("status with catalog");
+        let status = match store.status_with_catalog(&catalog) {
+            Ok(status) => status,
+            Err(err) => panic!("status with catalog: {err}"),
+        };
         let node_a = status
             .nodes
             .iter()
             .find(|node| node.id == "node-a")
-            .expect("node-a status");
+            .unwrap_or_else(|| panic!("node-a status"));
         assert_eq!(node_a.profiles_total, 2);
         assert_eq!(node_a.auth_ok, 1);
         assert_eq!(node_a.auth_expired, 1);
@@ -872,7 +873,7 @@ mod tests {
             .nodes
             .iter()
             .find(|node| node.id == "node-b")
-            .expect("node-b status");
+            .unwrap_or_else(|| panic!("node-b status"));
         assert_eq!(node_b.profiles_total, 2);
         assert_eq!(node_b.auth_ok, 1);
         assert_eq!(node_b.auth_expired, 0);
@@ -888,12 +889,13 @@ mod tests {
         let path = super::temp_path("report-auth-invalid");
         let store = MeshStore::with_path(path);
         let catalog = build_profile_catalog(vec![("alpha".to_string(), "claude".to_string())]);
-        store
-            .provision_node_profiles("node-a", &catalog)
-            .expect("provision node-a");
-        let err = store
-            .report_node_profile_auth("node-a", "CC1", "bad", &catalog)
-            .expect_err("invalid auth state should fail");
+        if let Err(err) = store.provision_node_profiles("node-a", &catalog) {
+            panic!("provision node-a: {err}");
+        }
+        let err = match store.report_node_profile_auth("node-a", "CC1", "bad", &catalog) {
+            Ok(_) => panic!("invalid auth state should fail"),
+            Err(err) => err,
+        };
         assert!(err.contains("invalid auth state"));
     }
 }

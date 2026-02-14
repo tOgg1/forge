@@ -320,9 +320,9 @@ mod tests {
     fn add_list_remove_cron_trigger() {
         let store = temp_store("cron");
         let now = "2026-02-13T00:00:00Z";
-        store
-            .create_job("nightly", "wf-nightly", now)
-            .expect("create job");
+        if let Err(err) = store.create_job("nightly", "wf-nightly", now) {
+            panic!("create job: {err}");
+        }
 
         let add = run_for_test(
             &["trigger", "add", "cron:0 2 * * *", "--job", "nightly"],
@@ -336,7 +336,10 @@ mod tests {
         assert!(list.stdout.contains("cron"));
         assert!(list.stdout.contains("nightly"));
 
-        let listed = store.list_triggers().expect("list triggers");
+        let listed = match store.list_triggers() {
+            Ok(listed) => listed,
+            Err(err) => panic!("list triggers: {err}"),
+        };
         let id = listed[0].trigger_id.clone();
         let rm = run_for_test(&["trigger", "rm", &id], &store);
         assert_eq!(rm.exit_code, 0, "stderr={}", rm.stderr);
@@ -348,9 +351,9 @@ mod tests {
     fn add_webhook_trigger() {
         let store = temp_store("webhook");
         let now = "2026-02-13T00:00:00Z";
-        store
-            .create_job("ship", "wf-ship", now)
-            .expect("create job");
+        if let Err(err) = store.create_job("ship", "wf-ship", now) {
+            panic!("create job: {err}");
+        }
 
         let out = run_for_test(
             &["trigger", "add", "webhook:/hooks/ship", "--job", "ship"],
@@ -365,7 +368,9 @@ mod tests {
     fn rejects_invalid_trigger_spec() {
         let store = temp_store("invalid-spec");
         let now = "2026-02-13T00:00:00Z";
-        store.create_job("qa", "wf-qa", now).expect("create job");
+        if let Err(err) = store.create_job("qa", "wf-qa", now) {
+            panic!("create job: {err}");
+        }
 
         let out = run_for_test(&["trigger", "add", "timer:5m", "--job", "qa"], &store);
         assert_eq!(out.exit_code, 1);

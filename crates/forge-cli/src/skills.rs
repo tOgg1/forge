@@ -777,7 +777,6 @@ pub fn run_for_test(args: &[&str], backend: &InMemorySkillsBackend) -> CommandOu
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -807,6 +806,33 @@ mod tests {
         InMemorySkillsBackend::new("/repo").with_config(test_config())
     }
 
+    fn ok_or_panic<T, E>(result: Result<T, E>, context: &str) -> T
+    where
+        E: std::fmt::Display,
+    {
+        match result {
+            Ok(value) => value,
+            Err(err) => panic!("{context}: {err}"),
+        }
+    }
+
+    fn parse_json_or_panic(raw: &str, context: &str) -> serde_json::Value {
+        match serde_json::from_str(raw) {
+            Ok(value) => value,
+            Err(err) => panic!("{context}: {err}"),
+        }
+    }
+
+    fn array_or_panic<'a>(
+        value: &'a serde_json::Value,
+        context: &str,
+    ) -> &'a Vec<serde_json::Value> {
+        match value.as_array() {
+            Some(array) => array,
+            None => panic!("{context}"),
+        }
+    }
+
     #[test]
     fn parse_skills_config_yaml_reads_profiles_pools_and_default_pool() {
         let raw = r#"
@@ -822,7 +848,7 @@ pools:
 default_pool: default
 "#;
 
-        let cfg = parse_skills_config_yaml(raw).expect("parse config yaml");
+        let cfg = ok_or_panic(parse_skills_config_yaml(raw), "parse config yaml");
         assert_eq!(cfg.default_pool, "default");
         assert_eq!(cfg.profiles.len(), 2);
         assert_eq!(cfg.profiles[0].name, "claude-main");
@@ -844,7 +870,7 @@ profiles:
     harness: codex
 "#;
 
-        let cfg = parse_skills_config_yaml(raw).expect("parse config yaml");
+        let cfg = ok_or_panic(parse_skills_config_yaml(raw), "parse config yaml");
         assert_eq!(cfg.profiles.len(), 1);
         assert_eq!(cfg.profiles[0].name, "valid");
         assert_eq!(cfg.profiles[0].harness, "codex");
@@ -905,7 +931,7 @@ profiles:
         let backend = test_backend();
         let out = run_for_test(&["skills", "bootstrap", "--json"], &backend);
         assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        let parsed = parse_json_or_panic(&out.stdout, "parse bootstrap json");
         assert_eq!(parsed["source"], "builtin");
         assert!(parsed["installed"].is_array());
     }
@@ -918,8 +944,8 @@ profiles:
             &backend,
         );
         assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
-        let installed = parsed["installed"].as_array().unwrap();
+        let parsed = parse_json_or_panic(&out.stdout, "parse bootstrap json");
+        let installed = array_or_panic(&parsed["installed"], "installed should be array");
         // Should have both claude and codex destinations
         assert!(
             installed.len() >= 2,
@@ -942,7 +968,7 @@ profiles:
             ]);
         let out = run_for_test(&["skills", "bootstrap", "--json"], &backend);
         assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        let parsed = parse_json_or_panic(&out.stdout, "parse bootstrap json");
         assert_eq!(parsed["source"], "/repo/.agent-skills");
     }
 
@@ -958,7 +984,7 @@ profiles:
             &backend,
         );
         assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        let parsed = parse_json_or_panic(&out.stdout, "parse bootstrap json");
         assert_eq!(parsed["source"], "/custom/skills");
     }
 
@@ -974,7 +1000,7 @@ profiles:
             &backend,
         );
         assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+        let parsed = parse_json_or_panic(&out.stdout, "parse bootstrap json");
         assert_eq!(parsed["source"], "/repo/my-skills");
     }
 
@@ -987,24 +1013,32 @@ profiles:
         // Second install without force - should skip
         let out2 = run_for_test(&["skills", "bootstrap", "--json"], &backend);
         assert_eq!(out2.exit_code, 0, "stderr: {}", out2.stderr);
-        let parsed2: serde_json::Value = serde_json::from_str(&out2.stdout).unwrap();
-        let installed2 = &parsed2["installed"].as_array().unwrap()[0];
+        let parsed2 = parse_json_or_panic(&out2.stdout, "parse second bootstrap json");
+        let installed2_array = array_or_panic(&parsed2["installed"], "installed should be array");
+        let installed2 = match installed2_array.first() {
+            Some(value) => value,
+            None => panic!("installed should contain first destination"),
+        };
         assert!(
-            !installed2["skipped"].as_array().unwrap().is_empty(),
+            !array_or_panic(&installed2["skipped"], "skipped should be array").is_empty(),
             "expected skipped files on second install"
         );
 
         // Third install with force - should overwrite
         let out3 = run_for_test(&["skills", "bootstrap", "--force", "--json"], &backend);
         assert_eq!(out3.exit_code, 0, "stderr: {}", out3.stderr);
-        let parsed3: serde_json::Value = serde_json::from_str(&out3.stdout).unwrap();
-        let installed3 = &parsed3["installed"].as_array().unwrap()[0];
+        let parsed3 = parse_json_or_panic(&out3.stdout, "parse forced bootstrap json");
+        let installed3_array = array_or_panic(&parsed3["installed"], "installed should be array");
+        let installed3 = match installed3_array.first() {
+            Some(value) => value,
+            None => panic!("installed should contain first destination"),
+        };
         assert!(
-            !installed3["created"].as_array().unwrap().is_empty(),
+            !array_or_panic(&installed3["created"], "created should be array").is_empty(),
             "expected created files with force"
         );
         assert_eq!(
-            installed3["skipped"].as_array().unwrap().len(),
+            array_or_panic(&installed3["skipped"], "skipped should be array").len(),
             0,
             "expected no skipped files with force"
         );
@@ -1161,8 +1195,8 @@ profiles:
         let backend = InMemorySkillsBackend::new("/repo").with_config(config);
         let out = run_for_test(&["skills", "bootstrap", "--json"], &backend);
         assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
-        let parsed: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
-        let installed = parsed["installed"].as_array().unwrap();
+        let parsed = parse_json_or_panic(&out.stdout, "parse bootstrap json");
+        let installed = array_or_panic(&parsed["installed"], "installed should be array");
         assert_eq!(installed.len(), 1);
         assert_eq!(installed[0]["dest"], "/custom/auth/skills");
     }
