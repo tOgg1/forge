@@ -1863,10 +1863,30 @@ pub mod input {
         Down,
     }
 
+    /// Canonical mouse button.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum MouseButton {
+        Left,
+        Right,
+        Middle,
+    }
+
+    /// Canonical mouse event kind.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum MouseEventKind {
+        Wheel(MouseWheelDirection),
+        Down(MouseButton),
+        Up(MouseButton),
+        Drag(MouseButton),
+        Move,
+    }
+
     /// Canonical mouse event.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct MouseEvent {
-        pub wheel: Option<MouseWheelDirection>,
+        pub kind: MouseEventKind,
+        pub column: usize,
+        pub row: usize,
     }
 
     /// Canonical frame resize event.
@@ -1955,10 +1975,12 @@ pub mod input {
                     modifiers,
                 }) if modifiers.ctrl => UiAction::Refresh,
                 InputEvent::Mouse(MouseEvent {
-                    wheel: Some(MouseWheelDirection::Up),
+                    kind: MouseEventKind::Wheel(MouseWheelDirection::Up),
+                    ..
                 }) => UiAction::ScrollUp,
                 InputEvent::Mouse(MouseEvent {
-                    wheel: Some(MouseWheelDirection::Down),
+                    kind: MouseEventKind::Wheel(MouseWheelDirection::Down),
+                    ..
                 }) => UiAction::ScrollDown,
                 InputEvent::Resize(_) | InputEvent::Tick => UiAction::Refresh,
                 _ => UiAction::Noop,
@@ -1976,8 +1998,8 @@ pub mod input {
 #[cfg(test)]
 mod tests {
     use super::input::{
-        translate_input, InputEvent, Key, KeyEvent, Modifiers, MouseEvent, MouseWheelDirection,
-        ResizeEvent, UiAction,
+        translate_input, InputEvent, Key, KeyEvent, Modifiers, MouseEvent, MouseEventKind,
+        MouseWheelDirection, ResizeEvent, UiAction,
     };
     use super::render::{
         FrameSize, OwnedStyledSpan, PlainSpanSource, RenderFrame, SpanSource, SpanStyle,
@@ -2348,13 +2370,17 @@ mod tests {
     fn input_translation_mouse_wheel() {
         assert_eq!(
             translate_input(&InputEvent::Mouse(MouseEvent {
-                wheel: Some(MouseWheelDirection::Up),
+                kind: MouseEventKind::Wheel(MouseWheelDirection::Up),
+                column: 0,
+                row: 0,
             })),
             UiAction::ScrollUp
         );
         assert_eq!(
             translate_input(&InputEvent::Mouse(MouseEvent {
-                wheel: Some(MouseWheelDirection::Down),
+                kind: MouseEventKind::Wheel(MouseWheelDirection::Down),
+                column: 0,
+                row: 0,
             })),
             UiAction::ScrollDown
         );
@@ -2803,7 +2829,10 @@ mod upstream_primitives_tests {
         let mut frame = Frame::new(8, 1, &mut pool);
         badge.render(Rect::new(0, 0, 8, 1), &mut frame);
 
-        let fg = frame.buffer.get(1, 0).expect("cell").fg;
+        let fg = match frame.buffer.get(1, 0) {
+            Some(cell) => cell.fg,
+            None => panic!("cell"),
+        };
         let danger_rgb =
             ftui::Color::Ansi256(theme.color(super::style::StyleToken::Danger)).to_rgb();
         assert_eq!(
@@ -2822,15 +2851,11 @@ mod upstream_primitives_tests {
         let mut pool = ftui::render::grapheme_pool::GraphemePool::new();
         let mut frame = Frame::new(40, 4, &mut pool);
         status.render(Rect::new(0, 0, 40, 1), &mut frame);
-        assert_eq!(
-            frame
-                .buffer
-                .get(0, 0)
-                .expect("status cell")
-                .content
-                .as_char(),
-            Some('f')
-        );
+        let first_char = match frame.buffer.get(0, 0) {
+            Some(cell) => cell.content.as_char(),
+            None => panic!("status cell"),
+        };
+        assert_eq!(first_char, Some('f'));
 
         let rows = vec![TableRow::new(vec!["id-1", "running"])];
         let table = forge_table(rows, [Constraint::Fixed(10), Constraint::Fill], theme);
