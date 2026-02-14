@@ -14,6 +14,9 @@ pub mod persistent_agent_repository;
 pub mod pool_repository;
 pub mod port_repository;
 pub mod profile_repository;
+pub mod team_delegation;
+pub mod team_repository;
+pub mod team_task_repository;
 pub mod transcript_repository;
 pub mod usage_repository;
 
@@ -101,6 +104,18 @@ pub enum DbError {
     ProfileNotFound,
     #[error("profile already exists")]
     ProfileAlreadyExists,
+    #[error("team not found")]
+    TeamNotFound,
+    #[error("team already exists")]
+    TeamAlreadyExists,
+    #[error("team member not found")]
+    TeamMemberNotFound,
+    #[error("team member already exists")]
+    TeamMemberAlreadyExists,
+    #[error("team task not found")]
+    TeamTaskNotFound,
+    #[error("team task already exists")]
+    TeamTaskAlreadyExists,
     #[error("alert not found")]
     AlertNotFound,
     #[error("approval not found")]
