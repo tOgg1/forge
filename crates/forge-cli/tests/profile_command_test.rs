@@ -1,4 +1,7 @@
 use forge_cli::profile::{run_for_test, CommandOutput, InMemoryProfileBackend, ProfileBackend};
+use std::ffi::OsString;
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn profile_json_outputs_match_goldens() {
@@ -149,7 +152,10 @@ fn profile_integration_scenario_human_paths() {
 
     let init = run(&["profile", "init"], &mut backend);
     assert_success(&init);
-    assert_eq!(init.stdout, "No shell aliases found\n");
+    assert_eq!(
+        init.stdout,
+        "No profiles imported from shell aliases/harnesses\n"
+    );
 }
 
 #[test]
@@ -189,7 +195,50 @@ fn profile_validation_and_error_paths() {
 }
 
 fn run(args: &[&str], backend: &mut dyn ProfileBackend) -> CommandOutput {
-    run_for_test(args, backend)
+    with_profile_init_aliases_disabled(|| run_for_test(args, backend))
+}
+
+fn with_profile_init_aliases_disabled<T>(callback: impl FnOnce() -> T) -> T {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _guard = match LOCK.get_or_init(|| Mutex::new(())).lock() {
+        Ok(guard) => guard,
+        Err(_) => panic!("profile env lock poisoned"),
+    };
+
+    let skip_key = "FORGE_PROFILE_INIT_SKIP_ZSH_ALIAS";
+    let alias_file_key = "FORGE_PROFILE_INIT_ALIAS_FILE";
+    let path_key = "PATH";
+    let previous_skip: Option<OsString> = std::env::var_os(skip_key);
+    let previous_alias_file: Option<OsString> = std::env::var_os(alias_file_key);
+    let previous_path: Option<OsString> = std::env::var_os(path_key);
+
+    std::env::set_var(skip_key, "1");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let isolated_alias_file = std::env::temp_dir().join(format!(
+        "forge-profile-aliases-empty-{}-{nonce}",
+        std::process::id()
+    ));
+    std::env::set_var(alias_file_key, &isolated_alias_file);
+    std::env::set_var(path_key, "");
+
+    let result = callback();
+
+    match previous_skip {
+        Some(value) => std::env::set_var(skip_key, value),
+        None => std::env::remove_var(skip_key),
+    }
+    match previous_alias_file {
+        Some(value) => std::env::set_var(alias_file_key, value),
+        None => std::env::remove_var(alias_file_key),
+    }
+    match previous_path {
+        Some(value) => std::env::set_var(path_key, value),
+        None => std::env::remove_var(path_key),
+    }
+    result
 }
 
 fn assert_success(output: &CommandOutput) {

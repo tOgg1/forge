@@ -83,6 +83,24 @@ impl PromptBackend for TestPromptBackend {
         Ok(prompts)
     }
 
+    fn read_prompt(
+        &self,
+        repo_path: &Path,
+        prompt_name: &str,
+    ) -> Result<String, PromptBackendError> {
+        let path = repo_path
+            .join(".forge")
+            .join("prompts")
+            .join(format!("{prompt_name}.md"));
+        fs::read_to_string(path).map_err(|err| {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                PromptBackendError::NotFound
+            } else {
+                PromptBackendError::Message(err.to_string())
+            }
+        })
+    }
+
     fn ensure_prompts_dir(&self, repo_path: &Path) -> Result<PathBuf, String> {
         let dir = repo_path.join(".forge").join("prompts");
         fs::create_dir_all(&dir).map_err(|err| err.to_string())?;

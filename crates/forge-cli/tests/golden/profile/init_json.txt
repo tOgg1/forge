@@ -1,3 +1,6 @@
 {
-  "imported": 0
+  "imported": 0,
+  "profiles": [],
+  "harnesses": [],
+  "aliases": []
 }

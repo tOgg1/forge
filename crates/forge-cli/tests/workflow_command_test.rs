@@ -1,6 +1,5 @@
-#![allow(clippy::expect_used, clippy::unwrap_used)]
-
 use forge_cli::workflow::{parse_workflow_toml, run_for_test, InMemoryWorkflowBackend, Workflow};
+use std::fmt::Debug;
 use std::path::PathBuf;
 
 #[test]
@@ -62,9 +61,20 @@ fn seeded_backend() -> InMemoryWorkflowBackend {
     }
 }
 
+fn ok_or_panic<T, E>(result: Result<T, E>, context: &str) -> T
+where
+    E: Debug,
+{
+    match result {
+        Ok(value) => value,
+        Err(err) => panic!("{context}: {err:?}"),
+    }
+}
+
 fn basic_workflow() -> Workflow {
-    parse_workflow_toml(
-        r#"
+    ok_or_panic(
+        parse_workflow_toml(
+            r#"
 name = "basic"
 description = "Basic workflow"
 
@@ -72,15 +82,17 @@ description = "Basic workflow"
 id = "plan"
 type = "agent"
 prompt = "Plan work"
-"#,
-        "/project/.forge/workflows/basic.toml",
+	"#,
+            "/project/.forge/workflows/basic.toml",
+        ),
+        "basic workflow should parse",
     )
-    .expect("basic workflow should parse")
 }
 
 fn invalid_workflow() -> Workflow {
-    parse_workflow_toml(
-        r#"
+    ok_or_panic(
+        parse_workflow_toml(
+            r#"
 name = "bad-dep"
 
 [[steps]]
@@ -88,8 +100,9 @@ id = "build"
 type = "bash"
 cmd = "make test"
 depends_on = ["missing"]
-"#,
-        ".forge/workflows/bad-dep.toml",
+	"#,
+            ".forge/workflows/bad-dep.toml",
+        ),
+        "invalid workflow fixture should parse",
     )
-    .expect("invalid workflow fixture should parse")
 }

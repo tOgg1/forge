@@ -12,6 +12,12 @@ Commands:
   validate    Validate a workflow
   run         Execute a workflow
   logs        Show persisted logs for a workflow run
+  approve     Approve a waiting human step for a workflow run
+  deny        Deny a waiting human step for a workflow run
+  blocked     List blocked steps for a workflow run
 
 Flags:
   -h, --help  help for workflow
+  --node      route workflow run through a mesh node
+  --step      workflow step id (approve/deny)
+  --reason    deny reason text (deny)
