@@ -4,6 +4,7 @@
 //! to Go daemon (`internal/forged/server.go`).
 
 use std::collections::HashMap;
+use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,19 +30,37 @@ pub struct ForgedAgentService {
     events: Arc<EventBus>,
     loop_runners: LoopRunnerManager,
     status: StatusService,
+    auth_token: Option<String>,
 }
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 impl ForgedAgentService {
     pub fn new(agents: AgentManager, tmux: Arc<dyn TmuxClient>) -> Self {
-        Self::new_with_loop_runners(agents, tmux, LoopRunnerManager::new())
+        Self::new_with_loop_runners_and_auth(agents, tmux, LoopRunnerManager::new(), None)
+    }
+
+    pub fn new_with_auth_token(
+        agents: AgentManager,
+        tmux: Arc<dyn TmuxClient>,
+        auth_token: Option<String>,
+    ) -> Self {
+        Self::new_with_loop_runners_and_auth(agents, tmux, LoopRunnerManager::new(), auth_token)
     }
 
     pub fn new_with_loop_runners(
         agents: AgentManager,
         tmux: Arc<dyn TmuxClient>,
         loop_runners: LoopRunnerManager,
+    ) -> Self {
+        Self::new_with_loop_runners_and_auth(agents, tmux, loop_runners, None)
+    }
+
+    pub fn new_with_loop_runners_and_auth(
+        agents: AgentManager,
+        tmux: Arc<dyn TmuxClient>,
+        loop_runners: LoopRunnerManager,
+        auth_token: Option<String>,
     ) -> Self {
         let hostname = nix::unistd::gethostname()
             .map(|h| h.to_string_lossy().to_string())
@@ -52,6 +71,9 @@ impl ForgedAgentService {
             events: Arc::new(EventBus::new()),
             loop_runners,
             status: StatusService::new("dev", hostname),
+            auth_token: auth_token
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
         }
     }
 
@@ -65,6 +87,20 @@ impl ForgedAgentService {
         self.loop_runners.clone()
     }
 
+    #[allow(clippy::result_large_err)]
+    fn require_auth<T>(&self, req: &Request<T>) -> Result<(), Status> {
+        let Some(expected) = self.auth_token.as_deref() else {
+            return Ok(());
+        };
+        let provided = bearer_token_from_request(req)
+            .ok_or_else(|| Status::unauthenticated("missing bearer token"))?;
+        if provided == expected {
+            Ok(())
+        } else {
+            Err(Status::permission_denied("invalid bearer token"))
+        }
+    }
+
     // -- RPC handlers --
 
     /// SpawnAgent creates a new agent in a tmux pane.
@@ -75,6 +111,7 @@ impl ForgedAgentService {
         &self,
         req: Request<proto::SpawnAgentRequest>,
     ) -> Result<Response<proto::SpawnAgentResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         if req.agent_id.is_empty() {
@@ -205,6 +242,7 @@ impl ForgedAgentService {
         &self,
         req: Request<proto::KillAgentRequest>,
     ) -> Result<Response<proto::KillAgentResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         if req.agent_id.is_empty() {
@@ -274,6 +312,7 @@ impl ForgedAgentService {
         &self,
         req: Request<proto::SendInputRequest>,
     ) -> Result<Response<proto::SendInputResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         if req.agent_id.is_empty() {
@@ -326,6 +365,7 @@ impl ForgedAgentService {
         &self,
         req: Request<proto::ListAgentsRequest>,
     ) -> Result<Response<proto::ListAgentsResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         let workspace_filter = if req.workspace_id.is_empty() {
@@ -354,6 +394,7 @@ impl ForgedAgentService {
         &self,
         req: Request<proto::GetAgentRequest>,
     ) -> Result<Response<proto::GetAgentResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         if req.agent_id.is_empty() {
@@ -376,6 +417,7 @@ impl ForgedAgentService {
         &self,
         req: Request<proto::StartLoopRunnerRequest>,
     ) -> Result<Response<proto::StartLoopRunnerResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         let runner = self
@@ -398,6 +440,7 @@ impl ForgedAgentService {
         &self,
         req: Request<proto::StopLoopRunnerRequest>,
     ) -> Result<Response<proto::StopLoopRunnerResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         let stopped = self
@@ -417,6 +460,7 @@ impl ForgedAgentService {
         &self,
         req: Request<proto::GetLoopRunnerRequest>,
     ) -> Result<Response<proto::GetLoopRunnerResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         let runner = self
@@ -433,12 +477,82 @@ impl ForgedAgentService {
     #[allow(clippy::result_large_err)]
     pub fn list_loop_runners(
         &self,
-        _req: Request<proto::ListLoopRunnersRequest>,
+        req: Request<proto::ListLoopRunnersRequest>,
     ) -> Result<Response<proto::ListLoopRunnersResponse>, Status> {
+        self.require_auth(&req)?;
         let runners = self.loop_runners.list_loop_runners();
         let runners: Vec<proto::LoopRunner> = runners.iter().map(loop_runner_to_proto).collect();
 
         Ok(Response::new(proto::ListLoopRunnersResponse { runners }))
+    }
+
+    /// ExecuteCommand accepts loop/workflow command requests and optionally runs them.
+    #[allow(clippy::result_large_err)]
+    pub fn execute_command(
+        &self,
+        req: Request<proto::ExecuteCommandRequest>,
+    ) -> Result<Response<proto::ExecuteCommandResponse>, Status> {
+        self.require_auth(&req)?;
+        let req = req.into_inner();
+
+        let command_family = match req.kind {
+            x if x == proto::ExecuteCommandKind::Loop as i32 => "loop",
+            x if x == proto::ExecuteCommandKind::Workflow as i32 => "workflow",
+            _ => return Err(Status::invalid_argument("kind must be LOOP or WORKFLOW")),
+        };
+
+        let mut argv = Vec::new();
+        argv.push(command_family.to_string());
+        argv.extend(
+            req.args
+                .iter()
+                .filter(|arg| !arg.trim().is_empty())
+                .cloned(),
+        );
+
+        if argv.len() == 1 {
+            return Err(Status::invalid_argument(
+                "args are required (example: up/run subcommand)",
+            ));
+        }
+
+        let mut normalized_tokens = vec!["forge".to_string()];
+        if !req.config_path.trim().is_empty() {
+            normalized_tokens.push("--config".to_string());
+            normalized_tokens.push(req.config_path.trim().to_string());
+        }
+        normalized_tokens.extend(argv.clone());
+        let normalized_command = normalized_tokens.join(" ");
+
+        if req.dry_run {
+            return Ok(Response::new(proto::ExecuteCommandResponse {
+                accepted: true,
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+                normalized_command,
+            }));
+        }
+
+        let mut command = Command::new("forge");
+        if !req.config_path.trim().is_empty() {
+            command.arg("--config").arg(req.config_path.trim());
+        }
+        command.args(&argv);
+        if !req.working_dir.trim().is_empty() {
+            command.current_dir(req.working_dir.trim());
+        }
+        let output = command
+            .output()
+            .map_err(|err| Status::internal(format!("execute command: {err}")))?;
+
+        Ok(Response::new(proto::ExecuteCommandResponse {
+            accepted: output.status.success(),
+            exit_code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            normalized_command,
+        }))
     }
 
     /// CapturePane returns current content for an agent pane.
@@ -447,6 +561,7 @@ impl ForgedAgentService {
         &self,
         req: Request<proto::CapturePaneRequest>,
     ) -> Result<Response<proto::CapturePaneResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         if req.agent_id.is_empty() {
@@ -489,6 +604,7 @@ impl ForgedAgentService {
         req: Request<proto::StreamPaneUpdatesRequest>,
         max_polls: usize,
     ) -> Result<Vec<proto::StreamPaneUpdatesResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         if req.agent_id.is_empty() {
@@ -618,6 +734,7 @@ impl ForgedAgentService {
         req: Request<proto::StreamEventsRequest>,
         max_polls: usize,
     ) -> Result<Vec<proto::StreamEventsResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
         let (sub_id, mut rx, replay) = self.events.subscribe(&req)?;
         let mut updates = Vec::with_capacity(replay.len());
@@ -645,6 +762,7 @@ impl ForgedAgentService {
         &self,
         req: Request<proto::GetTranscriptRequest>,
     ) -> Result<Response<proto::GetTranscriptResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         if req.agent_id.is_empty() {
@@ -721,6 +839,7 @@ impl ForgedAgentService {
         req: Request<proto::StreamTranscriptRequest>,
         max_polls: usize,
     ) -> Result<Vec<proto::StreamTranscriptResponse>, Status> {
+        self.require_auth(&req)?;
         let req = req.into_inner();
 
         if req.agent_id.is_empty() {
@@ -770,6 +889,21 @@ impl ForgedAgentService {
         }
 
         Ok(updates)
+    }
+}
+
+fn bearer_token_from_request<T>(req: &Request<T>) -> Option<String> {
+    let raw = req.metadata().get("authorization")?;
+    let value = raw.to_str().ok()?.trim();
+    let lowered = value.to_ascii_lowercase();
+    if !lowered.starts_with("bearer ") {
+        return None;
+    }
+    let token = value[7..].trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
     }
 }
 
@@ -845,6 +979,13 @@ impl ForgedService for ForgedAgentService {
         self.list_loop_runners(request)
     }
 
+    async fn execute_command(
+        &self,
+        request: Request<proto::ExecuteCommandRequest>,
+    ) -> Result<Response<proto::ExecuteCommandResponse>, Status> {
+        self.execute_command(request)
+    }
+
     async fn capture_pane(
         &self,
         request: Request<proto::CapturePaneRequest>,
@@ -894,16 +1035,18 @@ impl ForgedService for ForgedAgentService {
 
     async fn get_status(
         &self,
-        _request: Request<proto::GetStatusRequest>,
+        request: Request<proto::GetStatusRequest>,
     ) -> Result<Response<proto::GetStatusResponse>, Status> {
+        self.require_auth(&request)?;
         let agent_count = self.agents.list(None, &[]).len();
         Ok(Response::new(self.status.get_status(agent_count)))
     }
 
     async fn ping(
         &self,
-        _request: Request<proto::PingRequest>,
+        request: Request<proto::PingRequest>,
     ) -> Result<Response<proto::PingResponse>, Status> {
+        self.require_auth(&request)?;
         Ok(Response::new(self.status.ping()))
     }
 }

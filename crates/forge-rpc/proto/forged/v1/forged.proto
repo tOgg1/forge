@@ -52,6 +52,9 @@ service ForgedService {
   // ListLoopRunners lists loop runners owned by this daemon.
   rpc ListLoopRunners(ListLoopRunnersRequest) returns (ListLoopRunnersResponse);
 
+  // ExecuteCommand accepts a loop/workflow command request on this node.
+  rpc ExecuteCommand(ExecuteCommandRequest) returns (ExecuteCommandResponse);
+
   // -----------------------------------------------------------------------------
   // Screen Capture
   // -----------------------------------------------------------------------------
@@ -245,6 +248,48 @@ message ListLoopRunnersRequest {}
 
 message ListLoopRunnersResponse {
   repeated LoopRunner runners = 1;
+}
+
+message ExecuteCommandRequest {
+  // Which Forge command family to run.
+  ExecuteCommandKind kind = 1;
+
+  // Additional arguments passed to the command family.
+  // Example for LOOP: ["up", "--name", "demo"].
+  // Example for WORKFLOW: ["run", "release"].
+  repeated string args = 2;
+
+  // Optional working directory for command execution.
+  string working_dir = 3;
+
+  // Optional explicit Forge config path.
+  string config_path = 4;
+
+  // If true, validates and returns command plan without executing.
+  bool dry_run = 5;
+}
+
+message ExecuteCommandResponse {
+  // Request accepted by the daemon.
+  bool accepted = 1;
+
+  // Child process exit code (0 when dry_run=true).
+  int32 exit_code = 2;
+
+  // Captured stdout.
+  string stdout = 3;
+
+  // Captured stderr.
+  string stderr = 4;
+
+  // Normalized command the daemon planned/executed.
+  string normalized_command = 5;
+}
+
+enum ExecuteCommandKind {
+  EXECUTE_COMMAND_KIND_UNSPECIFIED = 0;
+  EXECUTE_COMMAND_KIND_LOOP = 1;
+  EXECUTE_COMMAND_KIND_WORKFLOW = 2;
 }
 
 message LoopRunner {

@@ -4,6 +4,7 @@ pub mod agent;
 pub mod bootstrap;
 pub mod events;
 pub mod loop_runner;
+pub mod node_registry;
 pub mod server;
 pub mod status;
 pub mod tmux;
