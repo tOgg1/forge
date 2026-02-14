@@ -5,8 +5,8 @@ Updated: 2026-02-09
 
 ## Shared policy
 
-- One workspace-wide format profile via `rust/rustfmt.toml`.
-- One workspace-wide clippy profile via `rust/clippy.toml`.
+- One workspace-wide format profile via `rustfmt.toml`.
+- One workspace-wide clippy profile via `clippy.toml`.
 - Deny warnings in CI/local quality checks (`-D warnings`).
 - Quality gate command is `scripts/rust-quality-check.sh`.
 
@@ -26,5 +26,5 @@ The script enforces:
 
 ## Conventions
 
-- Crates in `rust/crates/*` must use shared workspace package keys (`edition.workspace`, `license.workspace`, `publish.workspace`) to keep policy centralized.
+- Crates in `crates/*` must use shared workspace package keys (`edition.workspace`, `license.workspace`, `publish.workspace`) to keep policy centralized.
 - No crate-specific rustfmt/clippy config files.

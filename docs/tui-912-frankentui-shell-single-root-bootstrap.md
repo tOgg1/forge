@@ -4,7 +4,7 @@
 
 Implemented `forge-qbx` by enforcing a single runtime root for `forge-tui`:
 
-- Interactive TTY path now always mounts the FrankenTUI runtime (`interactive_runtime::run`).
+- Interactive TTY path now always mounts the FrankenTUI runtime (`run_frankentui_bootstrap` in `crates/forge-tui/src/bin/forge-tui.rs`).
 - Removed interactive snapshot fallback renderer path.
 - Non-interactive snapshot text mode is now CI-only (`CI` truthy).
 - Non-interactive local usage now fails fast with a clear terminal preflight error.

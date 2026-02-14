@@ -85,6 +85,10 @@ Pools are ordered lists of profile references.
 - `loop_defaults.prompt` (string): Default prompt path or name (optional).
 - `loop_defaults.prompt_msg` (string): Default base prompt message (optional).
 
+### scheduler
+
+- `scheduler.workflow_max_parallel` (int): Default max parallel step execution for `forge workflow run`. Default: `1`.
+
 ### tui
 
 - `tui.refresh_interval` (duration): UI refresh rate. Default: `2s`.

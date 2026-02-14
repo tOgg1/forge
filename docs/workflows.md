@@ -31,18 +31,21 @@ Use one of the following (exactly one recommended):
 - `prompt` (inline text)
 - `prompt_path` (file path, absolute or repo-relative)
 - `prompt_name` (name under `.forge/prompts/`, optional `.md`)
+- `prompt_id` (registry id under `.forge/prompts/`, optional `.md`; alias for `prompt_name`)
 
-Resolver order: inline `prompt` -> `prompt_path` -> `prompt_name`.
+Resolver order: inline `prompt` -> `prompt_path` -> `prompt_id` -> `prompt_name` -> autodetected `.forge/prompts/default.md`.
 
 ## Step types
 
 - `agent`
-  - `prompt` | `prompt_path` | `prompt_name` (required)
+  - `prompt` | `prompt_path` | `prompt_name` | `prompt_id` (required unless default prompt file exists)
   - `profile` or `pool` (optional)
+  - `agent_id` (optional profile-id alias for `profile`)
   - `max_runtime` (duration, optional)
 - `loop`
-  - `prompt` | `prompt_path` | `prompt_name` (required)
+  - `prompt` | `prompt_path` | `prompt_name` | `prompt_id` (required unless default prompt file exists)
   - `profile` or `pool` (optional)
+  - `agent_id` (optional profile-id alias for `profile`)
   - `interval` (duration, optional)
   - `max_iterations` (int, optional)
 - `bash`
@@ -59,8 +62,8 @@ Resolver order: inline `prompt` -> `prompt_path` -> `prompt_name`.
   - `workflow_name` (string, required)
   - `params` (table, optional)
 - `human`
-  - `prompt` | `prompt_path` | `prompt_name` (required)
-  - `timeout` (duration, optional)
+  - `prompt` | `prompt_path` | `prompt_name` | `prompt_id` (required unless default prompt file exists)
+  - `timeout` (duration, optional, format: `<int>[s|m|h|d]`; default: `24h`)
 
 ## Stop conditions
 
@@ -107,4 +110,9 @@ depends_on = ["plan"]
 forge workflow ls
 forge workflow show <name>
 forge workflow validate <name>
+forge workflow run <name>
+forge workflow logs <run-id>
+forge workflow blocked <run-id>
+forge workflow approve <run-id> --step <step-id>
+forge workflow deny <run-id> --step <step-id> --reason "<text>"
 ```

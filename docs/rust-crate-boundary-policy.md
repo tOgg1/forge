@@ -20,7 +20,7 @@ Canonical layer map: `docs/rust-crate-boundaries.json`.
 - Layer 0: `forge-core`, `forge-ftui-adapter`, `forge-rpc`
 - Layer 1: `forge-db`, `fmail-core`
 - Layer 2: `forge-loop`
-- Layer 3: `forge-daemon`, `forge-runner`
+- Layer 3: `forge-agent`, `forge-daemon`, `forge-runner`
 - Layer 4: `forge-cli`, `fmail-cli`
 - Layer 5: `forge-tui`, `fmail-tui`
 - Layer 9: `forge-parity-stub` (temporary bootstrap/test crate)

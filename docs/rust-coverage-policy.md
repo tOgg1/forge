@@ -16,33 +16,33 @@ Date: 2026-02-09
 ## Report format decision
 
 - Machine-readable report format: LCOV.
-- Canonical output path (repo-relative): `rust/coverage/lcov.info`.
-- CI artifact name: `rust-coverage` (contains `rust/coverage/lcov.info`).
+- Canonical output path (repo-relative): `coverage/lcov.info`.
+- CI artifact name: `rust-coverage` (contains `coverage/lcov.info`).
 - Human-readable summary: `cargo llvm-cov report --summary-only` appended to `GITHUB_STEP_SUMMARY`.
 
 ## Local development
 
 ```bash
 # Text summary
-cd rust && cargo llvm-cov --workspace --all-features
+cargo llvm-cov --workspace --all-features
 
 # LCOV file
-cd rust && cargo llvm-cov --workspace --all-features --lcov --output-path coverage/lcov.info
+cargo llvm-cov --workspace --all-features --lcov --output-path coverage/lcov.info
 
 # HTML report (opens in browser)
-cd rust && cargo llvm-cov --workspace --all-features --html --open
+cargo llvm-cov --workspace --all-features --html --open
 ```
 
 ## Per-crate thresholds
 
-- Per-crate thresholds are source-controlled in `rust/coverage-thresholds.txt`.
-- Enforcement: `scripts/rust-coverage-gate.sh` (reads thresholds + waivers; enforces thresholds on **modified Rust source files** under `rust/crates/<crate>/src/` by parsing `rust/coverage/lcov.info`).
-- Per-crate summary output (for CI artifacts and step summary): `rust/coverage/per-crate-summary.txt` (lists modified files + file-level line coverage).
-- New crates must be added to `rust/coverage-thresholds.txt` in the same PR.
+- Per-crate thresholds are source-controlled in `coverage-thresholds.txt`.
+- Enforcement: `scripts/rust-coverage-gate.sh` (reads thresholds + waivers; enforces thresholds on **modified Rust source files** under `crates/<crate>/src/` by parsing `coverage/lcov.info`).
+- Per-crate summary output (for CI artifacts and step summary): `coverage/per-crate-summary.txt` (lists modified files + file-level line coverage).
+- New crates must be added to `coverage-thresholds.txt` in the same PR.
 
 ## Temporary waiver process
 
-- Waiver registry: `rust/coverage-waivers.txt`.
+- Waiver registry: `coverage-waivers.txt`.
 - Waiver row format: `crate|expires_on|approved_by|issue|reason`.
 - `expires_on` must be UTC date `YYYY-MM-DD` and cannot be in the past.
 - Waivers are temporary only; remove waiver rows as soon as crate thresholds are met.
@@ -55,9 +55,9 @@ cd rust && cargo llvm-cov --workspace --all-features --html --open
 - CI job: `.github/workflows/ci.yml` -> `rust-coverage`
 - Nightly coverage publication: `.github/workflows/rust-coverage-nightly.yml` -> `rust-coverage-nightly`
 - CI workflow must install and run `cargo-llvm-cov`.
-- CI workflow must produce LCOV at `rust/coverage/lcov.info`.
+- CI workflow must produce LCOV at `coverage/lcov.info`.
 - CI workflow must upload the `rust-coverage` artifact.
-- Nightly workflow must upload `rust-coverage-nightly` artifact (`rust/coverage/lcov.info`).
+- Nightly workflow must upload `rust-coverage-nightly` artifact (`coverage/lcov.info`).
 
 ## Coverage gate self-test
 

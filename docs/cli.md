@@ -27,9 +27,13 @@ Keep backward compatibility. Existing top-level loop commands stay, but map to `
 Canonical groups:
 
 - `forge loop ...` (aliases: `forge up/ps/msg/stop/...`)
+- `forge delegation ...`
+- `forge team ...`
+- `forge task ...`
 - `forge workflow ...`
 - `forge job ...`
 - `forge trigger ...`
+- `forge registry ...`
 - `forge node ...`
 - `forge mesh ...`
 
@@ -113,9 +117,9 @@ forge agent run "Investigate flaky test"
 forge agent send reviewer-1 "Follow up with fix plan"
 ```
 
-### `forge` / `forge tui`
+### `forge tui`
 
-Launch the loop TUI.
+Launch the loop TUI. Running plain `forge` (no subcommand) also opens TUI.
 
 ```bash
 forge
@@ -158,6 +162,198 @@ forge config init          # Create default config with comments
 forge config init --force  # Overwrite existing config
 forge config path          # Print config file path
 ```
+
+### `forge completion`
+
+Generate shell completion scripts.
+
+```bash
+forge completion bash
+forge completion zsh
+forge completion fish
+```
+
+### `forge context`
+
+Show current workspace/agent context (alias for `forge use --show`).
+
+```bash
+forge context
+forge context --json
+```
+
+### `forge use`
+
+Set or inspect current workspace/agent context.
+
+```bash
+forge use my-project
+forge use ws_abc123
+forge use --agent agent_xyz
+forge use --show
+forge use --clear
+```
+
+### `forge send`
+
+Queue a message for an agent (safe queue-based dispatch).
+
+```bash
+forge send "Fix the lint errors"
+forge send abc123 "Fix the lint errors"
+forge send --all "Pause and commit your work"
+```
+
+### `forge inject`
+
+Inject a message directly into an agent (bypasses queue).
+
+```bash
+forge inject abc123 "Stop and commit"
+forge inject --force abc123 "Emergency stop"
+forge inject abc123 --file prompt.txt
+```
+
+### `forge hook`
+
+Register event hooks (command or webhook) that run on matching Forge events.
+
+```bash
+forge hook on-event --cmd "echo hook-fired"
+forge hook on-event --url https://example.test/hook --type agent.state_changed
+```
+
+### `forge lock`
+
+Manage advisory file locks for multi-agent coordination.
+
+```bash
+forge lock claim --agent agent-a --path crates/forge-cli/src/lib.rs --reason "editing"
+forge lock status --path crates/forge-cli/src/lib.rs
+forge lock release --agent agent-a --path crates/forge-cli/src/lib.rs
+forge lock check --path crates/forge-cli/src/lib.rs
+```
+
+### `forge mail`
+
+Send and read agent mailbox messages.
+
+```bash
+forge mail send --to agent-a1 --subject "Task handoff" --body "Please review PR #123"
+forge mail inbox --agent agent-a1 --unread
+forge mail read m-001 --agent agent-a1
+forge mail ack m-001 --agent agent-a1
+```
+
+### `forge migrate`
+
+Manage database schema migrations.
+
+```bash
+forge migrate status
+forge migrate up
+forge migrate down
+forge migrate version
+```
+
+### `forge skills`
+
+Manage workspace skills.
+
+```bash
+forge skills bootstrap
+```
+
+### `forge audit`
+
+View audit log events with time/type/entity filters.
+
+```bash
+forge audit --since 1h
+forge audit --type agent.state_changed --entity-type agent
+forge audit --action message.dispatched --limit 200
+```
+
+### `forge doctor`
+
+Run environment and capability diagnostics (deps/config/nodes/accounts).
+
+```bash
+forge doctor
+forge doctor --json
+```
+
+### `forge explain`
+
+Explain why an agent or queue item is in its current state.
+
+```bash
+forge explain
+forge explain <agent-id>
+forge explain <queue-item-id>
+```
+
+### `forge export`
+
+Export Forge state for automation and reporting.
+
+```bash
+forge export events --json
+forge export events --jsonl --type agent.spawned --since 1h
+forge export status --json
+forge export status --jsonl
+```
+
+### `forge status`
+
+Show fleet status summary.
+
+```bash
+forge status
+forge status --json
+```
+
+### `forge team`
+
+Manage teams and team members.
+
+```bash
+forge team ls
+forge team new ops --default-assignee agent-lead --heartbeat 300
+forge team show ops
+forge team member add ops agent-lead --role leader
+forge team member ls ops
+forge team member rm ops agent-lead
+forge team rm ops
+```
+
+### `forge task`
+
+Manage team task inbox lifecycle.
+
+```bash
+forge task send --team ops --type incident --title "database outage" --priority 5
+forge task ls --team ops --status queued,assigned
+forge task show <task-id>
+forge task assign <task-id> --agent agent-a
+forge task retry <task-id>
+```
+
+### `forge delegation`
+
+Evaluate delegation rules against payloads and return routing decisions.
+
+```bash
+forge delegation route --payload '{"type":"incident","repo":"forge","priority":5}' --team ops
+forge delegation explain --payload '{"type":"incident","repo":"forge","priority":5}' --team ops
+forge delegation route --payload '{"type":"incident"}' --rules '{"default_agent":"agent-a","rules":[]}'
+```
+
+Notes:
+
+- `--payload` is required.
+- Use exactly one of `--rules` or `--team`.
+- `route` returns final target decision; `explain` includes rule-check details.
 
 ### `forge loop up` (alias: `forge up`)
 
@@ -387,7 +583,7 @@ forge pool set-default default
 forge pool show default
 ```
 
-## Workflow and job commands (planned)
+## Workflow, job, and trigger commands
 
 ### `forge workflow`
 
@@ -398,19 +594,27 @@ forge workflow ls
 forge workflow show <name>
 forge workflow validate <name>
 forge workflow run <name> --input repo=.
+forge workflow run <name> --node <node-id>
 forge workflow graph <name> --format dot
 ```
 
+Concurrency:
+
+- Global default from `~/.config/forge/config.yaml`: `scheduler.workflow_max_parallel`.
+- Per-workflow override in workflow TOML: `max_parallel = <n>`.
+- `forge workflow show <name>` prints resolved max parallel value and source.
+
 ### `forge job`
 
-Run higher-level jobs that can start workflows or dispatch work.
+Manage job definitions and run history.
 
 ```bash
 forge job ls
 forge job show <name>
-forge job run <name> --input repo=.
-forge job logs <job-id>
-forge job cancel <job-id>
+forge job run <name> [--trigger <source>] [--input key=value]
+forge job runs <name> [--limit <n>]
+forge job logs <name> [--limit <n>]
+forge job cancel <run-id>
 ```
 
 ### `forge trigger`
@@ -424,16 +628,32 @@ forge trigger add webhook:/hooks/ship --job spec-to-ship
 forge trigger rm <trigger-id>
 ```
 
+### `forge registry`
+
+Manage central registry entries for agents/prompts.
+
+```bash
+forge registry status [--repo <path>]
+forge registry export [--repo <path>]
+forge registry import [--repo <path>] [--prefer local|repo]
+forge registry ls [all|agents|prompts]
+forge registry show agent <name>
+forge registry show prompt <name>
+forge registry update agent <name> --harness <harness> --profile <profile> [--source <source>]
+forge registry update prompt <name> --path <path> [--source <source>]
+```
+
 ### `forge node`
 
 Manage nodes in the mesh.
 
 ```bash
 forge node ls
-forge node add --ssh user@host --name <node>
-forge node bootstrap --ssh root@host
-forge node exec <node> -- <cmd>
-forge node doctor <node>
+forge node exec <node> -- <command>
+forge node registry ls <node> [agents|prompts]
+forge node registry show <node> <agent|prompt> <name>
+forge node registry update <node> agent <name> --harness <harness> --profile <profile> [--source <source>]
+forge node registry update <node> prompt <name> --path <path> [--source <source>]
 ```
 
 ### `forge mesh`
@@ -442,8 +662,9 @@ Inspect or change mesh master.
 
 ```bash
 forge mesh status
+forge mesh catalog
 forge mesh promote <node>
 forge mesh demote <node>
-forge mesh join <mesh-id>
-forge mesh leave
+forge mesh provision <node>
+forge mesh report-auth <node> <profile-id> <ok|expired|missing>
 ```

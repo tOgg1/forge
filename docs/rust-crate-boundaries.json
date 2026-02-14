@@ -5,6 +5,7 @@
   "forge-db": 1,
   "fmail-core": 1,
   "forge-loop": 2,
+  "forge-agent": 3,
   "forge-daemon": 3,
   "forge-runner": 3,
   "forge-cli": 4,
