@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::json;
@@ -116,12 +116,24 @@ impl UpBackend for InMemoryUpBackend {
 
     fn create_loop(&mut self, spec: &LoopCreateSpec) -> Result<LoopRecord, String> {
         self.next_id += 1;
+        let repo_path = if spec.repo.trim().is_empty() {
+            std::env::current_dir()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        } else {
+            spec.repo.clone()
+        };
+        let mut stored_spec = spec.clone();
+        stored_spec.prompt = crate::prompt_resolution::resolve_prompt_name_or_path(
+            Path::new(&repo_path),
+            &spec.prompt,
+        );
         let record = LoopRecord {
             id: format!("loop-{:03}", self.next_id),
             short_id: format!("s{:03}", self.next_id),
             name: spec.name.clone(),
         };
-        self.created_specs.push(spec.clone());
+        self.created_specs.push(stored_spec);
         self.created_records.push(record.clone());
         Ok(record)
     }
@@ -220,11 +232,15 @@ impl UpBackend for SqliteUpBackend {
         } else {
             None
         };
+        let resolved_prompt = crate::prompt_resolution::resolve_prompt_name_or_path(
+            Path::new(&repo_path),
+            &spec.prompt,
+        );
 
         let mut loop_entry = forge_db::loop_repository::Loop {
             name: spec.name.clone(),
             repo_path: repo_path.clone(),
-            base_prompt_path: spec.prompt.clone(),
+            base_prompt_path: resolved_prompt,
             base_prompt_msg: spec.prompt_msg.clone(),
             interval_seconds: spec.interval_seconds,
             max_iterations: i64::from(spec.max_iterations),
@@ -985,6 +1001,7 @@ mod tests {
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -1461,6 +1478,7 @@ mod tests {
 
     #[test]
     fn up_sqlite_backend_creates_loop_and_sets_running_metadata() {
+        let _cwd_guard = current_dir_guard();
         let db_path = temp_db_path("sqlite-create-start");
         let db = init_db(&db_path);
 
@@ -1514,6 +1532,45 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn up_sqlite_backend_resolves_registered_prompt_name_before_path_fallback() {
+        let db_path = temp_db_path("sqlite-prompt-name");
+        let _db = init_db(&db_path);
+        let repo_path = temp_repo_path("prompt-name");
+        let prompts_dir = repo_path.join(".forge").join("prompts");
+        std::fs::create_dir_all(&prompts_dir)
+            .unwrap_or_else(|err| panic!("create prompts dir: {err}"));
+        std::fs::write(prompts_dir.join("po-design.md"), "# prompt")
+            .unwrap_or_else(|err| panic!("write prompt file: {err}"));
+
+        with_current_dir(&repo_path, || {
+            let mut backend = SqliteUpBackend::new(db_path.clone());
+            let out = run_for_test(
+                &[
+                    "up",
+                    "--name",
+                    "prompt-loop",
+                    "--prompt",
+                    "po-design",
+                    "--quiet",
+                ],
+                &mut backend,
+            );
+            assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+            let db = forge_db::Db::open(forge_db::Config::new(&db_path))
+                .unwrap_or_else(|err| panic!("reopen db: {err}"));
+            let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+            let created = loop_repo
+                .get_by_name("prompt-loop")
+                .unwrap_or_else(|err| panic!("load loop: {err}"));
+            assert_eq!(created.base_prompt_path, ".forge/prompts/po-design.md");
+        });
+
+        let _ = std::fs::remove_file(db_path);
+        let _ = std::fs::remove_dir_all(repo_path);
     }
 
     #[test]
@@ -1766,6 +1823,41 @@ mod tests {
             "forge-cli-up-{tag}-{nanos}-{}-{suffix}.sqlite",
             std::process::id(),
         ))
+    }
+
+    fn temp_repo_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-up-repo-{tag}-{nanos}-{}-{suffix}",
+            std::process::id(),
+        ))
+    }
+
+    fn with_current_dir<F>(dir: &std::path::Path, f: F)
+    where
+        F: FnOnce(),
+    {
+        let _cwd_guard = current_dir_guard();
+        let previous = std::env::current_dir().unwrap_or_else(|err| panic!("resolve cwd: {err}"));
+        std::env::set_current_dir(dir).unwrap_or_else(|err| panic!("set cwd: {err}"));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        std::env::set_current_dir(previous).unwrap_or_else(|err| panic!("restore cwd: {err}"));
+        if let Err(payload) = result {
+            std::panic::resume_unwind(payload);
+        }
+    }
+
+    fn current_dir_guard() -> MutexGuard<'static, ()> {
+        static CURRENT_DIR_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        match CURRENT_DIR_LOCK.get_or_init(|| Mutex::new(())).lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 
     fn init_db(db_path: &PathBuf) -> forge_db::Db {

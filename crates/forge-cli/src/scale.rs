@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::json;
@@ -168,7 +168,19 @@ impl ScaleBackend for InMemoryScaleBackend {
             profile: spec.profile.clone(),
             created_seq: self.next_created_seq,
         };
-        self.created_specs.push(spec.clone());
+        let repo_path = if spec.repo.trim().is_empty() {
+            std::env::current_dir()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        } else {
+            spec.repo.clone()
+        };
+        let mut stored_spec = spec.clone();
+        stored_spec.prompt = crate::prompt_resolution::resolve_prompt_name_or_path(
+            Path::new(&repo_path),
+            &spec.prompt,
+        );
+        self.created_specs.push(stored_spec);
         self.loops.push(entry.clone());
         Ok(entry)
     }
@@ -350,11 +362,15 @@ impl ScaleBackend for SqliteScaleBackend {
         } else {
             None
         };
+        let resolved_prompt = crate::prompt_resolution::resolve_prompt_name_or_path(
+            Path::new(&repo_path),
+            &spec.prompt,
+        );
 
         let mut loop_entry = forge_db::loop_repository::Loop {
             name: spec.name.clone(),
             repo_path: repo_path.clone(),
-            base_prompt_path: spec.prompt.clone(),
+            base_prompt_path: resolved_prompt,
             base_prompt_msg: spec.prompt_msg.clone(),
             interval_seconds: spec.interval_seconds,
             max_iterations: i64::from(spec.max_iterations),
@@ -1548,6 +1564,62 @@ mod tests {
     }
 
     #[test]
+    fn scale_sqlite_up_resolves_registered_prompt_name_before_path_fallback() {
+        let db_path = temp_db_path("sqlite-prompt-name");
+        let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
+            .unwrap_or_else(|err| panic!("open db: {err}"));
+        db.migrate_up()
+            .unwrap_or_else(|err| panic!("migrate db: {err}"));
+
+        let repo_path = temp_repo_path("prompt-name");
+        let prompts_dir = repo_path.join(".forge").join("prompts");
+        std::fs::create_dir_all(&prompts_dir)
+            .unwrap_or_else(|err| panic!("create prompts dir: {err}"));
+        std::fs::write(prompts_dir.join("po-design.md"), "# prompt")
+            .unwrap_or_else(|err| panic!("write prompt file: {err}"));
+
+        let loop_repo = forge_db::loop_repository::LoopRepository::new(&db);
+        let mut existing = forge_db::loop_repository::Loop {
+            name: "existing".to_string(),
+            repo_path: repo_path.to_string_lossy().into_owned(),
+            state: forge_db::loop_repository::LoopState::Running,
+            ..Default::default()
+        };
+        loop_repo
+            .create(&mut existing)
+            .unwrap_or_else(|err| panic!("create existing loop: {err}"));
+
+        let repo_arg = repo_path.to_string_lossy().into_owned();
+        let mut backend = SqliteScaleBackend::new(db_path.clone());
+        let args = vec![
+            "scale",
+            "--count",
+            "2",
+            "--repo",
+            &repo_arg,
+            "--name-prefix",
+            "scaled",
+            "--prompt",
+            "po-design",
+            "--quiet",
+        ];
+        let out = run_for_test(&args, &mut backend);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+
+        let loops = loop_repo
+            .list()
+            .unwrap_or_else(|err| panic!("list loops: {err}"));
+        let created = loops
+            .iter()
+            .find(|entry| entry.id != existing.id)
+            .unwrap_or_else(|| panic!("expected created loop"));
+        assert_eq!(created.base_prompt_path, ".forge/prompts/po-design.md");
+
+        let _ = std::fs::remove_file(db_path);
+        let _ = std::fs::remove_dir_all(repo_path);
+    }
+
+    #[test]
     fn scale_sqlite_up_local_owner_sets_pid_metadata() {
         let db_path = temp_db_path("sqlite-local-owner");
         let mut db = forge_db::Db::open(forge_db::Config::new(&db_path))
@@ -1608,6 +1680,19 @@ mod tests {
         let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
             "forge-cli-scale-{tag}-{nanos}-{}-{suffix}.sqlite",
+            std::process::id()
+        ))
+    }
+
+    fn temp_repo_path(tag: &str) -> PathBuf {
+        static UNIQUE_SUFFIX: AtomicU64 = AtomicU64::new(0);
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => 0,
+        };
+        let suffix = UNIQUE_SUFFIX.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "forge-cli-scale-repo-{tag}-{nanos}-{}-{suffix}",
             std::process::id()
         ))
     }
