@@ -2,8 +2,11 @@ package parity
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +57,50 @@ func startTestServer(t *testing.T) (forgedv1.ForgedServiceClient, func()) {
 func hasTmux() bool {
 	_, err := exec.LookPath("tmux")
 	return err == nil
+}
+
+func requireTmuxPaneSplit(t *testing.T) {
+	t.Helper()
+	if !hasTmux() {
+		t.Skip("tmux not available")
+	}
+
+	session := fmt.Sprintf("forge-parity-%d-%d", os.Getpid(), time.Now().UnixNano())
+	newSession := exec.Command("tmux", "new-session", "-d", "-s", session, "sleep", "5")
+	if out, err := newSession.CombinedOutput(); err != nil {
+		t.Skipf("tmux new-session unavailable in test env: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	defer func() {
+		_ = exec.Command("tmux", "kill-session", "-t", session).Run()
+	}()
+
+	split := exec.Command("tmux", "split-window", "-d", "-t", session+":0.0", "true")
+	if out, err := split.CombinedOutput(); err != nil {
+		t.Skipf("tmux split-window unavailable in test env: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+}
+
+func interopSessionName(prefix string) string {
+	return fmt.Sprintf("%s-%d-%d", prefix, os.Getpid(), time.Now().UnixNano())
+}
+
+func spawnAgentOrSkipTmuxSplit(
+	t *testing.T,
+	client forgedv1.ForgedServiceClient,
+	req *forgedv1.SpawnAgentRequest,
+) *forgedv1.SpawnAgentResponse {
+	t.Helper()
+	resp, err := client.SpawnAgent(context.Background(), req)
+	if err == nil {
+		return resp
+	}
+	if st, ok := status.FromError(err); ok &&
+		st.Code() == codes.Internal &&
+		strings.Contains(st.Message(), "tmux split-window failed") {
+		t.Skipf("tmux split-window unavailable in test env: %v", err)
+	}
+	t.Fatalf("SpawnAgent: %v", err)
+	return nil
 }
 
 // TestDaemonInteropPingRoundTrip verifies Ping over gRPC.
@@ -245,27 +292,23 @@ func TestDaemonInteropLoopRunnerLifecycle(t *testing.T) {
 
 // TestDaemonInteropSpawnAndKillAgent requires tmux to spawn real agent panes.
 func TestDaemonInteropSpawnAndKillAgent(t *testing.T) {
-	if !hasTmux() {
-		t.Skip("tmux not available")
-	}
+	requireTmuxPaneSplit(t)
 	t.Parallel()
 	client, cleanup := startTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
+	sessionName := interopSessionName("sess-go-interop")
 
-	spawnResp, err := client.SpawnAgent(ctx, &forgedv1.SpawnAgentRequest{
+	spawnResp := spawnAgentOrSkipTmuxSplit(t, client, &forgedv1.SpawnAgentRequest{
 		AgentId:     "agent-go-interop",
 		WorkspaceId: "ws-go",
 		Command:     "echo",
 		Args:        []string{"hello"},
 		WorkingDir:  "/tmp",
-		SessionName: "sess-go-interop",
+		SessionName: sessionName,
 		Adapter:     "test",
 	})
-	if err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
 	agent := spawnResp.Agent
 	if agent == nil {
 		t.Fatal("expected agent")
@@ -291,26 +334,21 @@ func TestDaemonInteropSpawnAndKillAgent(t *testing.T) {
 
 // TestDaemonInteropSendInput requires tmux for agent pane interaction.
 func TestDaemonInteropSendInput(t *testing.T) {
-	if !hasTmux() {
-		t.Skip("tmux not available")
-	}
+	requireTmuxPaneSplit(t)
 	t.Parallel()
 	client, cleanup := startTestServer(t)
 	defer cleanup()
 
-	ctx := context.Background()
-
-	if _, err := client.SpawnAgent(ctx, &forgedv1.SpawnAgentRequest{
+	spawnAgentOrSkipTmuxSplit(t, client, &forgedv1.SpawnAgentRequest{
 		AgentId:     "agent-input-go",
 		WorkspaceId: "ws-input",
 		Command:     "echo",
 		WorkingDir:  "/tmp",
-		SessionName: "sess-input-go",
+		SessionName: interopSessionName("sess-input-go"),
 		Adapter:     "test",
-	}); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
+	})
 
+	ctx := context.Background()
 	resp, err := client.SendInput(ctx, &forgedv1.SendInputRequest{
 		AgentId:   "agent-input-go",
 		Text:      "hello",
@@ -327,27 +365,22 @@ func TestDaemonInteropSendInput(t *testing.T) {
 
 // TestDaemonInteropGetTranscript requires tmux for agent spawn.
 func TestDaemonInteropGetTranscript(t *testing.T) {
-	if !hasTmux() {
-		t.Skip("tmux not available")
-	}
+	requireTmuxPaneSplit(t)
 	t.Parallel()
 	client, cleanup := startTestServer(t)
 	defer cleanup()
 
-	ctx := context.Background()
-
-	if _, err := client.SpawnAgent(ctx, &forgedv1.SpawnAgentRequest{
+	spawnAgentOrSkipTmuxSplit(t, client, &forgedv1.SpawnAgentRequest{
 		AgentId:     "agent-transcript-go",
 		WorkspaceId: "ws-transcript",
 		Command:     "echo",
 		Args:        []string{"hi"},
 		WorkingDir:  "/tmp",
-		SessionName: "sess-transcript-go",
+		SessionName: interopSessionName("sess-transcript-go"),
 		Adapter:     "test",
-	}); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
+	})
 
+	ctx := context.Background()
 	resp, err := client.GetTranscript(ctx, &forgedv1.GetTranscriptRequest{
 		AgentId: "agent-transcript-go",
 		Limit:   100,

@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -16,7 +15,7 @@ type baselineRefreshReport struct {
 }
 
 func TestBaselineRefreshScriptDryRunPass(t *testing.T) {
-	scriptPath := filepath.Join(repoRootForRefreshTest(t), "scripts", "rust-baseline-refresh.sh")
+	scriptPath := filepath.Join(workspaceRoot(t), "scripts", "rust-baseline-refresh.sh")
 	stub := writeSnapshotStub(t)
 	outDir := t.TempDir()
 
@@ -40,7 +39,7 @@ func TestBaselineRefreshScriptDryRunPass(t *testing.T) {
 }
 
 func TestBaselineRefreshScriptDryRunFailAndAllowDrift(t *testing.T) {
-	scriptPath := filepath.Join(repoRootForRefreshTest(t), "scripts", "rust-baseline-refresh.sh")
+	scriptPath := filepath.Join(workspaceRoot(t), "scripts", "rust-baseline-refresh.sh")
 	stub := writeSnapshotStub(t)
 	outDir := t.TempDir()
 
@@ -77,7 +76,7 @@ func TestBaselineRefreshScriptDryRunFailAndAllowDrift(t *testing.T) {
 }
 
 func TestBaselineRefreshScriptRejectsInvalidApproval(t *testing.T) {
-	scriptPath := filepath.Join(repoRootForRefreshTest(t), "scripts", "rust-baseline-refresh.sh")
+	scriptPath := filepath.Join(workspaceRoot(t), "scripts", "rust-baseline-refresh.sh")
 	stub := writeSnapshotStub(t)
 	outDir := t.TempDir()
 
@@ -87,15 +86,6 @@ func TestBaselineRefreshScriptRejectsInvalidApproval(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected invalid approval failure\n%s", output)
 	}
-}
-
-func repoRootForRefreshTest(t *testing.T) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve caller path")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
 func writeSnapshotStub(t *testing.T) string {

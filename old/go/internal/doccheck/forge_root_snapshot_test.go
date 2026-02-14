@@ -69,7 +69,7 @@ func buildGoBinary(t *testing.T, root, pkg string) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), filepath.Base(pkg))
 	cmd := exec.Command("go", "build", "-o", bin, pkg)
-	cmd.Dir = root
+	cmd.Dir = goModuleRoot(t, root)
 	cmd.Env = withoutToolchainOverrides(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -82,7 +82,7 @@ func runBinary(t *testing.T, root, bin string, args ...string) binaryResult {
 	t.Helper()
 
 	cmd := exec.Command(bin, args...)
-	cmd.Dir = root
+	cmd.Dir = goModuleRoot(t, root)
 	cmd.Env = withoutToolchainOverrides(os.Environ())
 
 	var stdout bytes.Buffer

@@ -118,8 +118,8 @@ func goSurface(t *testing.T) SurfaceManifest {
 
 func rustSurface(t *testing.T) SurfaceManifest {
 	t.Helper()
-	root := repoRoot(t)
-	rustDir := filepath.Join(root, "rust")
+	root := workspaceRoot(t)
+	rustDir := root
 
 	// Build the Rust forge-cli binary.
 	buildCmd := exec.Command("cargo", "build", "-p", "forge-cli", "--quiet")
@@ -214,7 +214,7 @@ func runBinStderr(t *testing.T, bin string, args ...string) string {
 // e.g. `Some("logs") | Some("log") =>` means "logs" has alias "log".
 func populateRustAliases(t *testing.T, root string, cmds []SurfaceCommand) {
 	t.Helper()
-	libPath := filepath.Join(root, "rust", "crates", "forge-cli", "src", "lib.rs")
+	libPath := filepath.Join(root, "crates", "forge-cli", "src", "lib.rs")
 	data, err := os.ReadFile(libPath)
 	if err != nil {
 		t.Logf("warning: could not read lib.rs for alias extraction: %v", err)

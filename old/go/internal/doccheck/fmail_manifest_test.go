@@ -63,21 +63,51 @@ func repoRoot(t *testing.T) string {
 	}
 	cur := wd
 	for {
-		if _, err := os.Stat(filepath.Join(cur, "go.mod")); err == nil {
-			return cur
+		if _, err := os.Stat(filepath.Join(cur, "docs")); err == nil {
+			if _, err := os.Stat(filepath.Join(cur, "old", "go", "go.mod")); err == nil {
+				return cur
+			}
+			if _, err := os.Stat(filepath.Join(cur, "go.mod")); err == nil {
+				return cur
+			}
 		}
 		next := filepath.Dir(cur)
 		if next == cur {
-			t.Fatal("repo root with go.mod not found")
+			t.Fatal("workspace root with docs and go.mod not found")
 		}
 		cur = next
+	}
+}
+
+func goModuleRoot(t *testing.T, root string) string {
+	t.Helper()
+	legacyRoot := filepath.Join(root, "old", "go")
+	if _, err := os.Stat(filepath.Join(legacyRoot, "go.mod")); err == nil {
+		return legacyRoot
+	}
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+		return root
+	}
+	t.Fatalf("go module root not found under %s", root)
+	return ""
+}
+
+func TestRepoRootResolvesWorkspaceRoot(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+	if _, err := os.Stat(filepath.Join(root, "docs")); err != nil {
+		t.Fatalf("expected docs/ at repo root %s: %v", root, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "old", "go", "go.mod")); err != nil {
+		t.Fatalf("expected old/go/go.mod under repo root %s: %v", root, err)
 	}
 }
 
 func runGoHelp(t *testing.T, root, pkg string) string {
 	t.Helper()
 	cmd := exec.Command("go", "run", pkg, "--help")
-	cmd.Dir = root
+	cmd.Dir = goModuleRoot(t, root)
 	cmd.Env = withoutToolchainOverrides(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if err != nil {

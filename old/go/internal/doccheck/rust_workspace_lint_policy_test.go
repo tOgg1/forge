@@ -14,13 +14,13 @@ func TestRustWorkspaceLintPolicyPinned(t *testing.T) {
 	policy := readFile(t, filepath.Join(root, "docs/rust-workspace-lint-policy.md"))
 	scriptPath := filepath.Join(root, "scripts/rust-quality-check.sh")
 	script := readFile(t, scriptPath)
-	cargoWorkspace := readFile(t, filepath.Join(root, "rust/Cargo.toml"))
-	rustfmt := readFile(t, filepath.Join(root, "rust/rustfmt.toml"))
-	clippy := readFile(t, filepath.Join(root, "rust/clippy.toml"))
+	cargoWorkspace := readFile(t, filepath.Join(root, "Cargo.toml"))
+	rustfmt := readFile(t, filepath.Join(root, "rustfmt.toml"))
+	clippy := readFile(t, filepath.Join(root, "clippy.toml"))
 
 	for _, want := range []string{
-		"`rust/rustfmt.toml`",
-		"`rust/clippy.toml`",
+		"`rustfmt.toml`",
+		"`clippy.toml`",
 		"`scripts/rust-quality-check.sh`",
 		"`-D warnings`",
 	} {
@@ -76,7 +76,7 @@ func TestRustWorkspaceLintPolicyPinned(t *testing.T) {
 		"forge-parity-stub",
 		"forge-tui",
 	} {
-		manifest := readFile(t, filepath.Join(root, "rust/crates", crate, "Cargo.toml"))
+		manifest := readFile(t, filepath.Join(root, "crates", crate, "Cargo.toml"))
 		for _, want := range []string{
 			"edition.workspace = true",
 			"license.workspace = true",

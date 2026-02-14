@@ -48,7 +48,7 @@ func runBinaryWithHome(t *testing.T, root, bin, home string, args ...string) bin
 	t.Helper()
 
 	cmd := exec.Command(bin, args...)
-	cmd.Dir = root
+	cmd.Dir = goModuleRoot(t, root)
 
 	env := withoutToolchainOverrides(os.Environ())
 	env = append(env, "HOME="+home)
@@ -73,4 +73,3 @@ func runBinaryWithHome(t *testing.T, root, bin, home string, args ...string) bin
 	result.stderr = stderr.String()
 	return result
 }
-

@@ -11,13 +11,13 @@ func TestRustCrateBoundaryPolicyCoversActiveWorkspaceCrates(t *testing.T) {
 	t.Parallel()
 
 	root := repoRoot(t)
-	cargoWorkspace := readFile(t, filepath.Join(root, "rust/Cargo.toml"))
+	cargoWorkspace := readFile(t, filepath.Join(root, "Cargo.toml"))
 	boundariesDoc := readFile(t, filepath.Join(root, "docs/rust-crate-boundary-policy.md"))
 	policyJSON := readFile(t, filepath.Join(root, "docs/rust-crate-boundaries.json"))
 
 	workspaceCrates := workspaceCrateNames(cargoWorkspace)
 	if len(workspaceCrates) == 0 {
-		t.Fatalf("no rust workspace crates discovered in rust/Cargo.toml")
+		t.Fatalf("no rust workspace crates discovered in Cargo.toml")
 	}
 
 	var policy map[string]int

@@ -22,7 +22,7 @@ func TestGoReadsRustMutatedDB(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "rust-mutated.sqlite")
 
 	cmd := exec.Command("cargo", "test", "-p", "forge-db", "--test", "go_db_compat_seed_test", "--", "--exact", "seed_compat_db")
-	cmd.Dir = filepath.Join(repoRootFromDBTestFile(t), "rust")
+	cmd.Dir = workspaceRootFromDBTestFile(t)
 	cmd.Env = append(os.Environ(), "FORGE_RUST_DB_COMPAT_OUT="+dbPath)
 	seedOut, err := cmd.CombinedOutput()
 	if err != nil {
@@ -84,11 +84,25 @@ func TestGoReadsRustMutatedDB(t *testing.T) {
 	}
 }
 
-func repoRootFromDBTestFile(t *testing.T) string {
+func workspaceRootFromDBTestFile(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve test file path")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	cur := filepath.Dir(file)
+	for {
+		cargoPath := filepath.Join(cur, "Cargo.toml")
+		cratePath := filepath.Join(cur, "crates", "forge-db")
+		if _, err := os.Stat(cargoPath); err == nil {
+			if _, err := os.Stat(cratePath); err == nil {
+				return cur
+			}
+		}
+		next := filepath.Dir(cur)
+		if next == cur {
+			t.Fatalf("workspace root with Cargo.toml and crates/forge-db not found from %s", file)
+		}
+		cur = next
+	}
 }

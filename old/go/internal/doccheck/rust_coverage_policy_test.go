@@ -18,12 +18,12 @@ func TestRustCoveragePolicyAndWorkflowPinned(t *testing.T) {
 	for _, want := range []string{
 		"`cargo-llvm-cov`",
 		"Machine-readable report format: LCOV",
-		"`rust/coverage/lcov.info`",
-		"`rust/coverage/per-crate-summary.txt`",
+		"`coverage/lcov.info`",
+		"`coverage/per-crate-summary.txt`",
 		"CI artifact name: `rust-coverage`",
 		"`cargo llvm-cov report --summary-only`",
-		"`rust/coverage-thresholds.txt`",
-		"`rust/coverage-waivers.txt`",
+		"`coverage-thresholds.txt`",
+		"`coverage-waivers.txt`",
 		"`scripts/rust-coverage-gate.sh`",
 		"`crate|expires_on|approved_by|issue|reason`",
 	} {
@@ -45,10 +45,10 @@ func TestRustCoveragePolicyAndWorkflowPinned(t *testing.T) {
 		"cargo llvm-cov report --summary-only",
 		"name: rust-coverage",
 		// Path may be a YAML multi-line list.
-		"rust/coverage/lcov.info",
-		"rust/coverage/per-crate-summary.txt",
+		"coverage/lcov.info",
+		"coverage/per-crate-summary.txt",
 		"run: scripts/rust-coverage-gate.sh",
-		"Waivers: rust/coverage-waivers.txt",
+		"Waivers: coverage-waivers.txt",
 	} {
 		if !strings.Contains(workflow, want) {
 			t.Fatalf("ci workflow drift: missing %q", want)

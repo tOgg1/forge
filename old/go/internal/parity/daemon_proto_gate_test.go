@@ -82,3 +82,12 @@ func repoRoot(t *testing.T) string {
 		cur = next
 	}
 }
+
+func workspaceRoot(t *testing.T) string {
+	t.Helper()
+	root := filepath.Clean(filepath.Join(repoRoot(t), "..", ".."))
+	if _, err := os.Stat(filepath.Join(root, "docs")); err != nil {
+		t.Fatalf("workspace root missing docs/: %v", err)
+	}
+	return root
+}

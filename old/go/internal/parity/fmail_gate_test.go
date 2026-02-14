@@ -9,7 +9,7 @@ import (
 func TestFmailGateCommandAndTUIBaseline(t *testing.T) {
 	t.Parallel()
 
-	root := repoRoot(t)
+	root := workspaceRoot(t)
 
 	checks := []struct {
 		path   string
