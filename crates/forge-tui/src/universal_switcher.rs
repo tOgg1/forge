@@ -435,7 +435,7 @@ fn fuzzy_score(query: &str, text: &str) -> Option<i64> {
         return Some(420);
     }
     if t.starts_with(&q) {
-        return Some(360 - (t.len().saturating_sub(q.len()) as i64));
+        return Some(360);
     }
     if let Some(idx) = t.find(&q) {
         return Some(300 - (idx as i64 * 4));
@@ -555,7 +555,7 @@ mod tests {
                 repo: None,
                 profile: None,
                 tags: Vec::new(),
-                updated_at_epoch_s: 1_200,
+                updated_at_epoch_s: 1_990,
                 score: 0,
             },
             SearchHit {
@@ -566,7 +566,7 @@ mod tests {
                 repo: None,
                 profile: None,
                 tags: Vec::new(),
-                updated_at_epoch_s: 1_200,
+                updated_at_epoch_s: 1_100,
                 score: 0,
             },
         ]);

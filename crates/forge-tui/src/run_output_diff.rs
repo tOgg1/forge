@@ -129,7 +129,10 @@ pub fn normalize_semantic_line(line: &str, options: &RunOutputDiffOptions) -> St
 }
 
 fn replace_all(pattern: &str, source: &str, replacement: &str) -> String {
-    let regex = Regex::new(pattern).expect("regex pattern must compile");
+    let regex = match Regex::new(pattern) {
+        Ok(regex) => regex,
+        Err(err) => panic!("regex pattern must compile: {err}"),
+    };
     regex.replace_all(source, replacement).into_owned()
 }
 

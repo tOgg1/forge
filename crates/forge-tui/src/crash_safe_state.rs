@@ -217,6 +217,7 @@ fn parse_snapshot_value(
         saved_at_epoch_s,
         selected_loop_id: normalize_optional(obj.get("selected_loop_id").and_then(Value::as_str)),
         selected_run_id: normalize_optional(obj.get("selected_run_id").and_then(Value::as_str)),
+        log_scroll: obj.get("log_scroll").and_then(Value::as_u64).unwrap_or(0) as usize,
         tab_id: normalize_optional(obj.get("tab_id").and_then(Value::as_str)),
         layout_id: normalize_optional(obj.get("layout_id").and_then(Value::as_str)),
         filter_state: normalize_optional(obj.get("filter_state").and_then(Value::as_str)),
@@ -312,6 +313,10 @@ fn snapshot_to_value(snapshot: &PersistedSessionSnapshot) -> Value {
     root.insert(
         "selected_run_id".to_owned(),
         optional_value(snapshot.selected_run_id.as_deref()),
+    );
+    root.insert(
+        "log_scroll".to_owned(),
+        Value::from(snapshot.log_scroll as u64),
     );
     root.insert(
         "tab_id".to_owned(),
@@ -579,6 +584,10 @@ mod tests {
                 .and_then(|item| item.selected_run_id.as_deref()),
             Some("run-9")
         );
+        assert_eq!(
+            recovered.snapshot.as_ref().map(|item| item.log_scroll),
+            Some(21)
+        );
 
         cleanup(&path);
     }
@@ -596,6 +605,7 @@ mod tests {
         SessionContext {
             selected_loop_id: Some(loop_id.to_owned()),
             selected_run_id: Some("run-9".to_owned()),
+            log_scroll: 21,
             tab_id: Some("overview".to_owned()),
             layout_id: Some("ops".to_owned()),
             filter_state: Some("running".to_owned()),

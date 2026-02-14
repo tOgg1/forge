@@ -334,7 +334,7 @@ mod tests {
 
         assert_eq!(timeline.rows.len(), 2);
         assert_eq!(timeline.rows[0].loop_id, "loop-risk");
-        assert_eq!(timeline.rows[0].heatmap.chars().nth(0), Some('!'));
+        assert_eq!(timeline.rows[0].heatmap.chars().next(), Some('!'));
         assert_eq!(timeline.rows[0].heatmap.chars().nth(1), Some('X'));
         assert!(timeline.summary.critical_cells >= 1);
         assert!(timeline.summary.warning_cells >= 1);

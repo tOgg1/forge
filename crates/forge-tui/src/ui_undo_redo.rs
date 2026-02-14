@@ -131,7 +131,10 @@ mod tests {
         history.checkpoint(snap("loop-1", 1, 0, 0, ""));
         history.checkpoint(snap("loop-2", 2, 3, 25, "error"));
 
-        let restored = history.undo().expect("undo snapshot");
+        let restored = match history.undo() {
+            Some(snapshot) => snapshot,
+            None => panic!("undo snapshot should exist"),
+        };
         assert_eq!(restored.selected_loop_id, "loop-1");
         assert_eq!(restored.selected_loop_index, 1);
         assert_eq!(restored.log_scroll, 0);
@@ -144,8 +147,14 @@ mod tests {
         history.checkpoint(snap("loop-1", 1, 0, 0, ""));
         history.checkpoint(snap("loop-2", 2, 1, 8, "panic"));
 
-        let _ = history.undo().expect("undo");
-        let restored = history.redo().expect("redo");
+        let _ = match history.undo() {
+            Some(snapshot) => snapshot,
+            None => panic!("undo snapshot should exist"),
+        };
+        let restored = match history.redo() {
+            Some(snapshot) => snapshot,
+            None => panic!("redo snapshot should exist"),
+        };
         assert_eq!(restored.selected_loop_id, "loop-2");
         assert_eq!(restored.selected_run_index, 1);
         assert_eq!(restored.log_scroll, 8);
@@ -167,7 +176,10 @@ mod tests {
         let mut history = UndoRedoState::default();
         history.checkpoint(snap("loop-1", 1, 0, 0, ""));
         history.checkpoint(snap("loop-2", 2, 1, 8, "panic"));
-        let _ = history.undo().expect("undo");
+        let _ = match history.undo() {
+            Some(snapshot) => snapshot,
+            None => panic!("undo snapshot should exist"),
+        };
         assert_eq!(history.redo_len(), 1);
         history.checkpoint(snap("loop-3", 3, 1, 2, "warn"));
         assert_eq!(history.redo_len(), 0);
@@ -181,7 +193,10 @@ mod tests {
         history.checkpoint(snap("loop-3", 3, 0, 0, ""));
         history.checkpoint(snap("loop-4", 4, 0, 0, ""));
         assert_eq!(history.undo_len(), 3);
-        let restored = history.undo().expect("undo after cap");
+        let restored = match history.undo() {
+            Some(snapshot) => snapshot,
+            None => panic!("undo snapshot should exist after history cap"),
+        };
         assert_eq!(restored.selected_loop_id, "loop-3");
     }
 }

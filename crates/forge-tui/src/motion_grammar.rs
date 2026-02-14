@@ -308,12 +308,18 @@ mod tests {
         state.tab_entered_at = Some(start);
 
         // At start: progress near 0
-        let p = state.enter_progress_at(start).unwrap();
+        let p = match state.enter_progress_at(start) {
+            Some(progress) => progress,
+            None => panic!("enter progress should exist at start"),
+        };
         assert!(p < 0.01, "expected near zero, got {p}");
 
         // Midway: progress between 0 and 1
         let mid = start + Duration::from_millis(150);
-        let p = state.enter_progress_at(mid).unwrap();
+        let p = match state.enter_progress_at(mid) {
+            Some(progress) => progress,
+            None => panic!("enter progress should exist mid-transition"),
+        };
         assert!(p > 0.3 && p < 1.0, "expected mid-range, got {p}");
 
         // After duration: None (complete)
@@ -328,7 +334,10 @@ mod tests {
         state.focus_pulsed_at = Some(start);
 
         // At start: full intensity
-        let i = state.focus_pulse_intensity_at(start).unwrap();
+        let i = match state.focus_pulse_intensity_at(start) {
+            Some(intensity) => intensity,
+            None => panic!("focus pulse intensity should exist at start"),
+        };
         assert!((i - 1.0).abs() < 0.01, "expected ~1.0, got {i}");
 
         // After duration: None

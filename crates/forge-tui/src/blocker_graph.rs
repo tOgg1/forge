@@ -709,7 +709,7 @@ fn compute_loop_depths(
 
     let mut roots = loop_ids
         .iter()
-        .filter(|loop_id| incoming.get(*loop_id).is_none_or(BTreeSet::is_empty))
+        .filter(|loop_id| incoming.get(*loop_id).map_or(true, BTreeSet::is_empty))
         .cloned()
         .collect::<Vec<_>>();
     if roots.is_empty() {
@@ -730,7 +730,7 @@ fn compute_loop_depths(
                 let next_depth = current_depth.saturating_add(1);
                 let should_update = depths
                     .get(neighbor)
-                    .is_none_or(|existing| next_depth < *existing);
+                    .map_or(true, |existing| next_depth < *existing);
                 if should_update {
                     depths.insert(neighbor.clone(), next_depth);
                     queue.push_back(neighbor.clone());
@@ -758,7 +758,7 @@ fn aggregate_collapsed_states(
                 .cloned()
                 .unwrap_or_else(|| "unknown".to_owned());
             let rank = state_severity_rank(&state);
-            if best.as_ref().is_none_or(|(best_rank, best_state)| {
+            if best.as_ref().map_or(true, |(best_rank, best_state)| {
                 rank > *best_rank || (rank == *best_rank && state < *best_state)
             }) {
                 best = Some((rank, state));

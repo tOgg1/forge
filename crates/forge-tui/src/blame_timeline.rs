@@ -61,6 +61,7 @@ impl FileBlameTimeline {
         &self.entries
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_change(
         &mut self,
         timestamp: &str,

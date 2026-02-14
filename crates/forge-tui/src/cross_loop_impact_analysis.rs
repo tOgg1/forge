@@ -547,8 +547,10 @@ mod tests {
 
     #[test]
     fn includes_pause_action_for_critical_active_dependents() {
-        let mut policy = ImpactPolicy::default();
-        policy.critical_score = 60;
+        let policy = ImpactPolicy {
+            critical_score: 60,
+            ..ImpactPolicy::default()
+        };
         let report = analyze_cross_loop_impact(&sample_change(), &sample_dependencies(), &policy);
         assert!(report
             .actions

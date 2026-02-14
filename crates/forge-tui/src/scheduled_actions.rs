@@ -214,26 +214,26 @@ mod tests {
     #[test]
     fn schedule_after_and_pop_due_actions_in_order() {
         let mut queue = ScheduledActionQueue::new();
-        queue
-            .schedule_after(
-                ScheduledActionKind::RestartLoop {
-                    loop_id: "loop-b".to_owned(),
-                },
-                1_000,
-                20,
-                "retry later",
-            )
-            .expect("schedule loop-b");
-        queue
-            .schedule_after(
-                ScheduledActionKind::RestartLoop {
-                    loop_id: "loop-a".to_owned(),
-                },
-                1_000,
-                10,
-                "retry first",
-            )
-            .expect("schedule loop-a");
+        if let Err(err) = queue.schedule_after(
+            ScheduledActionKind::RestartLoop {
+                loop_id: "loop-b".to_owned(),
+            },
+            1_000,
+            20,
+            "retry later",
+        ) {
+            panic!("schedule loop-b should succeed: {err}");
+        }
+        if let Err(err) = queue.schedule_after(
+            ScheduledActionKind::RestartLoop {
+                loop_id: "loop-a".to_owned(),
+            },
+            1_000,
+            10,
+            "retry first",
+        ) {
+            panic!("schedule loop-a should succeed: {err}");
+        }
 
         let due = queue.pop_due_actions(1_015);
         assert_eq!(due.len(), 1);
@@ -248,16 +248,16 @@ mod tests {
     #[test]
     fn status_line_shows_timer_count_and_countdown() {
         let mut queue = ScheduledActionQueue::new();
-        queue
-            .schedule_after(
-                ScheduledActionKind::SnoozeThread {
-                    thread_id: "thread-1".to_owned(),
-                },
-                2_000,
-                45,
-                "quiet period",
-            )
-            .expect("schedule");
+        if let Err(err) = queue.schedule_after(
+            ScheduledActionKind::SnoozeThread {
+                thread_id: "thread-1".to_owned(),
+            },
+            2_000,
+            45,
+            "quiet period",
+        ) {
+            panic!("schedule should succeed: {err}");
+        }
 
         let line = queue.status_line(2_010, 3);
         assert!(line.contains("timers=1"));
@@ -267,16 +267,17 @@ mod tests {
     #[test]
     fn cancel_removes_item_by_schedule_id() {
         let mut queue = ScheduledActionQueue::new();
-        let id = queue
-            .schedule_after(
-                ScheduledActionKind::AutoAcknowledgeThread {
-                    thread_id: "thread-1".to_owned(),
-                },
-                1_000,
-                60,
-                "ack after timeout",
-            )
-            .expect("schedule");
+        let id = match queue.schedule_after(
+            ScheduledActionKind::AutoAcknowledgeThread {
+                thread_id: "thread-1".to_owned(),
+            },
+            1_000,
+            60,
+            "ack after timeout",
+        ) {
+            Ok(id) => id,
+            Err(err) => panic!("schedule should succeed: {err}"),
+        };
         assert!(queue.cancel(&id));
         assert!(!queue.cancel(&id));
         assert!(queue.is_empty());
@@ -310,16 +311,16 @@ mod tests {
     #[test]
     fn due_actions_peek_does_not_pop() {
         let mut queue = ScheduledActionQueue::new();
-        queue
-            .schedule_after(
-                ScheduledActionKind::RestartLoop {
-                    loop_id: "loop-1".to_owned(),
-                },
-                1_000,
-                5,
-                "",
-            )
-            .expect("schedule");
+        if let Err(err) = queue.schedule_after(
+            ScheduledActionKind::RestartLoop {
+                loop_id: "loop-1".to_owned(),
+            },
+            1_000,
+            5,
+            "",
+        ) {
+            panic!("schedule should succeed: {err}");
+        }
 
         let peek = queue.due_actions(1_006);
         assert_eq!(peek.len(), 1);

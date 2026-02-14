@@ -33,6 +33,7 @@ pub struct PaneSelection {
 pub struct SessionContext {
     pub selected_loop_id: Option<String>,
     pub selected_run_id: Option<String>,
+    pub log_scroll: usize,
     pub tab_id: Option<String>,
     pub layout_id: Option<String>,
     pub filter_state: Option<String>,
@@ -47,6 +48,7 @@ pub struct PersistedSessionSnapshot {
     pub saved_at_epoch_s: i64,
     pub selected_loop_id: Option<String>,
     pub selected_run_id: Option<String>,
+    pub log_scroll: usize,
     pub tab_id: Option<String>,
     pub layout_id: Option<String>,
     pub filter_state: Option<String>,
@@ -105,6 +107,7 @@ pub fn snapshot_session_context(
         } else {
             None
         },
+        log_scroll: context.log_scroll,
         tab_id: normalize_optional(context.tab_id.as_deref()),
         layout_id: normalize_optional(context.layout_id.as_deref()),
         filter_state: normalize_optional(context.filter_state.as_deref()),
@@ -215,6 +218,7 @@ pub fn restore_session_context(
         context: SessionContext {
             selected_loop_id,
             selected_run_id: normalize_optional(snapshot.selected_run_id.as_deref()),
+            log_scroll: snapshot.log_scroll,
             tab_id,
             layout_id,
             filter_state,
@@ -253,6 +257,12 @@ pub fn build_delta_digest(
         current.selected_run_id.as_deref(),
         &mut lines,
     );
+    if previous.log_scroll != current.log_scroll {
+        lines.push(format!(
+            "log scroll changed: {} -> {}",
+            previous.log_scroll, current.log_scroll
+        ));
+    }
     push_optional_change(
         "tab",
         previous.tab_id.as_deref(),
@@ -445,6 +455,7 @@ mod tests {
         SessionContext {
             selected_loop_id: Some("Loop-A".to_owned()),
             selected_run_id: Some("run-9".to_owned()),
+            log_scroll: 12,
             tab_id: Some("overview".to_owned()),
             layout_id: Some("ops".to_owned()),
             filter_state: Some("running".to_owned()),
@@ -511,6 +522,7 @@ mod tests {
             saved_at_epoch_s: 10,
             selected_loop_id: Some("loop-z".to_owned()),
             selected_run_id: Some("run-2".to_owned()),
+            log_scroll: 44,
             tab_id: Some("inbox".to_owned()),
             layout_id: Some("night".to_owned()),
             filter_state: Some("error".to_owned()),
@@ -539,6 +551,7 @@ mod tests {
             restore_session_context(Some(&snapshot), &universe, &SessionRestorePolicy::default());
 
         assert_eq!(restored.context.selected_loop_id, None);
+        assert_eq!(restored.context.log_scroll, 44);
         assert_eq!(restored.context.tab_id.as_deref(), Some("overview"));
         assert_eq!(restored.context.layout_id.as_deref(), Some("ops"));
         assert_eq!(restored.context.panes.len(), 1);
@@ -570,6 +583,7 @@ mod tests {
             saved_at_epoch_s: 10,
             selected_loop_id: Some("loop-a".to_owned()),
             selected_run_id: Some("run-1".to_owned()),
+            log_scroll: 6,
             tab_id: Some("overview".to_owned()),
             layout_id: Some("ops".to_owned()),
             filter_state: Some("running".to_owned()),
@@ -586,6 +600,7 @@ mod tests {
             saved_at_epoch_s: 20,
             selected_loop_id: Some("loop-b".to_owned()),
             selected_run_id: Some("run-2".to_owned()),
+            log_scroll: 0,
             tab_id: Some("runs".to_owned()),
             layout_id: Some("review".to_owned()),
             filter_state: Some("error".to_owned()),
@@ -619,6 +634,7 @@ mod tests {
             saved_at_epoch_s: 10,
             selected_loop_id: Some("loop-a".to_owned()),
             selected_run_id: Some("run-1".to_owned()),
+            log_scroll: 3,
             tab_id: Some("overview".to_owned()),
             layout_id: Some("ops".to_owned()),
             filter_state: Some("running".to_owned()),

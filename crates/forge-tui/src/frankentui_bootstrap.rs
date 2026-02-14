@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use forge_ftui_adapter::input::{
-    translate_input, InputEvent, Key, KeyEvent, Modifiers, MouseEvent, MouseWheelDirection,
-    ResizeEvent, UiAction,
+    translate_input, InputEvent, Key, KeyEvent, Modifiers, MouseButton, MouseEvent, MouseEventKind,
+    MouseWheelDirection, ResizeEvent, UiAction,
 };
 use forge_ftui_adapter::upstream_ftui as ftui;
 use ftui::core::event::{
@@ -277,14 +277,27 @@ fn map_key_event(key_event: FtuiKeyEvent) -> Option<KeyEvent> {
 }
 
 fn map_mouse_event(mouse_event: FtuiMouseEvent) -> Option<MouseEvent> {
-    match mouse_event.kind {
-        FtuiMouseEventKind::ScrollUp => Some(MouseEvent {
-            wheel: Some(MouseWheelDirection::Up),
-        }),
-        FtuiMouseEventKind::ScrollDown => Some(MouseEvent {
-            wheel: Some(MouseWheelDirection::Down),
-        }),
-        _ => None,
+    let kind = match mouse_event.kind {
+        FtuiMouseEventKind::ScrollUp => MouseEventKind::Wheel(MouseWheelDirection::Up),
+        FtuiMouseEventKind::ScrollDown => MouseEventKind::Wheel(MouseWheelDirection::Down),
+        FtuiMouseEventKind::Down(button) => MouseEventKind::Down(map_mouse_button(button)?),
+        FtuiMouseEventKind::Up(button) => MouseEventKind::Up(map_mouse_button(button)?),
+        FtuiMouseEventKind::Drag(button) => MouseEventKind::Drag(map_mouse_button(button)?),
+        FtuiMouseEventKind::Moved => MouseEventKind::Move,
+        _ => return None,
+    };
+    Some(MouseEvent {
+        kind,
+        column: mouse_event.x as usize,
+        row: mouse_event.y as usize,
+    })
+}
+
+fn map_mouse_button(button: ftui::core::event::MouseButton) -> Option<MouseButton> {
+    match button {
+        ftui::core::event::MouseButton::Left => Some(MouseButton::Left),
+        ftui::core::event::MouseButton::Right => Some(MouseButton::Right),
+        ftui::core::event::MouseButton::Middle => Some(MouseButton::Middle),
     }
 }
 
@@ -343,7 +356,8 @@ mod tests {
         RuntimeEvent,
     };
     use forge_ftui_adapter::input::{
-        InputEvent, Key, KeyEvent, Modifiers, MouseEvent, MouseWheelDirection, ResizeEvent,
+        InputEvent, Key, KeyEvent, Modifiers, MouseEvent, MouseEventKind, MouseWheelDirection,
+        ResizeEvent,
     };
     use forge_ftui_adapter::upstream_ftui as ftui;
     use ftui::core::event::{
@@ -378,7 +392,9 @@ mod tests {
         assert_eq!(
             translate_runtime_event(&mouse_event),
             RuntimeEvent::Input(InputEvent::Mouse(MouseEvent {
-                wheel: Some(MouseWheelDirection::Down),
+                kind: MouseEventKind::Wheel(MouseWheelDirection::Down),
+                column: 0,
+                row: 0,
             }))
         );
     }

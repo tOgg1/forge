@@ -186,8 +186,14 @@ fn collapsed_window_renders_compact_lines_and_focus_cycle() {
         2
     ));
 
-    let first_focus = focus_next_pip_window(&mut state).expect("focus");
-    let second_focus = focus_next_pip_window(&mut state).expect("focus");
+    let first_focus = match focus_next_pip_window(&mut state) {
+        Some(window_id) => window_id,
+        None => panic!("focus should return a window"),
+    };
+    let second_focus = match focus_next_pip_window(&mut state) {
+        Some(window_id) => window_id,
+        None => panic!("focus should return a window"),
+    };
     assert_ne!(first_focus, second_focus);
 
     let windows = render_pip_windows(&state, 120, 40);

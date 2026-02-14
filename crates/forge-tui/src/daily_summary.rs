@@ -330,7 +330,7 @@ mod tests {
             .sections
             .iter()
             .find(|section| section.title == "Incidents")
-            .expect("incidents section");
+            .unwrap_or_else(|| panic!("incidents section should exist"));
 
         assert!(incidents.lines[0].contains("inc-001"));
         assert!(incidents.lines[1].contains("inc-002"));
@@ -365,7 +365,7 @@ mod tests {
             .sections
             .iter()
             .find(|section| section.title == "Completed Work")
-            .expect("completed section");
+            .unwrap_or_else(|| panic!("completed section should exist"));
 
         assert_eq!(completed.total_items, 4);
         assert_eq!(completed.overflow_items, 2);

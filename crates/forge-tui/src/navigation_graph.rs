@@ -516,25 +516,13 @@ pub enum ZoomCommand {
     Set(ZoomLayer),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ZoomSpatialAnchor {
     pub fleet_cell_x: u16,
     pub fleet_cell_y: u16,
     pub cluster_id: String,
     pub loop_id: String,
     pub task_id: String,
-}
-
-impl Default for ZoomSpatialAnchor {
-    fn default() -> Self {
-        Self {
-            fleet_cell_x: 0,
-            fleet_cell_y: 0,
-            cluster_id: String::new(),
-            loop_id: String::new(),
-            task_id: String::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

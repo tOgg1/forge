@@ -325,10 +325,7 @@ fn sanitize_inline(raw: &str) -> String {
 }
 
 fn head_lines(contents: &str, max_lines: usize) -> (Vec<String>, usize) {
-    let all = contents
-        .lines()
-        .map(|line| sanitize_inline(line))
-        .collect::<Vec<_>>();
+    let all = contents.lines().map(sanitize_inline).collect::<Vec<_>>();
     let preview = all.iter().take(max_lines).cloned().collect::<Vec<_>>();
     let hidden = all.len().saturating_sub(preview.len());
     (preview, hidden)
@@ -393,8 +390,11 @@ mod tests {
 
     #[test]
     fn loop_peek_contains_health_task_and_output() {
-        let popup = build_quick_peek_popup(&PeekEntityRef::loop_id("LOOP-A"), &sample_catalog())
-            .expect("loop popup");
+        let popup = match build_quick_peek_popup(&PeekEntityRef::loop_id("LOOP-A"), &sample_catalog())
+        {
+            Some(popup) => popup,
+            None => panic!("loop popup should exist"),
+        };
         assert_eq!(popup.title, "Loop loop-a");
         assert!(popup
             .lines
@@ -412,8 +412,11 @@ mod tests {
 
     #[test]
     fn task_peek_contains_status_assignee_description() {
-        let popup = build_quick_peek_popup(&PeekEntityRef::task_id("forge-6ad"), &sample_catalog())
-            .expect("task popup");
+        let popup = match build_quick_peek_popup(&PeekEntityRef::task_id("forge-6ad"), &sample_catalog())
+        {
+            Some(popup) => popup,
+            None => panic!("task popup should exist"),
+        };
         assert_eq!(popup.title, "Task forge-6ad");
         assert!(popup
             .lines
@@ -431,9 +434,13 @@ mod tests {
 
     #[test]
     fn file_peek_shows_first_twenty_lines_and_recent_changes() {
-        let popup =
-            build_quick_peek_popup(&PeekEntityRef::file_path("src/main.rs"), &sample_catalog())
-                .expect("file popup");
+        let popup = match build_quick_peek_popup(
+            &PeekEntityRef::file_path("src/main.rs"),
+            &sample_catalog(),
+        ) {
+            Some(popup) => popup,
+            None => panic!("file popup should exist"),
+        };
         assert_eq!(popup.title, "File src/main.rs");
         assert!(popup.lines.iter().any(|line| line.contains("line-20")));
         assert!(!popup.lines.iter().any(|line| line.contains("line-21")));
@@ -446,11 +453,13 @@ mod tests {
 
     #[test]
     fn fmail_peek_shows_latest_message() {
-        let popup = build_quick_peek_popup(
+        let popup = match build_quick_peek_popup(
             &PeekEntityRef::fmail_thread("20260213-203154-0000"),
             &sample_catalog(),
-        )
-        .expect("fmail popup");
+        ) {
+            Some(popup) => popup,
+            None => panic!("fmail popup should exist"),
+        };
         assert_eq!(popup.title, "Thread 20260213-203154-0000");
         assert!(popup
             .lines
@@ -464,11 +473,13 @@ mod tests {
 
     #[test]
     fn commit_peek_uses_short_hash() {
-        let popup = build_quick_peek_popup(
+        let popup = match build_quick_peek_popup(
             &PeekEntityRef::commit("abcdef1234567890"),
             &sample_catalog(),
-        )
-        .expect("commit popup");
+        ) {
+            Some(popup) => popup,
+            None => panic!("commit popup should exist"),
+        };
         assert_eq!(popup.title, "Commit abcdef12");
         assert!(popup
             .lines

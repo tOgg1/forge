@@ -150,7 +150,10 @@ mod tests {
     #[test]
     fn share_url_normalizes_base_and_encodes_metadata() {
         let meta = sample_meta();
-        let url = build_share_url("https://forge.example.com///", "snap-0123", &meta).unwrap();
+        let url = match build_share_url("https://forge.example.com///", "snap-0123", &meta) {
+            Ok(url) => url,
+            Err(err) => panic!("share url should build: {err}"),
+        };
         assert_eq!(
             url,
             "https://forge.example.com/snapshots/snap-0123?view=Overview%20Main&mode=Triage%2FRead-Only&generated=1700000000123&readonly=1"
@@ -159,18 +162,23 @@ mod tests {
 
     #[test]
     fn share_url_rejects_invalid_base_url() {
-        let err = build_share_url("forge.example.com", "snap-0123", &sample_meta()).unwrap_err();
+        let err = match build_share_url("forge.example.com", "snap-0123", &sample_meta()) {
+            Ok(url) => panic!("invalid base url should fail, got {url}"),
+            Err(err) => err,
+        };
         assert!(err.contains("http:// or https://"));
     }
 
     #[test]
     fn build_snapshot_share_link_returns_snapshot_and_url() {
-        let link = build_snapshot_share_link(
+        let link = match build_snapshot_share_link(
             "https://forge.example.com",
             &sample_meta(),
             &sample_payload(),
-        )
-        .unwrap();
+        ) {
+            Ok(link) => link,
+            Err(err) => panic!("snapshot share link should build: {err}"),
+        };
         assert!(link.snapshot_id.starts_with("snap-"));
         assert!(link.url.contains("/snapshots/"));
         assert!(link.url.contains(&link.snapshot_id));

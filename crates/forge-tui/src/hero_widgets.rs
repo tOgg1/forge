@@ -20,10 +20,11 @@ pub struct HeroLine {
     pub role: TextRole,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TrendDirection {
     Up,
     Down,
+    #[default]
     Flat,
 }
 
@@ -35,12 +36,6 @@ impl TrendDirection {
             Self::Down => '↓',
             Self::Flat => '→',
         }
-    }
-}
-
-impl Default for TrendDirection {
-    fn default() -> Self {
-        Self::Flat
     }
 }
 

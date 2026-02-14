@@ -238,6 +238,7 @@ impl OperatorDecisionJournal {
         &self.entries
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record_action(
         &mut self,
         timestamp: &str,

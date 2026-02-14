@@ -609,14 +609,23 @@ mod tests {
     fn export_writes_markdown_text_and_metadata_json() {
         let draft = build_postmortem_draft(&sample_input(), &PostmortemDraftPolicy::default());
         let dir = temp_dir("files");
-        let files = export_postmortem_draft(&draft, &dir, "incident-inc-17").unwrap();
+        let files = match export_postmortem_draft(&draft, &dir, "incident-inc-17") {
+            Ok(files) => files,
+            Err(err) => panic!("postmortem export should succeed: {err}"),
+        };
         assert!(files.markdown_path.exists());
         assert!(files.text_path.exists());
         assert!(files.metadata_json_path.exists());
 
-        let markdown = fs::read_to_string(&files.markdown_path).unwrap();
+        let markdown = match fs::read_to_string(&files.markdown_path) {
+            Ok(contents) => contents,
+            Err(err) => panic!("markdown file should be readable: {err}"),
+        };
         assert!(markdown.contains("Postmortem Draft"));
-        let json = fs::read_to_string(&files.metadata_json_path).unwrap();
+        let json = match fs::read_to_string(&files.metadata_json_path) {
+            Ok(contents) => contents,
+            Err(err) => panic!("metadata json should be readable: {err}"),
+        };
         assert!(json.contains("\"timeline_rows\""));
 
         let _ = fs::remove_file(&files.markdown_path);
