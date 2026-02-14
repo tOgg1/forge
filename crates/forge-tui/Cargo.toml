@@ -22,6 +22,7 @@ forge-ftui-adapter = { path = "../forge-ftui-adapter" }
 forge-db = { path = "../forge-db" }
 crossterm = "0.28"
 regex = "1"
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]
