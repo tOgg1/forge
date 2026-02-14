@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 
-const MAX_HELP_DEPTH: usize = 3;
+const MAX_HELP_DEPTH: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -138,8 +138,19 @@ fn collect_path(
 }
 
 fn render_help(path: &[String]) -> String {
-    let mut args = path.to_vec();
-    args.push("--help".to_string());
+    if should_skip_help_probe(path) {
+        return String::new();
+    }
+
+    let mut args = Vec::new();
+    if path.is_empty() {
+        args.push("--help".to_string());
+    } else {
+        // Most command families expose leaf-specific help only through `<path...> --help`.
+        // We avoid known side-effectful leaves via `should_skip_help_probe`.
+        args.extend(path.iter().cloned());
+        args.push("--help".to_string());
+    }
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let _ = crate::run_with_args(&args, &mut stdout, &mut stderr);
@@ -149,6 +160,17 @@ fn render_help(path: &[String]) -> String {
     } else {
         String::from_utf8_lossy(&stderr).into_owned()
     }
+}
+
+fn should_skip_help_probe(path: &[String]) -> bool {
+    if path.len() < 2 {
+        return false;
+    }
+
+    matches!(
+        path.first().map(String::as_str),
+        Some("template" | "prompt")
+    )
 }
 
 fn parse_help_snapshot(help: &str) -> HelpSnapshot {
@@ -395,7 +417,63 @@ pub fn run_for_test(args: &[&str]) -> CommandOutput {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+    use std::path::Path;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
     use super::run_for_test;
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = LOCK.get_or_init(|| Mutex::new(()));
+        match lock.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    struct EnvGuard {
+        key: String,
+        previous: Option<OsString>,
+    }
+
+    impl EnvGuard {
+        fn set_text(key: &str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self {
+                key: key.to_string(),
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.take() {
+                std::env::set_var(&self.key, value);
+            } else {
+                std::env::remove_var(&self.key);
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_executable(path: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        if let Err(err) = std::fs::write(path, body) {
+            panic!("write executable: {err}");
+        }
+        let mut perms = match std::fs::metadata(path) {
+            Ok(metadata) => metadata.permissions(),
+            Err(err) => panic!("stat executable: {err}"),
+        };
+        perms.set_mode(0o755);
+        if let Err(err) = std::fs::set_permissions(path, perms) {
+            panic!("chmod executable: {err}");
+        }
+    }
 
     #[test]
     fn bash_contains_start_function() {
@@ -403,6 +481,48 @@ mod tests {
         assert_eq!(out.exit_code, 0);
         assert!(out.stderr.is_empty());
         assert!(out.stdout.contains("__start_forge"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn completion_generation_does_not_invoke_editor() {
+        static UNIQUE_SUFFIX: OnceLock<Mutex<u64>> = OnceLock::new();
+
+        let _lock = env_lock();
+        let unique_counter = UNIQUE_SUFFIX.get_or_init(|| Mutex::new(0));
+        let mut guard = match unique_counter.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *guard += 1;
+        let suffix = *guard;
+        drop(guard);
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "forge-completion-editor-probe-{}-{suffix}",
+            std::process::id()
+        ));
+        if let Err(err) = std::fs::create_dir_all(&temp_dir) {
+            panic!("create temp dir: {err}");
+        }
+        let marker = temp_dir.join("editor-invoked");
+        let fake_editor = temp_dir.join("fake-editor.sh");
+        write_executable(
+            &fake_editor,
+            &format!("#!/bin/sh\ntouch \"{}\"\n", marker.display()),
+        );
+
+        let _editor = EnvGuard::set_text("EDITOR", fake_editor.to_string_lossy().as_ref());
+        let _visual = EnvGuard::set_text("VISUAL", fake_editor.to_string_lossy().as_ref());
+
+        let out = run_for_test(&["completion", "bash"]);
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
+        assert!(
+            !marker.exists(),
+            "completion generation should not execute editor"
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[test]

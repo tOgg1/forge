@@ -9,12 +9,14 @@ mod command_renderer;
 pub mod completion;
 pub mod config;
 pub mod context;
+pub mod delegation;
 mod diff_renderer;
 pub mod doctor;
 pub mod error_envelope;
 mod error_renderer;
 pub mod explain;
 pub mod export;
+pub mod external_adapter;
 pub mod highlight_spec;
 pub mod hook;
 pub mod init;
@@ -53,11 +55,16 @@ mod spawn_loop;
 pub mod status;
 pub mod stop;
 mod structured_data_renderer;
+pub mod task;
+pub mod team;
+pub mod team_heartbeat_watchdog;
 pub mod template;
 pub mod trigger;
 pub mod tui;
 pub mod up;
 pub mod wait;
+pub mod webhook_auth;
+pub mod webhook_server;
 pub mod work;
 pub mod workflow;
 
@@ -200,6 +207,11 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let forwarded = forward_args(remaining, &flags);
             config::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
+        Some("delegation") => {
+            let backend = delegation::SqliteDelegationBackend::open_from_env();
+            let forwarded = forward_args(remaining, &flags);
+            delegation::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
         Some("doctor") => {
             let backend = doctor::FilesystemDoctorBackend::default();
             let forwarded = forward_args(remaining, &flags);
@@ -240,6 +252,10 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let forwarded = forward_args(remaining, &flags);
             queue::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
+        Some("registry") => {
+            let forwarded = forward_args(remaining, &flags);
+            registry::run_with_store(&forwarded, stdout, stderr)
+        }
         Some("mail") => {
             let backend = mail::SqliteMailBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
@@ -254,11 +270,6 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let store = mesh::MeshStore::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             mesh::run_with_store(&forwarded, &store, stdout, stderr)
-        }
-        Some("node") => {
-            let mut backend = node::ShellNodeBackend::open_from_env();
-            let forwarded = forward_args(remaining, &flags);
-            node::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
         Some("msg") => {
             let mut backend = msg::SqliteMsgBackend::open_from_env();
@@ -290,10 +301,6 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let forwarded = remaining.to_vec();
             run::run_with_backend(&forwarded, &mut backend, stdout, stderr)
         }
-        Some("registry") => {
-            let forwarded = forward_args(remaining, &flags);
-            registry::run_with_store(&forwarded, stdout, stderr)
-        }
         Some("scale") => {
             let mut backend = scale::SqliteScaleBackend::open_from_env();
             let forwarded = forward_loop_spawn_args(remaining, &flags);
@@ -323,6 +330,16 @@ pub fn run_with_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn W
             let backend = status::SqliteStatusBackend::open_from_env();
             let forwarded = forward_args(remaining, &flags);
             status::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
+        Some("task") => {
+            let backend = task::SqliteTaskBackend::open_from_env();
+            let forwarded = forward_args(remaining, &flags);
+            task::run_with_backend(&forwarded, &backend, stdout, stderr)
+        }
+        Some("team") => {
+            let backend = team::SqliteTeamBackend::open_from_env();
+            let forwarded = forward_args(remaining, &flags);
+            team::run_with_backend(&forwarded, &backend, stdout, stderr)
         }
         Some("template") | Some("tmpl") => {
             let backend = template::FilesystemTemplateBackend::open_from_env();
@@ -449,6 +466,7 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  completion  Generate shell completion scripts")?;
     writeln!(out, "  context   Show current context")?;
     writeln!(out, "  config    Manage global configuration")?;
+    writeln!(out, "  delegation  Evaluate delegation rules")?;
     writeln!(out, "  doctor    Run environment diagnostics")?;
     writeln!(out, "  explain   Explain agent or queue item status")?;
     writeln!(out, "  export    Export Forge data")?;
@@ -461,16 +479,15 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  logs      Tail loop logs")?;
     writeln!(out, "  mail      Forge Mail messaging")?;
     writeln!(out, "  migrate   Database migration command family")?;
-    writeln!(out, "  mesh      Manage mesh registry and master")?;
-    writeln!(out, "  node      Manage mesh nodes and remote execution")?;
     writeln!(out, "  mem       Loop memory command family")?;
+    writeln!(out, "  mesh      Manage mesh registry and master")?;
     writeln!(out, "  msg       Queue a message for loop(s)")?;
     writeln!(out, "  pool      Profile pool command family")?;
     writeln!(out, "  profile   Harness profile command family")?;
     writeln!(out, "  prompt    Loop prompt command family")?;
     writeln!(out, "  ps        List loops")?;
     writeln!(out, "  queue     Manage loop queues")?;
-    writeln!(out, "  registry  Manage agent and prompt registry")?;
+    writeln!(out, "  registry  Manage central registry")?;
     writeln!(out, "  resume    Resume loop execution")?;
     writeln!(out, "  rm        Remove loop records")?;
     writeln!(out, "  run       Run a single loop iteration")?;
@@ -479,6 +496,8 @@ fn write_root_help(out: &mut dyn Write) -> std::io::Result<()> {
     writeln!(out, "  skills    Manage workspace skills")?;
     writeln!(out, "  status    Show fleet status summary")?;
     writeln!(out, "  stop      Stop loops after current iteration")?;
+    writeln!(out, "  task      Manage team task inbox")?;
+    writeln!(out, "  team      Manage teams and team members")?;
     writeln!(out, "  template  Manage message templates")?;
     writeln!(out, "  trigger   Manage job triggers")?;
     writeln!(out, "  tui       Launch the Forge TUI")?;
@@ -556,11 +575,14 @@ pub struct RootCommandOutput {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::{
-        agent, audit, clean, completion, config, context, crate_label, doctor, explain, export,
-        hook, init, inject, kill, lock, logs, loop_internal, mail, mem, migrate, msg, pool,
-        profile, prompt, ps, queue, resume, rm, run, run_for_test, scale, send, seq, skills,
-        status, stop, template, tui, up, wait, work, workflow,
+        agent, audit, clean, completion, config, context, crate_label, delegation, doctor, explain,
+        export, external_adapter, hook, init, inject, job, kill, lock, logs, loop_internal, mail,
+        mem, mesh, migrate, msg, node, pool, profile, prompt, ps, queue, registry, resume, rm, run,
+        run_for_test, scale, send, seq, skills, status, stop, task, team, team_heartbeat_watchdog,
+        template, trigger, tui, up, wait, work, workflow,
     };
 
     #[test]
@@ -584,8 +606,18 @@ mod tests {
     }
 
     #[test]
+    fn delegation_module_is_accessible() {
+        let _ = delegation::InMemoryDelegationBackend::default();
+    }
+
+    #[test]
     fn explain_module_is_accessible() {
         let _ = explain::SqliteExplainBackend::open_from_env();
+    }
+
+    #[test]
+    fn external_adapter_module_is_accessible() {
+        let _ = external_adapter::AdapterRuntimeConfig::default();
     }
 
     #[test]
@@ -601,6 +633,18 @@ mod tests {
     #[test]
     fn inject_module_is_accessible() {
         let _ = inject::InMemoryInjectBackend::default();
+    }
+
+    #[test]
+    fn job_module_is_accessible() {
+        let _ = job::JobStore::open_from_env();
+    }
+
+    #[test]
+    fn trigger_module_is_accessible() {
+        let store = job::JobStore::open_from_env();
+        let out = trigger::run_for_test(&["trigger", "help"], &store);
+        assert_eq!(out.exit_code, 0);
     }
 
     #[test]
@@ -675,8 +719,18 @@ mod tests {
     }
 
     #[test]
+    fn mesh_module_is_accessible() {
+        let _ = mesh::MeshStore::with_path(std::path::PathBuf::from("/tmp/mesh-registry.json"));
+    }
+
+    #[test]
     fn msg_module_is_accessible() {
         let _ = msg::InMemoryMsgBackend::default();
+    }
+
+    #[test]
+    fn node_module_is_accessible() {
+        let _ = node::ShellNodeBackend::open_from_env();
     }
 
     #[test]
@@ -692,6 +746,14 @@ mod tests {
     #[test]
     fn queue_module_is_accessible() {
         let _ = queue::InMemoryQueueBackend::default();
+    }
+
+    #[test]
+    fn registry_module_is_accessible() {
+        let _ = registry::RegistryStore::with_paths(
+            std::path::PathBuf::from("/tmp/local"),
+            std::path::PathBuf::from("/tmp/repo"),
+        );
     }
 
     #[test]
@@ -735,6 +797,11 @@ mod tests {
     }
 
     #[test]
+    fn team_heartbeat_watchdog_module_is_accessible() {
+        let _ = team_heartbeat_watchdog::TeamHeartbeatState::default();
+    }
+
+    #[test]
     fn template_module_is_accessible() {
         let _ = template::Template {
             name: "demo".to_string(),
@@ -749,6 +816,16 @@ mod tests {
     #[test]
     fn stop_module_is_accessible() {
         let _ = stop::InMemoryStopBackend::default();
+    }
+
+    #[test]
+    fn task_module_is_accessible() {
+        let _ = task::SqliteTaskBackend::open_from_env();
+    }
+
+    #[test]
+    fn team_module_is_accessible() {
+        let _ = team::SqliteTeamBackend::open_from_env();
     }
 
     #[test]
@@ -791,6 +868,117 @@ mod tests {
         assert!(out.stdout.contains("Control plane for AI coding agents"));
         assert!(out.stdout.contains("Commands:"));
         assert!(out.stderr.is_empty());
+    }
+
+    #[test]
+    fn root_help_includes_extended_command_families() {
+        let out = run_for_test(&["--help"]);
+        assert_eq!(out.exit_code, 0);
+        for command in [
+            "  delegation",
+            "  job",
+            "  trigger",
+            "  mesh",
+            "  registry",
+            "  team",
+            "  task",
+            "  workflow",
+        ] {
+            assert!(
+                out.stdout.contains(command),
+                "missing command in root help: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn docs_cli_covers_root_help_command_families() {
+        let help = run_for_test(&["--help"]);
+        assert_eq!(help.exit_code, 0);
+
+        let docs_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/cli.md");
+        let docs_text = std::fs::read_to_string(&docs_path)
+            .unwrap_or_else(|err| panic!("read {}: {err}", docs_path.display()));
+
+        let command_ids = parse_root_help_command_ids(&help.stdout);
+        let documented_ids = parse_documented_command_ids(&docs_text);
+
+        const DOC_EXCLUSIONS: [&str; 0] = [];
+
+        let missing = command_ids
+            .into_iter()
+            .filter(|cmd| !DOC_EXCLUSIONS.contains(&cmd.as_str()) && !documented_ids.contains(cmd))
+            .collect::<Vec<_>>();
+
+        assert!(
+            missing.is_empty(),
+            "docs/cli.md missing command sections for: {}",
+            missing.join(", ")
+        );
+    }
+
+    fn parse_root_help_command_ids(help_text: &str) -> BTreeSet<String> {
+        let mut in_commands = false;
+        let mut ids = BTreeSet::new();
+
+        for line in help_text.lines() {
+            if line.trim() == "Commands:" {
+                in_commands = true;
+                continue;
+            }
+            if in_commands && line.trim() == "Global Flags:" {
+                break;
+            }
+            if !in_commands {
+                continue;
+            }
+            let trimmed = line.trim_start();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Some(command_id) = trimmed.split_whitespace().next() {
+                ids.insert(command_id.to_string());
+            }
+        }
+
+        ids
+    }
+
+    fn parse_documented_command_ids(docs_text: &str) -> BTreeSet<String> {
+        let mut ids = BTreeSet::new();
+
+        for line in docs_text.lines() {
+            if !line.starts_with("### ") {
+                continue;
+            }
+
+            let mut rest = line;
+            while let Some(start_tick) = rest.find('`') {
+                rest = &rest[start_tick + 1..];
+                let Some(end_tick) = rest.find('`') else {
+                    break;
+                };
+                let code_span = &rest[..end_tick];
+                rest = &rest[end_tick + 1..];
+
+                let Some(command_span) = code_span.strip_prefix("forge ") else {
+                    continue;
+                };
+                let mut parts = command_span.split_whitespace();
+                let Some(first) = parts.next() else {
+                    continue;
+                };
+                if first == "loop" {
+                    if let Some(subcommand) = parts.next() {
+                        ids.insert(subcommand.to_string());
+                    }
+                } else {
+                    ids.insert(first.to_string());
+                }
+            }
+        }
+
+        ids
     }
 
     #[test]
