@@ -702,7 +702,6 @@ fn compact_text(primary: &str, fallback: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod tests {
     use super::{
         add_log_anchor, annotate_log_anchor, export_anchor_bundle_json,
@@ -729,26 +728,39 @@ mod tests {
     #[test]
     fn add_annotation_and_remove_anchor_flow() {
         let mut store = LogAnchorStore::default();
-        let anchor_id = add_log_anchor(&mut store, draft("loop-1", "live", 42, "tool failed"))
-            .expect("add anchor");
+        let anchor_id = match add_log_anchor(&mut store, draft("loop-1", "live", 42, "tool failed"))
+        {
+            Ok(anchor_id) => anchor_id,
+            Err(err) => panic!("add anchor should succeed: {err}"),
+        };
 
-        annotate_log_anchor(&mut store, &anchor_id, "retry after cache clear")
-            .expect("annotate anchor");
-        let anchor = store.get(&anchor_id).expect("anchor exists");
+        if let Err(err) = annotate_log_anchor(&mut store, &anchor_id, "retry after cache clear") {
+            panic!("annotate anchor should succeed: {err}");
+        }
+        let anchor = match store.get(&anchor_id) {
+            Some(anchor) => anchor,
+            None => panic!("anchor should exist"),
+        };
         assert_eq!(anchor.annotation, "retry after cache clear");
         assert_eq!(anchor.marker, "m42");
 
-        remove_log_anchor(&mut store, &anchor_id).expect("remove anchor");
+        if let Err(err) = remove_log_anchor(&mut store, &anchor_id) {
+            panic!("remove anchor should succeed: {err}");
+        }
         assert!(store.get(&anchor_id).is_none());
     }
 
     #[test]
     fn duplicate_line_anchor_gets_unique_id_suffix() {
         let mut store = LogAnchorStore::default();
-        let first = add_log_anchor(&mut store, draft("loop-1", "live", 42, "tool failed"))
-            .expect("first anchor");
-        let second = add_log_anchor(&mut store, draft("loop-1", "live", 42, "tool failed"))
-            .expect("second anchor");
+        let first = match add_log_anchor(&mut store, draft("loop-1", "live", 42, "tool failed")) {
+            Ok(anchor_id) => anchor_id,
+            Err(err) => panic!("first anchor should add: {err}"),
+        };
+        let second = match add_log_anchor(&mut store, draft("loop-1", "live", 42, "tool failed")) {
+            Ok(anchor_id) => anchor_id,
+            Err(err) => panic!("second anchor should add: {err}"),
+        };
 
         assert_ne!(first, second);
         assert!(second.ends_with("-2"));
@@ -767,11 +779,15 @@ mod tests {
         first.annotation = "investigate scheduler".to_owned();
         first.tags = vec!["perf".to_owned(), "handoff".to_owned()];
         first.marker = "spike-1".to_owned();
-        add_log_anchor(&mut store, first).expect("first anchor");
+        if let Err(err) = add_log_anchor(&mut store, first) {
+            panic!("first anchor should add: {err}");
+        }
 
         let mut second = draft("loop-2", "latest-run", 3, "all green");
         second.tags = vec!["ok".to_owned()];
-        add_log_anchor(&mut store, second).expect("second anchor");
+        if let Err(err) = add_log_anchor(&mut store, second) {
+            panic!("second anchor should add: {err}");
+        }
 
         let filter = LogAnchorFilter {
             marker: "spike-1".to_owned(),
@@ -791,7 +807,9 @@ mod tests {
         let mut item = draft("loop-7", "live", 88, "panic: timeout");
         item.annotation = "root cause in adapter".to_owned();
         item.tags = vec!["p1".to_owned(), "handoff".to_owned()];
-        add_log_anchor(&mut source, item).expect("add source anchor");
+        if let Err(err) = add_log_anchor(&mut source, item) {
+            panic!("add source anchor should succeed: {err}");
+        }
 
         let json = export_anchor_bundle_json(&source, &LogAnchorFilter::default());
         let mut target = LogAnchorStore::default();
@@ -808,7 +826,9 @@ mod tests {
     #[test]
     fn import_skips_existing_anchor_and_reports_warning() {
         let mut store = LogAnchorStore::default();
-        add_log_anchor(&mut store, draft("loop-1", "live", 1, "line 1")).expect("seed anchor");
+        if let Err(err) = add_log_anchor(&mut store, draft("loop-1", "live", 1, "line 1")) {
+            panic!("seed anchor should add: {err}");
+        }
 
         let json = export_anchor_bundle_json(&store, &LogAnchorFilter::default());
         let outcome = import_anchor_bundle_json(&mut store, &json);
@@ -838,7 +858,9 @@ mod tests {
         let mut item = draft("loop-9", "live", 101, "failed command");
         item.annotation = "repro in tmux pane 3".to_owned();
         item.tags = vec!["handoff".to_owned(), "p1".to_owned()];
-        add_log_anchor(&mut store, item).expect("add anchor");
+        if let Err(err) = add_log_anchor(&mut store, item) {
+            panic!("add anchor should succeed: {err}");
+        }
 
         let markdown = export_anchor_handoff_markdown(&store, &LogAnchorFilter::default());
         assert!(markdown.contains("# log anchors handoff"));
@@ -852,7 +874,9 @@ mod tests {
         let mut store = LogAnchorStore::default();
         let mut item = draft("loop-3", "latest-run", 17, "build failed at step 4");
         item.annotation = "fix pending".to_owned();
-        add_log_anchor(&mut store, item).expect("add anchor");
+        if let Err(err) = add_log_anchor(&mut store, item) {
+            panic!("add anchor should succeed: {err}");
+        }
 
         let rows = render_anchor_rows(&store, &LogAnchorFilter::default(), 40, 4);
         assert_eq!(rows[0], "log anchors rows=1");
@@ -865,7 +889,9 @@ mod tests {
         let mut store = LogAnchorStore::default();
         let mut item = draft("loop-3", "latest-run", 17, "⚠ résumé parsing failure");
         item.annotation = "⚡".to_owned();
-        add_log_anchor(&mut store, item).expect("add anchor");
+        if let Err(err) = add_log_anchor(&mut store, item) {
+            panic!("add anchor should succeed: {err}");
+        }
 
         let rows = render_anchor_rows(&store, &LogAnchorFilter::default(), 8, 4);
         for row in rows {
@@ -878,7 +904,10 @@ mod tests {
         let mut store = LogAnchorStore::default();
         let mut item = draft("loop-3", "latest-run", 17, "build failed");
         item.marker = "hotspot".to_owned();
-        let anchor_id = add_log_anchor(&mut store, item).expect("add anchor");
+        let anchor_id = match add_log_anchor(&mut store, item) {
+            Ok(anchor_id) => anchor_id,
+            Err(err) => panic!("add anchor should succeed: {err}"),
+        };
 
         let by_marker = resolve_anchor_target(&store, "hotspot");
         assert_eq!(by_marker, Some(("latest-run".to_owned(), 17)));

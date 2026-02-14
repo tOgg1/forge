@@ -5,9 +5,12 @@
 //! log source/layer cycling, multi-log pagination, and pinned loops.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::Write;
 
 use forge_cli::logs::{render_lines_for_layer, LogRenderLayer};
-use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent};
+use forge_ftui_adapter::input::{
+    InputEvent, Key, KeyEvent, MouseButton, MouseEvent, MouseEventKind, MouseWheelDirection,
+};
 use forge_ftui_adapter::render::{CellStyle, FrameSize, Rect, RenderFrame, StyledSpan, TextRole};
 use forge_ftui_adapter::style::ThemeSpec;
 use forge_ftui_adapter::widgets::BorderStyle;
@@ -18,8 +21,11 @@ use crate::command_palette::{
 };
 use crate::keymap::{KeyChord, KeyCommand, KeyScope, Keymap, ModeScope};
 use crate::layouts::{
-    fit_pane_layout, layout_index_for, normalize_layout_index, PaneLayout, PANE_LAYOUTS,
+    fit_pane_layout_for_breakpoint, layout_cell_size, layout_index_for, normalize_layout_index,
+    PaneLayout, PANE_LAYOUTS,
 };
+use crate::link_registry::{LinkRegistry, LinkTarget};
+use crate::log_source_abstraction::{LogContentKind, LogSourceRoute, LogTransportKind};
 use crate::search_overlay::SearchOverlay;
 use crate::theme::{
     cycle_accessibility_preset, cycle_palette, resolve_palette_colors,
@@ -39,6 +45,7 @@ pub const MULTI_CELL_GAP: i32 = 1;
 pub const MULTI_MIN_CELL_WIDTH: i32 = 38;
 pub const MULTI_MIN_CELL_HEIGHT: i32 = 8;
 const MAX_NOTIFICATION_QUEUE: usize = 32;
+const MAX_NAV_HISTORY: usize = 32;
 const DESTRUCTIVE_CONFIRM_REASON_MIN_CHARS: usize = 12;
 const MAX_DESTRUCTIVE_CONFIRM_REASON_CHARS: usize = 160;
 
@@ -91,6 +98,45 @@ impl MainTab {
     }
 }
 
+fn parse_main_tab_id(tab_id: &str) -> Option<MainTab> {
+    let normalized = tab_id.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "1" | "overview" | "ov" => Some(MainTab::Overview),
+        "2" | "logs" | "log" => Some(MainTab::Logs),
+        "3" | "runs" | "run" => Some(MainTab::Runs),
+        "4" | "multi" | "multi-logs" | "multilogs" | "multi logs" => Some(MainTab::MultiLogs),
+        "5" | "inbox" => Some(MainTab::Inbox),
+        _ => None,
+    }
+}
+
+fn parse_layout_id(layout_id: &str) -> Option<usize> {
+    let normalized = layout_id.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if let Ok(index) = normalized.parse::<usize>() {
+        if index < PANE_LAYOUTS.len() {
+            return Some(index);
+        }
+        return None;
+    }
+    let mut parts = normalized.split('x');
+    let rows: i32 = parts.next()?.parse().ok()?;
+    let cols: i32 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    if PANE_LAYOUTS
+        .iter()
+        .any(|layout| layout.rows == rows && layout.cols == cols)
+    {
+        Some(layout_index_for(rows, cols))
+    } else {
+        None
+    }
+}
+
 // ---------------------------------------------------------------------------
 // UiMode
 // ---------------------------------------------------------------------------
@@ -102,6 +148,7 @@ pub enum UiMode {
     Main,
     Palette,
     Filter,
+    RegexSearch,
     ExpandedLogs,
     Confirm,
     Wizard,
@@ -791,6 +838,10 @@ pub struct App {
     filter_text: String,
     filter_state: String,
     filter_focus: FilterFocus,
+    log_regex_query: String,
+    log_regex_error: String,
+    log_regex_selected_match: usize,
+    log_regex_compiled: Option<regex::Regex>,
 
     // -- confirm/wizard --
     confirm: Option<ConfirmState>,
@@ -804,6 +855,7 @@ pub struct App {
     // -- status bar --
     status_text: String,
     status_kind: StatusKind,
+    clipboard_mirror: Option<String>,
     notification_queue: VecDeque<NotificationEvent>,
     notification_sequence: u64,
     action_busy: bool,
@@ -888,6 +940,10 @@ impl App {
             filter_text: String::new(),
             filter_state: "all".to_owned(),
             filter_focus: FilterFocus::Text,
+            log_regex_query: String::new(),
+            log_regex_error: String::new(),
+            log_regex_selected_match: 0,
+            log_regex_compiled: None,
 
             confirm: None,
             wizard: WizardState::default(),
@@ -898,6 +954,7 @@ impl App {
 
             status_text: String::new(),
             status_kind: StatusKind::Info,
+            clipboard_mirror: None,
             notification_queue: VecDeque::new(),
             notification_sequence: 0,
             action_busy: false,
@@ -982,8 +1039,29 @@ impl App {
     }
 
     #[must_use]
+    pub fn current_log_route(&self) -> LogSourceRoute {
+        let transport = match self.log_source {
+            LogSource::Live => LogTransportKind::LiveLoop,
+            LogSource::LatestRun => LogTransportKind::LatestRun,
+            LogSource::RunSelection => LogTransportKind::SelectedRun,
+        };
+        let content = match self.log_layer {
+            LogLayer::Diff => LogContentKind::Diff,
+            LogLayer::Raw | LogLayer::Events | LogLayer::Errors | LogLayer::Tools => {
+                LogContentKind::Parsed
+            }
+        };
+        LogSourceRoute::new(transport, content)
+    }
+
+    #[must_use]
     pub fn log_layer(&self) -> LogLayer {
         self.log_layer
+    }
+
+    #[must_use]
+    pub fn nav_history_len(&self) -> usize {
+        self.nav_history.len()
     }
 
     #[must_use]
@@ -1047,6 +1125,22 @@ impl App {
     }
 
     #[must_use]
+    pub fn log_regex_query(&self) -> &str {
+        &self.log_regex_query
+    }
+
+    #[must_use]
+    pub fn log_regex_error(&self) -> &str {
+        &self.log_regex_error
+    }
+
+    #[must_use]
+    pub fn log_regex_match_count(&self) -> usize {
+        let rendered_lines = self.rendered_log_lines();
+        self.collect_regex_match_indices(&rendered_lines).len()
+    }
+
+    #[must_use]
     pub fn status_text(&self) -> &str {
         &self.status_text
     }
@@ -1077,6 +1171,51 @@ impl App {
     }
 
     #[must_use]
+    pub fn layout_perf_hud_snapshot(&self) -> crate::layout_perf_hud::LayoutInspectorSnapshot {
+        let content_start_row = if self.focus_mode == FocusMode::DeepDebug {
+            1
+        } else {
+            2
+        };
+        let footer_rows = if self.status_text.is_empty() { 1 } else { 2 };
+        let content_height = self
+            .height
+            .saturating_sub(content_start_row + footer_rows)
+            .max(1);
+        let split_focus_supported = self.supports_split_focus_graph();
+        let focus_graph_nodes = if split_focus_supported {
+            vec!["left".to_owned(), "right".to_owned()]
+        } else {
+            vec!["main".to_owned()]
+        };
+        let focused_node = if split_focus_supported {
+            if self.focus_right {
+                "right"
+            } else {
+                "left"
+            }
+        } else {
+            "main"
+        };
+        crate::layout_perf_hud::LayoutInspectorSnapshot {
+            tab: self.tab,
+            mode: self.mode,
+            frame_width: self.width,
+            frame_height: self.height,
+            content_start_row,
+            content_height,
+            requested_layout: self.current_layout(),
+            effective_layout: self.effective_multi_layout(),
+            density_mode: self.density_mode,
+            focus_mode: self.focus_mode,
+            focus_right: self.focus_right,
+            split_focus_supported,
+            focus_graph_nodes,
+            focused_node: focused_node.to_owned(),
+        }
+    }
+
+    #[must_use]
     pub fn confirm(&self) -> Option<&ConfirmState> {
         self.confirm.as_ref()
     }
@@ -1094,6 +1233,11 @@ impl App {
     #[must_use]
     pub fn action_busy(&self) -> bool {
         self.action_busy
+    }
+
+    #[must_use]
+    pub fn clipboard_mirror(&self) -> Option<&str> {
+        self.clipboard_mirror.as_deref()
     }
 
     #[must_use]
@@ -1122,6 +1266,7 @@ impl App {
         let mode_scope = match self.mode {
             UiMode::Main => ModeScope::Main,
             UiMode::Filter => ModeScope::Filter,
+            UiMode::RegexSearch => ModeScope::Search,
             UiMode::ExpandedLogs => ModeScope::ExpandedLogs,
             UiMode::Confirm => ModeScope::Confirm,
             UiMode::Wizard => ModeScope::Wizard,
@@ -1196,6 +1341,143 @@ impl App {
 
     pub fn set_layout_idx(&mut self, idx: usize) {
         self.layout_idx = idx;
+    }
+
+    #[must_use]
+    pub fn active_layout(&self) -> PaneLayout {
+        self.current_layout()
+    }
+
+    #[must_use]
+    pub fn session_restore_context(&self) -> crate::session_restore::SessionContext {
+        let mut pinned_loop_ids = self.pinned.iter().cloned().collect::<Vec<_>>();
+        pinned_loop_ids.sort();
+        crate::session_restore::SessionContext {
+            selected_loop_id: if self.selected_id.trim().is_empty() {
+                None
+            } else {
+                Some(self.selected_id.clone())
+            },
+            selected_run_id: self.selected_run_view().map(|run| run.id.clone()),
+            log_scroll: self.log_scroll,
+            tab_id: Some(self.tab.short_label().to_owned()),
+            layout_id: Some(self.active_layout().label()),
+            filter_state: if self.filter_state.trim().is_empty() {
+                None
+            } else {
+                Some(self.filter_state.clone())
+            },
+            filter_query: if self.filter_text.trim().is_empty() {
+                None
+            } else {
+                Some(self.filter_text.clone())
+            },
+            panes: vec![
+                crate::session_restore::PaneSelection {
+                    pane_id: "left".to_owned(),
+                    focused: !self.focus_right,
+                },
+                crate::session_restore::PaneSelection {
+                    pane_id: "right".to_owned(),
+                    focused: self.focus_right,
+                },
+            ],
+            pinned_loop_ids,
+        }
+    }
+
+    pub fn restore_from_session_context(
+        &mut self,
+        context: &crate::session_restore::SessionContext,
+    ) -> Vec<String> {
+        let mut notices = Vec::new();
+
+        if let Some(tab_id) = context.tab_id.as_deref() {
+            if let Some(tab) = parse_main_tab_id(tab_id) {
+                self.set_tab(tab);
+            } else {
+                notices.push(format!("stored tab unavailable: {tab_id}"));
+            }
+        }
+
+        if let Some(layout_id) = context.layout_id.as_deref() {
+            if let Some(layout_idx) = parse_layout_id(layout_id) {
+                self.layout_idx = layout_idx;
+            } else {
+                notices.push(format!("stored layout unavailable: {layout_id}"));
+            }
+        }
+
+        if let Some(filter_state) = context.filter_state.as_deref() {
+            let normalized = filter_state.trim().to_ascii_lowercase();
+            if FILTER_STATUS_OPTIONS
+                .iter()
+                .any(|option| *option == normalized)
+            {
+                self.filter_state = normalized;
+            } else {
+                notices.push(format!("stored filter-state unavailable: {filter_state}"));
+            }
+        }
+        self.filter_text = context.filter_query.clone().unwrap_or_default();
+
+        if let Some(selected_loop_id) = context.selected_loop_id.as_deref() {
+            let previous = self.selected_id.clone();
+            self.select_loop_by_id(selected_loop_id);
+            if !self
+                .selected_id
+                .trim()
+                .eq_ignore_ascii_case(selected_loop_id.trim())
+            {
+                self.selected_id = previous;
+                notices.push(format!(
+                    "stored loop unavailable: {}",
+                    selected_loop_id.trim()
+                ));
+            }
+        }
+
+        if let Some(selected_run_id) = context.selected_run_id.as_deref() {
+            if let Some(index) = self
+                .run_history
+                .iter()
+                .position(|run| run.id.trim() == selected_run_id.trim())
+            {
+                self.selected_run = index;
+            } else {
+                notices.push(format!(
+                    "stored run unavailable: {}",
+                    selected_run_id.trim()
+                ));
+            }
+        }
+
+        if let Some(focused) = context.panes.iter().find(|pane| pane.focused) {
+            match focused.pane_id.trim().to_ascii_lowercase().as_str() {
+                "right" => self.focus_right = true,
+                "left" => self.focus_right = false,
+                _ => notices.push(format!(
+                    "stored pane focus unavailable: {}",
+                    focused.pane_id.trim()
+                )),
+            }
+        }
+
+        let available_ids = self
+            .loops
+            .iter()
+            .map(|loop_view| loop_view.id.trim().to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        self.pinned = context
+            .pinned_loop_ids
+            .iter()
+            .map(|id| id.trim().to_ascii_lowercase())
+            .filter(|id| !id.is_empty() && available_ids.contains(id))
+            .collect();
+
+        self.log_scroll = context.log_scroll.min(MAX_LOG_BACKFILL);
+        self.follow_mode = self.log_scroll == 0;
+        notices
     }
 
     fn inbox_threads(&self) -> Vec<InboxThreadView> {
@@ -1632,6 +1914,74 @@ impl App {
         self.action_busy = busy;
     }
 
+    fn copy_clipboard_context(&mut self) {
+        let (label, value) = match self.tab {
+            MainTab::Runs => {
+                let Some(run) = self.run_history.get(
+                    self.selected_run
+                        .min(self.run_history.len().saturating_sub(1)),
+                ) else {
+                    self.set_status(StatusKind::Info, "Clipboard: no run selected");
+                    return;
+                };
+                ("run id", run.id.trim().to_owned())
+            }
+            MainTab::Logs => {
+                if self.selected_log.lines.is_empty() {
+                    self.set_status(StatusKind::Info, "Clipboard: no log lines");
+                    return;
+                }
+                let last = self.selected_log.lines.len().saturating_sub(1);
+                let idx = last.saturating_sub(self.log_scroll.min(last));
+                ("log line", self.selected_log.lines[idx].clone())
+            }
+            MainTab::Inbox => {
+                let threads = self.inbox_threads();
+                let Some(thread) = threads.get(self.inbox_selected_thread) else {
+                    self.set_status(StatusKind::Info, "Clipboard: inbox is empty");
+                    return;
+                };
+                let Some(latest_index) = thread.message_indices.last().copied() else {
+                    self.set_status(StatusKind::Info, "Clipboard: inbox is empty");
+                    return;
+                };
+                let Some(message) = self.inbox_messages.get(latest_index) else {
+                    self.set_status(StatusKind::Info, "Clipboard: inbox is empty");
+                    return;
+                };
+                let value = if message.body.trim().is_empty() {
+                    message.subject.trim().to_owned()
+                } else {
+                    message.body.trim().to_owned()
+                };
+                ("thread content", value)
+            }
+            _ => {
+                self.set_status(
+                    StatusKind::Info,
+                    "Clipboard: use Ctrl+Y in Runs, Logs, or Inbox",
+                );
+                return;
+            }
+        };
+
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            self.set_status(StatusKind::Info, "Clipboard: selected content is empty");
+            return;
+        }
+        self.clipboard_mirror = Some(trimmed.to_owned());
+
+        if copy_to_system_clipboard(trimmed) {
+            self.set_status(StatusKind::Ok, &format!("Copied {label} to clipboard"));
+        } else {
+            self.set_status(
+                StatusKind::Info,
+                &format!("Clipboard unavailable; mirrored {label} in app state"),
+            );
+        }
+    }
+
     pub fn clear_status(&mut self) {
         self.status_text.clear();
         self.notification_queue.clear();
@@ -1680,6 +2030,50 @@ impl App {
             return true;
         }
         false
+    }
+
+    fn navigation_return_point(&self) -> NavigationReturnPoint {
+        NavigationReturnPoint {
+            tab: self.tab,
+            selected_id: self.selected_id.clone(),
+            selected_run: self.selected_run,
+            log_source: self.log_source,
+            log_layer: self.log_layer,
+        }
+    }
+
+    fn push_navigation_return_point(&mut self) {
+        let point = self.navigation_return_point();
+        if self.nav_history.last().is_some_and(|last| *last == point) {
+            return;
+        }
+        if self.nav_history.len() >= MAX_NAV_HISTORY {
+            self.nav_history.remove(0);
+        }
+        self.nav_history.push(point);
+    }
+
+    fn pop_navigation_return_point(&mut self) -> bool {
+        let Some(point) = self.nav_history.pop() else {
+            self.set_status(StatusKind::Info, "Backtrack: no navigation history");
+            return false;
+        };
+        self.set_tab(point.tab);
+        if !point.selected_id.trim().is_empty() {
+            self.select_loop_by_id(&point.selected_id);
+        }
+        self.selected_run = point
+            .selected_run
+            .min(self.run_history.len().saturating_sub(1));
+        self.log_source = point.log_source;
+        self.log_layer = point.log_layer;
+        self.log_scroll = 0;
+        self.follow_mode = true;
+        self.set_status(
+            StatusKind::Info,
+            &format!("Backtracked to {}", self.tab.label()),
+        );
+        true
     }
 
     // -- tab management (matching Go) ----------------------------------------
@@ -2361,7 +2755,7 @@ impl App {
     pub fn effective_multi_layout(&self) -> PaneLayout {
         let (width, height) = self.multi_viewport_size();
         let grid_height = (height - self.multi_header_rows()).max(self.multi_min_cell_height());
-        fit_pane_layout(
+        fit_pane_layout_for_breakpoint(
             self.current_layout(),
             width,
             grid_height,
@@ -2452,7 +2846,12 @@ impl App {
             FocusMode::DeepDebug => 2,
         };
         let mode_overhead = match self.mode {
-            UiMode::Palette | UiMode::Filter | UiMode::Confirm | UiMode::Wizard | UiMode::Help => 3,
+            UiMode::Palette
+            | UiMode::Filter
+            | UiMode::RegexSearch
+            | UiMode::Confirm
+            | UiMode::Wizard
+            | UiMode::Help => 3,
             _ => 0,
         };
         let density_adjust = if self.density_mode == DensityMode::Compact {
@@ -2612,6 +3011,10 @@ impl App {
             return Command::Fetch;
         }
 
+        if let InputEvent::Mouse(mouse_event) = event {
+            return self.update_mouse_mode(mouse_event);
+        }
+
         if let InputEvent::Key(key_event) = event {
             let resolved = self.resolve_key_command(key_event);
             if matches!(resolved, Some(KeyCommand::Quit)) {
@@ -2625,6 +3028,7 @@ impl App {
             match self.mode {
                 UiMode::Palette => self.update_palette_mode(key_event),
                 UiMode::Filter => self.update_filter_mode(key_event),
+                UiMode::RegexSearch => self.update_regex_search_mode(key_event),
                 UiMode::ExpandedLogs => self.update_expanded_logs_mode(key_event),
                 UiMode::Confirm => self.update_confirm_mode(key_event),
                 UiMode::Wizard => self.update_wizard_mode(key_event),
@@ -2635,6 +3039,251 @@ impl App {
         } else {
             Command::None
         }
+    }
+
+    fn content_area_metrics(&self) -> (usize, usize) {
+        let content_start = if self.focus_mode == FocusMode::DeepDebug {
+            1
+        } else {
+            2
+        };
+        let failure_explain_strip = self.failure_explain_strip_text();
+        let footer_lines = if self.status_text.is_empty() && failure_explain_strip.is_none() {
+            1
+        } else {
+            2
+        };
+        let content_height = self
+            .height
+            .max(1)
+            .saturating_sub(content_start + footer_lines)
+            .max(1);
+        (content_start, content_height)
+    }
+
+    fn tab_at_column(&self, column: usize) -> Option<MainTab> {
+        let mut x = 0usize;
+        for (index, tab) in MainTab::ORDER.iter().enumerate() {
+            if index > 0 {
+                x = x.saturating_add(2);
+            }
+            let label = if self.density_mode == DensityMode::Compact {
+                tab.short_label()
+            } else {
+                tab.label()
+            };
+            let badge = format!(" {}:{} ", index + 1, label);
+            let width = badge.chars().count();
+            if column >= x && column < x.saturating_add(width) {
+                return Some(*tab);
+            }
+            x = x.saturating_add(width);
+        }
+        None
+    }
+
+    fn update_mouse_mode(&mut self, mouse: MouseEvent) -> Command {
+        if self.mode != UiMode::Main {
+            return Command::None;
+        }
+
+        if self.focus_mode != FocusMode::DeepDebug && mouse.row == 1 {
+            if let Some(tab) = self.tab_at_column(mouse.column) {
+                if tab != self.tab {
+                    self.set_tab(tab);
+                }
+                return Command::Fetch;
+            }
+        }
+
+        match mouse.kind {
+            MouseEventKind::Wheel(direction) => match self.tab {
+                MainTab::Logs | MainTab::Runs | MainTab::MultiLogs => {
+                    match direction {
+                        MouseWheelDirection::Up => self.scroll_logs(3),
+                        MouseWheelDirection::Down => self.scroll_logs(-3),
+                    }
+                    Command::Fetch
+                }
+                MainTab::Inbox => {
+                    match direction {
+                        MouseWheelDirection::Up => self.move_inbox_selection(-1),
+                        MouseWheelDirection::Down => self.move_inbox_selection(1),
+                    }
+                    Command::Fetch
+                }
+                MainTab::Overview => {
+                    match direction {
+                        MouseWheelDirection::Up => self.move_selection(-1),
+                        MouseWheelDirection::Down => self.move_selection(1),
+                    }
+                    Command::Fetch
+                }
+            },
+            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
+                let (content_start, content_height) = self.content_area_metrics();
+                if mouse.row < content_start || mouse.row >= content_start + content_height {
+                    return Command::None;
+                }
+                let local_y = mouse.row - content_start;
+                let changed = match self.tab {
+                    MainTab::Inbox => {
+                        self.handle_inbox_mouse_hit(mouse.column, local_y, content_height)
+                    }
+                    MainTab::MultiLogs => {
+                        self.handle_multi_logs_mouse_hit(mouse.column, local_y, content_height)
+                    }
+                    MainTab::Logs | MainTab::Runs => {
+                        let old = self.focus_right;
+                        self.focus_right = mouse.column >= self.width.saturating_div(2);
+                        old != self.focus_right
+                    }
+                    MainTab::Overview => false,
+                };
+                if changed {
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            _ => Command::None,
+        }
+    }
+
+    fn handle_inbox_mouse_hit(
+        &mut self,
+        column: usize,
+        local_y: usize,
+        pane_height: usize,
+    ) -> bool {
+        let threads = self.inbox_threads();
+        if threads.is_empty() || pane_height < 4 {
+            return false;
+        }
+
+        let width = self.width.max(1);
+        let timeline_panel_h = if self.claim_events.is_empty() {
+            0usize
+        } else {
+            5usize.min(pane_height.saturating_sub(2))
+        };
+        let body_height = pane_height.saturating_sub(1 + timeline_panel_h);
+        let body_y = 1usize;
+        if local_y < body_y || local_y >= body_y.saturating_add(body_height) {
+            return false;
+        }
+
+        let min_detail_width = 30usize;
+        let list_panel_width = if width > min_detail_width + 24 {
+            (width * 2 / 5).clamp(24, width - min_detail_width - 1)
+        } else {
+            width
+        };
+        let has_detail = list_panel_width + 2 < width;
+        let detail_x = list_panel_width + 1;
+
+        if has_detail && column >= detail_x {
+            let old = self.focus_right;
+            self.focus_right = true;
+            return old != self.focus_right;
+        }
+
+        if column >= list_panel_width {
+            return false;
+        }
+
+        let mut changed = false;
+        if self.focus_right {
+            self.focus_right = false;
+            changed = true;
+        }
+
+        let list_inner_y = body_y + 1;
+        let list_inner_height = body_height.saturating_sub(2);
+        if local_y < list_inner_y || local_y >= list_inner_y.saturating_add(list_inner_height) {
+            return changed;
+        }
+        let row = local_y - list_inner_y;
+        if row < threads.len() && row != self.inbox_selected_thread {
+            self.inbox_selected_thread = row;
+            self.clamp_inbox_selection();
+            changed = true;
+        }
+        changed
+    }
+
+    fn handle_multi_logs_mouse_hit(
+        &mut self,
+        column: usize,
+        local_y: usize,
+        pane_height: usize,
+    ) -> bool {
+        let width = self.width.max(1);
+        if width < 4 || pane_height < 4 {
+            return false;
+        }
+
+        let ordered = self.ordered_multi_target_views();
+        if ordered.is_empty() {
+            return false;
+        }
+
+        let page_size = self.multi_page_size();
+        let (_, _, start, end) = multi_page_bounds(ordered.len(), page_size, self.multi_page);
+        if start >= ordered.len() {
+            return false;
+        }
+        let targets = &ordered[start..end];
+        if targets.is_empty() {
+            return false;
+        }
+
+        let header_rows = self.multi_header_rows().max(1) as usize;
+        if local_y < header_rows {
+            let old = self.focus_right;
+            self.focus_right = true;
+            return old != self.focus_right;
+        }
+
+        let cell_gap = self.multi_cell_gap().max(0);
+        let min_cell_width = self.multi_min_cell_width();
+        let min_cell_height = self.multi_min_cell_height();
+        let grid_height = ((pane_height as i32) - self.multi_header_rows()).max(min_cell_height);
+        let layout = fit_pane_layout_for_breakpoint(
+            self.current_layout(),
+            width as i32,
+            grid_height,
+            cell_gap,
+            min_cell_width,
+            min_cell_height,
+        );
+        let (cell_w, cell_h) = layout_cell_size(layout, width as i32, grid_height, cell_gap);
+        let cell_w = cell_w.max(1) as usize;
+        let cell_h = cell_h.max(1) as usize;
+        let gap = cell_gap as usize;
+
+        let grid_y = local_y.saturating_sub(header_rows);
+        for row in 0..layout.rows as usize {
+            let y_base = row * (cell_h + gap);
+            for col in 0..layout.cols as usize {
+                let index = row * layout.cols as usize + col;
+                if index >= targets.len() {
+                    continue;
+                }
+                let x_base = col * (cell_w + gap);
+                let in_x = column >= x_base && column < x_base + cell_w;
+                let in_y = grid_y >= y_base && grid_y < y_base + cell_h;
+                if in_x && in_y {
+                    let old_selected = self.selected_id.clone();
+                    let old_focus = self.focus_right;
+                    let target_id = targets[index].id.clone();
+                    self.focus_right = true;
+                    self.select_loop_by_id(&target_id);
+                    return old_selected != self.selected_id || old_focus != self.focus_right;
+                }
+            }
+        }
+        false
     }
 
     fn update_main_mode(&mut self, key: KeyEvent) -> Command {
@@ -2680,6 +3329,13 @@ impl App {
             Key::Char('5') => {
                 self.set_tab(MainTab::Inbox);
                 Command::Fetch
+            }
+            Key::Char('b') if !key.modifiers.ctrl => {
+                if self.pop_navigation_return_point() {
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
             }
             Key::Char(']') => {
                 self.cycle_tab(1);
@@ -2807,11 +3463,21 @@ impl App {
                 if self.tab == MainTab::Inbox {
                     self.quick_reply_selected_inbox_thread();
                     Command::None
+                } else if self.tab == MainTab::Logs || self.tab == MainTab::Runs {
+                    self.mode = UiMode::RegexSearch;
+                    Command::None
                 } else {
                     Command::None
                 }
             }
-            Key::Char('o') => {
+            Key::Char('o') if key.modifiers.ctrl => {
+                if self.activate_primary_link() {
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('o') if !key.modifiers.ctrl => {
                 if self.tab == MainTab::Inbox {
                     self.cycle_claim_conflict(1);
                     Command::None
@@ -2826,6 +3492,10 @@ impl App {
                 } else {
                     Command::None
                 }
+            }
+            Key::Char('y') if key.modifiers.ctrl => {
+                self.copy_clipboard_context();
+                Command::Fetch
             }
             Key::Char('u') if key.modifiers.ctrl => {
                 if self.tab == MainTab::Logs
@@ -3214,6 +3884,124 @@ impl App {
         }
     }
 
+    fn rendered_log_lines(&self) -> Vec<String> {
+        render_lines_for_layer(
+            &self.selected_log.lines,
+            map_log_render_layer(self.log_layer),
+            true,
+        )
+    }
+
+    fn collect_regex_match_indices(&self, rendered_lines: &[String]) -> Vec<usize> {
+        let Some(regex) = self.log_regex_compiled.as_ref() else {
+            return Vec::new();
+        };
+        rendered_lines
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                if regex.is_match(line) {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn set_log_regex_query(&mut self, query: String) {
+        self.log_regex_query = query;
+        self.log_regex_selected_match = 0;
+        self.log_regex_error.clear();
+        self.log_regex_compiled = None;
+        if self.log_regex_query.trim().is_empty() {
+            return;
+        }
+        match regex::Regex::new(&self.log_regex_query) {
+            Ok(regex) => {
+                self.log_regex_compiled = Some(regex);
+            }
+            Err(err) => {
+                self.log_regex_error = format!("invalid regex: {err}");
+            }
+        }
+    }
+
+    fn jump_log_regex_match(&mut self, delta: i32) -> Command {
+        if self.log_regex_query.trim().is_empty() {
+            self.set_status(StatusKind::Info, "Regex query is empty");
+            return Command::None;
+        }
+        if !self.log_regex_error.is_empty() {
+            let err = self.log_regex_error.clone();
+            self.set_status(StatusKind::Err, &err);
+            return Command::None;
+        }
+        let rendered_lines = self.rendered_log_lines();
+        let matches = self.collect_regex_match_indices(&rendered_lines);
+        if matches.is_empty() {
+            self.set_status(StatusKind::Info, "No regex matches");
+            return Command::None;
+        }
+        let mut index = self.log_regex_selected_match as i32 + delta;
+        while index < 0 {
+            index += matches.len() as i32;
+        }
+        self.log_regex_selected_match = (index as usize) % matches.len();
+        let line_index = matches[self.log_regex_selected_match];
+        self.log_scroll = rendered_lines.len().saturating_sub(line_index + 1);
+        self.set_status(
+            StatusKind::Info,
+            &format!(
+                "Regex match {}/{}",
+                self.log_regex_selected_match + 1,
+                matches.len()
+            ),
+        );
+        Command::Fetch
+    }
+
+    fn update_regex_search_mode(&mut self, key: KeyEvent) -> Command {
+        match key.key {
+            Key::Char('q') | Key::Escape => {
+                self.mode = UiMode::Main;
+                Command::None
+            }
+            Key::Char('?') => {
+                self.help_return = UiMode::RegexSearch;
+                self.mode = UiMode::Help;
+                Command::None
+            }
+            Key::Enter => {
+                self.mode = UiMode::Main;
+                Command::Fetch
+            }
+            Key::Char('j') | Key::Down => self.jump_log_regex_match(1),
+            Key::Char('k') | Key::Up => self.jump_log_regex_match(-1),
+            Key::Char('n') if key.modifiers.ctrl => self.jump_log_regex_match(1),
+            Key::Char('p') if key.modifiers.ctrl => self.jump_log_regex_match(-1),
+            Key::Backspace => {
+                if !self.log_regex_query.is_empty() {
+                    self.log_regex_query.pop();
+                    self.set_log_regex_query(self.log_regex_query.clone());
+                    Command::Fetch
+                } else {
+                    Command::None
+                }
+            }
+            Key::Char('u') if key.modifiers.ctrl => {
+                self.set_log_regex_query(String::new());
+                Command::Fetch
+            }
+            Key::Char(ch) if !key.modifiers.ctrl && !key.modifiers.alt => {
+                self.log_regex_query.push(ch);
+                self.set_log_regex_query(self.log_regex_query.clone());
+                Command::Fetch
+            }
+            _ => Command::None,
+        }
+    }
+
     fn update_expanded_logs_mode(&mut self, key: KeyEvent) -> Command {
         match key.key {
             Key::Char('q') | Key::Escape => {
@@ -3288,6 +4076,10 @@ impl App {
             Key::Char('/') => {
                 self.mode = UiMode::Filter;
                 self.filter_focus = FilterFocus::Text;
+                Command::None
+            }
+            Key::Char('R') => {
+                self.mode = UiMode::RegexSearch;
                 Command::None
             }
             Key::Char('S') => {
@@ -3612,6 +4404,77 @@ impl App {
         }
     }
 
+    fn collect_active_links(&self) -> LinkRegistry {
+        let mut registry = LinkRegistry::new();
+        match self.tab {
+            MainTab::Logs => {
+                registry.register_text(&self.selected_log.message);
+                for line in self.selected_log.lines.iter().rev().take(256) {
+                    registry.register_text(line);
+                }
+            }
+            MainTab::Runs => {
+                if let Some(run) = self.run_history.get(self.selected_run) {
+                    registry.register_target(LinkTarget::Run(run.id.clone()));
+                    registry.register_text(&run.status);
+                    for line in run.output_lines.iter().rev().take(256) {
+                        registry.register_text(line);
+                    }
+                }
+            }
+            MainTab::Overview => {
+                if let Some(view) = self.selected_view() {
+                    registry.register_target(LinkTarget::Loop(view.id.clone()));
+                    registry.register_text(&view.state);
+                    registry.register_text(&view.last_error);
+                }
+            }
+            MainTab::MultiLogs => {
+                for view in self.ordered_multi_target_views().into_iter().take(8) {
+                    registry.register_target(LinkTarget::Loop(view.id.clone()));
+                    registry.register_text(&view.state);
+                    registry.register_text(&view.last_error);
+                }
+            }
+            MainTab::Inbox => {
+                if let Some(snapshot) = &self.handoff_snapshot {
+                    for line in snapshot.lines() {
+                        registry.register_text(&line);
+                    }
+                }
+            }
+        }
+        registry
+    }
+
+    fn activate_primary_link(&mut self) -> bool {
+        let links = self.collect_active_links();
+        let Some(entry) = links.first() else {
+            self.set_status(StatusKind::Info, "No links in current context");
+            return false;
+        };
+
+        match &entry.target {
+            LinkTarget::Run(run_id) => {
+                self.jump_to_search_target(crate::search_overlay::SearchJumpTarget::Run {
+                    run_id: run_id.clone(),
+                });
+            }
+            LinkTarget::Loop(loop_id) => {
+                self.jump_to_search_target(crate::search_overlay::SearchJumpTarget::Log {
+                    loop_id: loop_id.clone(),
+                });
+            }
+            LinkTarget::Url(url) => {
+                self.set_status(
+                    StatusKind::Info,
+                    &format!("Open URL: {url} (fallback: copy/paste)"),
+                );
+            }
+        }
+        true
+    }
+
     fn populate_search_index(&mut self) {
         let index = self.search_overlay.index_mut();
         crate::search_overlay::index_loops(index, &self.loops);
@@ -3621,6 +4484,7 @@ impl App {
 
     fn jump_to_search_target(&mut self, target: crate::search_overlay::SearchJumpTarget) {
         use crate::search_overlay::SearchJumpTarget;
+        self.push_navigation_return_point();
         match target {
             SearchJumpTarget::Loop { loop_id } => {
                 self.select_loop_by_id(&loop_id);
@@ -3818,6 +4682,42 @@ impl App {
                     frame.draw_text(0, content_start + idx, &search_line.text, role);
                 }
             }
+            UiMode::RegexSearch => {
+                let rendered_lines = self.rendered_log_lines();
+                let matches = self.collect_regex_match_indices(&rendered_lines);
+                let current = if matches.is_empty() {
+                    0
+                } else {
+                    self.log_regex_selected_match.min(matches.len() - 1) + 1
+                };
+                let lines = [
+                    "Regex Log Search  (type query, j/k next-prev match, enter apply, esc close)"
+                        .to_owned(),
+                    format!("query: /{}/", self.log_regex_query),
+                    if self.log_regex_error.is_empty() {
+                        format!(
+                            "matches: {current}/{}  lines:{}",
+                            matches.len(),
+                            rendered_lines.len()
+                        )
+                    } else {
+                        format!("error: {}", self.log_regex_error)
+                    },
+                ];
+                for (idx, line) in lines.iter().enumerate() {
+                    if idx >= content_height {
+                        break;
+                    }
+                    let role = if idx == 0 {
+                        TextRole::Accent
+                    } else if idx == 2 && !self.log_regex_error.is_empty() {
+                        TextRole::Danger
+                    } else {
+                        TextRole::Primary
+                    };
+                    frame.draw_text(0, content_start + idx, &trim_to_width(line, width), role);
+                }
+            }
             UiMode::Confirm => {
                 if let Some(ref confirm) = self.confirm {
                     let prompt = &confirm.prompt;
@@ -3964,7 +4864,7 @@ impl App {
                                 },
                                 theme,
                             );
-                            crate::overview_tab::render_overview_paneled(
+                            crate::overview_tab::render_overview_paneled_with_options(
                                 &mut pane_frame,
                                 &self.loops,
                                 self.selected_view(),
@@ -3978,6 +4878,9 @@ impl App {
                                     height: content_height,
                                 },
                                 self.focus_right,
+                                crate::overview_tab::OverviewPaneOptions {
+                                    reserve_next_action_slot: true,
+                                },
                             );
                             pane_frame
                         },
@@ -4151,6 +5054,7 @@ impl App {
                 HintSpec::new("E", "export", 6, Some(KeyCommand::ExportCurrentView)),
                 HintSpec::new("ctrl+e", "evidence", 5, Some(KeyCommand::JumpEvidenceError)),
                 HintSpec::new("ctrl+b", "return", 5, Some(KeyCommand::JumpEvidenceBack)),
+                HintSpec::new("ctrl+y", "copy", 5, None),
                 HintSpec::new("i", "dismiss-hints", 4, None),
                 HintSpec::new("I", "recall-hints", 4, None),
                 HintSpec::new("ctrl+p", "palette", 5, Some(KeyCommand::OpenPalette)),
@@ -4169,6 +5073,7 @@ impl App {
                 HintSpec::new("E", "export", 6, Some(KeyCommand::ExportCurrentView)),
                 HintSpec::new("ctrl+e", "evidence", 5, Some(KeyCommand::JumpEvidenceError)),
                 HintSpec::new("ctrl+b", "return", 5, Some(KeyCommand::JumpEvidenceBack)),
+                HintSpec::new("ctrl+y", "copy", 5, None),
                 HintSpec::new("F", "follow", 5, Some(KeyCommand::ToggleFollow)),
                 HintSpec::new("M", "density", 5, None),
                 HintSpec::new("Z", "focus", 5, None),
@@ -4185,6 +5090,7 @@ impl App {
                 HintSpec::new("E", "export", 7, Some(KeyCommand::ExportCurrentView)),
                 HintSpec::new("ctrl+e", "evidence", 6, Some(KeyCommand::JumpEvidenceError)),
                 HintSpec::new("ctrl+b", "return", 6, Some(KeyCommand::JumpEvidenceBack)),
+                HintSpec::new("ctrl+y", "copy", 6, None),
                 HintSpec::new("t/T", "theme", 6, Some(KeyCommand::CycleTheme)),
                 HintSpec::new("A", "a11y-mode", 6, None),
                 HintSpec::new("M", "density", 6, None),
@@ -4212,6 +5118,7 @@ impl App {
                     5,
                     Some(KeyCommand::ScrollLogsDown),
                 ));
+                hints.push(HintSpec::new("R", "regex", 6, None));
             }
             MainTab::Runs => {
                 hints.push(HintSpec::new(
@@ -4232,6 +5139,7 @@ impl App {
                     5,
                     Some(KeyCommand::ScrollLogsDown),
                 ));
+                hints.push(HintSpec::new("R", "regex", 6, None));
             }
             MainTab::MultiLogs => {
                 hints.push(HintSpec::new(
@@ -4289,6 +5197,7 @@ impl App {
             UiMode::Help => "  mode:Help",
             UiMode::Confirm => "  mode:Confirm",
             UiMode::ExpandedLogs => "  mode:Expanded Logs",
+            UiMode::RegexSearch => "  mode:Regex Search",
             UiMode::Search => "  mode:Search",
             UiMode::Main => "",
         };
@@ -4600,14 +5509,37 @@ impl App {
             map_log_render_layer(self.log_layer),
             true,
         );
+        let regex_matches = self.collect_regex_match_indices(&rendered_lines);
+        let selected_regex_line = if regex_matches.is_empty() {
+            None
+        } else {
+            Some(regex_matches[self.log_regex_selected_match.min(regex_matches.len() - 1)])
+        };
+        let regex_suffix = if self.log_regex_query.trim().is_empty() {
+            String::new()
+        } else if !self.log_regex_error.is_empty() {
+            format!("  regex:{}", self.log_regex_error)
+        } else {
+            format!(
+                "  regex:/{}/ {}/{}",
+                self.log_regex_query,
+                if regex_matches.is_empty() {
+                    0
+                } else {
+                    self.log_regex_selected_match.min(regex_matches.len() - 1) + 1
+                },
+                regex_matches.len()
+            )
+        };
 
         let info_line = format!(
-            "source:{}  layer:{}  follow:{}  scroll:{}  lines:{}",
+            "source:{}  layer:{}  follow:{}  scroll:{}  lines:{}{}",
             self.log_source.label(),
             self.log_layer.label(),
             if self.follow_mode { "on" } else { "off" },
             self.log_scroll,
-            rendered_lines.len()
+            rendered_lines.len(),
+            regex_suffix
         );
         frame.draw_styled_text(
             inner.x,
@@ -4643,15 +5575,28 @@ impl App {
         let (start, end, _) =
             crate::multi_logs::log_window_bounds(rendered_lines.len(), available, self.log_scroll);
         for (offset, line) in rendered_lines[start..end].iter().enumerate() {
-            let role = if line.starts_with("! [ANOM:") {
+            let line_index = start + offset;
+            let is_regex_match = regex_matches.binary_search(&line_index).is_ok();
+            let role = if Some(line_index) == selected_regex_line {
+                TextRole::Accent
+            } else if is_regex_match {
+                TextRole::Success
+            } else if line.starts_with("! [ANOM:") {
                 TextRole::Danger
             } else {
                 TextRole::Primary
             };
+            let decorated = if Some(line_index) == selected_regex_line {
+                format!("> {line}")
+            } else if is_regex_match {
+                format!("* {line}")
+            } else {
+                line.clone()
+            };
             frame.draw_text(
                 inner.x,
                 inner.y + 1 + offset,
-                &trim_to_width(line, inner.width),
+                &trim_to_width(&decorated, inner.width),
                 role,
             );
         }
@@ -4894,6 +5839,43 @@ impl App {
                         }
                     }
 
+                    if let Some(latest_message_idx) =
+                        selected_thread.message_indices.last().copied()
+                    {
+                        if let Some(latest_message) = self.inbox_messages.get(latest_message_idx) {
+                            let markdown_lines = markdown_to_plain_lines(
+                                &latest_message.body,
+                                detail_inner.width,
+                                4,
+                            );
+                            if !markdown_lines.is_empty() && row < detail_inner.height {
+                                frame.draw_styled_text(
+                                    detail_inner.x,
+                                    detail_inner.y + row,
+                                    "markdown detail (latest body)",
+                                    pal.info,
+                                    pal.panel,
+                                    false,
+                                );
+                                row += 1;
+                            }
+                            for line in markdown_lines {
+                                if row >= detail_inner.height {
+                                    break;
+                                }
+                                frame.draw_styled_text(
+                                    detail_inner.x,
+                                    detail_inner.y + row,
+                                    &line,
+                                    pal.text,
+                                    pal.panel,
+                                    false,
+                                );
+                                row += 1;
+                            }
+                        }
+                    }
+
                     // Thread messages (newest first)
                     for idx in selected_thread.message_indices.iter().rev() {
                         if row >= detail_inner.height {
@@ -4937,6 +5919,49 @@ impl App {
                             false,
                         );
                         row += 1;
+
+                        if row >= detail_inner.height {
+                            break;
+                        }
+                        if !message.subject.trim().is_empty() {
+                            let subject_line = format!("  subject: {}", message.subject.trim());
+                            frame.draw_styled_text(
+                                detail_inner.x,
+                                detail_inner.y + row,
+                                &trim_to_width(&subject_line, detail_inner.width),
+                                pal.text_muted,
+                                pal.panel,
+                                false,
+                            );
+                            row += 1;
+                        }
+
+                        let body_width = detail_inner.width.saturating_sub(2);
+                        for detail_line in
+                            render_inbox_markdown_detail_lines(&message.body, body_width)
+                        {
+                            if row >= detail_inner.height {
+                                break;
+                            }
+                            let indented = if detail_line.is_empty() {
+                                String::new()
+                            } else {
+                                format!("  {detail_line}")
+                            };
+                            frame.draw_styled_text(
+                                detail_inner.x,
+                                detail_inner.y + row,
+                                &trim_to_width(&indented, detail_inner.width),
+                                fg,
+                                pal.panel,
+                                false,
+                            );
+                            row += 1;
+                        }
+
+                        if row < detail_inner.height {
+                            row += 1;
+                        }
                     }
                 } else {
                     // No thread selected — draw empty detail panel
@@ -5035,6 +6060,16 @@ impl App {
         if queued > 0 && !out.trim().is_empty() {
             out.push_str(&format!(" (+{queued} queued)"));
         }
+        let timers = self.pending_scheduled_timer_count();
+        if timers > 0 {
+            let next_due = self.next_scheduled_timer_in_ticks().unwrap_or(0);
+            let timer_summary = format!("timers:{timers} next:{next_due}t");
+            if out.trim().is_empty() {
+                out = timer_summary;
+            } else {
+                out.push_str(&format!(" [{timer_summary}]"));
+            }
+        }
         out
     }
 
@@ -5110,6 +6145,28 @@ impl App {
             .count()
     }
 
+    fn pending_scheduled_timer_count(&self) -> usize {
+        self.notification_queue
+            .iter()
+            .filter(|event| {
+                !event.acknowledged
+                    && event
+                        .snoozed_until_sequence
+                        .is_some_and(|until| self.notification_sequence < until)
+            })
+            .count()
+    }
+
+    fn next_scheduled_timer_in_ticks(&self) -> Option<u64> {
+        self.notification_queue
+            .iter()
+            .filter(|event| !event.acknowledged)
+            .filter_map(|event| event.snoozed_until_sequence)
+            .filter(|until| self.notification_sequence < *until)
+            .map(|until| until.saturating_sub(self.notification_sequence))
+            .min()
+    }
+
     fn render_help_content(
         &self,
         frame: &mut RenderFrame,
@@ -5123,6 +6180,8 @@ impl App {
             "Navigation:".to_owned(),
             "  1/2/3/4/5 switch tabs (Overview/Logs/Runs/MultiLogs/Inbox)".to_owned(),
             "  ]/[       cycle tabs".to_owned(),
+            "  b         backtrack last deep-link jump".to_owned(),
+            "  Ctrl+O    activate primary link (run/loop/url fallback)".to_owned(),
             "  j/k       move loop selection".to_owned(),
             "  ,/.       move run selection / multi page".to_owned(),
             "".to_owned(),
@@ -5132,6 +6191,7 @@ impl App {
             "  D         delete selected loop".to_owned(),
             "  r         resume selected loop".to_owned(),
             "  n         new loop wizard".to_owned(),
+            "  R         regex log search (logs/runs; j/k jump matches)".to_owned(),
             "  confirm rail: tab/left/right choose action, enter selects (safe default=cancel)"
                 .to_owned(),
             "  high-risk confirm (kill/force-delete): type reason (12+ chars)".to_owned(),
@@ -5183,6 +6243,7 @@ impl App {
             "  /         filter mode".to_owned(),
             "  Ctrl+E/W/A jump latest ERROR/WARN/ACK evidence".to_owned(),
             "  Ctrl+B    return to sticky evidence source".to_owned(),
+            "  Ctrl+Y    copy context (run id/log line/thread content)".to_owned(),
             "".to_owned(),
         ];
         lines.extend(
@@ -5343,6 +6404,43 @@ fn format_mail_id(id: i64) -> String {
     format!("m-{id}")
 }
 
+fn copy_to_system_clipboard(text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    try_copy_via_command("pbcopy", &[], text)
+        || try_copy_via_command("wl-copy", &[], text)
+        || try_copy_via_command("xclip", &["-selection", "clipboard"], text)
+        || try_copy_via_command("xsel", &["--clipboard", "--input"], text)
+}
+
+fn try_copy_via_command(program: &str, args: &[&str], text: &str) -> bool {
+    let mut child = match std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return false,
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        if stdin.write_all(text.as_bytes()).is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return false;
+        }
+    } else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return false;
+    }
+
+    child.wait().is_ok_and(|status| status.success())
+}
+
 fn map_log_render_layer(layer: LogLayer) -> LogRenderLayer {
     match layer {
         LogLayer::Raw => LogRenderLayer::Raw,
@@ -5386,6 +6484,77 @@ fn evidence_line_matches(kind: EvidenceKind, line: &str) -> bool {
     }
 }
 
+fn replace_markdown_links(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(open) = rest.find('[') {
+        out.push_str(&rest[..open]);
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find("](") else {
+            out.push_str(&rest[open..]);
+            return out;
+        };
+        let after_close = &after_open[close + 2..];
+        let Some(url_end) = after_close.find(')') else {
+            out.push_str(&rest[open..]);
+            return out;
+        };
+        let text = &after_open[..close];
+        let url = &after_close[..url_end];
+        out.push_str(text);
+        if !url.trim().is_empty() {
+            out.push_str(" <");
+            out.push_str(url.trim());
+            out.push('>');
+        }
+        rest = &after_close[url_end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn markdown_to_plain_lines(markdown: &str, width: usize, max_lines: usize) -> Vec<String> {
+    if max_lines == 0 || width == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut in_code = false;
+    for raw in markdown.lines() {
+        if out.len() >= max_lines {
+            break;
+        }
+        let trimmed = raw.trim();
+        if trimmed.starts_with("```") {
+            in_code = !in_code;
+            continue;
+        }
+        let line = if in_code {
+            format!("`{trimmed}`")
+        } else if let Some(rest) = trimmed.strip_prefix("### ") {
+            format!("{} {}", "\u{25B8}", rest.trim())
+        } else if let Some(rest) = trimmed.strip_prefix("## ") {
+            format!("{} {}", "\u{25B8}", rest.trim().to_ascii_uppercase())
+        } else if let Some(rest) = trimmed.strip_prefix("# ") {
+            format!("{} {}", "\u{25B8}", rest.trim().to_ascii_uppercase())
+        } else if let Some(rest) = trimmed.strip_prefix("- ") {
+            format!("{} {}", "\u{2022}", rest.trim())
+        } else if let Some(rest) = trimmed.strip_prefix("* ") {
+            format!("{} {}", "\u{2022}", rest.trim())
+        } else {
+            trimmed.to_owned()
+        };
+        let line = replace_markdown_links(&line)
+            .replace("**", "")
+            .replace("__", "")
+            .replace('`', "");
+        if line.trim().is_empty() {
+            continue;
+        }
+        out.push(trim_to_width(&line, width));
+    }
+    out
+}
+
 fn trim_to_width(value: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
@@ -5394,6 +6563,213 @@ fn trim_to_width(value: &str, width: usize) -> String {
         return value.to_owned();
     }
     value.chars().take(width).collect()
+}
+
+fn render_inbox_markdown_detail_lines(markdown: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
+    }
+
+    let markdown = markdown.trim();
+    if markdown.is_empty() {
+        return Vec::new();
+    }
+
+    let mut rendered = Vec::new();
+    let mut in_code_block = false;
+
+    for raw_line in markdown.lines() {
+        let line = raw_line.trim_end();
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+
+        if in_code_block {
+            push_wrapped_prefixed_lines(&mut rendered, line, "` ", "` ", width);
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            if rendered.last().is_some_and(|value| !value.is_empty()) {
+                rendered.push(String::new());
+            }
+            continue;
+        }
+
+        if let Some((level, heading)) = parse_markdown_heading(trimmed) {
+            let prefix = format!("{} ", "#".repeat(level.min(3)));
+            push_wrapped_prefixed_lines(&mut rendered, heading, &prefix, "  ", width);
+            continue;
+        }
+
+        if let Some((prefix, list_text)) = parse_markdown_list_item(trimmed) {
+            let continuation = " ".repeat(prefix.chars().count());
+            push_wrapped_prefixed_lines(&mut rendered, list_text, &prefix, &continuation, width);
+            continue;
+        }
+
+        if let Some(quoted) = parse_markdown_quote(trimmed) {
+            push_wrapped_prefixed_lines(&mut rendered, quoted, "> ", "> ", width);
+            continue;
+        }
+
+        push_wrapped_prefixed_lines(&mut rendered, trimmed, "", "", width);
+    }
+
+    while rendered.last().is_some_and(String::is_empty) {
+        rendered.pop();
+    }
+
+    if rendered.is_empty() {
+        rendered.push(trim_to_width(markdown, width));
+    }
+    rendered
+}
+
+fn parse_markdown_heading(line: &str) -> Option<(usize, &str)> {
+    let level = line.chars().take_while(|ch| *ch == '#').count();
+    if !(1..=6).contains(&level) {
+        return None;
+    }
+    let heading = line[level..].trim_start();
+    if heading.is_empty() {
+        return None;
+    }
+    Some((level, heading))
+}
+
+fn parse_markdown_quote(line: &str) -> Option<&str> {
+    let mut remaining = line;
+    let mut saw_quote = false;
+    while let Some(stripped) = remaining.strip_prefix('>') {
+        saw_quote = true;
+        remaining = stripped.trim_start();
+    }
+    if !saw_quote {
+        return None;
+    }
+    Some(remaining)
+}
+
+fn parse_markdown_list_item(line: &str) -> Option<(String, &str)> {
+    for marker in ["- ", "* ", "+ "] {
+        if let Some(rest) = line.strip_prefix(marker) {
+            return Some(("* ".to_owned(), rest.trim_start()));
+        }
+    }
+
+    let digit_prefix_len = line
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .map(char::len_utf8)
+        .sum::<usize>();
+    if digit_prefix_len == 0 {
+        return None;
+    }
+
+    let suffix = &line[digit_prefix_len..];
+    let rest = suffix.strip_prefix(". ")?;
+    Some((
+        format!("{}. ", &line[..digit_prefix_len]),
+        rest.trim_start(),
+    ))
+}
+
+fn push_wrapped_prefixed_lines(
+    out: &mut Vec<String>,
+    text: &str,
+    prefix: &str,
+    continuation_prefix: &str,
+    width: usize,
+) {
+    if width == 0 {
+        return;
+    }
+
+    let body_width = width.saturating_sub(prefix.chars().count()).max(1);
+    let wrapped = wrap_words_to_width(text, body_width);
+    if wrapped.is_empty() {
+        out.push(trim_to_width(prefix, width));
+        return;
+    }
+
+    for (index, line) in wrapped.into_iter().enumerate() {
+        let active_prefix = if index == 0 {
+            prefix
+        } else {
+            continuation_prefix
+        };
+        let combined = if line.is_empty() {
+            active_prefix.to_owned()
+        } else {
+            format!("{active_prefix}{line}")
+        };
+        out.push(trim_to_width(&combined, width));
+    }
+}
+
+fn wrap_words_to_width(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
+    }
+
+    let mut wrapped = Vec::new();
+    let mut current = String::new();
+
+    for word in text.split_whitespace() {
+        let chunks = split_text_chunks(word, width);
+        for (chunk_idx, chunk) in chunks.into_iter().enumerate() {
+            if chunk_idx > 0 && !current.is_empty() {
+                wrapped.push(std::mem::take(&mut current));
+            }
+
+            if current.is_empty() {
+                current = chunk;
+                continue;
+            }
+
+            let candidate_width = current.chars().count() + 1 + chunk.chars().count();
+            if candidate_width <= width {
+                current.push(' ');
+                current.push_str(&chunk);
+            } else {
+                wrapped.push(std::mem::take(&mut current));
+                current = chunk;
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        wrapped.push(current);
+    }
+
+    if wrapped.is_empty() && !text.trim().is_empty() {
+        return split_text_chunks(text.trim(), width);
+    }
+
+    wrapped
+}
+
+fn split_text_chunks(text: &str, width: usize) -> Vec<String> {
+    if width == 0 || text.is_empty() {
+        return Vec::new();
+    }
+
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        current.push(ch);
+        if current.chars().count() >= width {
+            chunks.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
 }
 
 fn failure_explain_label_priority(label: &str) -> usize {
@@ -5492,7 +6868,10 @@ impl View for PlaceholderView {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use forge_ftui_adapter::input::{InputEvent, Key, KeyEvent, Modifiers, ResizeEvent};
+    use forge_ftui_adapter::input::{
+        InputEvent, Key, KeyEvent, Modifiers, MouseButton, MouseEvent, MouseEventKind,
+        MouseWheelDirection, ResizeEvent,
+    };
 
     fn key(k: Key) -> InputEvent {
         InputEvent::Key(KeyEvent::plain(k))
@@ -5506,6 +6885,30 @@ mod tests {
                 ctrl: true,
                 alt: false,
             },
+        })
+    }
+
+    fn mouse_left_down(column: usize, row: usize) -> InputEvent {
+        InputEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+        })
+    }
+
+    fn mouse_left_drag(column: usize, row: usize) -> InputEvent {
+        InputEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column,
+            row,
+        })
+    }
+
+    fn mouse_wheel(direction: MouseWheelDirection, column: usize, row: usize) -> InputEvent {
+        InputEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::Wheel(direction),
+            column,
+            row,
         })
     }
 
@@ -5599,6 +7002,20 @@ mod tests {
         }]
     }
 
+    fn sample_markdown_inbox_messages() -> Vec<InboxMessageView> {
+        vec![InboxMessageView {
+            id: 21,
+            thread_id: Some("thread-markdown".to_owned()),
+            from: "agent-md".to_owned(),
+            subject: "markdown status".to_owned(),
+            body: "# Incident Playbook\n- restart daemon\n- verify health\n[notes](https://example.com/notes)".to_owned(),
+            created_at: "2026-02-12T08:14:00Z".to_owned(),
+            ack_required: false,
+            read_at: None,
+            acked_at: None,
+        }]
+    }
+
     fn sample_claim_events() -> Vec<ClaimEventView> {
         vec![
             ClaimEventView {
@@ -5633,6 +7050,126 @@ mod tests {
         assert_eq!(labels.join("|"), "ov|logs|runs|multi|inbox");
     }
 
+    // -- session restore bridge --
+
+    #[test]
+    fn session_restore_round_trip_restores_tab_layout_selection_and_scroll() {
+        let mut app = app_with_loops(4);
+        app.set_run_history(vec![
+            RunView {
+                id: "run-1".to_owned(),
+                status: "success".to_owned(),
+                ..RunView::default()
+            },
+            RunView {
+                id: "run-2".to_owned(),
+                status: "error".to_owned(),
+                ..RunView::default()
+            },
+        ]);
+        app.set_tab(MainTab::MultiLogs);
+        app.layout_idx = layout_index_for(2, 3);
+        app.filter_state = "running".to_owned();
+        app.filter_text = "agent timeout".to_owned();
+        app.select_loop_by_id("loop-2");
+        app.selected_run = 1;
+        app.focus_right = true;
+        app.pinned.insert("loop-0".to_owned());
+        app.pinned.insert("loop-3".to_owned());
+        app.log_scroll = 22;
+        app.follow_mode = false;
+
+        let context = app.session_restore_context();
+
+        let mut restored = app_with_loops(4);
+        restored.set_run_history(vec![
+            RunView {
+                id: "run-1".to_owned(),
+                status: "success".to_owned(),
+                ..RunView::default()
+            },
+            RunView {
+                id: "run-2".to_owned(),
+                status: "error".to_owned(),
+                ..RunView::default()
+            },
+        ]);
+
+        let notices = restored.restore_from_session_context(&context);
+        assert_eq!(notices, Vec::<String>::new());
+        assert_eq!(restored.tab(), MainTab::MultiLogs);
+        assert_eq!(restored.active_layout(), PaneLayout { rows: 2, cols: 3 });
+        assert_eq!(restored.filter_state(), "running");
+        assert_eq!(restored.filter_text(), "agent timeout");
+        assert_eq!(restored.selected_id(), "loop-2");
+        assert_eq!(
+            restored.selected_run_view().map(|run| run.id.as_str()),
+            Some("run-2")
+        );
+        assert!(restored.focus_right());
+        assert!(restored.pinned.contains("loop-0"));
+        assert!(restored.pinned.contains("loop-3"));
+        assert_eq!(restored.log_scroll(), 22);
+        assert!(!restored.follow_mode());
+    }
+
+    #[test]
+    fn restore_from_session_context_reports_unavailable_values_and_clamps_scroll() {
+        let mut app = app_with_loops(2);
+        app.set_run_history(vec![RunView {
+            id: "run-1".to_owned(),
+            status: "success".to_owned(),
+            ..RunView::default()
+        }]);
+        app.pinned.insert("loop-1".to_owned());
+        let original_layout = app.active_layout();
+
+        let context = crate::session_restore::SessionContext {
+            selected_loop_id: Some("missing-loop".to_owned()),
+            selected_run_id: Some("missing-run".to_owned()),
+            log_scroll: MAX_LOG_BACKFILL + 5000,
+            tab_id: Some("missing-tab".to_owned()),
+            layout_id: Some("9x9".to_owned()),
+            filter_state: Some("unknown".to_owned()),
+            filter_query: Some("x".to_owned()),
+            panes: vec![crate::session_restore::PaneSelection {
+                pane_id: "unknown-pane".to_owned(),
+                focused: true,
+            }],
+            pinned_loop_ids: vec!["missing-loop".to_owned()],
+        };
+
+        let notices = app.restore_from_session_context(&context);
+        assert!(notices
+            .iter()
+            .any(|msg| msg.contains("stored tab unavailable")));
+        assert!(notices
+            .iter()
+            .any(|msg| msg.contains("stored layout unavailable")));
+        assert!(notices
+            .iter()
+            .any(|msg| msg.contains("stored filter-state unavailable")));
+        assert!(notices
+            .iter()
+            .any(|msg| msg.contains("stored loop unavailable")));
+        assert!(notices
+            .iter()
+            .any(|msg| msg.contains("stored run unavailable")));
+        assert!(notices
+            .iter()
+            .any(|msg| msg.contains("stored pane focus unavailable")));
+        assert_eq!(app.tab(), MainTab::Overview);
+        assert_eq!(app.active_layout(), original_layout);
+        assert_eq!(app.selected_id(), "loop-0");
+        assert_eq!(
+            app.selected_run_view().map(|run| run.id.as_str()),
+            Some("run-1")
+        );
+        assert!(app.pinned.is_empty());
+        assert_eq!(app.log_scroll(), MAX_LOG_BACKFILL);
+        assert!(!app.follow_mode());
+    }
+
     // -- LogSource / LogLayer labels --
 
     #[test]
@@ -5645,6 +7182,24 @@ mod tests {
     fn log_layer_labels() {
         let labels: Vec<&str> = LogLayer::ORDER.iter().map(|l| l.label()).collect();
         assert_eq!(labels.join("|"), "raw|events|errors|tools|diff");
+    }
+
+    #[test]
+    fn current_log_route_maps_live_raw_to_live_parsed() {
+        let app = App::new("default", 12);
+        let route = app.current_log_route();
+        assert_eq!(route.transport, LogTransportKind::LiveLoop);
+        assert_eq!(route.content, LogContentKind::Parsed);
+    }
+
+    #[test]
+    fn current_log_route_maps_selected_diff_to_selected_diff() {
+        let mut app = App::new("default", 12);
+        app.log_source = LogSource::RunSelection;
+        app.log_layer = LogLayer::Diff;
+        let route = app.current_log_route();
+        assert_eq!(route.transport, LogTransportKind::SelectedRun);
+        assert_eq!(route.content, LogContentKind::Diff);
     }
 
     // -- App construction --
@@ -5742,6 +7297,78 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_y_copies_selected_run_id_into_clipboard_mirror() {
+        let mut app = app_with_loops(2);
+        app.set_tab(MainTab::Runs);
+        app.set_run_history(vec![
+            RunView {
+                id: "run-11".to_owned(),
+                status: "success".to_owned(),
+                ..RunView::default()
+            },
+            RunView {
+                id: "run-22".to_owned(),
+                status: "error".to_owned(),
+                ..RunView::default()
+            },
+        ]);
+        app.move_run_selection(1);
+
+        let cmd = app.update(ctrl_key('y'));
+        assert_eq!(cmd, Command::Fetch);
+        assert_eq!(app.clipboard_mirror(), Some("run-22"));
+        assert!(
+            app.status_text().contains("Copied run id")
+                || app.status_text().contains("Clipboard unavailable")
+        );
+    }
+
+    #[test]
+    fn ctrl_y_copies_log_line_into_clipboard_mirror() {
+        let mut app = app_with_loops(1);
+        app.set_tab(MainTab::Logs);
+        app.set_selected_log(LogTailView {
+            lines: vec!["older line".to_owned(), "newest line".to_owned()],
+            message: String::new(),
+        });
+
+        let cmd = app.update(ctrl_key('y'));
+        assert_eq!(cmd, Command::Fetch);
+        assert_eq!(app.clipboard_mirror(), Some("newest line"));
+    }
+
+    #[test]
+    fn ctrl_y_copies_selected_inbox_thread_content() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.set_tab(MainTab::Inbox);
+
+        let cmd = app.update(ctrl_key('y'));
+        assert_eq!(cmd, Command::Fetch);
+        assert_eq!(app.clipboard_mirror(), Some("needs ack"));
+    }
+
+    #[test]
+    fn layout_perf_hud_snapshot_reflects_focus_and_layout_state() {
+        let mut app = app_with_loops(6);
+        app.update(key(Key::Char('4')));
+        app.update(key(Key::Char('m')));
+        app.update(key(Key::Char('Z')));
+
+        let snapshot = app.layout_perf_hud_snapshot();
+        assert_eq!(snapshot.tab, MainTab::MultiLogs);
+        assert!(snapshot.split_focus_supported);
+        assert_eq!(
+            snapshot.focus_graph_nodes,
+            vec!["left".to_owned(), "right".to_owned()]
+        );
+        assert_eq!(snapshot.focused_node, "right");
+        assert_eq!(snapshot.focus_mode, FocusMode::DeepDebug);
+        assert!(snapshot.content_height > 0);
+        assert!(snapshot.effective_layout.capacity() >= 1);
+    }
+
+    #[test]
     fn inbox_filter_cycles_and_clamps_selection() {
         let mut app = App::new("default", 12);
         app.set_inbox_messages(sample_inbox_messages());
@@ -5830,6 +7457,121 @@ mod tests {
         let snapshot = app.render().snapshot();
         assert!(snapshot.contains("thread:thread-b"));
         assert!(snapshot.contains("m-3 agent-c incident escalated"));
+    }
+
+    #[test]
+    fn inbox_detail_pane_renders_markdown_body() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_markdown_inbox_messages());
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 140,
+            height: 36,
+        }));
+        app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('i'))); // dismiss onboarding overlay
+        let snapshot = app.render().snapshot();
+        assert!(snapshot.contains("markdown detail (latest body)"));
+        assert!(snapshot.contains("▸ INCIDENT PLAYBOOK"));
+        assert!(snapshot.contains("• restart daemon"));
+        assert!(snapshot.contains("notes <https://example.com/notes>"));
+    }
+
+    #[test]
+    fn inbox_markdown_detail_lines_preserve_markdown_structure() {
+        let lines = render_inbox_markdown_detail_lines(
+            "# Title\n- first item\n1. second item\n> quoted line\n```\nlet x = 1;\n```",
+            40,
+        );
+        assert!(lines.iter().any(|line| line == "# Title"));
+        assert!(lines.iter().any(|line| line == "* first item"));
+        assert!(lines.iter().any(|line| line == "1. second item"));
+        assert!(lines.iter().any(|line| line == "> quoted line"));
+        assert!(lines.iter().any(|line| line == "` let x = 1;"));
+    }
+
+    #[test]
+    fn inbox_markdown_detail_lines_wrap_long_words_and_continuations() {
+        let lines =
+            render_inbox_markdown_detail_lines("- supercalifragilisticexpialidocious token", 16);
+        assert!(!lines.is_empty());
+        assert!(lines[0].starts_with("* "));
+        assert!(lines.len() >= 2);
+        assert!(lines.iter().all(|line| line.chars().count() <= 16));
+    }
+
+    #[test]
+    fn mouse_click_tab_rail_switches_tabs() {
+        let mut app = app_with_loops(3);
+        assert_eq!(app.tab(), MainTab::Overview);
+        app.update(mouse_left_down(15, 1));
+        assert_eq!(app.tab(), MainTab::Logs);
+    }
+
+    #[test]
+    fn mouse_click_inbox_list_selects_thread_and_focuses_list_pane() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 140,
+            height: 36,
+        }));
+        app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('i')));
+        assert_eq!(app.inbox_selected_thread, 0);
+
+        // Global row = content_start(2) + list_inner_y(2) + row(1).
+        app.update(mouse_left_down(2, 5));
+        assert_eq!(app.inbox_selected_thread, 1);
+        assert!(!app.focus_right());
+    }
+
+    #[test]
+    fn mouse_drag_inbox_list_updates_thread_selection() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 140,
+            height: 36,
+        }));
+        app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('i')));
+        assert_eq!(app.inbox_selected_thread, 0);
+
+        app.update(mouse_left_drag(2, 5));
+        assert_eq!(app.inbox_selected_thread, 1);
+    }
+
+    #[test]
+    fn mouse_click_multi_logs_cell_selects_corresponding_loop() {
+        let mut app = app_with_loops(4);
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 120,
+            height: 36,
+        }));
+        app.update(key(Key::Char('4')));
+        assert_eq!(app.selected_id(), "loop-0");
+
+        // content_start(2), header_rows(2), second cell x starts near 60.
+        app.update(mouse_left_down(65, 5));
+        assert_eq!(app.selected_id(), "loop-1");
+        assert!(app.focus_right());
+    }
+
+    #[test]
+    fn mouse_wheel_scrolls_inbox_thread_selection() {
+        let mut app = App::new("default", 12);
+        app.set_inbox_messages(sample_inbox_messages());
+        app.update(InputEvent::Resize(ResizeEvent {
+            width: 140,
+            height: 36,
+        }));
+        app.update(key(Key::Char('5')));
+        app.update(key(Key::Char('i')));
+
+        app.update(mouse_wheel(MouseWheelDirection::Down, 10, 6));
+        assert_eq!(app.inbox_selected_thread, 1);
+        app.update(mouse_wheel(MouseWheelDirection::Up, 10, 6));
+        assert_eq!(app.inbox_selected_thread, 0);
     }
 
     #[test]
@@ -6535,6 +8277,170 @@ mod tests {
         assert!(snapshot.contains("error: failed to connect"));
         assert!(!snapshot.contains("Logs tab  |"));
         assert!(!snapshot.contains("placeholder content"));
+    }
+
+    #[test]
+    fn regex_search_mode_opens_on_logs_tab_and_persists_query() {
+        let mut app = app_with_loops(2);
+        app.set_tab(MainTab::Logs);
+        app.set_selected_log(LogTailView {
+            lines: vec![
+                "alpha event".to_owned(),
+                "error: timeout".to_owned(),
+                "error: retry".to_owned(),
+            ],
+            message: String::new(),
+        });
+
+        app.update(key(Key::Char('R')));
+        assert_eq!(app.mode(), UiMode::RegexSearch);
+        for ch in "error".chars() {
+            app.update(key(Key::Char(ch)));
+        }
+        assert_eq!(app.log_regex_query(), "error");
+        assert_eq!(app.log_regex_match_count(), 2);
+
+        app.update(key(Key::Enter));
+        assert_eq!(app.mode(), UiMode::Main);
+        app.update(key(Key::Char('1')));
+        app.update(key(Key::Char('2')));
+        assert_eq!(app.log_regex_query(), "error");
+    }
+
+    #[test]
+    fn regex_search_jumps_matches_and_highlights_selected_line() {
+        let mut app = app_with_loops(2);
+        app.set_tab(MainTab::Logs);
+        app.set_selected_log(LogTailView {
+            lines: vec![
+                "first".to_owned(),
+                "error: first".to_owned(),
+                "between".to_owned(),
+                "error: second".to_owned(),
+            ],
+            message: String::new(),
+        });
+
+        app.update(key(Key::Char('R')));
+        for ch in "error".chars() {
+            app.update(key(Key::Char(ch)));
+        }
+        let cmd = app.update(key(Key::Char('j')));
+        assert_eq!(cmd, Command::Fetch);
+        assert!(app.status_text().contains("Regex match 2/2"));
+        app.update(key(Key::Enter));
+
+        let snapshot = app.render().snapshot();
+        assert!(snapshot.contains("error: second"));
+        assert_eq!(app.log_regex_match_count(), 2);
+        assert!(app.status_text().contains("Regex match 2/2"));
+    }
+
+    #[test]
+    fn regex_search_invalid_pattern_surfaces_error() {
+        let mut app = app_with_loops(2);
+        app.set_tab(MainTab::Logs);
+        app.set_selected_log(LogTailView {
+            lines: vec!["error: first".to_owned()],
+            message: String::new(),
+        });
+
+        app.update(key(Key::Char('R')));
+        app.update(key(Key::Char('[')));
+        assert!(app.log_regex_error().contains("invalid regex"));
+        let frame = app.render();
+        let snapshot = frame.snapshot();
+        assert!(snapshot.contains("invalid regex"));
+    }
+
+    #[test]
+    fn deep_link_jump_pushes_nav_history_and_b_backtracks() {
+        let mut app = app_with_loops(3);
+        app.set_tab(MainTab::Overview);
+        app.move_selection(1);
+        assert_eq!(app.selected_id(), "loop-1");
+        app.set_run_history(vec![
+            RunView {
+                id: "run-1".to_owned(),
+                status: "error".to_owned(),
+                exit_code: Some(1),
+                duration: "4s".to_owned(),
+                ..RunView::default()
+            },
+            RunView {
+                id: "run-0".to_owned(),
+                status: "success".to_owned(),
+                exit_code: Some(0),
+                duration: "2s".to_owned(),
+                ..RunView::default()
+            },
+        ]);
+
+        app.jump_to_search_target(crate::search_overlay::SearchJumpTarget::Run {
+            run_id: "run-1".to_owned(),
+        });
+        assert_eq!(app.tab(), MainTab::Runs);
+        assert_eq!(app.nav_history_len(), 1);
+
+        let cmd = app.update(key(Key::Char('b')));
+        assert_eq!(cmd, Command::Fetch);
+        assert_eq!(app.tab(), MainTab::Overview);
+        assert_eq!(app.selected_id(), "loop-1");
+        assert_eq!(app.nav_history_len(), 0);
+    }
+
+    #[test]
+    fn backtrack_key_without_history_is_noop_with_status() {
+        let mut app = app_with_loops(1);
+        let cmd = app.update(key(Key::Char('b')));
+        assert_eq!(cmd, Command::None);
+        assert!(app.status_text().contains("no navigation history"));
+    }
+
+    #[test]
+    fn ctrl_o_jumps_to_logs_when_loop_link_is_present() {
+        let mut app = app_with_loops(3);
+        app.set_tab(MainTab::Logs);
+        app.set_selected_log(LogTailView {
+            lines: vec!["investigate loop-2 for newest errors".to_owned()],
+            message: String::new(),
+        });
+
+        let cmd = app.update(ctrl_key('o'));
+        assert_eq!(cmd, Command::Fetch);
+        assert_eq!(app.tab(), MainTab::Logs);
+        assert_eq!(app.selected_id(), "loop-2");
+        assert!(app.status_text().contains("Jumped to logs for loop-2"));
+    }
+
+    #[test]
+    fn ctrl_o_shows_url_fallback_status() {
+        let mut app = app_with_loops(1);
+        app.set_tab(MainTab::Logs);
+        app.set_selected_log(LogTailView {
+            lines: vec!["docs: https://example.com/runbook".to_owned()],
+            message: String::new(),
+        });
+
+        let cmd = app.update(ctrl_key('o'));
+        assert_eq!(cmd, Command::Fetch);
+        assert!(app
+            .status_text()
+            .contains("Open URL: https://example.com/runbook"));
+    }
+
+    #[test]
+    fn ctrl_o_without_links_reports_no_links() {
+        let mut app = app_with_loops(1);
+        app.set_tab(MainTab::Logs);
+        app.set_selected_log(LogTailView {
+            lines: vec!["all systems nominal".to_owned()],
+            message: String::new(),
+        });
+
+        let cmd = app.update(ctrl_key('o'));
+        assert_eq!(cmd, Command::None);
+        assert!(app.status_text().contains("No links in current context"));
     }
 
     // -- follow mode --
@@ -7623,6 +9529,55 @@ mod tests {
 
         let display = app.status_display_text();
         assert_eq!(display, "Error: boom");
+    }
+
+    #[test]
+    fn failure_explain_strip_prioritizes_root_cause_then_frame_then_command() {
+        let mut app = App::new("default", 12);
+        app.tab = MainTab::Logs;
+        app.selected_log.lines = vec![
+            "$ cargo test --workspace".to_owned(),
+            "running 1 test".to_owned(),
+            "thread 'main' panicked at src/main.rs:42:11".to_owned(),
+            "caused by: database is locked".to_owned(),
+            "at forge::db::persist_run (src/db.rs:120)".to_owned(),
+            "fatal: run failed".to_owned(),
+        ];
+
+        let strip = match app.failure_explain_strip_text() {
+            Some(text) => text,
+            None => panic!("failure explain strip should be present"),
+        };
+        let root_cause_idx = match strip.find("root cause=") {
+            Some(idx) => idx,
+            None => panic!("root cause fragment should exist"),
+        };
+        let frame_idx = match strip.find("frame=") {
+            Some(idx) => idx,
+            None => panic!("frame fragment should exist"),
+        };
+        let command_idx = match strip.find("command=") {
+            Some(idx) => idx,
+            None => panic!("command fragment should exist"),
+        };
+
+        assert!(strip.starts_with("Failure explain: "));
+        assert!(root_cause_idx < frame_idx);
+        assert!(frame_idx < command_idx);
+        assert!(!strip.contains("context="));
+    }
+
+    #[test]
+    fn failure_explain_strip_hides_when_no_failure_detected() {
+        let mut app = App::new("default", 12);
+        app.tab = MainTab::Logs;
+        app.selected_log.lines = vec![
+            "$ cargo test --workspace".to_owned(),
+            "running 12 tests".to_owned(),
+            "all tests passed".to_owned(),
+        ];
+
+        assert!(app.failure_explain_strip_text().is_none());
     }
 
     #[test]

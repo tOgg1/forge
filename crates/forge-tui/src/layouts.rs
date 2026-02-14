@@ -21,6 +21,23 @@ pub const PANE_LAYOUTS: [PaneLayout; 10] = [
     PaneLayout { rows: 4, cols: 4 },
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BreakpointTier {
+    Xs,
+    Sm,
+    Md,
+    Lg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BreakpointContract {
+    pub tier: BreakpointTier,
+    pub max_rows: i32,
+    pub max_cols: i32,
+    pub min_cell_width: i32,
+    pub min_cell_height: i32,
+}
+
 impl PaneLayout {
     #[must_use]
     pub fn capacity(self) -> i32 {
@@ -156,9 +173,94 @@ pub fn fit_pane_layout(
     best
 }
 
+#[must_use]
+pub fn classify_breakpoint(width: i32, height: i32) -> BreakpointTier {
+    if width <= 90 || height <= 26 {
+        BreakpointTier::Xs
+    } else if width <= 110 || height <= 34 {
+        BreakpointTier::Sm
+    } else if width <= 160 || height <= 46 {
+        BreakpointTier::Md
+    } else {
+        BreakpointTier::Lg
+    }
+}
+
+#[must_use]
+pub fn breakpoint_contract(
+    width: i32,
+    height: i32,
+    min_cell_width: i32,
+    min_cell_height: i32,
+) -> BreakpointContract {
+    let min_cell_width = min_cell_width.max(1);
+    let min_cell_height = min_cell_height.max(1);
+    let tier = classify_breakpoint(width, height);
+    match tier {
+        BreakpointTier::Xs => BreakpointContract {
+            tier,
+            max_rows: 2,
+            max_cols: 2,
+            min_cell_width: min_cell_width.saturating_sub(18).max(20),
+            min_cell_height: min_cell_height.saturating_sub(4).max(4),
+        },
+        BreakpointTier::Sm => BreakpointContract {
+            tier,
+            max_rows: 2,
+            max_cols: 3,
+            min_cell_width: min_cell_width.saturating_sub(14).max(22),
+            min_cell_height: min_cell_height.saturating_sub(3).max(5),
+        },
+        BreakpointTier::Md => BreakpointContract {
+            tier,
+            max_rows: 3,
+            max_cols: 4,
+            min_cell_width: min_cell_width.saturating_sub(10).max(28),
+            min_cell_height: min_cell_height.saturating_sub(2).max(6),
+        },
+        BreakpointTier::Lg => BreakpointContract {
+            tier,
+            max_rows: 4,
+            max_cols: 4,
+            min_cell_width,
+            min_cell_height,
+        },
+    }
+}
+
+#[must_use]
+pub fn fit_pane_layout_for_breakpoint(
+    mut requested: PaneLayout,
+    width: i32,
+    height: i32,
+    gap: i32,
+    min_cell_width: i32,
+    min_cell_height: i32,
+) -> PaneLayout {
+    if requested.rows < 1 || requested.cols < 1 {
+        requested = PaneLayout { rows: 1, cols: 1 };
+    }
+    let contract = breakpoint_contract(width, height, min_cell_width, min_cell_height);
+    let capped = PaneLayout {
+        rows: requested.rows.min(contract.max_rows).max(1),
+        cols: requested.cols.min(contract.max_cols).max(1),
+    };
+    fit_pane_layout(
+        capped,
+        width,
+        height,
+        gap,
+        contract.min_cell_width,
+        contract.min_cell_height,
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{fit_pane_layout, layout_cell_size, PaneLayout};
+    use super::{
+        classify_breakpoint, fit_pane_layout, fit_pane_layout_for_breakpoint, layout_cell_size,
+        BreakpointTier, PaneLayout,
+    };
 
     #[test]
     fn fit_pane_layout_degrades_when_space_too_small() {
@@ -189,5 +291,34 @@ mod tests {
             layout_cell_size(PaneLayout { rows: 2, cols: 4 }, 220, 26, 1);
         assert_eq!(cell_width, 54);
         assert_eq!(cell_height, 12);
+    }
+
+    #[test]
+    fn classify_breakpoint_maps_standard_snapshot_sizes() {
+        assert_eq!(classify_breakpoint(80, 24), BreakpointTier::Xs);
+        assert_eq!(classify_breakpoint(104, 32), BreakpointTier::Sm);
+        assert_eq!(classify_breakpoint(120, 40), BreakpointTier::Md);
+        assert_eq!(classify_breakpoint(200, 50), BreakpointTier::Lg);
+    }
+
+    #[test]
+    fn fit_breakpoint_contract_caps_dense_layouts_on_small_viewports() {
+        let requested = PaneLayout { rows: 4, cols: 4 };
+        assert_eq!(
+            fit_pane_layout_for_breakpoint(requested, 80, 24, 1, 38, 8),
+            PaneLayout { rows: 2, cols: 2 }
+        );
+        assert_eq!(
+            fit_pane_layout_for_breakpoint(requested, 104, 32, 1, 38, 8),
+            PaneLayout { rows: 2, cols: 3 }
+        );
+        assert_eq!(
+            fit_pane_layout_for_breakpoint(requested, 120, 40, 1, 38, 8),
+            PaneLayout { rows: 3, cols: 4 }
+        );
+        assert_eq!(
+            fit_pane_layout_for_breakpoint(requested, 200, 50, 1, 38, 8),
+            PaneLayout { rows: 4, cols: 4 }
+        );
     }
 }

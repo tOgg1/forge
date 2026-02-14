@@ -408,7 +408,6 @@ fn escape_xml(value: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use std::env;
     use std::fs;
@@ -499,13 +498,19 @@ mod tests {
         let basename = default_basename("Runs", 1700000000999);
         let result = export_frame_to_files(&frame, &dir, &basename, &sample_meta());
         assert!(result.is_ok());
-        let files = result.unwrap();
+        let files = match result {
+            Ok(files) => files,
+            Err(err) => panic!("export should succeed: {err}"),
+        };
 
         assert!(files.text_path.exists());
         assert!(files.html_path.exists());
         assert!(files.svg_path.exists());
 
-        let text = fs::read_to_string(&files.text_path).unwrap();
+        let text = match fs::read_to_string(&files.text_path) {
+            Ok(text) => text,
+            Err(err) => panic!("text file should be readable: {err}"),
+        };
         assert!(text.contains("view: Logs"));
         assert!(text.contains("<A&B>"));
 

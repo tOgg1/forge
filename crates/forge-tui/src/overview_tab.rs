@@ -17,6 +17,53 @@ pub struct OverviewLine {
     pub role: TextRole,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OverviewPaneOptions {
+    pub reserve_next_action_slot: bool,
+}
+
+fn push_unique_action(actions: &mut Vec<String>, text: &str) {
+    if actions.iter().any(|existing| existing == text) {
+        return;
+    }
+    actions.push(text.to_owned());
+}
+
+fn build_next_action_lines(
+    loop_view: &LoopView,
+    run_history: &[RunView],
+    selected_run: usize,
+) -> Vec<String> {
+    let mut actions = Vec::new();
+    let state = loop_view.state.trim().to_ascii_lowercase();
+
+    if state == "error" || !loop_view.last_error.trim().is_empty() {
+        push_unique_action(&mut actions, "[2] Logs: inspect error lines and root cause");
+    }
+    if loop_view.queue_depth > 0 {
+        push_unique_action(
+            &mut actions,
+            "[3] Runs: review queue backlog and latest status",
+        );
+    }
+    if !run_history.is_empty() {
+        let idx = selected_run.min(run_history.len().saturating_sub(1));
+        let status = run_history[idx].status.trim().to_ascii_lowercase();
+        if status != "success" {
+            push_unique_action(&mut actions, "[3] Runs: inspect latest run output");
+        }
+    }
+    if matches!(state.as_str(), "waiting" | "stopped") {
+        push_unique_action(&mut actions, "[r] Resume: wake selected loop");
+    }
+    if actions.is_empty() {
+        push_unique_action(&mut actions, "[2] Logs: verify healthy output stream");
+        push_unique_action(&mut actions, "[4] Multi Logs: compare peer loops");
+    }
+
+    actions
+}
+
 fn truncate_line(text: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
@@ -312,6 +359,31 @@ pub fn render_overview_paneled(
     area: Rect,
     _focus_right: bool,
 ) {
+    render_overview_paneled_with_options(
+        frame,
+        loops,
+        selected_loop,
+        run_history,
+        selected_run,
+        pal,
+        area,
+        _focus_right,
+        OverviewPaneOptions::default(),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_overview_paneled_with_options(
+    frame: &mut RenderFrame,
+    loops: &[LoopView],
+    selected_loop: Option<&LoopView>,
+    run_history: &[RunView],
+    selected_run: usize,
+    pal: &ResolvedPalette,
+    area: Rect,
+    _focus_right: bool,
+    options: OverviewPaneOptions,
+) {
     if area.width < 4 || area.height < 4 {
         return;
     }
@@ -407,11 +479,11 @@ pub fn render_overview_paneled(
     if rest2.height >= 4 {
         let counts = count_runs(run_history);
         let has_domain_panel = rest2.height >= 9;
-        let snap_h = 4usize.min(
-            rest2
-                .height
-                .saturating_sub(if has_domain_panel { 4 } else { 0 }),
-        );
+        let has_next_action_slot = options.reserve_next_action_slot
+            && rest2.height >= if has_domain_panel { 13 } else { 9 };
+        let reserved_rows =
+            if has_domain_panel { 4 } else { 0 } + if has_next_action_slot { 4 } else { 0 };
+        let snap_h = 4usize.min(rest2.height.saturating_sub(reserved_rows));
         let (snap_rect, rest3) = rest2.split_vertical(snap_h);
         let snap_inner = frame.draw_panel(
             snap_rect,
@@ -491,6 +563,50 @@ pub fn render_overview_paneled(
                     domain_inner.x,
                     domain_inner.y + 1,
                     &truncate_line(&groups_line, domain_inner.width),
+                    pal.text_muted,
+                    pal.panel,
+                );
+            }
+        }
+
+        if has_next_action_slot && rest.height >= 4 {
+            let slot_h = 4usize.min(rest.height);
+            let (slot_rect, rest_after_slot) = rest.split_vertical(slot_h);
+            rest = rest_after_slot;
+            let actions = build_next_action_lines(loop_view, run_history, selected_run);
+            let slot_inner = frame.draw_panel(
+                slot_rect,
+                "Next Action",
+                BorderStyle::Rounded,
+                pal.border,
+                pal.panel,
+            );
+            if slot_inner.height > 0 {
+                draw_text_on_bg(
+                    frame,
+                    slot_inner.x,
+                    slot_inner.y,
+                    &truncate_line(
+                        actions
+                            .first()
+                            .map_or("[2] Logs: inspect selected loop", String::as_str),
+                        slot_inner.width,
+                    ),
+                    pal.accent,
+                    pal.panel,
+                );
+            }
+            if slot_inner.height > 1 {
+                draw_text_on_bg(
+                    frame,
+                    slot_inner.x,
+                    slot_inner.y + 1,
+                    &truncate_line(
+                        actions
+                            .get(1)
+                            .map_or("[3] Runs: inspect latest run context", String::as_str),
+                        slot_inner.width,
+                    ),
                     pal.text_muted,
                     pal.panel,
                 );
@@ -823,5 +939,156 @@ mod tests {
         assert!(snapshot.contains("Work Domains (Auto)"));
         assert!(snapshot.contains("groups:"));
         assert!(snapshot.contains("auth-core"));
+    }
+
+    #[test]
+    fn paneled_overview_next_action_slot_hidden_by_default() {
+        let theme = crate::default_theme();
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 120,
+                height: 34,
+            },
+            theme,
+        );
+        let loops = vec![LoopView {
+            id: "loop-a".to_owned(),
+            short_id: "a".to_owned(),
+            name: "auth-worker-a".to_owned(),
+            repo_path: "/repo/crates/auth-core/src".to_owned(),
+            profile_name: "dev".to_owned(),
+            ..LoopView::default()
+        }];
+        let runs = vec![RunView {
+            id: "run-1".to_owned(),
+            status: "success".to_owned(),
+            exit_code: Some(0),
+            duration: "2s".to_owned(),
+            ..RunView::default()
+        }];
+        let pal = crate::theme::resolve_palette_colors(&crate::theme::DEFAULT_PALETTE);
+
+        render_overview_paneled(
+            &mut frame,
+            &loops,
+            Some(&loops[0]),
+            &runs,
+            0,
+            &pal,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 120,
+                height: 34,
+            },
+            false,
+        );
+
+        let snapshot = frame.snapshot();
+        assert!(!snapshot.contains("Next Action (reserved)"));
+    }
+
+    #[test]
+    fn paneled_overview_next_action_slot_renders_when_enabled() {
+        let theme = crate::default_theme();
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 120,
+                height: 34,
+            },
+            theme,
+        );
+        let loops = vec![LoopView {
+            id: "loop-a".to_owned(),
+            short_id: "a".to_owned(),
+            name: "auth-worker-a".to_owned(),
+            repo_path: "/repo/crates/auth-core/src".to_owned(),
+            profile_name: "dev".to_owned(),
+            ..LoopView::default()
+        }];
+        let runs = vec![RunView {
+            id: "run-1".to_owned(),
+            status: "success".to_owned(),
+            exit_code: Some(0),
+            duration: "2s".to_owned(),
+            ..RunView::default()
+        }];
+        let pal = crate::theme::resolve_palette_colors(&crate::theme::DEFAULT_PALETTE);
+
+        render_overview_paneled_with_options(
+            &mut frame,
+            &loops,
+            Some(&loops[0]),
+            &runs,
+            0,
+            &pal,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 120,
+                height: 34,
+            },
+            false,
+            OverviewPaneOptions {
+                reserve_next_action_slot: true,
+            },
+        );
+
+        let snapshot = frame.snapshot();
+        assert!(snapshot.contains("Next Action"));
+        assert!(snapshot.contains("[2] Logs: verify healthy output stream"));
+    }
+
+    #[test]
+    fn paneled_overview_next_action_slot_prioritizes_error_remediation() {
+        let theme = crate::default_theme();
+        let mut frame = RenderFrame::new(
+            FrameSize {
+                width: 120,
+                height: 34,
+            },
+            theme,
+        );
+        let loops = vec![LoopView {
+            id: "loop-e".to_owned(),
+            short_id: "e".to_owned(),
+            name: "error-loop".to_owned(),
+            state: "error".to_owned(),
+            last_error: "panic: broken pipe".to_owned(),
+            repo_path: "/repo/crates/auth-core/src".to_owned(),
+            profile_name: "dev".to_owned(),
+            ..LoopView::default()
+        }];
+        let runs = vec![RunView {
+            id: "run-2".to_owned(),
+            status: "error".to_owned(),
+            exit_code: Some(1),
+            duration: "4s".to_owned(),
+            ..RunView::default()
+        }];
+        let pal = crate::theme::resolve_palette_colors(&crate::theme::DEFAULT_PALETTE);
+
+        render_overview_paneled_with_options(
+            &mut frame,
+            &loops,
+            Some(&loops[0]),
+            &runs,
+            0,
+            &pal,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 120,
+                height: 34,
+            },
+            false,
+            OverviewPaneOptions {
+                reserve_next_action_slot: true,
+            },
+        );
+
+        let snapshot = frame.snapshot();
+        assert!(snapshot.contains("[2] Logs: inspect error lines and root cause"));
+        assert!(snapshot.contains("[3] Runs: inspect latest run output"));
     }
 }

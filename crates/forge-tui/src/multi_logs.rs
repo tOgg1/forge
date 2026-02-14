@@ -6,7 +6,7 @@
 
 use crate::app::{App, LogLayer, LogTailView, LoopView};
 use crate::filter::loop_display_id;
-use crate::layouts::{fit_pane_layout, layout_cell_size};
+use crate::layouts::{fit_pane_layout_for_breakpoint, layout_cell_size};
 use crate::log_compare::{diff_hint, summarize_diff_hints, synchronized_windows, DiffHint};
 use crate::log_pipeline::{annotate_lines_with_anomaly_markers, detect_rule_based_anomalies};
 use crate::semantic_log_clustering::{cluster_semantic_errors_by_loop, compact_cluster_summary};
@@ -245,7 +245,7 @@ impl App {
         let min_cell_height = self.multi_min_cell_height();
         let grid_height = ((height as i32) - header_rows).max(min_cell_height);
         let requested = self.current_layout();
-        let layout = fit_pane_layout(
+        let layout = fit_pane_layout_for_breakpoint(
             requested,
             width as i32,
             grid_height,
@@ -381,6 +381,7 @@ impl App {
         Some((left_id, right_id))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_compare_logs_pane(
         &self,
         width: usize,
@@ -1101,9 +1102,21 @@ mod tests {
         app.update(key(Key::Char('C')));
         let frame = app.render_multi_logs_pane(60, 14, &test_pal());
         let hint_x = ((60 - 3) / 2) + 1;
-        assert_eq!(frame.cell(hint_x, 3).unwrap().glyph, '=');
-        assert_eq!(frame.cell(hint_x, 4).unwrap().glyph, '!');
-        assert_eq!(frame.cell(hint_x, 5).unwrap().glyph, '<');
+        let hint_row_3 = match frame.cell(hint_x, 3) {
+            Some(cell) => cell,
+            None => panic!("expected diff hint cell at row 3"),
+        };
+        let hint_row_4 = match frame.cell(hint_x, 4) {
+            Some(cell) => cell,
+            None => panic!("expected diff hint cell at row 4"),
+        };
+        let hint_row_5 = match frame.cell(hint_x, 5) {
+            Some(cell) => cell,
+            None => panic!("expected diff hint cell at row 5"),
+        };
+        assert_eq!(hint_row_3.glyph, '=');
+        assert_eq!(hint_row_4.glyph, '!');
+        assert_eq!(hint_row_5.glyph, '<');
     }
 
     #[test]

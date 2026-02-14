@@ -1241,7 +1241,10 @@ mod tests {
                 break;
             }
         }
-        let (start_x, row_y) = output_row.expect("output row should be rendered");
+        let (start_x, row_y) = match output_row {
+            Some(position) => position,
+            None => panic!("output row should be rendered"),
+        };
 
         let mut saw_non_primary_color = false;
         for x in start_x..(start_x + 56) {

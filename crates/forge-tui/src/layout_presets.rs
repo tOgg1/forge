@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{Map, Value};
 
-use crate::layouts::{fit_pane_layout, PaneLayout, PANE_LAYOUTS};
+use crate::layouts::{fit_pane_layout_for_breakpoint, PaneLayout, PANE_LAYOUTS};
 
 pub const LAYOUT_PRESET_SCHEMA_VERSION: u32 = 2;
 
@@ -188,7 +188,7 @@ pub fn apply_layout_preset(
     min_cell_height: i32,
 ) -> AppliedLayoutPreset {
     let requested_layout = preset.requested_layout();
-    let effective_layout = fit_pane_layout(
+    let effective_layout = fit_pane_layout_for_breakpoint(
         requested_layout,
         width,
         height,

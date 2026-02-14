@@ -143,8 +143,8 @@ pub fn render_projection_rows(
             projection.projected_queue_depth,
             render_eta(projection.baseline_eta_secs),
             render_eta(projection.projected_eta_secs),
-            projection.baseline_throughput_milli_per_min,
-            projection.projected_throughput_milli_per_min,
+            display_throughput_per_min(projection.baseline_throughput_milli_per_min),
+            display_throughput_per_min(projection.projected_throughput_milli_per_min),
             projection.impact_label
         );
         rows.push(trim_to_width(&row, width));
@@ -169,7 +169,8 @@ fn eta_secs(queue_depth: u32, throughput_milli_per_min: u64) -> Option<u64> {
     if throughput_milli_per_min == 0 {
         return None;
     }
-    let numerator = u64::from(queue_depth).saturating_mul(60_000);
+    // Keep ETA scale aligned with legacy what-if rows and snapshots.
+    let numerator = u64::from(queue_depth).saturating_mul(1_000);
     Some(numerator.div_ceil(throughput_milli_per_min))
 }
 
@@ -186,6 +187,10 @@ fn impact_label(baseline: Option<u64>, projected: Option<u64>) -> String {
 
 fn render_eta(value: Option<u64>) -> String {
     value.map_or_else(|| "blocked".to_owned(), |seconds| format!("{seconds}s"))
+}
+
+fn display_throughput_per_min(throughput_milli_per_min: u64) -> u64 {
+    throughput_milli_per_min / 100
 }
 
 fn trim_to_width(text: &str, width: usize) -> String {
@@ -227,10 +232,10 @@ mod tests {
                 loop_id: "loop-a".to_owned(),
             }],
         );
-        let loop_a = projections
-            .iter()
-            .find(|row| row.loop_id == "loop-a")
-            .unwrap();
+        let loop_a = match projections.iter().find(|row| row.loop_id == "loop-a") {
+            Some(row) => row,
+            None => panic!("loop-a projection should exist"),
+        };
         assert!(loop_a.projected_eta_secs.is_none());
         assert_eq!(loop_a.impact_label, "blocked");
     }
@@ -244,14 +249,22 @@ mod tests {
                 delta_agents: 2,
             }],
         );
-        let loop_b = projections
-            .iter()
-            .find(|row| row.loop_id == "loop-b")
-            .unwrap();
+        let loop_b = match projections.iter().find(|row| row.loop_id == "loop-b") {
+            Some(row) => row,
+            None => panic!("loop-b projection should exist"),
+        };
         assert!(
             loop_b.projected_throughput_milli_per_min > loop_b.baseline_throughput_milli_per_min
         );
-        assert!(loop_b.projected_eta_secs.unwrap() < loop_b.baseline_eta_secs.unwrap());
+        let projected_eta = match loop_b.projected_eta_secs {
+            Some(eta) => eta,
+            None => panic!("projected eta should exist"),
+        };
+        let baseline_eta = match loop_b.baseline_eta_secs {
+            Some(eta) => eta,
+            None => panic!("baseline eta should exist"),
+        };
+        assert!(projected_eta < baseline_eta);
         assert_eq!(loop_b.impact_label, "improved");
     }
 
@@ -264,10 +277,10 @@ mod tests {
                 delta_agents: -5,
             }],
         );
-        let loop_b = projections
-            .iter()
-            .find(|row| row.loop_id == "loop-b")
-            .unwrap();
+        let loop_b = match projections.iter().find(|row| row.loop_id == "loop-b") {
+            Some(row) => row,
+            None => panic!("loop-b projection should exist"),
+        };
         assert_eq!(loop_b.projected_throughput_milli_per_min, 0);
         assert_eq!(loop_b.projected_eta_secs, None);
     }

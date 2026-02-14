@@ -282,7 +282,6 @@ fn normalize_actor(value: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod tests {
     use super::{
         append_macro_step, finalize_macro_recording, plan_macro_run, render_macro_definition,
@@ -293,10 +292,17 @@ mod tests {
     fn record_and_finalize_keeps_step_order() {
         let policy = KeyboardMacroPolicy::default();
         let mut draft = start_macro_recording("triage", "agent-a", 100);
-        append_macro_step(&mut draft, "j", &policy).expect("step j");
-        append_macro_step(&mut draft, "k", &policy).expect("step k");
+        if let Err(err) = append_macro_step(&mut draft, "j", &policy) {
+            panic!("step j should append: {err}");
+        }
+        if let Err(err) = append_macro_step(&mut draft, "k", &policy) {
+            panic!("step k should append: {err}");
+        }
 
-        let definition = finalize_macro_recording(draft).expect("finalize");
+        let definition = match finalize_macro_recording(draft) {
+            Ok(definition) => definition,
+            Err(err) => panic!("finalize should succeed: {err}"),
+        };
         assert_eq!(definition.steps[0].key, "j");
         assert_eq!(definition.steps[1].key, "k");
         assert!(definition.id.starts_with("macro-"));
@@ -308,7 +314,10 @@ mod tests {
         policy.blocked_steps.push("q".to_owned());
         let mut draft = start_macro_recording("triage", "agent-a", 100);
 
-        let err = append_macro_step(&mut draft, "q", &policy).expect_err("blocked key must fail");
+        let err = match append_macro_step(&mut draft, "q", &policy) {
+            Ok(()) => panic!("blocked key must fail"),
+            Err(err) => err,
+        };
         assert!(err.contains("blocked"));
     }
 
@@ -316,10 +325,17 @@ mod tests {
     fn review_flags_destructive_steps_as_warnings() {
         let policy = KeyboardMacroPolicy::default();
         let mut draft = start_macro_recording("cleanup", "agent-a", 100);
-        append_macro_step(&mut draft, "open logs", &policy).expect("logs");
-        append_macro_step(&mut draft, "delete stale loop", &policy).expect("delete");
+        if let Err(err) = append_macro_step(&mut draft, "open logs", &policy) {
+            panic!("logs step should append: {err}");
+        }
+        if let Err(err) = append_macro_step(&mut draft, "delete stale loop", &policy) {
+            panic!("delete step should append: {err}");
+        }
 
-        let definition = finalize_macro_recording(draft).expect("finalize");
+        let definition = match finalize_macro_recording(draft) {
+            Ok(definition) => definition,
+            Err(err) => panic!("finalize should succeed: {err}"),
+        };
         let review = review_macro_definition(&definition, &policy);
         assert!(review.safe_to_run);
         assert!(review.issues.iter().any(|issue| {
@@ -335,10 +351,18 @@ mod tests {
             ..KeyboardMacroPolicy::default()
         };
         let mut draft = start_macro_recording("triage", "agent-a", 100);
-        append_macro_step(&mut draft, "j", &policy).expect("step");
-        let definition = finalize_macro_recording(draft).expect("finalize");
+        if let Err(err) = append_macro_step(&mut draft, "j", &policy) {
+            panic!("step should append: {err}");
+        }
+        let definition = match finalize_macro_recording(draft) {
+            Ok(definition) => definition,
+            Err(err) => panic!("finalize should succeed: {err}"),
+        };
 
-        let err = plan_macro_run(&definition, 3, &policy).expect_err("repeat over limit");
+        let err = match plan_macro_run(&definition, 3, &policy) {
+            Ok(_) => panic!("repeat over limit should fail"),
+            Err(err) => err,
+        };
         assert!(err.contains("exceeds policy limit"));
     }
 
@@ -346,11 +370,21 @@ mod tests {
     fn run_plan_expands_steps_for_repeat_count() {
         let policy = KeyboardMacroPolicy::default();
         let mut draft = start_macro_recording("triage", "agent-a", 100);
-        append_macro_step(&mut draft, "j", &policy).expect("step1");
-        append_macro_step(&mut draft, "k", &policy).expect("step2");
-        let definition = finalize_macro_recording(draft).expect("finalize");
+        if let Err(err) = append_macro_step(&mut draft, "j", &policy) {
+            panic!("step1 should append: {err}");
+        }
+        if let Err(err) = append_macro_step(&mut draft, "k", &policy) {
+            panic!("step2 should append: {err}");
+        }
+        let definition = match finalize_macro_recording(draft) {
+            Ok(definition) => definition,
+            Err(err) => panic!("finalize should succeed: {err}"),
+        };
 
-        let plan = plan_macro_run(&definition, 2, &policy).expect("plan");
+        let plan = match plan_macro_run(&definition, 2, &policy) {
+            Ok(plan) => plan,
+            Err(err) => panic!("plan should succeed: {err}"),
+        };
         assert_eq!(plan.total_steps, 4);
         assert_eq!(plan.queued_steps, vec!["j", "k", "j", "k"]);
     }
@@ -359,9 +393,16 @@ mod tests {
     fn render_definition_is_reviewable_and_deterministic() {
         let policy = KeyboardMacroPolicy::default();
         let mut draft = start_macro_recording("triage", "agent-a", 100);
-        append_macro_step(&mut draft, "j", &policy).expect("step1");
-        append_macro_step(&mut draft, "open logs", &policy).expect("step2");
-        let definition = finalize_macro_recording(draft).expect("finalize");
+        if let Err(err) = append_macro_step(&mut draft, "j", &policy) {
+            panic!("step1 should append: {err}");
+        }
+        if let Err(err) = append_macro_step(&mut draft, "open logs", &policy) {
+            panic!("step2 should append: {err}");
+        }
+        let definition = match finalize_macro_recording(draft) {
+            Ok(definition) => definition,
+            Err(err) => panic!("finalize should succeed: {err}"),
+        };
 
         let lines = render_macro_definition(&definition);
         assert_eq!(lines[0], "macro triage by agent-a (steps=2)");

@@ -761,14 +761,14 @@ mod tests {
     #[test]
     fn register_pluggable_widget_and_persist_round_trip() {
         let mut registry = StatusWidgetRegistry::with_builtins();
-        registry
-            .register(StatusWidgetDefinition::new(
-                "latency",
-                "Latency",
-                StripPosition::Bottom,
-                15,
-            ))
-            .expect("register latency widget");
+        if let Err(err) = registry.register(StatusWidgetDefinition::new(
+            "latency",
+            "Latency",
+            StripPosition::Bottom,
+            15,
+        )) {
+            panic!("register latency widget should succeed: {err}");
+        }
 
         let store = default_status_strip_store(&registry);
         let json = persist_status_strip_store(&store, &registry);
@@ -782,23 +782,24 @@ mod tests {
     #[test]
     fn register_duplicate_widget_id_is_rejected() {
         let mut registry = StatusWidgetRegistry::new();
-        registry
-            .register(StatusWidgetDefinition::new(
-                "queue_depth",
-                "Queue",
-                StripPosition::Bottom,
-                10,
-            ))
-            .expect("first register passes");
+        if let Err(err) = registry.register(StatusWidgetDefinition::new(
+            "queue_depth",
+            "Queue",
+            StripPosition::Bottom,
+            10,
+        )) {
+            panic!("first register should succeed: {err}");
+        }
 
-        let err = registry
-            .register(StatusWidgetDefinition::new(
-                "queue_depth",
-                "Queue v2",
-                StripPosition::Bottom,
-                20,
-            ))
-            .expect_err("duplicate register should fail");
+        let err = match registry.register(StatusWidgetDefinition::new(
+            "queue_depth",
+            "Queue v2",
+            StripPosition::Bottom,
+            20,
+        )) {
+            Ok(_) => panic!("duplicate register should fail"),
+            Err(err) => err,
+        };
         assert!(err.contains("already registered"));
     }
 
@@ -866,8 +867,10 @@ mod tests {
         let registry = StatusWidgetRegistry::with_builtins();
         let mut store = default_status_strip_store(&registry);
 
-        move_widget_slot(&mut store, "queue_depth", StripPosition::Top, 1, &registry)
-            .expect("move queue widget to top");
+        if let Err(err) = move_widget_slot(&mut store, "queue_depth", StripPosition::Top, 1, &registry)
+        {
+            panic!("move queue widget to top should succeed: {err}");
+        }
 
         let plan = build_status_strip_plan(&store, &registry);
         assert_eq!(
@@ -882,12 +885,16 @@ mod tests {
         let registry = StatusWidgetRegistry::with_builtins();
         let mut store = default_status_strip_store(&registry);
 
-        set_widget_enabled(&mut store, "alerts", false, &registry).expect("disable alerts");
+        if let Err(err) = set_widget_enabled(&mut store, "alerts", false, &registry) {
+            panic!("disable alerts should succeed: {err}");
+        }
         let plan = build_status_strip_plan(&store, &registry);
         assert!(!plan_ids_bottom(&plan).contains(&"alerts".to_owned()));
 
-        let err = set_widget_enabled(&mut store, "missing", false, &registry)
-            .expect_err("missing widget should fail");
+        let err = match set_widget_enabled(&mut store, "missing", false, &registry) {
+            Ok(()) => panic!("missing widget should fail"),
+            Err(err) => err,
+        };
         assert!(err.contains("not found"));
     }
 

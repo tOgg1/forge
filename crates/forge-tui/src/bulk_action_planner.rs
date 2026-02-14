@@ -13,6 +13,8 @@ pub enum BulkPlannerAction {
     Scale { target_count: usize },
     Message { body: String },
     Inject { body: String },
+    AckThread,
+    ReplyThread { body: String },
 }
 
 impl BulkPlannerAction {
@@ -22,15 +24,44 @@ impl BulkPlannerAction {
             Self::Scale { .. } => "scale",
             Self::Message { .. } => "msg",
             Self::Inject { .. } => "inject",
+            Self::AckThread => "thread-ack",
+            Self::ReplyThread { .. } => "thread-reply",
         }
     }
 
     fn payload(&self) -> Option<&str> {
         match self {
-            Self::Message { body } | Self::Inject { body } => Some(body),
-            Self::Stop | Self::Scale { .. } => None,
+            Self::Message { body } | Self::Inject { body } | Self::ReplyThread { body } => {
+                Some(body)
+            }
+            Self::Stop | Self::Scale { .. } | Self::AckThread => None,
         }
     }
+
+    fn requires_loop_targets(&self) -> bool {
+        matches!(
+            self,
+            Self::Stop | Self::Scale { .. } | Self::Message { .. } | Self::Inject { .. }
+        )
+    }
+
+    fn requires_thread_targets(&self) -> bool {
+        matches!(self, Self::AckThread | Self::ReplyThread { .. })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BulkThreadRecord {
+    pub thread_key: String,
+    pub subject: String,
+    pub unread_count: usize,
+    pub pending_ack_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BulkPlannerTarget {
+    Loop(FleetLoopRecord),
+    Thread(BulkThreadRecord),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +161,159 @@ pub fn plan_bulk_action(
                 &mut conflicts,
             );
         }
+        BulkPlannerAction::AckThread | BulkPlannerAction::ReplyThread { .. } => {
+            conflicts.push(BulkActionConflict {
+                severity: ConflictSeverity::Error,
+                code: "unsupported-target-kind".to_owned(),
+                target: None,
+                message: "thread actions require plan_bulk_action_mixed with thread targets"
+                    .to_owned(),
+            });
+        }
+    }
+
+    finalize_plan(action, selected.len(), queue, conflicts, preview_limit)
+}
+
+#[must_use]
+pub fn plan_bulk_action_mixed(
+    action: BulkPlannerAction,
+    selected: &[BulkPlannerTarget],
+    preview_limit: usize,
+) -> BulkActionPlan {
+    let mut loops = Vec::new();
+    let mut threads = Vec::new();
+    for target in selected {
+        match target {
+            BulkPlannerTarget::Loop(loop_record) => loops.push(loop_record.clone()),
+            BulkPlannerTarget::Thread(thread_record) => threads.push(thread_record.clone()),
+        }
+    }
+
+    let mut conflicts = Vec::new();
+    let mut queue = Vec::new();
+
+    if action.requires_loop_targets() {
+        if loops.is_empty() {
+            conflicts.push(BulkActionConflict {
+                severity: ConflictSeverity::Error,
+                code: "empty-loop-selection".to_owned(),
+                target: None,
+                message: "no loops selected for loop action".to_owned(),
+            });
+            return finalize_plan(action, selected.len(), queue, conflicts, preview_limit);
+        }
+
+        let payload_missing = action
+            .payload()
+            .is_some_and(|payload| payload.trim().is_empty());
+        if payload_missing {
+            conflicts.push(BulkActionConflict {
+                severity: ConflictSeverity::Error,
+                code: "missing-payload".to_owned(),
+                target: None,
+                message: format!(
+                    "{} action requires non-empty payload",
+                    action.command_name()
+                ),
+            });
+        }
+
+        let mut ordered: Vec<&FleetLoopRecord> = loops.iter().collect();
+        ordered.sort_by(|a, b| {
+            normalize(&a.id)
+                .cmp(&normalize(&b.id))
+                .then(normalize(&a.name).cmp(&normalize(&b.name)))
+        });
+
+        match &action {
+            BulkPlannerAction::Scale { target_count } => {
+                plan_scale_action(*target_count, &ordered, &mut queue, &mut conflicts);
+            }
+            BulkPlannerAction::Stop
+            | BulkPlannerAction::Message { .. }
+            | BulkPlannerAction::Inject { .. } => {
+                plan_per_loop_action(
+                    &action,
+                    payload_missing,
+                    &ordered,
+                    &mut queue,
+                    &mut conflicts,
+                );
+            }
+            BulkPlannerAction::AckThread | BulkPlannerAction::ReplyThread { .. } => {}
+        }
+
+        for thread in &threads {
+            conflicts.push(BulkActionConflict {
+                severity: ConflictSeverity::Warning,
+                code: "ignored-thread-target".to_owned(),
+                target: Some(normalize_thread_target(thread)),
+                message: "thread target ignored by loop action".to_owned(),
+            });
+            push_queue_item(
+                &mut queue,
+                normalize_thread_target(thread),
+                format!("{} <thread-target>", action.command_name()),
+                "no-op rollback: target ignored".to_owned(),
+                Some("target is thread; action requires loop targets".to_owned()),
+            );
+        }
+
+        return finalize_plan(action, selected.len(), queue, conflicts, preview_limit);
+    }
+
+    if action.requires_thread_targets() {
+        if threads.is_empty() {
+            conflicts.push(BulkActionConflict {
+                severity: ConflictSeverity::Error,
+                code: "empty-thread-selection".to_owned(),
+                target: None,
+                message: "no threads selected for thread action".to_owned(),
+            });
+            return finalize_plan(action, selected.len(), queue, conflicts, preview_limit);
+        }
+
+        let payload_missing = action
+            .payload()
+            .is_some_and(|payload| payload.trim().is_empty());
+        if payload_missing {
+            conflicts.push(BulkActionConflict {
+                severity: ConflictSeverity::Error,
+                code: "missing-payload".to_owned(),
+                target: None,
+                message: format!(
+                    "{} action requires non-empty payload",
+                    action.command_name()
+                ),
+            });
+        }
+
+        plan_thread_action(
+            &action,
+            payload_missing,
+            &threads,
+            &mut queue,
+            &mut conflicts,
+        );
+
+        for loop_entry in &loops {
+            conflicts.push(BulkActionConflict {
+                severity: ConflictSeverity::Warning,
+                code: "ignored-loop-target".to_owned(),
+                target: Some(loop_entry.id.clone()),
+                message: "loop target ignored by thread action".to_owned(),
+            });
+            push_queue_item(
+                &mut queue,
+                loop_entry.id.clone(),
+                format!("{} <loop-target>", action.command_name()),
+                "no-op rollback: target ignored".to_owned(),
+                Some("target is loop; action requires thread targets".to_owned()),
+            );
+        }
+
+        return finalize_plan(action, selected.len(), queue, conflicts, preview_limit);
     }
 
     finalize_plan(action, selected.len(), queue, conflicts, preview_limit)
@@ -247,7 +431,9 @@ fn plan_per_loop_action(
                 BulkPlannerAction::Stop
                 | BulkPlannerAction::Message { .. }
                 | BulkPlannerAction::Inject { .. } => {}
-                BulkPlannerAction::Scale { .. } => {}
+                BulkPlannerAction::Scale { .. }
+                | BulkPlannerAction::AckThread
+                | BulkPlannerAction::ReplyThread { .. } => {}
             }
         }
 
@@ -346,6 +532,66 @@ fn plan_scale_action(
     }
 }
 
+fn plan_thread_action(
+    action: &BulkPlannerAction,
+    payload_missing: bool,
+    selected: &[BulkThreadRecord],
+    queue: &mut Vec<PlannedQueueItem>,
+    conflicts: &mut Vec<BulkActionConflict>,
+) {
+    let mut seen_threads = BTreeSet::new();
+
+    for thread in selected {
+        let target = normalize_thread_target(thread);
+        let mut blocked_reason = None;
+
+        if thread.thread_key.trim().is_empty() {
+            blocked_reason = Some("thread key is empty".to_owned());
+            conflicts.push(BulkActionConflict {
+                severity: ConflictSeverity::Error,
+                code: "missing-thread-key".to_owned(),
+                target: Some(target.clone()),
+                message: "selected row does not have thread key".to_owned(),
+            });
+        } else if !seen_threads.insert(normalize(&thread.thread_key)) {
+            blocked_reason = Some("duplicate thread target".to_owned());
+            conflicts.push(BulkActionConflict {
+                severity: ConflictSeverity::Warning,
+                code: "duplicate-thread-target".to_owned(),
+                target: Some(target.clone()),
+                message: "duplicate thread target in selection".to_owned(),
+            });
+        }
+
+        if blocked_reason.is_none() && payload_missing {
+            blocked_reason = Some("action payload is empty".to_owned());
+        }
+
+        if blocked_reason.is_none() {
+            match action {
+                BulkPlannerAction::AckThread if thread.pending_ack_count == 0 => {
+                    blocked_reason = Some("thread has no pending acknowledgements".to_owned());
+                    conflicts.push(BulkActionConflict {
+                        severity: ConflictSeverity::Warning,
+                        code: "thread-ack-noop".to_owned(),
+                        target: Some(target.clone()),
+                        message: "ack action is a no-op for thread with no pending ack".to_owned(),
+                    });
+                }
+                BulkPlannerAction::AckThread | BulkPlannerAction::ReplyThread { .. } => {}
+                BulkPlannerAction::Stop
+                | BulkPlannerAction::Scale { .. }
+                | BulkPlannerAction::Message { .. }
+                | BulkPlannerAction::Inject { .. } => {}
+            }
+        }
+
+        let command = build_thread_command(action, &thread.thread_key);
+        let rollback_hint = rollback_hint_for_thread(action, &thread.thread_key);
+        push_queue_item(queue, target, command, rollback_hint, blocked_reason);
+    }
+}
+
 fn finalize_plan(
     action: BulkPlannerAction,
     total_targets: usize,
@@ -439,6 +685,9 @@ fn build_loop_command(action: &BulkPlannerAction, loop_id: &str) -> String {
         BulkPlannerAction::Scale { target_count } => {
             format!("forge scale --count {target_count}")
         }
+        BulkPlannerAction::AckThread | BulkPlannerAction::ReplyThread { .. } => {
+            format!("{} <thread-target>", action.command_name())
+        }
     }
 }
 
@@ -461,6 +710,64 @@ fn rollback_hint_for_loop(action: &BulkPlannerAction, loop_id: &str) -> String {
             "rollback: prefer queued correction via forge msg --loop {} -- <correction>",
             loop_token
         ),
+        BulkPlannerAction::AckThread | BulkPlannerAction::ReplyThread { .. } => {
+            "rollback: unsupported for loop target".to_owned()
+        }
+    }
+}
+
+fn build_thread_command(action: &BulkPlannerAction, thread_key: &str) -> String {
+    let thread_token = if thread_key.trim().is_empty() {
+        "<thread>".to_owned()
+    } else {
+        shell_quote(thread_key)
+    };
+
+    match action {
+        BulkPlannerAction::AckThread => format!("fmail ack --thread {thread_token}"),
+        BulkPlannerAction::ReplyThread { body } => format!(
+            "fmail send --thread {} -- {}",
+            thread_token,
+            shell_quote(body.trim())
+        ),
+        BulkPlannerAction::Stop
+        | BulkPlannerAction::Scale { .. }
+        | BulkPlannerAction::Message { .. }
+        | BulkPlannerAction::Inject { .. } => format!("{} <loop-target>", action.command_name()),
+    }
+}
+
+fn rollback_hint_for_thread(action: &BulkPlannerAction, thread_key: &str) -> String {
+    let thread_token = if thread_key.trim().is_empty() {
+        "<thread>".to_owned()
+    } else {
+        shell_quote(thread_key)
+    };
+    match action {
+        BulkPlannerAction::AckThread => format!(
+            "rollback: post corrective follow-up in thread {} if ack was premature",
+            thread_token
+        ),
+        BulkPlannerAction::ReplyThread { .. } => format!(
+            "rollback: send corrective follow-up via fmail send --thread {} -- <correction>",
+            thread_token
+        ),
+        BulkPlannerAction::Stop
+        | BulkPlannerAction::Scale { .. }
+        | BulkPlannerAction::Message { .. }
+        | BulkPlannerAction::Inject { .. } => "rollback: unsupported for thread target".to_owned(),
+    }
+}
+
+fn normalize_thread_target(thread: &BulkThreadRecord) -> String {
+    let key = thread.thread_key.trim();
+    let subject = thread.subject.trim();
+    if key.is_empty() {
+        "<missing-thread-key>".to_owned()
+    } else if subject.is_empty() {
+        format!("thread={key}")
+    } else {
+        format!("thread={key} ({subject})")
     }
 }
 
@@ -507,8 +814,8 @@ fn shell_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        plan_bulk_action, queue_transparency_lines, BulkPlannerAction, ConflictSeverity,
-        QueueEntryStatus,
+        plan_bulk_action, plan_bulk_action_mixed, queue_transparency_lines, BulkPlannerAction,
+        BulkPlannerTarget, BulkThreadRecord, ConflictSeverity, QueueEntryStatus,
     };
     use crate::fleet_selection::FleetLoopRecord;
 
@@ -543,6 +850,23 @@ mod tests {
                 state: "stopped".to_owned(),
                 tags: vec!["infra".to_owned()],
                 stale: true,
+            },
+        ]
+    }
+
+    fn sample_threads() -> Vec<BulkThreadRecord> {
+        vec![
+            BulkThreadRecord {
+                thread_key: "task-forge-1".to_owned(),
+                subject: "handoff request".to_owned(),
+                unread_count: 2,
+                pending_ack_count: 1,
+            },
+            BulkThreadRecord {
+                thread_key: "task-forge-2".to_owned(),
+                subject: "ci failure".to_owned(),
+                unread_count: 1,
+                pending_ack_count: 0,
             },
         ]
     }
@@ -658,5 +982,75 @@ mod tests {
         assert!(lines[0].starts_with("dry-run inject:"));
         assert!(lines.iter().any(|line| line.contains("[blocked]")));
         assert!(lines.iter().any(|line| line.contains("rollback")));
+    }
+
+    #[test]
+    fn mixed_plan_for_loop_action_blocks_thread_targets() {
+        let loops = sample_loops();
+        let threads = sample_threads();
+        let selected = vec![
+            BulkPlannerTarget::Loop(loops[0].clone()),
+            BulkPlannerTarget::Thread(threads[0].clone()),
+        ];
+
+        let plan = plan_bulk_action_mixed(BulkPlannerAction::Stop, &selected, 3);
+        assert_eq!(plan.total_targets, 2);
+        assert_eq!(plan.ready_targets, 1);
+        assert_eq!(plan.blocked_targets, 1);
+        assert!(plan
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.code == "ignored-thread-target"));
+        assert!(plan.queue.iter().any(|item| item
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("requires loop targets"))));
+    }
+
+    #[test]
+    fn ack_thread_plan_uses_pending_ack_and_noop_when_clear() {
+        let loops = sample_loops();
+        let threads = sample_threads();
+        let selected = vec![
+            BulkPlannerTarget::Loop(loops[0].clone()),
+            BulkPlannerTarget::Thread(threads[0].clone()),
+            BulkPlannerTarget::Thread(threads[1].clone()),
+        ];
+
+        let plan = plan_bulk_action_mixed(BulkPlannerAction::AckThread, &selected, 5);
+        assert_eq!(plan.total_targets, 3);
+        assert_eq!(plan.ready_targets, 1);
+        assert_eq!(plan.blocked_targets, 2);
+        assert!(plan
+            .queue
+            .iter()
+            .any(|item| item.command.contains("fmail ack --thread")));
+        assert!(plan
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.code == "thread-ack-noop"));
+        assert!(plan
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.code == "ignored-loop-target"));
+    }
+
+    #[test]
+    fn reply_thread_requires_payload_in_mixed_planner() {
+        let threads = sample_threads();
+        let selected = vec![BulkPlannerTarget::Thread(threads[0].clone())];
+        let plan = plan_bulk_action_mixed(
+            BulkPlannerAction::ReplyThread {
+                body: "   ".to_owned(),
+            },
+            &selected,
+            4,
+        );
+        assert_eq!(plan.ready_targets, 0);
+        assert_eq!(plan.blocked_targets, 1);
+        assert!(plan
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.code == "missing-payload"));
     }
 }

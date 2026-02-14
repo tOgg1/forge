@@ -15,7 +15,31 @@ struct LiveLoopSnapshot {
     waiting: usize,
     stopped: usize,
     errored: usize,
+    teams: Vec<TeamSummaryView>,
+    team_tasks: Vec<TeamTaskInboxView>,
     log_paths: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TeamSummaryView {
+    id: String,
+    name: String,
+    members: usize,
+    queued: usize,
+    assigned: usize,
+    running: usize,
+    blocked: usize,
+    open: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TeamTaskInboxView {
+    id: String,
+    team_name: String,
+    status: String,
+    priority: i64,
+    assigned_agent_id: String,
+    title: String,
 }
 
 fn main() {
@@ -49,7 +73,7 @@ fn run_interactive() {
 fn run_frankentui_bootstrap() -> Result<(), String> {
     #[cfg(feature = "frankentui-bootstrap")]
     {
-        return forge_tui::frankentui_bootstrap::run(resolve_database_path());
+        forge_tui::frankentui_bootstrap::run(resolve_database_path())
     }
 
     #[cfg(not(feature = "frankentui-bootstrap"))]
@@ -107,33 +131,82 @@ fn render_snapshot_lines_for_path(db_path: &Path) -> Vec<String> {
 
     if snapshot.loops.is_empty() {
         lines.push("No loops found".to_string());
-        return lines;
+    } else {
+        lines.push(format!(
+            "{:<10} {:<9} {:>5} {:>6} {:<18} NAME",
+            "ID", "STATE", "RUNS", "QUEUE", "PROFILE"
+        ));
+        for loop_view in snapshot.loops.iter().take(40) {
+            let display_id = if loop_view.short_id.trim().is_empty() {
+                trim(&loop_view.id, 10)
+            } else {
+                trim(&loop_view.short_id, 10)
+            };
+            let profile = if loop_view.profile_name.trim().is_empty() {
+                "-".to_string()
+            } else {
+                trim(&loop_view.profile_name, 18)
+            };
+            lines.push(format!(
+                "{:<10} {:<9} {:>5} {:>6} {:<18} {}",
+                display_id,
+                trim(&loop_view.state, 9),
+                loop_view.runs,
+                loop_view.queue_depth,
+                profile,
+                trim(&loop_view.name, 60)
+            ));
+        }
     }
 
-    lines.push(format!(
-        "{:<10} {:<9} {:>5} {:>6} {:<18} NAME",
-        "ID", "STATE", "RUNS", "QUEUE", "PROFILE"
-    ));
-    for loop_view in snapshot.loops.iter().take(40) {
-        let display_id = if loop_view.short_id.trim().is_empty() {
-            trim(&loop_view.id, 10)
-        } else {
-            trim(&loop_view.short_id, 10)
-        };
-        let profile = if loop_view.profile_name.trim().is_empty() {
-            "-".to_string()
-        } else {
-            trim(&loop_view.profile_name, 18)
-        };
+    lines.push(String::new());
+    lines.push("teams snapshot (read-only):".to_string());
+    if snapshot.teams.is_empty() {
+        lines.push("No teams found".to_string());
+    } else {
         lines.push(format!(
-            "{:<10} {:<9} {:>5} {:>6} {:<18} {}",
-            display_id,
-            trim(&loop_view.state, 9),
-            loop_view.runs,
-            loop_view.queue_depth,
-            profile,
-            trim(&loop_view.name, 60)
+            "{:<18} {:>7} {:>7} {:>8} {:>7} {:>7} {:>6}",
+            "TEAM", "MEMBER", "OPEN", "QUEUED", "ASSIGN", "RUN", "BLOCK"
         ));
+        for team in snapshot.teams.iter().take(40) {
+            lines.push(format!(
+                "{:<18} {:>7} {:>7} {:>8} {:>7} {:>7} {:>6}",
+                trim(&team.name, 18),
+                team.members,
+                team.open,
+                team.queued,
+                team.assigned,
+                team.running,
+                team.blocked,
+            ));
+        }
+    }
+
+    lines.push(String::new());
+    lines.push("team task inbox (read-only):".to_string());
+    if snapshot.team_tasks.is_empty() {
+        lines.push("No open team tasks".to_string());
+    } else {
+        lines.push(format!(
+            "{:<10} {:<14} {:<9} {:>8} {:<14} TITLE",
+            "TASK", "TEAM", "STATUS", "PRIORITY", "ASSIGNEE"
+        ));
+        for task in snapshot.team_tasks.iter().take(40) {
+            let assignee = if task.assigned_agent_id.trim().is_empty() {
+                "-".to_string()
+            } else {
+                trim(&task.assigned_agent_id, 14)
+            };
+            lines.push(format!(
+                "{:<10} {:<14} {:<9} {:>8} {:<14} {}",
+                trim(&task.id, 10),
+                trim(&task.team_name, 14),
+                trim(&task.status, 9),
+                task.priority,
+                assignee,
+                trim(&task.title, 48)
+            ));
+        }
     }
     lines
 }
@@ -254,7 +327,83 @@ fn load_live_loop_snapshot(db_path: &Path) -> Result<LiveLoopSnapshot, String> {
             .then_with(|| left.id.cmp(&right.id))
     });
 
+    let team_repo = forge_db::team_repository::TeamRepository::new(&db);
+    let team_task_repo = forge_db::team_task_repository::TeamTaskRepository::new(&db);
+    let team_rows = match team_repo.list_teams() {
+        Ok(rows) => rows,
+        Err(err) if is_missing_table(&err, "teams") => Vec::new(),
+        Err(err) => return Err(err.to_string()),
+    };
+    for team in team_rows {
+        let members = match team_repo.list_members(&team.id) {
+            Ok(items) => items,
+            Err(err) if is_missing_table(&err, "team_members") => Vec::new(),
+            Err(err) => return Err(err.to_string()),
+        };
+        let tasks = match team_task_repo.list(&forge_db::team_task_repository::TeamTaskFilter {
+            team_id: team.id.clone(),
+            statuses: vec![
+                "queued".to_string(),
+                "assigned".to_string(),
+                "running".to_string(),
+                "blocked".to_string(),
+            ],
+            assigned_agent_id: String::new(),
+            limit: 10_000,
+        }) {
+            Ok(items) => items,
+            Err(err) if is_missing_table(&err, "team_tasks") => Vec::new(),
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let mut summary = TeamSummaryView {
+            id: team.id,
+            name: team.name,
+            members: members.len(),
+            ..TeamSummaryView::default()
+        };
+        for task in tasks {
+            match task.status.as_str() {
+                "queued" => summary.queued += 1,
+                "assigned" => summary.assigned += 1,
+                "running" => summary.running += 1,
+                "blocked" => summary.blocked += 1,
+                _ => {}
+            }
+            snapshot.team_tasks.push(TeamTaskInboxView {
+                id: task.id,
+                team_name: summary.name.clone(),
+                status: task.status,
+                priority: task.priority,
+                assigned_agent_id: task.assigned_agent_id,
+                title: payload_title(&task.payload_json),
+            });
+        }
+        summary.open = summary.queued + summary.assigned + summary.running + summary.blocked;
+        snapshot.teams.push(summary);
+    }
+    snapshot.teams.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    snapshot.team_tasks.sort_by(|left, right| {
+        left.priority
+            .cmp(&right.priority)
+            .then_with(|| left.team_name.cmp(&right.team_name))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
     Ok(snapshot)
+}
+
+fn payload_title(payload_json: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(payload_json)
+        .ok()
+        .and_then(|value| value.get("title").cloned())
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .unwrap_or_default()
 }
 
 fn is_missing_table(err: &forge_db::DbError, table: &str) -> bool {
@@ -334,9 +483,8 @@ fn trim(value: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used, clippy::unwrap_used)]
-
     use std::ffi::OsString;
+    use std::fmt::Display;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -348,17 +496,29 @@ mod tests {
     use forge_db::loop_run_repository::{LoopRun, LoopRunRepository};
     use forge_db::pool_repository::{Pool, PoolRepository};
     use forge_db::profile_repository::{Profile, ProfileRepository};
+    use forge_db::team_repository::{TeamRole, TeamService};
+    use forge_db::team_task_repository::TeamTaskService;
 
     use super::{
-        ci_non_tty_snapshot_mode_enabled, load_live_loop_snapshot, resolve_database_path,
-        runtime_legacy_requested,
+        ci_non_tty_snapshot_mode_enabled, load_live_loop_snapshot, render_snapshot_lines_for_path,
+        resolve_database_path, runtime_legacy_requested,
     };
+
+    fn ok_or_panic<T, E>(result: Result<T, E>, context: &str) -> T
+    where
+        E: Display,
+    {
+        match result {
+            Ok(value) => value,
+            Err(err) => panic!("{context}: {err}"),
+        }
+    }
 
     #[test]
     fn live_snapshot_includes_loop_queue_and_profile_fields() {
         let path = temp_db_path("snapshot-shape");
-        let mut db = forge_db::Db::open(forge_db::Config::new(&path)).expect("open db");
-        db.migrate_up().expect("migrate db");
+        let mut db = ok_or_panic(forge_db::Db::open(forge_db::Config::new(&path)), "open db");
+        ok_or_panic(db.migrate_up(), "migrate db");
 
         let profile_repo = ProfileRepository::new(&db);
         let mut profile = Profile {
@@ -368,14 +528,14 @@ mod tests {
             command_template: "codex run".to_string(),
             ..Default::default()
         };
-        profile_repo.create(&mut profile).expect("create profile");
+        ok_or_panic(profile_repo.create(&mut profile), "create profile");
 
         let pool_repo = PoolRepository::new(&db);
         let mut pool = Pool {
             name: "default".to_string(),
             ..Default::default()
         };
-        pool_repo.create(&mut pool).expect("create pool");
+        ok_or_panic(pool_repo.create(&mut pool), "create pool");
 
         let loop_repo = LoopRepository::new(&db);
         let mut loop_entry = Loop {
@@ -386,7 +546,7 @@ mod tests {
             state: LoopState::Running,
             ..Default::default()
         };
-        loop_repo.create(&mut loop_entry).expect("create loop");
+        ok_or_panic(loop_repo.create(&mut loop_entry), "create loop");
 
         let queue_repo = forge_db::loop_queue_repository::LoopQueueRepository::new(&db);
         let mut queue_items = vec![LoopQueueItem {
@@ -394,9 +554,10 @@ mod tests {
             payload: "{\"text\":\"ship\"}".to_string(),
             ..Default::default()
         }];
-        queue_repo
-            .enqueue(&loop_entry.id, &mut queue_items)
-            .expect("enqueue queue item");
+        ok_or_panic(
+            queue_repo.enqueue(&loop_entry.id, &mut queue_items),
+            "enqueue queue item",
+        );
 
         let run_repo = LoopRunRepository::new(&db);
         let mut run = LoopRun {
@@ -404,9 +565,9 @@ mod tests {
             profile_id: profile.id.clone(),
             ..Default::default()
         };
-        run_repo.create(&mut run).expect("create loop run");
+        ok_or_panic(run_repo.create(&mut run), "create loop run");
 
-        let snapshot = load_live_loop_snapshot(&path).expect("load live snapshot");
+        let snapshot = ok_or_panic(load_live_loop_snapshot(&path), "load live snapshot");
         assert_eq!(snapshot.loops.len(), 1);
         assert_eq!(snapshot.total_queue_depth, 1);
         assert_eq!(snapshot.profile_count, 1);
@@ -427,8 +588,8 @@ mod tests {
     #[test]
     fn live_snapshot_refreshes_queue_depth_after_enqueue() {
         let path = temp_db_path("refresh");
-        let mut db = forge_db::Db::open(forge_db::Config::new(&path)).expect("open db");
-        db.migrate_up().expect("migrate db");
+        let mut db = ok_or_panic(forge_db::Db::open(forge_db::Config::new(&path)), "open db");
+        ok_or_panic(db.migrate_up(), "migrate db");
 
         let loop_repo = LoopRepository::new(&db);
         let mut loop_entry = Loop {
@@ -437,9 +598,9 @@ mod tests {
             state: LoopState::Stopped,
             ..Default::default()
         };
-        loop_repo.create(&mut loop_entry).expect("create loop");
+        ok_or_panic(loop_repo.create(&mut loop_entry), "create loop");
 
-        let before = load_live_loop_snapshot(&path).expect("load before enqueue");
+        let before = ok_or_panic(load_live_loop_snapshot(&path), "load before enqueue");
         assert_eq!(before.loops.len(), 1);
         assert_eq!(before.loops[0].queue_depth, 0);
 
@@ -449,12 +610,58 @@ mod tests {
             payload: "{\"text\":\"hello\"}".to_string(),
             ..Default::default()
         }];
-        queue_repo
-            .enqueue(&loop_entry.id, &mut queue_items)
-            .expect("enqueue queue item");
+        ok_or_panic(
+            queue_repo.enqueue(&loop_entry.id, &mut queue_items),
+            "enqueue queue item",
+        );
 
-        let after = load_live_loop_snapshot(&path).expect("load after enqueue");
+        let after = ok_or_panic(load_live_loop_snapshot(&path), "load after enqueue");
         assert_eq!(after.loops[0].queue_depth, 1);
+
+        cleanup_temp_dir(&path);
+    }
+
+    #[test]
+    fn snapshot_renders_team_summary_and_task_inbox_sections() {
+        let path = temp_db_path("teams-inbox");
+        let mut db = ok_or_panic(forge_db::Db::open(forge_db::Config::new(&path)), "open db");
+        ok_or_panic(db.migrate_up(), "migrate db");
+
+        let team_service = TeamService::new(&db);
+        let team = ok_or_panic(team_service.create_team("ops", "{}", "", 300), "create team");
+        ok_or_panic(
+            team_service.add_member(&team.id, "agent-lead", TeamRole::Leader),
+            "add team leader",
+        );
+
+        let task_service = TeamTaskService::new(&db);
+        ok_or_panic(
+            task_service.submit(&team.id, r#"{"type":"incident","title":"database outage"}"#, 5),
+            "submit queued task",
+        );
+        let assigned = ok_or_panic(
+            task_service.submit(&team.id, r#"{"type":"incident","title":"auth timeout"}"#, 8),
+            "submit assigned task",
+        );
+        ok_or_panic(
+            task_service.assign(&assigned.id, "agent-a", Some("agent-a")),
+            "assign task",
+        );
+
+        let snapshot = ok_or_panic(load_live_loop_snapshot(&path), "load snapshot");
+        assert_eq!(snapshot.teams.len(), 1);
+        assert_eq!(snapshot.teams[0].name, "ops");
+        assert_eq!(snapshot.teams[0].members, 1);
+        assert_eq!(snapshot.teams[0].open, 2);
+        assert_eq!(snapshot.team_tasks.len(), 2);
+
+        let lines = render_snapshot_lines_for_path(&path);
+        let rendered = lines.join("\n");
+        assert!(rendered.contains("teams snapshot (read-only):"));
+        assert!(rendered.contains("ops"));
+        assert!(rendered.contains("team task inbox (read-only):"));
+        assert!(rendered.contains("database outage"));
+        assert!(rendered.contains("auth timeout"));
 
         cleanup_temp_dir(&path);
     }
